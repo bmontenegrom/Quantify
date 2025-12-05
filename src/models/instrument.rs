@@ -373,3 +373,94 @@ impl UncertaintyModel {
         }
     }
 }
+
+/// Medida individual realizada por un alumno en una práctica.
+///
+/// - `value`: valor medido en la UNIDAD DE LA ESCALA (por ejemplo, 12.34 si la escala está en V).
+/// - `unit`: snapshot de la unidad usada (para que la medida siga siendo interpretable
+///           aunque en el futuro cambie la definición de la escala en los JSON).
+/// - `absolute_uncertainty`: incertidumbre absoluta asociada al valor (misma unidad que `value`).
+/// - `relative_uncertainty`: u / |value|, si tiene sentido.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Measurement {
+    /// Id de la medida (podés usar algo tipo "m1", "m2", o un UUID en forma de String)
+    pub id: String,
+
+    /// Para poder reconstruir la relación con el instrumento utilizado
+    pub instrument_id: String,
+
+    /// Escala utilizada dentro de ese instrumento
+    pub scale_id: String,
+
+    /// Valor medido (en la unidad de la escala)
+    pub value: f64,
+
+    /// Unidad (snapshot) que tenía la escala al momento de medir
+    pub unit: UnitDef,
+
+    /// Incertidumbre absoluta (en misma unidad que `value`)
+    pub absolute_uncertainty: Option<f64>,
+
+    /// Incertidumbre relativa (u / |value|)
+    pub relative_uncertainty: Option<f64>,
+
+    /// Comentarios libres (por ejemplo: "se descartó por oscilaciones", "se promedió con N=3", etc.)
+    pub notes: Option<String>,
+}
+
+impl Measurement {
+    /// Crea una medida a partir de una escala, calculando de entrada la incertidumbre
+    /// usando el modelo definido en la escala.
+    pub fn new_from_scale(
+        id: String,
+        instrument_id: String,
+        scale: &Scale,
+        value: f64,
+    ) -> Self {
+        let mut m = Measurement {
+            id,
+            instrument_id,
+            scale_id: scale.id.clone(),
+            value,
+            unit: scale.unit.clone(),
+            absolute_uncertainty: None,
+            relative_uncertainty: None,
+            notes: None,
+        };
+        m.recompute_uncertainty(scale);
+        m
+    }
+
+    /// Recalcula la incertidumbre usando el modelo de la escala.
+    /// Esto sirve si:
+    /// - el alumno modifica el valor medido,
+    /// - o se actualiza el modelo de incertidumbre de la escala.
+    pub fn recompute_uncertainty(&mut self, scale: &Scale) {
+        if let Some(u) = scale
+            .uncertainty_model
+            .compute_absolute_uncertainty(self.value, scale)
+        {
+            self.absolute_uncertainty = Some(u);
+            if self.value != 0.0 {
+                self.relative_uncertainty = Some(u / self.value.abs());
+            } else {
+                self.relative_uncertainty = None;
+            }
+        } else {
+            self.absolute_uncertainty = None;
+            self.relative_uncertainty = None;
+        }
+    }
+
+    /// Permite que el alumno o el docente fije manualmente la incertidumbre absoluta
+    /// (por ejemplo, luego de combinar varias fuentes, aplicar correcciones, etc.).
+    /// Se recalcula automáticamente la incertidumbre relativa.
+    pub fn set_manual_absolute_uncertainty(&mut self, u_abs: f64) {
+        self.absolute_uncertainty = Some(u_abs);
+        if self.value != 0.0 {
+            self.relative_uncertainty = Some(u_abs / self.value.abs());
+        } else {
+            self.relative_uncertainty = None;
+        }
+    }
+}
