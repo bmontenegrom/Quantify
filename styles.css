@@ -1,84 +1,286 @@
-
-.app-root {
-    font-family: sans-serif;
-    padding: 1rem;
+body {
+  background-color: #444040;
+  color: #e5e5e5;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.practicas-tabs {
-    display: flex;
-    gap: 0.5rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid #ccc;
+/* Contenedor general */
+.practica-pendulo {
+  max-width: 1100px;
+  margin: 1.5rem auto;
+  padding: 1.5rem;
+  background: #6d4343;
+  border-radius: 12px;
+  border: 1px solid #2a2a2a;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
 }
 
-.tab {
-    padding: 0.5rem 1rem;
-    background: #eee;
-    border: none;
-    cursor: pointer;
-    border-radius: 4px 4px 0 0;
+.practica-pendulo h3,
+.practica-pendulo h4 {
+  margin-bottom: 0.75rem;
+  color: #f0f0f0;
 }
 
-.tab-activa {
-    background: #fff;
-    border: 1px solid #ccc;
-    border-bottom: 1px solid #fff;
+/* Selector de series */
+.series-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: #cccccc;
 }
 
-.practica-content {
-    padding: 1rem 0;
+.serie-button {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: #1c1c1c;
+  color: #e0e0e0;
+  font-size: 0.85rem;
+  cursor: pointer;
 }
 
-.practica-layout {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    margin-top: 1rem;
+.serie-button:hover {
+  background: #222222;
 }
 
-.columna-izquierda, .columna-derecha {
-    border: 1px solid #ddd;
-    padding: 0.5rem;
-    border-radius: 4px;
+.serie-button.active {
+  border-color: #888888;
+  background: #252525;
 }
 
+.serie-button.add {
+  border-style: dashed;
+}
 
+/* Cronómetro */
 .cronometro-panel {
-    border: 1px solid #ddd;
-    padding: 0.75rem;
-    border-radius: 4px;
-    display: inline-block;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 10px;
+  background: #3f3e3e;
+  border: 1px solid #2c2c2c;
+  margin-bottom: 1rem;
 }
 
 .cronometro-display {
-    font-family: monospace;
-    font-size: 1.5rem;
-    text-align: center;
-    margin-bottom: 0.5rem;
+  font-family: "SF Mono", "Consolas", "Roboto Mono", monospace;
+  font-size: 1.5rem;
+  text-align: center;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: #111111;
+  border: 1px solid #333333;
+  color: #f2f2f2;
 }
 
 .cronometro-buttons {
-    display: flex;
-    gap: 0.5rem;
-    justify-content: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
 }
 
 .cronometro-buttons button {
-    padding: 0.25rem 0.75rem;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: #202020;
+  color: #e5e5e5;
+  font-size: 0.85rem;
+  cursor: pointer;
 }
 
-.outlier-row {
-    background-color: rgba(255, 0, 0, 0.12);
+.cronometro-buttons button:hover {
+  background: #262626;
+}
+
+/* Marcas: grilla multi columna */
+.marcas-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 10px;
+  background: #3f3e3e;
+  border: 1px solid #2c2c2c;
+}
+
+.marcas-panel > h4 {
+  margin-bottom: 0.5rem;
+}
+
+.marcas-panel > button {
+  margin-bottom: 0.75rem;
+  padding: 0.3rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: #202020;
+  color: #e5e5e5;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.marcas-panel > button:hover {
+  background: #272727;
+}
+
+.marcas-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.5rem;
+}
+
+.marca-card {
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #343434;
+  background: #242121;
+  text-align: center;
+  font-family: "SF Mono", "Consolas", "Roboto Mono", monospace;
+  font-size: 0.9rem;
+  color: #d9d9d9;
+}
+
+/* Períodos: grilla + botón al costado */
+.periodos-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 10px;
+  background: #3f3e3e;
+  border: 1px solid #2c2c2c;
 }
 
 .outlier-controls {
-    margin: 0.5rem 0;
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    flex-wrap: wrap;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  color: #c8c8c8;
 }
 
 .outlier-controls button {
-    padding: 0.2rem 0.6rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: #202020;
+  color: #e5e5e5;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.outlier-controls button:hover {
+  background: #272727;
+}
+
+.periodos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.6rem;
+}
+
+.period-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid #343434;
+  background: #242121;
+}
+
+.period-card.outlier {
+  border-color: #777777;
+  box-shadow: 0 0 0 1px rgba(180, 180, 180, 0.25);
+}
+
+.period-card.discarded {
+  border-style: dashed;
+  border-color: #666666;
+  opacity: 0.55;
+}
+
+.period-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.period-value {
+  font-family: "SF Mono", "Consolas", "Roboto Mono", monospace;
+  font-size: 0.95rem;
+  color: #f0f0f0;
+}
+
+.period-status {
+  font-size: 0.75rem;
+  color: #b0b0b0;
+}
+
+.period-toggle {
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid #444444;
+  background: #202020;
+  color: #e5e5e5;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.period-toggle:hover {
+  background: #292929;
+}
+
+/* Stats */
+.periodos-stats {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  color: #d0d0d0;
+}
+
+/* Histograma / normalidad */
+.histograma-panel,
+.normality-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 10px;
+  background: #3f3e3e;
+  border: 1px solid #2c2c2c;
+}
+
+.histograma-panel h4,
+.normality-panel h4 {
+  margin-bottom: 0.5rem;
+}
+
+/* SVG histograma en gris */
+.histograma-panel svg {
+  border-radius: 8px;
+}
+
+/* ya pusimos estos colores directamente en el <svg> y <rect>/<path>,
+   pero si quieres forzar desde css podrías usar clases. */
+
+.normality-test h5 {
+  margin-bottom: 0.4rem;
+  color: #e0e0e0;
+}
+
+.normality-interpretation {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: #c4c4c4;
+}
+
+.normality-pass {
+  color: #c2e0c2; /* verde muy suave/grisáceo */
+}
+
+.normality-fail {
+  color: #e0c2c2; /* rojo muy suave/grisáceo */
 }

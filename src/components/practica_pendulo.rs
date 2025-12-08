@@ -33,6 +33,16 @@ struct HistData {
     max_count: usize,
 }
 
+/// Una serie de datos de la práctica del péndulo.
+/// Cada serie tiene sus propias marcas y flags de descarte.
+#[derive(Clone, PartialEq)]
+struct SerieData {
+    id: usize,
+    label: String,
+    marcas: Vec<u64>,
+    descartados: Vec<bool>,
+}
+
 /// A partir de las marcas en ms devuelve períodos independientes en segundos:
 /// (t1 - t0), (t3 - t2), ...
 fn compute_periodos(marcas: &[u64]) -> Vec<f64> {
@@ -261,7 +271,7 @@ fn render_histograma(stats: Option<Stats>, hist: Option<HistData>) -> AnyView {
             <svg
                 width=width
                 height=height
-                style="border: 1px solid #ccc; background-color: #fafafa;"
+                style="border: 1px solid #333; background-color: #191919;"
             >
                 // barras del histograma
                 {
@@ -282,7 +292,7 @@ fn render_histograma(stats: Option<Stats>, hist: Option<HistData>) -> AnyView {
                                     y=y
                                     width=bin_px - 2.0
                                     height=bar_h
-                                    fill="#88c"
+                                    fill="#4f7cff"
                                 />
                             }
                         })
@@ -309,7 +319,7 @@ fn render_histograma(stats: Option<Stats>, hist: Option<HistData>) -> AnyView {
                         <path
                             d=d
                             fill="none"
-                            stroke="#c44"
+                            stroke="#ff6b6b"
                             stroke-width="2"
                         />
                     }
@@ -341,20 +351,20 @@ fn render_normality_test(
                 {move || {
                     if passes {
                         view! {
-                            <p style="color: green;">
+                            <p class="normality-pass">
                                 "D < D₍crit₎ → No se rechaza la hipótesis de normalidad al 5%."
                             </p>
                         }.into_any()
                     } else {
                         view! {
-                            <p style="color: red;">
+                            <p class="normality-fail">
                                 "D ≥ D₍crit₎ → Se rechaza la hipótesis de normalidad al 5%."
                             </p>
                         }.into_any()
                     }
                 }}
 
-                <div class="normality-interpretation" style="margin-top: 0.5rem; font-size: 0.9rem;">
+                <div class="normality-interpretation">
                     <h6>"Interpretación sugerida para el informe"</h6>
                     {move || {
                         if passes {
@@ -408,12 +418,34 @@ fn render_normality_test(
 
 #[component]
 pub fn PracticaPendulo() -> impl IntoView {
-    // --- Cronómetro ---
+    // --- Cronómetro (compartido entre series) ---
     let (elapsed_ms, set_elapsed_ms) = signal(0u64);
     let (running, set_running) = signal(false);
 
-    // --- Marcas de tiempo (en ms) ---
-    let (marcas, set_marcas) = signal(Vec::<u64>::new());
+    // --- Series de datos ---
+    let (series, set_series) = signal(vec![SerieData {
+        id: 0,
+        label: "Serie 1".to_string(),
+        marcas: Vec::new(),
+        descartados: Vec::new(),
+    }]);
+
+    // Índice de serie actual
+    let (current_idx, set_current_idx) = signal(0usize);
+
+    // --- Helper: marcas de la serie actual ---
+    let marcas = Memo::new({
+        let series = series.clone();
+        let current_idx = current_idx.clone();
+        move |_| {
+            let idx = current_idx.get();
+            series.with(|vec| {
+                vec.get(idx)
+                    .map(|s| s.marcas.clone())
+                    .unwrap_or_default()
+            })
+        }
+    });
 
     // Intervalo: cada 10 ms, si running, incrementa elapsed_ms
     {
@@ -437,126 +469,242 @@ pub fn PracticaPendulo() -> impl IntoView {
         cb.forget();
     }
 
-    // --- Períodos independientes ---
-    let periodos = Memo::new(move |_| compute_periodos(&marcas.get()));
+    // --- Períodos independientes de la serie actual ---
+    let periodos = Memo::new({
+        let series = series.clone();
+        let current_idx = current_idx.clone();
+        move |_| {
+            let idx = current_idx.get();
+            series.with(|vec| {
+                if let Some(s) = vec.get(idx) {
+                    compute_periodos(&s.marcas)
+                } else {
+                    Vec::new()
+                }
+            })
+        }
+    });
 
-    // --- Vector de "descartados" ---
-    let (descartados, set_descartados) = signal(Vec::<bool>::new());
-
-    // Sincronizar longitud de descartados con periodos
+    // Sincronizar longitud de descartados con los períodos de la serie actual
     Effect::new({
         let periodos = periodos.clone();
-        let set_descartados = set_descartados.clone();
+        let set_series = set_series.clone();
+        let current_idx = current_idx.clone();
         move |_| {
             let len = periodos.get().len();
-            set_descartados.update(|v| {
-                if v.len() != len {
-                    v.resize(len, false); // false = no descartado
+            let idx = current_idx.get();
+            set_series.update(|vec| {
+                if let Some(s) = vec.get_mut(idx) {
+                    if s.descartados.len() != len {
+                        s.descartados.resize(len, false); // false = no descartado
+                    }
                 }
             });
         }
     });
 
-    // --- Períodos activos (no descartados) ---
-    let active_periods = Memo::new(move |_| {
-        let ps = periodos.get();
-        let ds = descartados.get();
-        let mut res = Vec::new();
-        for (i, p) in ps.into_iter().enumerate() {
-            if ds.get(i).copied().unwrap_or(false) == false {
-                res.push(p);
-            }
+    // --- Períodos activos (no descartados) de la serie actual ---
+    let active_periods = Memo::new({
+        let series = series.clone();
+        let current_idx = current_idx.clone();
+        let periodos = periodos.clone();
+        move |_| {
+            let ps = periodos.get();
+            let idx = current_idx.get();
+            series.with(|vec| {
+                if let Some(s) = vec.get(idx) {
+                    let mut res = Vec::new();
+                    for (i, p) in ps.into_iter().enumerate() {
+                        if s.descartados.get(i).copied().unwrap_or(false) == false {
+                            res.push(p);
+                        }
+                    }
+                    res
+                } else {
+                    Vec::new()
+                }
+            })
         }
-        res
     });
 
     // --- Estadísticas, histograma, KS ---
-    let stats = Memo::new(move |_| compute_stats(&active_periods.get()));
-    let hist_data = Memo::new(move |_| compute_histogram(&active_periods.get()));
+    let stats = Memo::new({
+        let active_periods = active_periods.clone();
+        move |_| compute_stats(&active_periods.get())
+    });
 
-    let ks_result = Memo::new(move |_| {
-        let st_opt = stats.get();
-        let acts = active_periods.get();
-        if let Some(st) = st_opt {
-            ks_test_normal(&acts, st.mean, st.std)
-        } else {
-            None
+    let hist_data = Memo::new({
+        let active_periods = active_periods.clone();
+        move |_| compute_histogram(&active_periods.get())
+    });
+
+    let ks_result = Memo::new({
+        let stats = stats.clone();
+        let active_periods = active_periods.clone();
+        move |_| {
+            let st_opt = stats.get();
+            let acts = active_periods.get();
+            if let Some(st) = st_opt {
+                ks_test_normal(&acts, st.mean, st.std)
+            } else {
+                None
+            }
         }
     });
 
     // --- Parámetro de outliers: múltiplos de sigma ---
     let (sigma_threshold, set_sigma_threshold) = signal(3.0f64);
 
-    // --- Flags de outlier (paralelo a periodos) ---
-    let outliers = Memo::new(move |_| {
-        let ps = periodos.get();
-        let ds = descartados.get();
-        let st_opt = stats.get();
-        let sigma = sigma_threshold.get();
+    // --- Flags de outlier (paralelo a periodos, serie actual) ---
+    let outliers = Memo::new({
+        let series = series.clone();
+        let current_idx = current_idx.clone();
+        let periodos = periodos.clone();
+        let stats = stats.clone();
+        let sigma_threshold = sigma_threshold.clone();
+        move |_| {
+            let ps = periodos.get();
+            let st_opt = stats.get();
+            let sigma = sigma_threshold.get();
+            let idx = current_idx.get();
 
-        let mut flags = vec![false; ps.len()];
-
-        if let Some(st) = st_opt {
-            if st.std > 0.0 && sigma > 0.0 {
-                for (i, &p) in ps.iter().enumerate() {
-                    if ds.get(i).copied().unwrap_or(false) {
-                        continue;
-                    }
-                    let z = (p - st.mean) / st.std;
-                    if z.abs() > sigma {
-                        flags[i] = true;
+            series.with(|vec| {
+                let mut flags = vec![false; ps.len()];
+                if let (Some(s), Some(st)) = (vec.get(idx), st_opt) {
+                    if st.std > 0.0 && sigma > 0.0 {
+                        for (i, &p) in ps.iter().enumerate() {
+                            if s.descartados.get(i).copied().unwrap_or(false) {
+                                continue;
+                            }
+                            let z = (p - st.mean) / st.std;
+                            if z.abs() > sigma {
+                                flags[i] = true;
+                            }
+                        }
                     }
                 }
-            }
+                flags
+            })
         }
-
-        flags
     });
 
-    // --- Índices de períodos ordenados de menor a mayor ---
-    let periodos_sorted_idx = Memo::new(move |_| {
-        let ps = periodos.get();
-        let mut idxs: Vec<usize> = (0..ps.len()).collect();
-        idxs.sort_by(|&a, &b| ps[a].partial_cmp(&ps[b]).unwrap());
-        idxs
+    // --- Índices de períodos ordenados de menor a mayor (serie actual) ---
+    let periodos_sorted_idx = Memo::new({
+        let periodos = periodos.clone();
+        move |_| {
+            let ps = periodos.get();
+            let mut idxs: Vec<usize> = (0..ps.len()).collect();
+            idxs.sort_by(|&a, &b| ps[a].partial_cmp(&ps[b]).unwrap());
+            idxs
+        }
     });
 
     // --- Handlers de cronómetro ---
     let on_start = move |_| set_running.set(true);
     let on_pause = move |_| set_running.set(false);
-    let on_reset = move |_| {
-        set_running.set(false);
-        set_elapsed_ms.set(0);
-        set_marcas.set(Vec::new());
-        set_descartados.set(Vec::new());
-    };
-
-    // --- Registrar marca ---
-    let on_registrar_marca = move |_| {
-        let current = elapsed_ms.get_untracked();
-        set_marcas.update(|v| {
-            if v.len() < 200 {
-                v.push(current);
-            }
-        });
-    };
-
-    // --- Botón "Descartar outliers" ---
-    let outliers_for_button = outliers.clone();
-    let on_discard_outliers = move |_| {
-        let outs = outliers_for_button.get();
-        set_descartados.update(|v| {
-            for (i, is_out) in outs.iter().enumerate() {
-                if *is_out && i < v.len() {
-                    v[i] = true;
+    let on_reset = {
+        let set_series = set_series.clone();
+        let current_idx = current_idx.clone();
+        move |_| {
+            set_running.set(false);
+            set_elapsed_ms.set(0);
+            let idx = current_idx.get_untracked();
+            set_series.update(|vec| {
+                if let Some(s) = vec.get_mut(idx) {
+                    s.marcas.clear();
+                    s.descartados.clear();
                 }
-            }
-        });
+            });
+        }
+    };
+
+    // --- Registrar marca en la serie actual (sin límite artificial) ---
+    let on_registrar_marca = {
+        let set_series = set_series.clone();
+        let current_idx = current_idx.clone();
+        move |_| {
+            let current = elapsed_ms.get_untracked();
+            let idx = current_idx.get_untracked();
+            set_series.update(|vec| {
+                if let Some(s) = vec.get_mut(idx) {
+                    s.marcas.push(current);
+                }
+            });
+        }
+    };
+
+    // --- Botón "Descartar outliers" para la serie actual ---
+    let on_discard_outliers = {
+        let outliers_for_button = outliers.clone();
+        let set_series = set_series.clone();
+        let current_idx = current_idx.clone();
+        move |_| {
+            let outs = outliers_for_button.get();
+            let idx = current_idx.get_untracked();
+            set_series.update(|vec| {
+                if let Some(s) = vec.get_mut(idx) {
+                    for (i, is_out) in outs.iter().enumerate() {
+                        if *is_out && i < s.descartados.len() {
+                            s.descartados[i] = true;
+                        }
+                    }
+                }
+            });
+        }
+    };
+
+    // --- Agregar nueva serie ---
+    let on_add_serie = {
+        let series_for_add = series.clone();
+        let set_series = set_series.clone();
+        let set_current_idx = set_current_idx.clone();
+        move |_| {
+            let new_idx = series_for_add.get_untracked().len();
+            set_series.update(|vec| {
+                vec.push(SerieData {
+                    id: new_idx,
+                    label: format!("Serie {}", new_idx + 1),
+                    marcas: Vec::new(),
+                    descartados: Vec::new(),
+                });
+            });
+            set_current_idx.set(new_idx);
+        }
     };
 
     view! {
         <div class="practica-pendulo">
             <h3>"Medición del período de un péndulo"</h3>
+
+            // ---------- Selector de series ----------
+            <div class="series-selector">
+                <span>"Series de datos: "</span>
+                <For
+                    each=move || series.get()
+                    key=|s: &SerieData| s.id
+                    children=move |s: SerieData| {
+                        let current_idx = current_idx.clone();
+                        let set_current_idx = set_current_idx.clone();
+                        view! {
+                            <button
+                                class=move || {
+                                    if current_idx.get() == s.id {
+                                        "serie-button active"
+                                    } else {
+                                        "serie-button"
+                                    }
+                                }
+                                on:click=move |_| set_current_idx.set(s.id)
+                            >
+                                {s.label.clone()}
+                            </button>
+                        }
+                    }
+                />
+                <button class="serie-button add" on:click=on_add_serie>
+                    "+ Serie"
+                </button>
+            </div>
 
             // ---------- Cronómetro ----------
             <div class="cronometro-panel">
@@ -582,53 +730,42 @@ pub fn PracticaPendulo() -> impl IntoView {
                         }}
                     </button>
                     <button on:click=on_reset>
-                        "Reiniciar (tiempo y datos)"
+                        "Reiniciar (tiempo y datos de la serie actual)"
                     </button>
                 </div>
             </div>
 
-            // ---------- Marcas ----------
+            // ---------- Marcas (TIEMPOS EN SEGUNDOS, GRID MULTICOLUMNA) ----------
             <div class="marcas-panel">
                 <h4>
                     "Marcas de tiempo "
-                    {"("} {move || marcas.get().len()} {"/ 200)"}
+                    {"("} {move || marcas.get().len()} {")"}
                 </h4>
 
                 <button on:click=on_registrar_marca>
                     "Registrar marca"
                 </button>
 
-                <table class="marcas-table">
-                    <thead>
-                        <tr>
-                            <th>"#"</th>
-                            <th>"Tiempo [ms]"</th>
-                            <th>"Tiempo [s]"</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <For
-                            each=move || {
-                                marcas
-                                    .get()
-                                    .into_iter()
-                                    .enumerate()
-                                    .collect::<Vec<_>>()
+                <div class="marcas-grid">
+                    <For
+                        each=move || {
+                            marcas
+                                .get()
+                                .into_iter()
+                                .enumerate()
+                                .collect::<Vec<_>>()
+                        }
+                        key=|item: &(usize, u64)| item.0
+                        children=move |(_i, t_ms): (usize, u64)| {
+                            let t_s = t_ms as f64 / 1000.0;
+                            view! {
+                                <div class="marca-card">
+                                    <span>{format!("{:.3} s", t_s)}</span>
+                                </div>
                             }
-                            key=|item: &(usize, u64)| item.0
-                            children=move |(i, t_ms): (usize, u64)| {
-                                let t_s = t_ms as f64 / 1000.0;
-                                view! {
-                                    <tr>
-                                        <td>{i}</td>
-                                        <td>{t_ms}</td>
-                                        <td>{format!("{:.4}", t_s)}</td>
-                                    </tr>
-                                }
-                            }
-                        />
-                    </tbody>
-                </table>
+                        }
+                    />
+                </div>
             </div>
 
             // ---------- Períodos ----------
@@ -650,73 +787,97 @@ pub fn PracticaPendulo() -> impl IntoView {
                     </button>
                 </div>
 
-                <table class="periodos-table">
-                    <thead>
-                        <tr>
-                            <th>"# índice"</th>
-                            <th>"T [s]"</th>
-                            <th>"Estado"</th>
-                            <th>"Acción"</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <For
-                            // usamos índices ordenados por período
-                            each=move || periodos_sorted_idx.get()
-                            key=|i: &usize| *i
-                            children=move |i: usize| {
-                                let desc_sig = descartados.clone();
-                                let set_desc = set_descartados.clone();
-                                let outliers_sig = outliers.clone();
-                                let periodos_sig = periodos.clone();
+                // Grilla de períodos (sin índice; botón al costado del valor)
+                <div class="periodos-grid">
+                    <For
+                        each=move || periodos_sorted_idx.get()
+                        key=|i: &usize| *i
+                        children=move |i: usize| {
+                            let periodos_sig = periodos.clone();
+                            let outliers_sig = outliers.clone();
+                            let series_sig = series.clone();
+                            let current_idx_sig = current_idx.clone();
+                            let set_series_sig = set_series.clone();
 
-                                view! {
-                                    <tr
-                                        class=move || {
-                                            let is_out = outliers_sig
-                                                .get()
-                                                .get(i)
-                                                .copied()
-                                                .unwrap_or(false);
-                                            if is_out { "outlier-row" } else { "" }
+                            view! {
+                                <div
+                                    class=move || {
+                                        let is_out = outliers_sig
+                                            .get()
+                                            .get(i)
+                                            .copied()
+                                            .unwrap_or(false);
+
+                                        let is_desc = series_sig.with(|vec| {
+                                            let idx = current_idx_sig.get();
+                                            vec.get(idx)
+                                                .and_then(|s| s.descartados.get(i).copied())
+                                                .unwrap_or(false)
+                                        });
+
+                                        if is_desc {
+                                            "period-card discarded"
+                                        } else if is_out {
+                                            "period-card outlier"
+                                        } else {
+                                            "period-card"
+                                        }
+                                    }
+                                >
+                                    <div class="period-info">
+                                        <div class="period-value">
+                                            {move || format!("{:.4} s", periodos_sig.get()[i])}
+                                        </div>
+                                        <div class="period-status">
+                                            {move || {
+                                                series_sig.with(|vec| {
+                                                    let idx = current_idx_sig.get();
+                                                    if let Some(s) = vec.get(idx) {
+                                                        if s.descartados.get(i).copied().unwrap_or(false) {
+                                                            "Descartado".to_string()
+                                                        } else {
+                                                            "Usado".to_string()
+                                                        }
+                                                    } else {
+                                                        "-".to_string()
+                                                    }
+                                                })
+                                            }}
+                                        </div>
+                                    </div>
+                                    <button
+                                        class="period-toggle"
+                                        on:click=move |_| {
+                                            let idx_sel = current_idx_sig.get_untracked();
+                                            set_series_sig.update(|vec| {
+                                                if let Some(s) = vec.get_mut(idx_sel) {
+                                                    if i < s.descartados.len() {
+                                                        s.descartados[i] = !s.descartados[i];
+                                                    }
+                                                }
+                                            });
                                         }
                                     >
-                                        <td>{i}</td>
-                                        <td>{format!("{:.4}", periodos_sig.get()[i])}</td>
-                                        <td>
-                                            {move || {
-                                                if desc_sig.get().get(i).copied().unwrap_or(false) {
-                                                    "Descartado"
-                                                } else {
-                                                    "Usado"
-                                                }
-                                            }}
-                                        </td>
-                                        <td>
-                                            <button
-                                                on:click=move |_| {
-                                                    set_desc.update(|v| {
-                                                        if i < v.len() {
-                                                            v[i] = !v[i];
-                                                        }
-                                                    });
-                                                }
-                                            >
-                                                {move || {
-                                                    if desc_sig.get().get(i).copied().unwrap_or(false) {
-                                                        "Restaurar"
+                                        {move || {
+                                            series_sig.with(|vec| {
+                                                let idx = current_idx_sig.get();
+                                                if let Some(s) = vec.get(idx) {
+                                                    if s.descartados.get(i).copied().unwrap_or(false) {
+                                                        "Restaurar".to_string()
                                                     } else {
-                                                        "Descartar"
+                                                        "Descartar".to_string()
                                                     }
-                                                }}
-                                            </button>
-                                        </td>
-                                    </tr>
-                                }
+                                                } else {
+                                                    "".to_string()
+                                                }
+                                            })
+                                        }}
+                                    </button>
+                                </div>
                             }
-                        />
-                    </tbody>
-                </table>
+                        }
+                    />
+                </div>
 
                 {move || render_stats(stats.get())}
             </div>
