@@ -1,3 +1,85 @@
+/* Contenedor de todas las pestañas */
+.practicas-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+  padding: 0.4rem;
+  background: #121212;
+  border-bottom: 1px solid #2a2a2a;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+/* Botón de pestaña */
+.tab-button {
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px 6px 0 0;
+  background: #1b1b1b;
+  border: 1px solid #2d2d2d;
+  border-bottom: none;
+  color: #d0d0d0;
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.tab-button:hover {
+  background: #242424;
+  color: #e5e5e5;
+}
+
+/* Pestaña seleccionada */
+.tab-button.active {
+  background: #1f1f1f;
+  color: #ffffff;
+  border-color: #3a3a3a;
+  box-shadow: 0 -2px 6px rgba(255, 255, 255, 0.05) inset;
+  font-weight: 600;
+}
+
+/* Contenido de la pestaña mostrada */
+.tab-content {
+  padding: 1rem;
+  background: #151515;
+  border-radius: 0 6px 6px 6px;
+  border: 1px solid #2d2d2d;
+  margin-top: -1px;
+}
+
+/* Para pantallas chicas: convertir pestañas en scroll horizontal */
+@media (max-width: 700px) {
+  .practicas-tabs {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .tab-button {
+    flex: 0 0 auto;
+  }
+}
+
+/* Estilo del scrollbar (opcional) */
+.practicas-tabs::-webkit-scrollbar {
+  height: 6px;
+}
+
+.practicas-tabs::-webkit-scrollbar-track {
+  background: #111111;
+}
+
+.practicas-tabs::-webkit-scrollbar-thumb {
+  background: #444444;
+  border-radius: 10px;
+}
+
+.practicas-tabs::-webkit-scrollbar-thumb:hover {
+  background: #555555;
+}
+
+
+
 body {
   background-color: #444040;
   color: #e5e5e5;
@@ -283,4 +365,18 @@ body {
 
 .normality-fail {
   color: #e0c2c2; /* rojo muy suave/grisáceo */
+}
+
+.export-button {
+  padding: 0.35rem 1.0rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: #202020;
+  color: #e5e5e5;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.export-button:hover {
+  background: #282828;
 }

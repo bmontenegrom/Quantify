@@ -3,6 +3,103 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use web_sys::window;
 
+use serde::Serialize;
+use js_sys::Array;
+use wasm_bindgen::JsValue;
+
+// ---------- STRUCTS PARA EXPORTACIÓN JSON ----------
+
+#[derive(Serialize)]
+struct ExportKsResult {
+    d_observed: f64,
+    d_critical: f64,
+    passes: bool,
+}
+
+#[derive(Serialize)]
+struct ExportStats {
+    n_raw_times: usize,
+    n_periods_used: usize,
+    mean_period_s: f64,
+    std_s: f64,
+    sn_s: f64,
+    ks: Option<ExportKsResult>,
+}
+
+#[derive(Serialize)]
+struct ExportSerie {
+    label: String,
+    // todos los períodos calculados para esa serie (incluyendo descartados)
+    periods_s: Vec<f64>,
+    // true = descartado, paralelo a periods_s
+    discarded: Vec<bool>,
+    // stats calculados solo con los NO descartados
+    stats: Option<ExportStats>,
+}
+
+#[derive(Serialize)]
+struct ExportPendulumPractice {
+    title: String,
+    created_at_utc: String,
+    series: Vec<ExportSerie>,
+}
+
+/// Construye un objeto exportable a partir del estado de las series.
+/// Usa exactamente las mismas funciones que la UI: compute_periodos, compute_stats, ks_test_normal.
+fn build_export_from_series(series: &[SerieData]) -> ExportPendulumPractice {
+    // Esto más adelante lo podés parametrizar desde la UI
+    let title = "Práctica: péndulo simple".to_string();
+    let created_at_utc = js_sys::Date::new_0().to_iso_string().into(); // ISO8601
+
+    let mut export_series = Vec::new();
+
+    for s in series {
+        let periods = compute_periodos(&s.marcas);
+
+        // períodos activos (no descartados)
+        let mut active = Vec::new();
+        for (i, p) in periods.iter().enumerate() {
+            if s.descartados.get(i).copied().unwrap_or(false) == false {
+                active.push(*p);
+            }
+        }
+
+        let st_opt = compute_stats(&active);
+        let ks_opt = if let Some(st) = st_opt {
+            ks_test_normal(&active, st.mean, st.std)
+        } else {
+            None
+        };
+
+        let stats_export = st_opt.map(|st| ExportStats {
+            n_raw_times: s.marcas.len(),
+            n_periods_used: active.len(),
+            mean_period_s: st.mean,
+            std_s: st.std,
+            sn_s: st.sn,
+            ks: ks_opt.map(|(d, dcrit, passes)| ExportKsResult {
+                d_observed: d,
+                d_critical: dcrit,
+                passes,
+            }),
+        });
+
+        export_series.push(ExportSerie {
+            label: s.label.clone(),
+            periods_s: periods,
+            discarded: s.descartados.clone(),
+            stats: stats_export,
+        });
+    }
+
+    ExportPendulumPractice {
+        title,
+        created_at_utc,
+        series: export_series,
+    }
+}
+
+
 // ---------- LÓGICA NUMÉRICA / AUXILIAR ----------
 
 /// Convierte milisegundos a "HH:MM:SS.mmm"
@@ -42,6 +139,46 @@ struct SerieData {
     marcas: Vec<u64>,
     descartados: Vec<bool>,
 }
+
+
+fn download_json(filename: &str, contents: &str) {
+    if let Some(win) = web_sys::window() {
+        if let Some(doc) = win.document() {
+            // Creamos un Blob con el contenido del JSON
+            let array = Array::new();
+            array.push(&JsValue::from_str(contents));
+
+            let blob = web_sys::Blob::new_with_str_sequence(&array)
+                .expect("no se pudo crear Blob");
+
+            let url = web_sys::Url::create_object_url_with_blob(&blob)
+                .expect("no se pudo crear object URL");
+
+            // Creamos un <a href="blob:..." download="archivo.json"> y lo clickeamos
+            let a = doc
+                .create_element("a")
+                .expect("no se pudo crear <a>")
+                .dyn_into::<web_sys::HtmlAnchorElement>()
+                .expect("no es un anchor");
+
+            a.set_href(&url);
+            a.set_download(filename);
+            let style = a.unchecked_ref::<web_sys::HtmlElement>()
+             .style();
+            let _ = style.set_property("display", "none");
+
+            if let Some(body) = doc.body() {
+                let _ = body.append_child(&a);
+                a.click();
+                let _ = body.remove_child(&a);
+            }
+
+            // Limpieza del URL
+            let _ = web_sys::Url::revoke_object_url(&url);
+        }
+    }
+}
+
 
 /// A partir de las marcas en ms devuelve períodos independientes en segundos:
 /// (t1 - t0), (t3 - t2), ...
@@ -672,6 +809,29 @@ pub fn PracticaPendulo() -> impl IntoView {
         }
     };
 
+        // --- Exportar a JSON (descarga tipo navegador) ---
+    let on_export_json = {
+        let series_sig = series.clone();
+        move |_| {
+            let snapshot = series_sig.get_untracked();
+            let export_obj = build_export_from_series(&snapshot);
+
+            match serde_json::to_string_pretty(&export_obj) {
+                Ok(json_str) => {
+                    download_json("pendulo_practica.json", &json_str);
+                }
+                Err(e) => {
+                    web_sys::console::error_1(
+                        &format!("Error serializando JSON: {}", e).into(),
+                    );
+                }
+            }
+        }
+    };
+
+        // --- Exportar a JSON ---
+    
+
     view! {
         <div class="practica-pendulo">
             <h3>"Medición del período de un péndulo"</h3>
@@ -891,6 +1051,12 @@ pub fn PracticaPendulo() -> impl IntoView {
             // ---------- Test de normalidad KS ----------
             <div class="normality-panel">
                 {move || render_normality_test(ks_result.get(), stats.get())}
+            </div>
+            // ---------- Exportación ----------
+            <div style="margin-top: 1rem; text-align: right;">
+                <button class="export-button" on:click=on_export_json>
+                    "Exportar práctica (JSON)"
+                </button>
             </div>
         </div>
     }
