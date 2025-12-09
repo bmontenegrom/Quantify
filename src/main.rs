@@ -1,29 +1,11 @@
-use leptos::*;
-use leptos::prelude::*;
-use leptos::mount:: mount_to_body;
-mod components;
 
+mod components;
+use crate::components::app_shell::AppShell;
 //use components::practicas_tabs::PracticasTabs;
 mod models;
 
 fn main() {
-    // En CSR esto se ejecuta en el navegador
-    mount_to_body(|| view! { <App/> });
-}
+    console_error_panic_hook::set_once();
+    leptos::mount::mount_to_body(AppShell);
 
-
-
-#[component]
-fn App() -> impl IntoView {
-    view! {
-        <main class="app-root">
-            <header class="app-header">
-                <h1>"Laboratorio de Física"</h1>
-            </header>
-
-            <section class="app-main">
-                <components::practicas_tabs::PracticasTabs />
-            </section>
-        </main>
-    }
 }
