@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 
 use crate::components::practicas_tabs::PracticasTabs;
+use crate::components::instrumentos_panel::InstrumentosPanel;
 // Más adelante: use crate::components::instrumentos_panel::InstrumentosPanel;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -91,7 +92,7 @@ pub fn AppShell() -> impl IntoView {
                     }.into_any(),
 
                     SidebarSection::Instrumentos => view! {
-                        <InstrumentosPlaceholder />
+                        <InstrumentosPanel />
                     }.into_any(),
 
                     SidebarSection::Ayuda => view! {
