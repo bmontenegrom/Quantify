@@ -1,12 +1,15 @@
 use leptos::ev;
 use leptos::prelude::*;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
+use wasm_bindgen_futures::spawn_local;
 use js_sys::Array;
 use web_sys::{
-    window, HtmlAnchorElement, HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement,
+    window, console, HtmlAnchorElement, HtmlInputElement, HtmlSelectElement,
+    HtmlTextAreaElement,
 };
+use tauri_wasm::{self, args};
 
 // ─────────────────────────────────────────────────────────────
 // Helpers para leer valores de inputs/select/textarea
@@ -38,14 +41,14 @@ fn select_value(ev: &ev::Event) -> String {
 // ─────────────────────────────────────────────────────────────
 
 /// Tipo de instrumento: analógico o digital.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum UiInstrumentKind {
     Analogico,
     Digital,
 }
 
 /// Magnitud física principal que mide la escala
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum UiQuantity {
     Tension,
     Corriente,
@@ -61,7 +64,7 @@ pub enum UiQuantity {
 }
 
 /// Unidad básica (sin prefijo)
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum UiUnit {
     Volt,
     Ampere,
@@ -77,7 +80,7 @@ pub enum UiUnit {
 }
 
 /// Prefijo independiente de la unidad (m, µ, k, etc.)
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum UiPrefix {
     Nano,
     Micro,
@@ -114,7 +117,7 @@ impl UiPrefix {
 }
 
 /// Modelo genérico de incertidumbre (simplificado para UI).
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum UiUncertaintyKind {
     /// Incertidumbre combinada en lectura y calibración (en unidades de la escala)
     LecturaCalibracion,
@@ -124,7 +127,7 @@ pub enum UiUncertaintyKind {
     AbsolutaFija,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct UiScale {
     pub id: u32,
     pub label: String,
@@ -146,7 +149,7 @@ pub struct UiScale {
     pub digitos: Option<f64>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct UiInstrument {
     pub id: u32,
     pub nombre: String,
@@ -155,18 +158,26 @@ pub struct UiInstrument {
     pub escalas: Vec<UiScale>,
 }
 
-/// Objeto raíz para exportar a JSON
-#[derive(Serialize)]
+/// Objeto raíz para exportar a JSON manualmente
+#[derive(Serialize, Deserialize)]
 pub struct UiInstrumentCollection {
     pub version: String,
     pub instrumentos: Vec<UiInstrument>,
 }
 
+/// Estructura para persistencia en archivo (incluye contadores)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct InstrumentStore {
+    instrumentos: Vec<UiInstrument>,
+    next_instrument_id: u32,
+    next_scale_id: u32,
+}
+
 // ─────────────────────────────────────────────────────────────
-// Utilidades
+// Utilidades varias
 // ─────────────────────────────────────────────────────────────
 
-/// Descargar un JSON como archivo desde el WebView
+/// Descargar un JSON como archivo desde el WebView (export manual)
 fn download_json(filename: &str, contents: &str) {
     if let Some(win) = window() {
         if let Some(doc) = win.document() {
@@ -261,7 +272,7 @@ fn render_list_section(instrumentos: ReadSignal<Vec<UiInstrument>>) -> impl Into
                 download_json("instrumentos.json", &json_str);
             }
             Err(e) => {
-                web_sys::console::error_1(
+                console::error_1(
                     &format!("Error serializando instrumentos: {}", e).into(),
                 );
             }
@@ -395,6 +406,7 @@ fn render_form_section(
         let escala_digitos = escala_digitos.clone();
         let set_escala_label = set_escala_label.clone();
         let set_escalas_en_edicion = set_escalas_en_edicion.clone();
+        let set_next_scale_id = set_next_scale_id.clone();
 
         move |_| {
             let id = next_scale_id.get_untracked();
@@ -460,7 +472,7 @@ fn render_form_section(
     let on_save_instrument = move |_| {
         let nombre = nuevo_nombre.get_untracked().trim().to_string();
         if nombre.is_empty() {
-            web_sys::console::warn_1(&"Nombre de instrumento vacío".into());
+            console::warn_1(&"Nombre de instrumento vacío".into());
             return;
         }
 
@@ -799,6 +811,138 @@ pub fn InstrumentosPanel() -> impl IntoView {
     // Generador simple de IDs locales
     let (next_instrument_id, set_next_instrument_id) = signal(1u32);
     let (next_scale_id, set_next_scale_id) = signal(1u32);
+
+    // -------- CARGA INICIAL DESDE TAURI (archivo instrumentos.json) --------
+    {
+        let instrumentos = instrumentos.clone();
+        let set_instrumentos = set_instrumentos.clone();
+        let set_next_instrument_id = set_next_instrument_id.clone();
+        let set_next_scale_id = set_next_scale_id.clone();
+        let set_escalas_en_edicion = set_escalas_en_edicion.clone();
+
+        Effect::new(move |_| {
+            // Evita recargar si ya hay datos (p.ej. en hot reload)
+            if !instrumentos.get().is_empty() {
+                return;
+            }
+
+            spawn_local(async move {
+                if !tauri_wasm::is_tauri() {
+                    console::log_1(
+                        &"No se detectó Tauri (modo navegador), no se cargan instrumentos desde disco"
+                            .into(),
+                    );
+                    return;
+                }
+
+                match tauri_wasm::invoke("load_instruments_file").await {
+                    Ok(js_val) => {
+                        if js_val.is_null() || js_val.is_undefined() {
+                            console::log_1(&"No hay archivo de instrumentos todavía".into());
+                            return;
+                        }
+
+                        if let Some(json_str) = js_val.as_string() {
+                            match serde_json::from_str::<InstrumentStore>(&json_str) {
+                                Ok(store) => {
+                                    set_instrumentos.set(store.instrumentos);
+                                    set_next_instrument_id.set(store.next_instrument_id);
+                                    set_next_scale_id.set(store.next_scale_id);
+                                    set_escalas_en_edicion.set(Vec::new());
+                                    console::log_1(
+                                        &"Instrumentos cargados desde disco".into(),
+                                    );
+                                }
+                                Err(e) => {
+                                    console::error_1(
+                                        &format!(
+                                            "Error parseando instrumentos.json: {e}"
+                                        )
+                                        .into(),
+                                    );
+                                }
+                            }
+                        } else {
+                            console::error_1(
+                                &"load_instruments_file devolvió algo que no es string"
+                                    .into(),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        console::error_1(
+                            &format!(
+                                "Error al invocar load_instruments_file: {e:?}"
+                            )
+                            .into(),
+                        );
+                    }
+                }
+            });
+        });
+    }
+
+    // -------- GUARDADO AUTOMÁTICO AL CAMBIAR INSTRUMENTOS / IDS --------
+    {
+        let instrumentos = instrumentos.clone();
+        let next_instrument_id = next_instrument_id.clone();
+        let next_scale_id = next_scale_id.clone();
+
+        Effect::new(move |_| {
+            let store = InstrumentStore {
+                instrumentos: instrumentos.get(),
+                next_instrument_id: next_instrument_id.get(),
+                next_scale_id: next_scale_id.get(),
+            };
+
+            spawn_local(async move {
+                if !tauri_wasm::is_tauri() {
+                    return;
+                }
+
+                let json = match serde_json::to_string(&store) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        console::error_1(
+                            &format!(
+                                "Error serializando instrumentos para guardar: {e}"
+                            )
+                            .into(),
+                        );
+                        return;
+                    }
+                };
+
+                #[derive(Serialize)]
+                struct SaveArgs<'a> {
+                    json: &'a str,
+                }
+                let binding = SaveArgs { json: &json };
+                let args_js = match args(&binding) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        console::error_1(
+                            &format!(
+                                "Error preparando args para save_instruments_file: {e}"
+                            )
+                            .into(),
+                        );
+                        return;
+                    }
+                };
+
+                if let Err(e) = tauri_wasm::invoke("save_instruments_file")
+                    .with_args(args_js)
+                    .await
+                {
+                    console::error_1(
+                        &format!("Error al invocar save_instruments_file: {e:?}")
+                            .into(),
+                    );
+                }
+            });
+        });
+    }
 
     view! {
         <div class="instrumentos-panel">
