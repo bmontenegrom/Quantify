@@ -750,3 +750,64 @@ body {
   font-size: 0.85rem;
   color: #f0f0f0;
 }
+
+
+
+
+.regression-panel {
+    margin-top: 1rem;
+    padding: 1rem;
+    border-radius: 8px;
+    background-color: #222;
+    color: #eee;
+    border: 1px solid #444;
+}
+
+.regression-title {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+}
+
+.regression-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.regression-summary {
+    flex: 1 1 200px;
+}
+
+.regression-plot {
+    flex: 1 1 260px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.regression-summary-box {
+    padding: 0.5rem 0.75rem;
+    background-color: #262626;
+    border-radius: 6px;
+    border: 1px solid #555;
+    font-size: 0.9rem;
+}
+
+.regression-summary-box p {
+    margin: 0.1rem 0;
+}
+
+.regression-means {
+    margin-top: 0.3rem;
+    opacity: 0.8;
+}
+
+.regression-svg {
+    max-width: 100%;
+    border-radius: 6px;
+}
+
+.regression-plot-placeholder {
+    font-size: 0.9rem;
+    opacity: 0.7;
+}
