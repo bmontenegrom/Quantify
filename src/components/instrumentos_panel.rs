@@ -259,7 +259,12 @@ fn render_header() -> impl IntoView {
     }
 }
 
-fn render_list_section(instrumentos: ReadSignal<Vec<UiInstrument>>) -> impl IntoView {
+/// Sección de lista de instrumentos + export + eliminar
+fn render_list_section(
+    instrumentos: ReadSignal<Vec<UiInstrument>>,
+    set_instrumentos: WriteSignal<Vec<UiInstrument>>,
+) -> impl IntoView {
+    // Exportar JSON manualmente (colección completa)
     let on_export_json = move |_| {
         let snapshot = instrumentos.get_untracked();
         let collection = UiInstrumentCollection {
@@ -301,16 +306,38 @@ fn render_list_section(instrumentos: ReadSignal<Vec<UiInstrument>>) -> impl Into
                         each=move || instrumentos.get()
                         key=|inst: &UiInstrument| inst.id
                         children=move |inst: UiInstrument| {
+                            let set_instrumentos = set_instrumentos.clone();
+                            let inst_id = inst.id;
+
+                            let on_delete = move |_| {
+                                set_instrumentos.update(|lista| {
+                                    lista.retain(|i| i.id != inst_id);
+                                });
+                            };
+
                             view! {
                                 <div class="instrument-card">
                                     <div class="instrument-card-header">
-                                        <span class="instrument-name">{inst.nombre.clone()}</span>
-                                        <span class="instrument-kind">
-                                            {match inst.kind {
-                                                UiInstrumentKind::Analogico => "Analógico",
-                                                UiInstrumentKind::Digital => "Digital",
-                                            }}
-                                        </span>
+                                        <div class="instrument-card-title">
+                                            <span class="instrument-name">
+                                                {inst.nombre.clone()}
+                                            </span>
+                                            <span class="instrument-kind">
+                                                {
+                                                    match inst.kind {
+                                                        UiInstrumentKind::Analogico => "Analógico",
+                                                        UiInstrumentKind::Digital => "Digital",
+                                                    }
+                                                }
+                                            </span>
+                                        </div>
+                                        <button
+                                            class="export-button"
+                                            title="Eliminar instrumento"
+                                            on:click=on_delete
+                                        >
+                                            "Eliminar"
+                                        </button>
                                     </div>
                                     <div class="instrument-card-body">
                                         <p class="instrument-notes">
@@ -918,6 +945,7 @@ pub fn InstrumentosPanel() -> impl IntoView {
                     json: &'a str,
                 }
                 let binding = SaveArgs { json: &json };
+
                 let args_js = match args(&binding) {
                     Ok(a) => a,
                     Err(e) => {
@@ -948,7 +976,7 @@ pub fn InstrumentosPanel() -> impl IntoView {
         <div class="instrumentos-panel">
             { render_header() }
             <div class="instrumentos-layout">
-                { render_list_section(instrumentos) }
+                { render_list_section(instrumentos, set_instrumentos) }
                 {
                     render_form_section(
                         set_instrumentos,

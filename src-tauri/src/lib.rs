@@ -5,7 +5,7 @@ fn instrumentos_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     // app.path() es la API nueva de Tauri 2 para paths específicos de la app
     let base = app
         .path()
-        .app_data_dir()
+        .app_local_data_dir()
         .or_else(|_| Err("No se pudo obtener app_data_dir de Tauri".to_string()))?;
 
     // aseguramos que el directorio exista
