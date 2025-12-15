@@ -406,6 +406,33 @@ body {
   background: #282828;
 }
 
+.edit-button {
+  padding: 0.35rem 1.0rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: #202020;
+  color: #e5e5e5;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.edit-button:hover {
+  background: #282828;
+}
+
+.delete-button {
+  padding: 0.35rem 1.0rem;
+  border-radius: 999px;
+  border: 1px solid #3a3a3a;
+  background: #202020;
+  color: #e5e5e5;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.delete-button:hover {
+  background: #282828;
+}
 
 
 /* Layout principal: sidebar + contenido */

@@ -41,14 +41,14 @@ fn select_value(ev: &ev::Event) -> String {
 // ─────────────────────────────────────────────────────────────
 
 /// Tipo de instrumento: analógico o digital.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum UiInstrumentKind {
     Analogico,
     Digital,
 }
 
 /// Magnitud física principal que mide la escala
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum UiQuantity {
     Tension,
     Corriente,
@@ -64,7 +64,7 @@ pub enum UiQuantity {
 }
 
 /// Unidad básica (sin prefijo)
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum UiUnit {
     Volt,
     Ampere,
@@ -80,7 +80,7 @@ pub enum UiUnit {
 }
 
 /// Prefijo independiente de la unidad (m, µ, k, etc.)
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum UiPrefix {
     Nano,
     Micro,
@@ -103,7 +103,6 @@ impl UiPrefix {
     }
 
     /// Factor de conversión del prefijo a unidad base.
-    /// Ej: m → 1e-3, k → 1e3, etc.
     pub fn factor(&self) -> f64 {
         match self {
             UiPrefix::Nano => 1e-9,
@@ -117,7 +116,7 @@ impl UiPrefix {
 }
 
 /// Modelo genérico de incertidumbre (simplificado para UI).
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum UiUncertaintyKind {
     /// Incertidumbre combinada en lectura y calibración (en unidades de la escala)
     LecturaCalibracion,
@@ -127,7 +126,7 @@ pub enum UiUncertaintyKind {
     AbsolutaFija,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UiScale {
     pub id: u32,
     pub label: String,
@@ -149,7 +148,7 @@ pub struct UiScale {
     pub digitos: Option<f64>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UiInstrument {
     pub id: u32,
     pub nombre: String,
@@ -159,7 +158,7 @@ pub struct UiInstrument {
 }
 
 /// Objeto raíz para exportar a JSON manualmente
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UiInstrumentCollection {
     pub version: String,
     pub instrumentos: Vec<UiInstrument>,
@@ -259,14 +258,32 @@ fn render_header() -> impl IntoView {
     }
 }
 
-/// Sección de lista de instrumentos + export + eliminar
+/// Sección de lista de instrumentos + export + eliminar + modificar
 fn render_list_section(
     instrumentos: ReadSignal<Vec<UiInstrument>>,
     set_instrumentos: WriteSignal<Vec<UiInstrument>>,
+    set_nuevo_nombre: WriteSignal<String>,
+    set_nuevo_kind: WriteSignal<UiInstrumentKind>,
+    set_nuevo_notas: WriteSignal<String>,
+    set_escalas_en_edicion: WriteSignal<Vec<UiScale>>,
+    set_escala_quantity: WriteSignal<UiQuantity>,
+    set_escala_unit: WriteSignal<UiUnit>,
+    set_escala_prefix: WriteSignal<UiPrefix>,
+    set_escala_min: WriteSignal<String>,
+    set_escala_max: WriteSignal<String>,
+    set_escala_res: WriteSignal<String>,
+    set_escala_unc_kind: WriteSignal<UiUncertaintyKind>,
+    set_escala_lectura: WriteSignal<String>,
+    set_escala_calibracion: WriteSignal<String>,
+    set_escala_porcentaje: WriteSignal<String>,
+    set_escala_digitos: WriteSignal<String>,
+    set_editing_instrument_id: WriteSignal<Option<u32>>,
 ) -> impl IntoView {
     // Exportar JSON manualmente (colección completa)
     let on_export_json = move |_| {
         let snapshot = instrumentos.get_untracked();
+        console::log_1(&format!("Exportando instrumentos: {:?}", snapshot).into());
+
         let collection = UiInstrumentCollection {
             version: "0.1.0".to_string(),
             instrumentos: snapshot,
@@ -307,12 +324,141 @@ fn render_list_section(
                         key=|inst: &UiInstrument| inst.id
                         children=move |inst: UiInstrument| {
                             let set_instrumentos = set_instrumentos.clone();
+                            let set_nuevo_nombre = set_nuevo_nombre.clone();
+                            let set_nuevo_kind = set_nuevo_kind.clone();
+                            let set_nuevo_notas = set_nuevo_notas.clone();
+                            let set_escalas_en_edicion = set_escalas_en_edicion.clone();
+                            let set_escala_quantity = set_escala_quantity.clone();
+                            let set_escala_unit = set_escala_unit.clone();
+                            let set_escala_prefix = set_escala_prefix.clone();
+                            let set_escala_min = set_escala_min.clone();
+                            let set_escala_max = set_escala_max.clone();
+                            let set_escala_res = set_escala_res.clone();
+                            let set_escala_unc_kind = set_escala_unc_kind.clone();
+                            let set_escala_lectura = set_escala_lectura.clone();
+                            let set_escala_calibracion = set_escala_calibracion.clone();
+                            let set_escala_porcentaje = set_escala_porcentaje.clone();
+                            let set_escala_digitos = set_escala_digitos.clone();
+                            let set_editing_instrument_id = set_editing_instrument_id.clone();
+
                             let inst_id = inst.id;
 
+                            // Eliminar con confirmación
                             let on_delete = move |_| {
+                                console::log_1(
+                                    &format!("Intentando eliminar instrumento id={}", inst_id).into()
+                                );
+
+                                let confirmed: bool;
+
+                                if let Some(win) = window() {
+                                    match win.confirm_with_message(
+                                        "¿Eliminar este instrumento? Esta acción no se puede deshacer.",
+                                    ) {
+                                        Ok(c) => { confirmed = c; }
+                                        Err(e) => {
+                                            console::error_1(
+                                                &format!("Error mostrando confirm(): {:?}", e).into(),
+                                            );
+                                            confirmed = false;
+                                        }
+                                    }
+                                } else {
+                                    console::warn_1(
+                                        &"window() es None, no se puede mostrar confirm(). No se elimina."
+                                            .into(),
+                                    );
+                                    confirmed = false;
+                                }
+
+                                if !confirmed {
+                                    console::log_1(
+                                        &"El usuario canceló la eliminación del instrumento."
+                                            .into(),
+                                    );
+                                    return;
+                                }
+
                                 set_instrumentos.update(|lista| {
                                     lista.retain(|i| i.id != inst_id);
                                 });
+
+                                // si se estaba editando este instrumento, salir del modo edición
+                                set_editing_instrument_id.set(None);
+                                set_escalas_en_edicion.set(Vec::new());
+                            };
+
+                            // Modificar: carga datos al formulario
+                            let inst_clone = inst.clone();
+                            let on_edit = move |_| {
+                                console::log_1(
+                                    &format!("Editando instrumento: {:?}", inst_clone).into(),
+                                );
+
+                                let i = inst_clone.clone();
+                                set_editing_instrument_id.set(Some(i.id));
+
+                                set_nuevo_nombre.set(i.nombre.clone());
+                                set_nuevo_kind.set(i.kind);
+                                set_nuevo_notas.set(i.notas.clone());
+                                set_escalas_en_edicion.set(i.escalas.clone());
+
+                                // si hay al menos una escala, la usamos para precargar el form de escala
+                                if let Some(first) = i.escalas.first() {
+                                    set_escala_quantity.set(first.quantity);
+                                    set_escala_unit.set(first.unit);
+                                    set_escala_prefix.set(first.prefix);
+                                    set_escala_min.set(first.range_min.to_string());
+                                    set_escala_max.set(first.range_max.to_string());
+                                    set_escala_res.set(first.resolution.to_string());
+                                    set_escala_unc_kind.set(first.uncertainty_kind);
+
+                                    match first.uncertainty_kind {
+                                        UiUncertaintyKind::LecturaCalibracion => {
+                                            set_escala_lectura.set(
+                                                first
+                                                    .lectura_abs
+                                                    .map(|v| v.to_string())
+                                                    .unwrap_or_default(),
+                                            );
+                                            set_escala_calibracion.set(
+                                                first
+                                                    .calibracion_abs
+                                                    .map(|v| v.to_string())
+                                                    .unwrap_or_default(),
+                                            );
+                                            set_escala_porcentaje.set(String::new());
+                                            set_escala_digitos.set(String::new());
+                                        }
+                                        UiUncertaintyKind::PorcentajeMasDigitos => {
+                                            set_escala_porcentaje.set(
+                                                first
+                                                    .porcentaje
+                                                    .map(|v| v.to_string())
+                                                    .unwrap_or_default(),
+                                            );
+                                            set_escala_digitos.set(
+                                                first
+                                                    .digitos
+                                                    .map(|v| v.to_string())
+                                                    .unwrap_or_default(),
+                                            );
+                                            set_escala_lectura.set(String::new());
+                                            set_escala_calibracion.set(String::new());
+                                        }
+                                        UiUncertaintyKind::AbsolutaFija => {
+                                            set_escala_lectura.set(
+                                                first
+                                                    .lectura_abs
+                                                    .map(|v| v.to_string())
+                                                    .unwrap_or_default(),
+                                            );
+                                            set_escala_calibracion.set(String::new());
+                                            set_escala_porcentaje.set(String::new());
+                                            set_escala_digitos.set(String::new());
+                                        }
+                                    }
+                                }
                             };
 
                             view! {
@@ -331,13 +477,22 @@ fn render_list_section(
                                                 }
                                             </span>
                                         </div>
-                                        <button
-                                            class="export-button"
-                                            title="Eliminar instrumento"
-                                            on:click=on_delete
-                                        >
-                                            "Eliminar"
-                                        </button>
+                                        <div class="instrument-card-actions">
+                                            <button
+                                                class="edit-button"
+                                                title="Modificar instrumento"
+                                                on:click=on_edit
+                                            >
+                                                "Modificar"
+                                            </button>
+                                            <button
+                                                class="delete-button"
+                                                title="Eliminar instrumento"
+                                                on:click=on_delete
+                                            >
+                                                "Eliminar"
+                                            </button>
+                                        </div>
                                     </div>
                                     <div class="instrument-card-body">
                                         <p class="instrument-notes">
@@ -416,6 +571,8 @@ fn render_form_section(
     set_next_instrument_id: WriteSignal<u32>,
     next_scale_id: ReadSignal<u32>,
     set_next_scale_id: WriteSignal<u32>,
+    editing_instrument_id: ReadSignal<Option<u32>>,
+    set_editing_instrument_id: WriteSignal<Option<u32>>,
 ) -> impl IntoView {
     // Handler: agregar escala al instrumento en edición
     let on_add_scale = {
@@ -495,7 +652,7 @@ fn render_form_section(
         }
     };
 
-    // Handler: guardar instrumento completo
+    // Handler: guardar instrumento (nuevo o modificación)
     let on_save_instrument = move |_| {
         let nombre = nuevo_nombre.get_untracked().trim().to_string();
         if nombre.is_empty() {
@@ -503,27 +660,57 @@ fn render_form_section(
             return;
         }
 
-        let id = next_instrument_id.get_untracked();
-        set_next_instrument_id.set(id + 1);
+        let editing = editing_instrument_id.get_untracked();
+        console::log_1(
+            &format!("Guardando instrumento. editing = {:?}", editing).into(),
+        );
 
-        let inst = UiInstrument {
-            id,
-            nombre,
-            kind: nuevo_kind.get_untracked(),
-            notas: nuevo_notas.get_untracked(),
-            escalas: escalas_en_edicion.get_untracked(),
-        };
+        if let Some(edit_id) = editing {
+            // Actualizar instrumento existente
+            let nuevo_nombre_val = nombre.clone();
+            let nuevo_kind_val = nuevo_kind.get_untracked();
+            let nuevo_notas_val = nuevo_notas.get_untracked();
+            let nuevas_escalas = escalas_en_edicion.get_untracked();
 
-        set_instrumentos.update(|v| v.push(inst));
+            set_instrumentos.update(|lista| {
+                if let Some(inst) = lista.iter_mut().find(|i| i.id == edit_id) {
+                    inst.nombre = nuevo_nombre_val.clone();
+                    inst.kind = nuevo_kind_val;
+                    inst.notas = nuevo_notas_val.clone();
+                    inst.escalas = nuevas_escalas.clone();
+                }
+            });
+        } else {
+            // Crear instrumento nuevo
+            let id = next_instrument_id.get_untracked();
+            set_next_instrument_id.set(id + 1);
 
+            let inst = UiInstrument {
+                id,
+                nombre,
+                kind: nuevo_kind.get_untracked(),
+                notas: nuevo_notas.get_untracked(),
+                escalas: escalas_en_edicion.get_untracked(),
+            };
+
+            set_instrumentos.update(|v| v.push(inst));
+        }
+
+        // Resetear formulario y salir del modo edición
         set_nuevo_nombre.set(String::new());
         set_nuevo_notas.set(String::new());
         set_escalas_en_edicion.set(Vec::new());
+        set_editing_instrument_id.set(None);
     };
 
     view! {
         <section class="instrumentos-form-section">
-            <h4>"Nuevo instrumento"</h4>
+            <Show
+                when=move || editing_instrument_id.get().is_some()
+                fallback=|| view! { <h4>"Nuevo instrumento"</h4> }
+            >
+                <h4>"Modificar instrumento"</h4>
+            </Show>
 
             <div class="instrument-form-group">
                 <label>"Nombre"</label>
@@ -548,8 +735,12 @@ fn render_form_section(
                         set_nuevo_kind.set(kind);
                     }
                 >
-                    <option value="digital" selected>{ "Digital" }</option>
-                    <option value="analogico">{ "Analógico" }</option>
+                    <option value="digital" selected={move || nuevo_kind.get() == UiInstrumentKind::Digital}>
+                        { "Digital" }
+                    </option>
+                    <option value="analogico" selected={move || nuevo_kind.get() == UiInstrumentKind::Analogico}>
+                        { "Analógico" }
+                    </option>
                 </select>
             </div>
 
@@ -601,17 +792,72 @@ fn render_form_section(
                             set_escala_unit.set(u);
                         }
                     >
-                        <option value="tension" selected>{ "Tensión" }</option>
-                        <option value="corriente">{ "Corriente" }</option>
-                        <option value="resistencia">{ "Resistencia" }</option>
-                        <option value="capacitancia">{ "Capacitancia" }</option>
-                        <option value="inductancia">{ "Inductancia" }</option>
-                        <option value="temperatura">{ "Temperatura" }</option>
-                        <option value="masa">{ "Masa" }</option>
-                        <option value="volumen">{ "Volumen" }</option>
-                        <option value="tiempo">{ "Tiempo" }</option>
-                        <option value="densidad">{ "Densidad" }</option>
-                        <option value="longitud">{ "Longitud" }</option>
+                        <option
+                            value="tension"
+                            selected={move || escala_quantity.get() == UiQuantity::Tension}
+                        >
+                            { "Tensión" }
+                        </option>
+                        <option
+                            value="corriente"
+                            selected={move || escala_quantity.get() == UiQuantity::Corriente}
+                        >
+                            { "Corriente" }
+                        </option>
+                        <option
+                            value="resistencia"
+                            selected={move || escala_quantity.get() == UiQuantity::Resistencia}
+                        >
+                            { "Resistencia" }
+                        </option>
+                        <option
+                            value="capacitancia"
+                            selected={move || escala_quantity.get() == UiQuantity::Capacitancia}
+                        >
+                            { "Capacitancia" }
+                        </option>
+                        <option
+                            value="inductancia"
+                            selected={move || escala_quantity.get() == UiQuantity::Inductancia}
+                        >
+                            { "Inductancia" }
+                        </option>
+                        <option
+                            value="temperatura"
+                            selected={move || escala_quantity.get() == UiQuantity::Temperatura}
+                        >
+                            { "Temperatura" }
+                        </option>
+                        <option
+                            value="masa"
+                            selected={move || escala_quantity.get() == UiQuantity::Masa}
+                        >
+                            { "Masa" }
+                        </option>
+                        <option
+                            value="volumen"
+                            selected={move || escala_quantity.get() == UiQuantity::Volumen}
+                        >
+                            { "Volumen" }
+                        </option>
+                        <option
+                            value="tiempo"
+                            selected={move || escala_quantity.get() == UiQuantity::Tiempo}
+                        >
+                            { "Tiempo" }
+                        </option>
+                        <option
+                            value="densidad"
+                            selected={move || escala_quantity.get() == UiQuantity::Densidad}
+                        >
+                            { "Densidad" }
+                        </option>
+                        <option
+                            value="longitud"
+                            selected={move || escala_quantity.get() == UiQuantity::Longitud}
+                        >
+                            { "Longitud" }
+                        </option>
                     </select>
                 </div>
 
@@ -638,12 +884,42 @@ fn render_form_section(
                             set_escala_prefix.set(p);
                         }
                     >
-                        <option value="none" selected>{ " (sin prefijo)" }</option>
-                        <option value="mili">{ "m" }</option>
-                        <option value="micro">{ "µ" }</option>
-                        <option value="nano">{ "n" }</option>
-                        <option value="kilo">{ "k" }</option>
-                        <option value="mega">{ "M" }</option>
+                        <option
+                            value="none"
+                            selected={move || escala_prefix.get() == UiPrefix::Ninguno}
+                        >
+                            { " (sin prefijo)" }
+                        </option>
+                        <option
+                            value="mili"
+                            selected={move || escala_prefix.get() == UiPrefix::Mili}
+                        >
+                            { "m" }
+                        </option>
+                        <option
+                            value="micro"
+                            selected={move || escala_prefix.get() == UiPrefix::Micro}
+                        >
+                            { "µ" }
+                        </option>
+                        <option
+                            value="nano"
+                            selected={move || escala_prefix.get() == UiPrefix::Nano}
+                        >
+                            { "n" }
+                        </option>
+                        <option
+                            value="kilo"
+                            selected={move || escala_prefix.get() == UiPrefix::Kilo}
+                        >
+                            { "k" }
+                        </option>
+                        <option
+                            value="mega"
+                            selected={move || escala_prefix.get() == UiPrefix::Mega}
+                        >
+                            { "M" }
+                        </option>
                     </select>
                 </div>
 
@@ -687,13 +963,22 @@ fn render_form_section(
                             set_escala_unc_kind.set(k);
                         }
                     >
-                        <option value="lectura_cal" selected>
+                        <option
+                            value="lectura_cal"
+                            selected={move || escala_unc_kind.get() == UiUncertaintyKind::LecturaCalibracion}
+                        >
                             "Lectura + Calibración (absolutas)"
                         </option>
-                        <option value="p_digitos">
+                        <option
+                            value="p_digitos"
+                            selected={move || escala_unc_kind.get() == UiUncertaintyKind::PorcentajeMasDigitos}
+                        >
                             "±(p% del valor + d dígitos)"
                         </option>
-                        <option value="absoluta">
+                        <option
+                            value="absoluta"
+                            selected={move || escala_unc_kind.get() == UiUncertaintyKind::AbsolutaFija}
+                        >
                             "Absoluta fija"
                         </option>
                     </select>
@@ -795,7 +1080,13 @@ fn render_form_section(
 
             <div class="instrument-actions">
                 <button class="primary-button" on:click=on_save_instrument>
-                    "Guardar instrumento"
+                    {move || {
+                        if editing_instrument_id.get().is_some() {
+                            "Guardar cambios".to_string()
+                        } else {
+                            "Guardar instrumento".to_string()
+                        }
+                    }}
                 </button>
             </div>
         </section>
@@ -811,7 +1102,7 @@ pub fn InstrumentosPanel() -> impl IntoView {
     // Lista de instrumentos definidos en la sesión
     let (instrumentos, set_instrumentos) = signal(Vec::<UiInstrument>::new());
 
-    // Campos del formulario de "nuevo instrumento"
+    // Campos del formulario de "nuevo instrumento" / edición
     let (nuevo_nombre, set_nuevo_nombre) = signal(String::new());
     let (nuevo_kind, set_nuevo_kind) = signal(UiInstrumentKind::Digital);
     let (nuevo_notas, set_nuevo_notas) = signal(String::new());
@@ -839,6 +1130,9 @@ pub fn InstrumentosPanel() -> impl IntoView {
     let (next_instrument_id, set_next_instrument_id) = signal(1u32);
     let (next_scale_id, set_next_scale_id) = signal(1u32);
 
+    // Modo edición: id del instrumento que se está editando (o None)
+    let (editing_instrument_id, set_editing_instrument_id) = signal::<Option<u32>>(None);
+
     // -------- CARGA INICIAL DESDE TAURI (archivo instrumentos.json) --------
     {
         let instrumentos = instrumentos.clone();
@@ -846,9 +1140,9 @@ pub fn InstrumentosPanel() -> impl IntoView {
         let set_next_instrument_id = set_next_instrument_id.clone();
         let set_next_scale_id = set_next_scale_id.clone();
         let set_escalas_en_edicion = set_escalas_en_edicion.clone();
+        let set_editing_instrument_id = set_editing_instrument_id.clone();
 
         Effect::new(move |_| {
-            // Evita recargar si ya hay datos (p.ej. en hot reload)
             if !instrumentos.get().is_empty() {
                 return;
             }
@@ -870,12 +1164,21 @@ pub fn InstrumentosPanel() -> impl IntoView {
                         }
 
                         if let Some(json_str) = js_val.as_string() {
+                            console::log_1(
+                                &format!("JSON de instrumentos cargado: {}", json_str)
+                                    .into(),
+                            );
                             match serde_json::from_str::<InstrumentStore>(&json_str) {
                                 Ok(store) => {
+                                    console::log_1(
+                                        &format!("InstrumentStore cargado: {:?}", store)
+                                            .into(),
+                                    );
                                     set_instrumentos.set(store.instrumentos);
                                     set_next_instrument_id.set(store.next_instrument_id);
                                     set_next_scale_id.set(store.next_scale_id);
                                     set_escalas_en_edicion.set(Vec::new());
+                                    set_editing_instrument_id.set(None);
                                     console::log_1(
                                         &"Instrumentos cargados desde disco".into(),
                                     );
@@ -945,7 +1248,6 @@ pub fn InstrumentosPanel() -> impl IntoView {
                     json: &'a str,
                 }
                 let binding = SaveArgs { json: &json };
-
                 let args_js = match args(&binding) {
                     Ok(a) => a,
                     Err(e) => {
@@ -967,6 +1269,11 @@ pub fn InstrumentosPanel() -> impl IntoView {
                         &format!("Error al invocar save_instruments_file: {e:?}")
                             .into(),
                     );
+                } else {
+                    console::log_1(
+                        &"instrumentos.json guardado correctamente desde la UI"
+                            .into(),
+                    );
                 }
             });
         });
@@ -976,7 +1283,28 @@ pub fn InstrumentosPanel() -> impl IntoView {
         <div class="instrumentos-panel">
             { render_header() }
             <div class="instrumentos-layout">
-                { render_list_section(instrumentos, set_instrumentos) }
+                {
+                    render_list_section(
+                        instrumentos,
+                        set_instrumentos,
+                        set_nuevo_nombre,
+                        set_nuevo_kind,
+                        set_nuevo_notas,
+                        set_escalas_en_edicion,
+                        set_escala_quantity,
+                        set_escala_unit,
+                        set_escala_prefix,
+                        set_escala_min,
+                        set_escala_max,
+                        set_escala_res,
+                        set_escala_unc_kind,
+                        set_escala_lectura,
+                        set_escala_calibracion,
+                        set_escala_porcentaje,
+                        set_escala_digitos,
+                        set_editing_instrument_id,
+                    )
+                }
                 {
                     render_form_section(
                         set_instrumentos,
@@ -1016,6 +1344,8 @@ pub fn InstrumentosPanel() -> impl IntoView {
                         set_next_instrument_id,
                         next_scale_id,
                         set_next_scale_id,
+                        editing_instrument_id,
+                        set_editing_instrument_id,
                     )
                 }
             </div>
