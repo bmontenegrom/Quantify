@@ -21,6 +21,14 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
+        .route("/academic/context", get(academic_context))
+        .route("/academic/courses", post(create_course))
+        .route("/academic/courses/{id}/groups", post(create_group))
+        .route(
+            "/academic/courses/{id}/practices",
+            post(enable_course_practice),
+        )
+        .route("/academic/groups/{id}/members", post(add_group_member))
         .route("/practices", get(practices))
         .route("/submissions", get(submissions).post(create_submission))
         .route("/submissions/{id}", get(submission_detail))
@@ -79,6 +87,65 @@ async fn practices(
     Ok(Json(db::practices(&state.pool).await?))
 }
 
+async fn academic_context(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<db::AcademicContext>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    Ok(Json(db::academic_context(&state.pool, &user).await?))
+}
+
+async fn create_course(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(input): Json<db::CreateCourse>,
+) -> Result<Json<db::Course>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if input.name.trim().is_empty() || input.term.trim().is_empty() {
+        return Err(AppError::bad_request("name and term are required"));
+    }
+    Ok(Json(db::create_course(&state.pool, input).await?))
+}
+
+async fn create_group(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(course_id): Path<String>,
+    Json(input): Json<db::CreateGroup>,
+) -> Result<Json<db::LabGroup>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if input.name.trim().is_empty() {
+        return Err(AppError::bad_request("name is required"));
+    }
+    Ok(Json(
+        db::create_group(&state.pool, &course_id, input).await?,
+    ))
+}
+
+async fn add_group_member(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(group_id): Path<String>,
+    Json(input): Json<db::AddGroupMember>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    db::add_group_member(&state.pool, &group_id, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("estudiante no encontrado"))?;
+    Ok(Json(Health { status: "ok" }))
+}
+
+async fn enable_course_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(course_id): Path<String>,
+    Json(input): Json<db::SetCoursePractice>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    db::enable_course_practice(&state.pool, &course_id, input).await?;
+    Ok(Json(Health { status: "ok" }))
+}
+
 async fn submissions(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -104,10 +171,9 @@ async fn create_submission(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<db::SubmissionDetail>, AppError> {
-    current_user(&state, &headers).await?;
-    let mut student_name = None;
-    let mut group_name = None;
-    let mut course = None;
+    let user = current_user(&state, &headers).await?;
+    let mut course_id = None;
+    let mut group_id = None;
     let mut practice_id = None;
     let mut file_name = None;
     let mut csv_content = None;
@@ -119,9 +185,8 @@ async fn create_submission(
     {
         let name = field.name().unwrap_or_default().to_string();
         match name.as_str() {
-            "student_name" => student_name = Some(read_text(field).await?),
-            "group_name" => group_name = Some(read_text(field).await?),
-            "course" => course = Some(read_text(field).await?),
+            "course_id" => course_id = Some(read_text(field).await?),
+            "group_id" => group_id = Some(read_text(field).await?),
             "practice_id" => practice_id = Some(read_text(field).await?),
             "csv_file" => {
                 file_name = field
@@ -139,11 +204,21 @@ async fn create_submission(
     let analysis = analysis::analyze_csv(&csv_content)
         .map_err(|err| AppError::bad_request(format!("CSV invalido: {err}")))?;
 
+    let course_id = required(course_id, "course_id")?;
+    let group_id = required(group_id, "group_id")?;
+    let practice_id = required(practice_id, "practice_id")?;
+
+    if !db::user_can_submit(&state.pool, &user, &course_id, &group_id, &practice_id).await? {
+        return Err(AppError::forbidden(
+            "no tenes acceso a ese curso, grupo o practica",
+        ));
+    }
+
     let submission = NewSubmission {
-        student_name: required(student_name, "student_name")?,
-        group_name: required(group_name, "group_name")?,
-        course: required(course, "course")?,
-        practice_id: required(practice_id, "practice_id")?,
+        submitted_by_user_id: user.id,
+        course_id,
+        group_id,
+        practice_id,
         file_name: file_name.unwrap_or_else(|| "medidas.csv".into()),
         csv_content,
         analysis,

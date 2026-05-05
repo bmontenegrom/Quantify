@@ -34,6 +34,7 @@
         <nav class="tabs" aria-label="Vistas">
           <button class="tab active" data-view="student">Estudiantes</button>
           <button class="tab teacher-only" data-view="teacher">Docentes</button>
+          <button class="tab teacher-only" data-view="admin">Cursos</button>
         </nav>
         <div class="session-box">
           <span id="session-user"></span>
@@ -52,16 +53,12 @@
         <form id="submission-form" class="panel">
           <div class="form-grid">
             <label>
-              Estudiante
-              <input name="student_name" required placeholder="Nombre y apellido" />
+              Curso
+              <select name="course_id" id="course-select" required></select>
             </label>
             <label>
               Grupo
-              <input name="group_name" required placeholder="Grupo 3" />
-            </label>
-            <label>
-              Curso
-              <input name="course" required placeholder="Fisica Experimental I" />
+              <select name="group_id" id="group-select" required></select>
             </label>
             <label>
               Practica
@@ -102,6 +99,83 @@
             Selecciona una entrega para ver el detalle.
           </section>
         </div>
+      </section>
+
+      <section id="admin-view" class="view">
+        <div class="section-head">
+          <h2>Cursos y grupos</h2>
+          <p>Administra la estructura basica de cursado.</p>
+        </div>
+
+        <div class="admin-grid">
+          <section class="panel">
+            <h3>Nuevo curso</h3>
+            <form id="course-form" class="stack-form">
+              <label>
+                Nombre
+                <input name="name" required placeholder="Fisica Experimental I" />
+              </label>
+              <label>
+                Periodo
+                <input name="term" required placeholder="2026" />
+              </label>
+              <button type="submit">Crear curso</button>
+            </form>
+          </section>
+
+          <section class="panel">
+            <h3>Nuevo grupo</h3>
+            <form id="group-form" class="stack-form">
+              <label>
+                Curso
+                <select name="course_id" id="admin-course-select" required></select>
+              </label>
+              <label>
+                Nombre
+                <input name="name" required placeholder="Grupo 2" />
+              </label>
+              <button type="submit">Crear grupo</button>
+            </form>
+          </section>
+
+          <section class="panel">
+            <h3>Agregar estudiante</h3>
+            <form id="member-form" class="stack-form">
+              <label>
+                Grupo
+                <select name="group_id" id="admin-group-select" required></select>
+              </label>
+              <label>
+                Usuario estudiante
+                <input name="username" required placeholder="estudiante" />
+              </label>
+              <button type="submit">Agregar</button>
+            </form>
+          </section>
+
+          <section class="panel">
+            <h3>Habilitar practica</h3>
+            <form id="course-practice-form" class="stack-form">
+              <label>
+                Curso
+                <select name="course_id" id="practice-course-select" required></select>
+              </label>
+              <label>
+                Practica
+                <select name="practice_id" id="admin-practice-select" required></select>
+              </label>
+              <button type="submit">Habilitar</button>
+            </form>
+          </section>
+        </div>
+
+        <section class="panel catalog-panel">
+          <div class="list-head">
+            <h3>Catalogo academico</h3>
+            <span id="admin-status" class="submission-meta"></span>
+          </div>
+          <div id="course-catalog" class="course-catalog"></div>
+        </section>
       </section>
     </main>
     </div>

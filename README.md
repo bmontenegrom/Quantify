@@ -68,6 +68,24 @@ largo_m,periodo_s
 0.40,1.27
 ```
 
+## Modelo academico actual
+
+El MVP ya guarda entregas contra entidades reales:
+
+- cursos
+- grupos de laboratorio
+- estudiantes asignados a grupos
+- practicas habilitadas por curso
+
+El usuario `docente` o `admin` puede administrar esto desde la pestaña `Cursos`. Para desarrollo se siembra automaticamente:
+
+- Curso: `Fisica Experimental I (2026)`
+- Grupo: `Grupo 1`
+- Estudiante: `estudiante`
+- Practicas habilitadas: pendulo, Hooke y caida libre
+
+Las entregas nuevas guardan `course_id`, `group_id`, `practice_id` y `submitted_by_user_id`. Las columnas de texto se mantienen por compatibilidad y para mostrar historico.
+
 ## Deploy simple en Ubuntu
 
 Con Docker y Docker Compose:

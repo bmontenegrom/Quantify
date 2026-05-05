@@ -1,5 +1,6 @@
 const state = {
   user: null,
+  academic: null,
   practices: [],
   submissions: [],
   selectedId: null,
@@ -11,12 +12,24 @@ const loginForm = document.querySelector("#login-form");
 const loginStatus = document.querySelector("#login-status");
 const sessionUser = document.querySelector("#session-user");
 const logoutButton = document.querySelector("#logout-button");
+const courseSelect = document.querySelector("#course-select");
+const groupSelect = document.querySelector("#group-select");
 const practiceSelect = document.querySelector("#practice-select");
 const submissionForm = document.querySelector("#submission-form");
 const submitStatus = document.querySelector("#submit-status");
 const latestResult = document.querySelector("#latest-result");
 const submissionList = document.querySelector("#submission-list");
 const submissionDetail = document.querySelector("#submission-detail");
+const courseForm = document.querySelector("#course-form");
+const groupForm = document.querySelector("#group-form");
+const memberForm = document.querySelector("#member-form");
+const coursePracticeForm = document.querySelector("#course-practice-form");
+const adminCourseSelect = document.querySelector("#admin-course-select");
+const adminGroupSelect = document.querySelector("#admin-group-select");
+const practiceCourseSelect = document.querySelector("#practice-course-select");
+const adminPracticeSelect = document.querySelector("#admin-practice-select");
+const courseCatalog = document.querySelector("#course-catalog");
+const adminStatus = document.querySelector("#admin-status");
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -60,6 +73,45 @@ document.querySelectorAll(".tab").forEach((tab) => {
 });
 
 document.querySelector("#refresh-submissions").addEventListener("click", loadSubmissions);
+courseSelect.addEventListener("change", updateStudentSelectors);
+
+courseForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await withAdminError(async () => {
+    await postJson("/api/academic/courses", Object.fromEntries(new FormData(courseForm).entries()));
+    courseForm.reset();
+    await refreshAcademic("Curso creado");
+  });
+});
+
+groupForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await withAdminError(async () => {
+    const data = Object.fromEntries(new FormData(groupForm).entries());
+    await postJson(`/api/academic/courses/${data.course_id}/groups`, { name: data.name });
+    groupForm.reset();
+    await refreshAcademic("Grupo creado");
+  });
+});
+
+memberForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await withAdminError(async () => {
+    const data = Object.fromEntries(new FormData(memberForm).entries());
+    await postJson(`/api/academic/groups/${data.group_id}/members`, { username: data.username });
+    memberForm.reset();
+    await refreshAcademic("Estudiante agregado");
+  });
+});
+
+coursePracticeForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await withAdminError(async () => {
+    const data = Object.fromEntries(new FormData(coursePracticeForm).entries());
+    await postJson(`/api/academic/courses/${data.course_id}/practices`, { practice_id: data.practice_id });
+    await refreshAcademic("Practica habilitada");
+  });
+});
 
 submissionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -76,6 +128,7 @@ submissionForm.addEventListener("submit", async (event) => {
     const submission = await response.json();
     submitStatus.textContent = "Entrega guardada";
     submissionForm.reset();
+    renderStudentSelectors();
     renderAnalysis(latestResult, submission);
     latestResult.classList.remove("hidden");
     if (canReview()) await loadSubmissions();
@@ -105,10 +158,7 @@ async function startApp() {
   });
 
   selectView("student");
-  state.practices = await fetchJson("/api/practices");
-  practiceSelect.innerHTML = state.practices
-    .map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`)
-    .join("");
+  await loadAcademic();
 
   if (canReview()) await loadSubmissions();
 }
@@ -123,6 +173,95 @@ async function loadSubmissions() {
   if (!canReview()) return;
   state.submissions = await fetchJson("/api/submissions");
   renderSubmissionList();
+}
+
+async function loadAcademic() {
+  state.academic = await fetchJson("/api/academic/context");
+  state.practices = state.academic.practices;
+  renderStudentSelectors();
+  if (canReview()) renderAdmin();
+}
+
+async function refreshAcademic(message) {
+  await loadAcademic();
+  adminStatus.textContent = message;
+  window.setTimeout(() => {
+    adminStatus.textContent = "";
+  }, 2500);
+}
+
+async function withAdminError(action) {
+  try {
+    adminStatus.textContent = "";
+    await action();
+  } catch (error) {
+    adminStatus.textContent = error.message;
+  }
+}
+
+function renderStudentSelectors() {
+  const courses = state.academic.courses;
+  courseSelect.innerHTML = courses.length
+    ? courses.map((course) => `<option value="${escapeHtml(course.id)}">${escapeHtml(course.name)} (${escapeHtml(course.term)})</option>`).join("")
+    : `<option value="">Sin cursos asignados</option>`;
+  updateStudentSelectors();
+}
+
+function updateStudentSelectors() {
+  const course = selectedCourse();
+  groupSelect.innerHTML = course?.groups.length
+    ? course.groups.map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.name)}</option>`).join("")
+    : `<option value="">Sin grupos</option>`;
+  practiceSelect.innerHTML = course?.practices.length
+    ? course.practices.map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`).join("")
+    : `<option value="">Sin practicas habilitadas</option>`;
+}
+
+function renderAdmin() {
+  const courses = state.academic.courses;
+  const allGroups = courses.flatMap((course) => course.groups.map((group) => ({ ...group, courseName: course.name })));
+
+  const courseOptions = courses
+    .map((course) => `<option value="${escapeHtml(course.id)}">${escapeHtml(course.name)} (${escapeHtml(course.term)})</option>`)
+    .join("");
+  adminCourseSelect.innerHTML = courseOptions;
+  practiceCourseSelect.innerHTML = courseOptions;
+  adminGroupSelect.innerHTML = allGroups
+    .map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.courseName)} - ${escapeHtml(group.name)}</option>`)
+    .join("");
+  adminPracticeSelect.innerHTML = state.practices
+    .map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`)
+    .join("");
+
+  courseCatalog.innerHTML = courses.length
+    ? courses.map(renderCourseCard).join("")
+    : `<p class="submission-meta">No hay cursos creados.</p>`;
+}
+
+function renderCourseCard(course) {
+  return `
+    <article class="course-card">
+      <h4>${escapeHtml(course.name)} (${escapeHtml(course.term)})</h4>
+      <div class="submission-meta">${course.groups.length} grupos - ${course.practices.length} practicas habilitadas</div>
+      <div class="chips">
+        ${course.practices.map((practice) => `<span class="chip">${escapeHtml(practice.name)}</span>`).join("") || `<span class="chip">Sin practicas</span>`}
+      </div>
+      ${course.groups
+        .map(
+          (group) => `
+            <div class="metric">
+              <strong>${escapeHtml(group.name)}</strong>
+              <div class="submission-meta">${group.members.map((member) => escapeHtml(member.display_name)).join(", ") || "Sin estudiantes"}</div>
+            </div>
+          `,
+        )
+        .join("")}
+    </article>
+  `;
+}
+
+function selectedCourse() {
+  return state.academic?.courses.find((course) => course.id === courseSelect.value);
 }
 
 function renderSubmissionList() {
@@ -292,6 +431,16 @@ async function saveReview(event, id) {
 
 async function fetchJson(url) {
   const response = await fetch(url);
+  if (!response.ok) throw new Error(await errorText(response));
+  return response.json();
+}
+
+async function postJson(url, payload) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
   if (!response.ok) throw new Error(await errorText(response));
   return response.json();
 }

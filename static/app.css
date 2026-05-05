@@ -173,8 +173,14 @@ button:hover {
 .form-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 14px;
+}
+
+.stack-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
 }
 
 label {
@@ -229,6 +235,49 @@ textarea {
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(280px, 360px) 1fr;
+}
+
+.admin-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.catalog-panel {
+  margin-top: 18px;
+}
+
+.course-catalog {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.course-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.course-card h4 {
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chip {
+  background: #eef2f7;
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 4px 8px;
 }
 
 .submission-list {
@@ -338,6 +387,7 @@ textarea {
   }
 
   .form-grid,
+  .admin-grid,
   .teacher-grid,
   .review-row {
     grid-template-columns: 1fr;
