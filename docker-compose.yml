@@ -9,5 +9,8 @@ services:
       DATABASE_URL: "sqlite:/app/data/quantify.db"
       UPLOAD_DIR: "/app/data/uploads"
       RUST_LOG: "${RUST_LOG:-quantify=info,tower_http=info}"
+      SEED_ADMIN_PASSWORD: "${SEED_ADMIN_PASSWORD:-admin123}"
+      SEED_TEACHER_PASSWORD: "${SEED_TEACHER_PASSWORD:-docente123}"
+      SEED_STUDENT_PASSWORD: "${SEED_STUDENT_PASSWORD:-estudiante123}"
     volumes:
       - ./data:/app/data

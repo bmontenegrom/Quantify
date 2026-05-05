@@ -1,8 +1,9 @@
 use crate::analysis::AnalysisResult;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::{FromRow, SqlitePool};
-use std::path::PathBuf;
+use std::{env, path::PathBuf};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -16,6 +17,34 @@ pub struct Practice {
     pub id: String,
     pub name: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct AuthUser {
+    pub id: String,
+    pub username: String,
+    pub display_name: String,
+    pub role: String,
+}
+
+#[derive(Debug, FromRow)]
+struct UserWithPassword {
+    pub id: String,
+    pub username: String,
+    pub display_name: String,
+    pub role: String,
+    pub password_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LoginResponse {
+    pub user: AuthUser,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -87,6 +116,34 @@ pub struct ReviewSubmission {
 pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('estudiante', 'docente', 'admin')),
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS practices (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -119,6 +176,131 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    Ok(())
+}
+
+pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
+    let users = [
+        (
+            "admin",
+            "Administrador",
+            "admin",
+            env::var("SEED_ADMIN_PASSWORD").unwrap_or_else(|_| "admin123".into()),
+        ),
+        (
+            "docente",
+            "Docente de prueba",
+            "docente",
+            env::var("SEED_TEACHER_PASSWORD").unwrap_or_else(|_| "docente123".into()),
+        ),
+        (
+            "estudiante",
+            "Estudiante de prueba",
+            "estudiante",
+            env::var("SEED_STUDENT_PASSWORD").unwrap_or_else(|_| "estudiante123".into()),
+        ),
+    ];
+
+    for (username, display_name, role, password) in users {
+        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM users WHERE username = ?1")
+            .bind(username)
+            .fetch_optional(pool)
+            .await?;
+
+        if exists.is_none() {
+            sqlx::query(
+                r#"
+                INSERT INTO users (id, username, display_name, role, password_hash, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(username)
+            .bind(display_name)
+            .bind(role)
+            .bind(hash_password(&password))
+            .bind(Utc::now())
+            .execute(pool)
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn login(
+    pool: &SqlitePool,
+    request: LoginRequest,
+) -> anyhow::Result<Option<(String, AuthUser)>> {
+    let user = sqlx::query_as::<_, UserWithPassword>(
+        r#"
+        SELECT id, username, display_name, role, password_hash
+        FROM users
+        WHERE username = ?1
+        "#,
+    )
+    .bind(request.username.trim())
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(user) = user else {
+        return Ok(None);
+    };
+
+    if !verify_password(&request.password, &user.password_hash) {
+        return Ok(None);
+    }
+
+    let token = Uuid::new_v4().to_string();
+    let now = Utc::now();
+    let expires_at = now + Duration::hours(12);
+
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (token, user_id, created_at, expires_at)
+        VALUES (?1, ?2, ?3, ?4)
+        "#,
+    )
+    .bind(&token)
+    .bind(&user.id)
+    .bind(now)
+    .bind(expires_at)
+    .execute(pool)
+    .await?;
+
+    Ok(Some((
+        token,
+        AuthUser {
+            id: user.id,
+            username: user.username,
+            display_name: user.display_name,
+            role: user.role,
+        },
+    )))
+}
+
+pub async fn user_by_session(pool: &SqlitePool, token: &str) -> anyhow::Result<Option<AuthUser>> {
+    let user = sqlx::query_as::<_, AuthUser>(
+        r#"
+        SELECT u.id, u.username, u.display_name, u.role
+        FROM sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.token = ?1 AND s.expires_at > ?2
+        "#,
+    )
+    .bind(token)
+    .bind(Utc::now())
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(user)
+}
+
+pub async fn logout(pool: &SqlitePool, token: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM sessions WHERE token = ?1")
+        .bind(token)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -304,4 +486,24 @@ pub async fn update_review(
     .await?;
 
     submission_detail(pool, id).await
+}
+
+fn hash_password(password: &str) -> String {
+    let salt = Uuid::new_v4().to_string();
+    format!("{salt}:{}", digest_password(&salt, password))
+}
+
+fn verify_password(password: &str, password_hash: &str) -> bool {
+    let Some((salt, expected)) = password_hash.split_once(':') else {
+        return false;
+    };
+    digest_password(salt, password) == expected
+}
+
+fn digest_password(salt: &str, password: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(salt.as_bytes());
+    hasher.update(b":");
+    hasher.update(password.as_bytes());
+    format!("{:x}", hasher.finalize())
 }

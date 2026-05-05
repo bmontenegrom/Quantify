@@ -51,6 +51,7 @@ async fn main() -> anyhow::Result<()> {
 
     db::migrate(&pool).await?;
     db::seed_practices(&pool).await?;
+    db::seed_users(&pool).await?;
 
     let state = Arc::new(AppState { pool, upload_dir });
     let app = Router::new()

@@ -7,15 +7,39 @@
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
+    <section id="login-screen" class="login-screen">
+      <form id="login-form" class="login-card">
+        <p class="eyebrow">Laboratorio de fisica</p>
+        <h1>Quantify</h1>
+        <label>
+          Usuario
+          <input name="username" required autocomplete="username" placeholder="docente" />
+        </label>
+        <label>
+          Contrasena
+          <input name="password" type="password" required autocomplete="current-password" placeholder="docente123" />
+        </label>
+        <button type="submit">Entrar</button>
+        <span id="login-status" role="status"></span>
+      </form>
+    </section>
+
+    <div id="app-shell" class="hidden">
     <header class="topbar">
       <div>
         <p class="eyebrow">Laboratorio de fisica</p>
         <h1>Quantify</h1>
       </div>
-      <nav class="tabs" aria-label="Vistas">
-        <button class="tab active" data-view="student">Estudiantes</button>
-        <button class="tab" data-view="teacher">Docentes</button>
-      </nav>
+      <div class="topbar-actions">
+        <nav class="tabs" aria-label="Vistas">
+          <button class="tab active" data-view="student">Estudiantes</button>
+          <button class="tab teacher-only" data-view="teacher">Docentes</button>
+        </nav>
+        <div class="session-box">
+          <span id="session-user"></span>
+          <button id="logout-button" type="button">Salir</button>
+        </div>
+      </div>
     </header>
 
     <main>
@@ -80,6 +104,7 @@
         </div>
       </section>
     </main>
+    </div>
 
     <script src="/app.js" type="module"></script>
   </body>

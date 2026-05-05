@@ -1,15 +1,53 @@
 const state = {
+  user: null,
   practices: [],
   submissions: [],
   selectedId: null,
 };
 
+const loginScreen = document.querySelector("#login-screen");
+const appShell = document.querySelector("#app-shell");
+const loginForm = document.querySelector("#login-form");
+const loginStatus = document.querySelector("#login-status");
+const sessionUser = document.querySelector("#session-user");
+const logoutButton = document.querySelector("#logout-button");
 const practiceSelect = document.querySelector("#practice-select");
 const submissionForm = document.querySelector("#submission-form");
 const submitStatus = document.querySelector("#submit-status");
 const latestResult = document.querySelector("#latest-result");
 const submissionList = document.querySelector("#submission-list");
 const submissionDetail = document.querySelector("#submission-detail");
+
+loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  loginStatus.textContent = "Entrando...";
+
+  try {
+    const payload = Object.fromEntries(new FormData(loginForm).entries());
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) throw new Error(await errorText(response));
+
+    const body = await response.json();
+    state.user = body.user;
+    loginForm.reset();
+    loginStatus.textContent = "";
+    await startApp();
+  } catch (error) {
+    loginStatus.textContent = error.message;
+  }
+});
+
+logoutButton.addEventListener("click", async () => {
+  await fetch("/api/auth/logout", { method: "POST" });
+  state.user = null;
+  appShell.classList.add("hidden");
+  loginScreen.classList.remove("hidden");
+});
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
@@ -40,21 +78,49 @@ submissionForm.addEventListener("submit", async (event) => {
     submissionForm.reset();
     renderAnalysis(latestResult, submission);
     latestResult.classList.remove("hidden");
-    await loadSubmissions();
+    if (canReview()) await loadSubmissions();
   } catch (error) {
     submitStatus.textContent = error.message;
   }
 });
 
 async function init() {
+  try {
+    const body = await fetchJson("/api/auth/me");
+    state.user = body.user;
+    await startApp();
+  } catch {
+    loginScreen.classList.remove("hidden");
+    appShell.classList.add("hidden");
+  }
+}
+
+async function startApp() {
+  loginScreen.classList.add("hidden");
+  appShell.classList.remove("hidden");
+  sessionUser.textContent = `${state.user.display_name} (${state.user.role})`;
+
+  document.querySelectorAll(".teacher-only").forEach((element) => {
+    element.classList.toggle("hidden", !canReview());
+  });
+
+  selectView("student");
   state.practices = await fetchJson("/api/practices");
   practiceSelect.innerHTML = state.practices
     .map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`)
     .join("");
-  await loadSubmissions();
+
+  if (canReview()) await loadSubmissions();
+}
+
+function selectView(view) {
+  document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
+  document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
+  document.querySelector(`#${view}-view`).classList.add("active");
 }
 
 async function loadSubmissions() {
+  if (!canReview()) return;
   state.submissions = await fetchJson("/api/submissions");
   renderSubmissionList();
 }
@@ -70,7 +136,7 @@ function renderSubmissionList() {
       (item) => `
         <article class="submission-item ${item.id === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
           <strong>${escapeHtml(item.student_name)}</strong>
-          <div class="submission-meta">${escapeHtml(item.group_name)} · ${escapeHtml(item.practice_name)}</div>
+          <div class="submission-meta">${escapeHtml(item.group_name)} - ${escapeHtml(item.practice_name)}</div>
           <span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
         </article>
       `,
@@ -97,7 +163,7 @@ function renderAnalysis(target, submission, includeReview = false) {
     <div>
       <h3>${escapeHtml(submission.practice_name)}</h3>
       <p class="submission-meta">
-        ${escapeHtml(submission.student_name)} · ${escapeHtml(submission.group_name)} · ${escapeHtml(submission.course)}
+        ${escapeHtml(submission.student_name)} - ${escapeHtml(submission.group_name)} - ${escapeHtml(submission.course)}
       </p>
       <span class="status ${escapeHtml(submission.status)}">${escapeHtml(submission.status)}</span>
     </div>
@@ -153,7 +219,7 @@ function renderRegression(regression) {
   return `
     <h3>Ajuste lineal automatico</h3>
     <div class="metric">
-      <div>${escapeHtml(regression.y_column)} = ${format(regression.slope)} · ${escapeHtml(regression.x_column)} + ${format(regression.intercept)}</div>
+      <div>${escapeHtml(regression.y_column)} = ${format(regression.slope)} * ${escapeHtml(regression.x_column)} + ${format(regression.intercept)}</div>
       <div class="submission-meta">R2 = ${format(regression.r_squared)}</div>
     </div>
   `;
@@ -239,6 +305,10 @@ async function errorText(response) {
   }
 }
 
+function canReview() {
+  return state.user && ["docente", "admin"].includes(state.user.role);
+}
+
 function format(value) {
   return Number(value).toLocaleString("es-UY", { maximumSignificantDigits: 5 });
 }
@@ -252,6 +322,4 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-init().catch((error) => {
-  document.body.innerHTML = `<main><section class="panel">No se pudo iniciar la app: ${escapeHtml(error.message)}</section></main>`;
-});
+init();

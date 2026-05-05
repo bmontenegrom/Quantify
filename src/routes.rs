@@ -5,6 +5,8 @@ use crate::{
 };
 use axum::{
     extract::{Multipart, Path, State},
+    http::{header, HeaderMap, HeaderValue},
+    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
@@ -16,6 +18,9 @@ type SharedState = Arc<AppState>;
 pub fn api_router(state: SharedState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/auth/login", post(login))
+        .route("/auth/logout", post(logout))
+        .route("/auth/me", get(me))
         .route("/practices", get(practices))
         .route("/submissions", get(submissions).post(create_submission))
         .route("/submissions/{id}", get(submission_detail))
@@ -32,20 +37,62 @@ async fn health() -> Json<Health> {
     Json(Health { status: "ok" })
 }
 
-async fn practices(State(state): State<SharedState>) -> Result<Json<Vec<db::Practice>>, AppError> {
+async fn login(
+    State(state): State<SharedState>,
+    Json(request): Json<db::LoginRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let Some((token, user)) = db::login(&state.pool, request).await? else {
+        return Err(AppError::unauthorized("usuario o contrasena invalidos"));
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert(header::SET_COOKIE, session_cookie(&token, 12 * 60 * 60));
+    Ok((headers, Json(db::LoginResponse { user })))
+}
+
+async fn logout(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    if let Some(token) = session_token(&headers) {
+        db::logout(&state.pool, &token).await?;
+    }
+
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::SET_COOKIE, session_cookie("", 0));
+    Ok((response_headers, Json(Health { status: "ok" })))
+}
+
+async fn me(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<db::LoginResponse>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    Ok(Json(db::LoginResponse { user }))
+}
+
+async fn practices(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<db::Practice>>, AppError> {
+    current_user(&state, &headers).await?;
     Ok(Json(db::practices(&state.pool).await?))
 }
 
 async fn submissions(
     State(state): State<SharedState>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<db::SubmissionListItem>>, AppError> {
+    require_teacher(&state, &headers).await?;
     Ok(Json(db::submission_list(&state.pool).await?))
 }
 
 async fn submission_detail(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<db::SubmissionDetail>, AppError> {
+    require_teacher(&state, &headers).await?;
     let submission = db::submission_detail(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("submission not found"))?;
@@ -54,8 +101,10 @@ async fn submission_detail(
 
 async fn create_submission(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<db::SubmissionDetail>, AppError> {
+    current_user(&state, &headers).await?;
     let mut student_name = None;
     let mut group_name = None;
     let mut course = None;
@@ -106,9 +155,11 @@ async fn create_submission(
 
 async fn review_submission(
     State(state): State<SharedState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(review): Json<ReviewSubmission>,
 ) -> Result<Json<db::SubmissionDetail>, AppError> {
+    require_teacher(&state, &headers).await?;
     if !matches!(
         review.status.as_str(),
         "pendiente" | "observada" | "aprobada"
@@ -137,4 +188,38 @@ fn required(value: Option<String>, name: &str) -> Result<String, AppError> {
         return Err(AppError::bad_request(format!("{name} is required")));
     }
     Ok(value)
+}
+
+async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::AuthUser, AppError> {
+    let token = session_token(headers).ok_or_else(|| AppError::unauthorized("login requerido"))?;
+    db::user_by_session(&state.pool, &token)
+        .await?
+        .ok_or_else(|| AppError::unauthorized("sesion invalida o vencida"))
+}
+
+async fn require_teacher(
+    state: &SharedState,
+    headers: &HeaderMap,
+) -> Result<db::AuthUser, AppError> {
+    let user = current_user(state, headers).await?;
+    if matches!(user.role.as_str(), "docente" | "admin") {
+        Ok(user)
+    } else {
+        Err(AppError::forbidden("se requiere rol docente"))
+    }
+}
+
+fn session_token(headers: &HeaderMap) -> Option<String> {
+    let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
+    cookie_header
+        .split(';')
+        .filter_map(|cookie| cookie.trim().split_once('='))
+        .find_map(|(name, value)| (name == "quantify_session").then(|| value.to_string()))
+}
+
+fn session_cookie(token: &str, max_age_seconds: i64) -> HeaderValue {
+    let value = format!(
+        "quantify_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_seconds}"
+    );
+    HeaderValue::from_str(&value).expect("valid cookie header")
 }

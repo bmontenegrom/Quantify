@@ -30,12 +30,23 @@ Abrir:
 http://localhost:8080
 ```
 
+Usuarios iniciales de desarrollo:
+
+```text
+admin / admin123
+docente / docente123
+estudiante / estudiante123
+```
+
 Variables utiles:
 
 ```powershell
 $env:APP_BIND_ADDR="127.0.0.1:8080"
 $env:DATABASE_URL="sqlite:data/quantify.db"
 $env:UPLOAD_DIR="data/uploads"
+$env:SEED_ADMIN_PASSWORD="cambiar-esto"
+$env:SEED_TEACHER_PASSWORD="cambiar-esto"
+$env:SEED_STUDENT_PASSWORD="cambiar-esto"
 cargo run
 ```
 
