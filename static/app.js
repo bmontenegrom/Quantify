@@ -26,10 +26,13 @@ const submissionDetail = document.querySelector("#submission-detail");
 const userForm = document.querySelector("#user-form");
 const courseForm = document.querySelector("#course-form");
 const groupForm = document.querySelector("#group-form");
+const courseMemberForm = document.querySelector("#course-member-form");
 const memberForm = document.querySelector("#member-form");
 const coursePracticeForm = document.querySelector("#course-practice-form");
 const adminCourseSelect = document.querySelector("#admin-course-select");
+const memberCourseSelect = document.querySelector("#member-course-select");
 const adminGroupSelect = document.querySelector("#admin-group-select");
+const courseMemberSelect = document.querySelector("#course-member-select");
 const studentMemberSelect = document.querySelector("#student-member-select");
 const practiceCourseSelect = document.querySelector("#practice-course-select");
 const adminPracticeSelect = document.querySelector("#admin-practice-select");
@@ -136,6 +139,16 @@ groupForm.addEventListener("submit", async (event) => {
     await postJson(`/api/academic/courses/${data.course_id}/groups`, { name: data.name });
     groupForm.reset();
     await refreshAcademic("Grupo creado");
+  });
+});
+
+courseMemberForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await withAdminError(async () => {
+    const data = Object.fromEntries(new FormData(courseMemberForm).entries());
+    await postJson(`/api/academic/courses/${data.course_id}/members`, { user_id: data.user_id });
+    courseMemberForm.reset();
+    await refreshAcademic("Estudiante inscrito");
   });
 });
 
@@ -468,9 +481,13 @@ function renderAdmin() {
     .map((course) => `<option value="${escapeHtml(course.id)}">${escapeHtml(course.name)} (${escapeHtml(course.term)})</option>`)
     .join("");
   adminCourseSelect.innerHTML = courseOptions;
+  memberCourseSelect.innerHTML = courseOptions;
   practiceCourseSelect.innerHTML = courseOptions;
   adminGroupSelect.innerHTML = allGroups
     .map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.courseName)} - ${escapeHtml(group.name)}</option>`)
+    .join("");
+  courseMemberSelect.innerHTML = state.academic.students
+    .map((student) => `<option value="${escapeHtml(student.id)}">${escapeHtml(student.display_name)} (${escapeHtml(student.email)})</option>`)
     .join("");
   studentMemberSelect.innerHTML = state.academic.students
     .map((student) => `<option value="${escapeHtml(student.id)}">${escapeHtml(student.display_name)} (${escapeHtml(student.email)})</option>`)
@@ -518,10 +535,16 @@ function renderUsers() {
 }
 
 function renderCourseCard(course) {
+  const members = course.members
+    .map((member) => `<span class="chip">${escapeHtml(member.display_name)}</span>`)
+    .join("");
   return `
     <article class="course-card">
       <h4>${escapeHtml(course.name)} (${escapeHtml(course.term)})</h4>
-      <div class="submission-meta">${course.groups.length} grupos - ${course.practices.length} practicas habilitadas</div>
+      <div class="submission-meta">${course.members.length} inscritos - ${course.groups.length} grupos - ${course.practices.length} practicas habilitadas</div>
+      <div class="chips">
+        ${members || `<span class="chip">Sin inscritos</span>`}
+      </div>
       <div class="chips">
         ${course.practices.map((practice) => `<span class="chip">${escapeHtml(practice.name)}</span>`).join("") || `<span class="chip">Sin practicas</span>`}
       </div>

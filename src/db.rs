@@ -90,6 +90,7 @@ pub struct CourseSummary {
     pub name: String,
     pub term: String,
     pub active: bool,
+    pub members: Vec<AuthUser>,
     pub groups: Vec<GroupSummary>,
     pub practices: Vec<Practice>,
 }
@@ -122,6 +123,11 @@ pub struct CreateGroup {
 
 #[derive(Debug, Deserialize)]
 pub struct AddGroupMember {
+    pub user_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EnrollCourseMember {
     pub user_id: String,
 }
 
@@ -343,6 +349,19 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
             user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             created_at TEXT NOT NULL,
             PRIMARY KEY(group_id, user_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS course_members (
+            course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(course_id, user_id)
         )
         "#,
     )
@@ -759,6 +778,8 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
             .fetch_optional(pool)
             .await?)
     {
+        enroll_course_member(pool, course_id, &student_id).await?;
+
         sqlx::query(
             r#"
             INSERT INTO group_members (group_id, user_id, created_at)
@@ -883,6 +904,77 @@ pub async fn create_group(
     )
 }
 
+pub async fn enroll_course_member(
+    pool: &SqlitePool,
+    course_id: &str,
+    user_id: &str,
+) -> anyhow::Result<()> {
+    let existing: Option<(String,)> =
+        sqlx::query_as("SELECT user_id FROM course_members WHERE course_id = ?1 AND user_id = ?2")
+            .bind(course_id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?;
+
+    if existing.is_none() {
+        sqlx::query(
+            r#"
+            INSERT INTO course_members (course_id, user_id, created_at)
+            VALUES (?1, ?2, ?3)
+            "#,
+        )
+        .bind(course_id)
+        .bind(user_id)
+        .bind(Utc::now())
+        .execute(pool)
+        .await?;
+    }
+
+    let default_group_id = ensure_default_group(pool, course_id).await?;
+    sqlx::query(
+        r#"
+        INSERT INTO group_members (group_id, user_id, created_at)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(group_id, user_id) DO NOTHING
+        "#,
+    )
+    .bind(default_group_id)
+    .bind(user_id)
+    .bind(Utc::now())
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn ensure_default_group(pool: &SqlitePool, course_id: &str) -> anyhow::Result<String> {
+    let existing = sqlx::query_as::<_, LabGroup>(
+        r#"
+        SELECT id, course_id, name
+        FROM lab_groups
+        WHERE course_id = ?1 AND name = 'General'
+        LIMIT 1
+        "#,
+    )
+    .bind(course_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(group) = existing {
+        return Ok(group.id);
+    }
+
+    let created = create_group(
+        pool,
+        course_id,
+        CreateGroup {
+            name: "General".into(),
+        },
+    )
+    .await?;
+    Ok(created.id)
+}
+
 pub async fn add_group_member(
     pool: &SqlitePool,
     group_id: &str,
@@ -912,6 +1004,26 @@ pub async fn add_group_member(
     .execute(pool)
     .await?;
 
+    Ok(Some(()))
+}
+
+pub async fn add_course_member(
+    pool: &SqlitePool,
+    course_id: &str,
+    input: EnrollCourseMember,
+) -> anyhow::Result<Option<()>> {
+    let user = sqlx::query_as::<_, (String,)>(
+        "SELECT id FROM users WHERE id = ?1 AND role = 'estudiante'",
+    )
+    .bind(input.user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some((user_id,)) = user else {
+        return Ok(None);
+    };
+
+    enroll_course_member(pool, course_id, &user_id).await?;
     Ok(Some(()))
 }
 
@@ -949,12 +1061,14 @@ pub async fn user_can_submit(
     let allowed: Option<(i64,)> = sqlx::query_as(
         r#"
         SELECT 1
-        FROM group_members gm
-        JOIN lab_groups g ON g.id = gm.group_id
+        FROM course_members cm
+        JOIN lab_groups g ON g.course_id = cm.course_id
         JOIN course_practices cp ON cp.course_id = g.course_id
-        WHERE gm.user_id = ?1
+        JOIN group_members gm ON gm.group_id = g.id
+        WHERE cm.user_id = ?1
           AND g.id = ?2
           AND g.course_id = ?3
+          AND gm.user_id = ?1
           AND cp.practice_id = ?4
         "#,
     )
@@ -1117,9 +1231,8 @@ async fn students_for_course(pool: &SqlitePool, course_id: &str) -> anyhow::Resu
         r#"
         SELECT DISTINCT u.id, u.username, u.email, u.display_name, u.role
         FROM users u
-        JOIN group_members gm ON gm.user_id = u.id
-        JOIN lab_groups g ON g.id = gm.group_id
-        WHERE g.course_id = ?1 AND u.role = 'estudiante'
+        JOIN course_members cm ON cm.user_id = u.id
+        WHERE cm.course_id = ?1 AND u.role = 'estudiante'
         ORDER BY u.display_name
         "#,
     )
@@ -1217,9 +1330,8 @@ async fn student_course_summaries(
         r#"
         SELECT DISTINCT c.id, c.name, c.term, c.active
         FROM courses c
-        JOIN lab_groups g ON g.course_id = c.id
-        JOIN group_members gm ON gm.group_id = g.id
-        WHERE gm.user_id = ?1 AND c.active = 1
+        JOIN course_members cm ON cm.course_id = c.id
+        WHERE cm.user_id = ?1 AND c.active = 1
         ORDER BY c.term DESC, c.name
         "#,
     )
@@ -1235,6 +1347,7 @@ async fn course_summaries(
 ) -> anyhow::Result<Vec<CourseSummary>> {
     let mut summaries = Vec::with_capacity(courses.len());
     for course in courses {
+        let members = course_members_for_course(pool, &course.id).await?;
         let groups = groups_for_course(pool, &course.id).await?;
         let practices = practices_for_course(pool, &course.id).await?;
         summaries.push(CourseSummary {
@@ -1242,11 +1355,30 @@ async fn course_summaries(
             name: course.name,
             term: course.term,
             active: course.active,
+            members,
             groups,
             practices,
         });
     }
     Ok(summaries)
+}
+
+async fn course_members_for_course(
+    pool: &SqlitePool,
+    course_id: &str,
+) -> anyhow::Result<Vec<AuthUser>> {
+    Ok(sqlx::query_as::<_, AuthUser>(
+        r#"
+        SELECT u.id, u.username, u.email, u.display_name, u.role
+        FROM course_members cm
+        JOIN users u ON u.id = cm.user_id
+        WHERE cm.course_id = ?1 AND u.role = 'estudiante'
+        ORDER BY u.display_name
+        "#,
+    )
+    .bind(course_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 async fn groups_for_course(

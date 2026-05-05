@@ -34,6 +34,7 @@ pub fn api_router(state: SharedState) -> Router {
             "/academic/courses/{id}/practices",
             post(enable_course_practice),
         )
+        .route("/academic/courses/{id}/members", post(add_course_member))
         .route("/academic/groups/{id}/members", post(add_group_member))
         .route("/practices", get(practices))
         .route("/submissions", get(submissions).post(create_submission))
@@ -227,6 +228,19 @@ async fn add_group_member(
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
     db::add_group_member(&state.pool, &group_id, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("estudiante no encontrado"))?;
+    Ok(Json(Health { status: "ok" }))
+}
+
+async fn add_course_member(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(course_id): Path<String>,
+    Json(input): Json<db::EnrollCourseMember>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    db::add_course_member(&state.pool, &course_id, input)
         .await?
         .ok_or_else(|| AppError::not_found("estudiante no encontrado"))?;
     Ok(Json(Health { status: "ok" }))

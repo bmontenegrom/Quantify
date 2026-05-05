@@ -165,8 +165,8 @@
 
       <section id="courses-view" class="view">
         <div class="section-head">
-          <h2>Cursos y grupos</h2>
-          <p>Administra la estructura basica de cursado.</p>
+          <h2>Cursos</h2>
+          <p>Administra cursos, inscripciones, grupos y practicas habilitadas.</p>
         </div>
 
         <div class="admin-grid courses-grid">
@@ -186,6 +186,21 @@
           </section>
 
           <section class="panel">
+            <h3>Inscribir estudiante</h3>
+            <form id="course-member-form" class="stack-form">
+              <label>
+                Curso
+                <select name="course_id" id="member-course-select" required></select>
+              </label>
+              <label>
+                Estudiante
+                <select name="user_id" id="course-member-select" required></select>
+              </label>
+              <button type="submit">Inscribir</button>
+            </form>
+          </section>
+
+          <section class="panel">
             <h3>Nuevo grupo</h3>
             <form id="group-form" class="stack-form">
               <label>
@@ -201,7 +216,7 @@
           </section>
 
           <section class="panel">
-            <h3>Agregar estudiante</h3>
+            <h3>Asignar a grupo</h3>
             <form id="member-form" class="stack-form">
               <label>
                 Grupo
