@@ -39,6 +39,7 @@ const adminStatus = document.querySelector("#admin-status");
 const userStatus = document.querySelector("#user-status");
 const gradeComponentForm = document.querySelector("#grade-component-form");
 const gradeCourseSelect = document.querySelector("#grade-course-select");
+const gradebookCourseFilter = document.querySelector("#gradebook-course-filter");
 const teacherGradebook = document.querySelector("#teacher-gradebook");
 const studentGrades = document.querySelector("#student-grades");
 const gradeStatus = document.querySelector("#grade-status");
@@ -93,6 +94,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
 
 document.querySelector("#refresh-submissions").addEventListener("click", loadSubmissions);
 courseSelect.addEventListener("change", updateStudentSelectors);
+gradebookCourseFilter.addEventListener("change", renderGradebookAdmin);
 
 gradeComponentForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -249,6 +251,7 @@ function renderGradeCourseOptions() {
     .map((course) => `<option value="${escapeHtml(course.id)}">${escapeHtml(course.name)} (${escapeHtml(course.term)})</option>`)
     .join("");
   gradeCourseSelect.innerHTML = options;
+  gradebookCourseFilter.innerHTML = options;
 }
 
 function renderStudentGrades() {
@@ -331,74 +334,66 @@ function renderGradebookAdmin() {
     return;
   }
 
-  teacherGradebook.innerHTML = state.gradebooks
-    .map(
-      (book) => `
-        <section class="grade-course" data-course-id="${escapeHtml(book.course.id)}">
-          <div>
-            <h3>${escapeHtml(book.course.name)} (${escapeHtml(book.course.term)})</h3>
-            <p class="submission-meta">${book.components.length} componentes - ${book.students.length} estudiantes</p>
-          </div>
-          ${renderTeacherGradeTable(book)}
-        </section>
-      `,
-    )
-    .join("");
+  const selectedId = gradebookCourseFilter.value || state.gradebooks[0].course.id;
+  const book = state.gradebooks.find((item) => item.course.id === selectedId) ?? state.gradebooks[0];
+  gradebookCourseFilter.value = book.course.id;
+
+  if (book.components.length === 0) {
+    teacherGradebook.innerHTML = `
+      <section class="detail-empty">
+        Crea componentes para ${escapeHtml(book.course.name)} antes de cargar notas.
+      </section>
+    `;
+    return;
+  }
+
+  teacherGradebook.innerHTML = `
+    <section class="grade-course">
+      <div>
+        <h3>${escapeHtml(book.course.name)} (${escapeHtml(book.course.term)})</h3>
+        <p class="submission-meta">${book.components.length} componentes - ${book.students.length} estudiantes</p>
+      </div>
+      <div class="student-grade-list">
+        ${book.students.map((summary) => renderStudentGradeCard(summary, book.components)).join("")}
+      </div>
+    </section>
+  `;
 
   teacherGradebook.querySelectorAll(".grade-input").forEach((input) => {
     input.addEventListener("change", () => saveGradeInput(input));
   });
 }
 
-function renderTeacherGradeTable(book) {
-  if (book.components.length === 0) {
-    return `<p class="submission-meta">Crea componentes para cargar notas.</p>`;
-  }
-
+function renderStudentGradeCard(summary, components) {
   return `
-    <div class="grade-table-wrap">
-      <table class="grade-table">
-        <thead>
-          <tr>
-            <th>Estudiante</th>
-            ${book.components
-              .map(
-                (component) => `
-                  <th>${escapeHtml(component.name)}<br><span class="submission-meta">${escapeHtml(component.kind)} - sobre ${format(component.max_points)} - vale ${format(component.weight_points)}</span></th>
-                `,
-              )
-              .join("")}
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${book.students
-            .map(
-              (summary) => `
-                <tr>
-                  <td>${escapeHtml(summary.student.display_name)}<br><span class="submission-meta">${escapeHtml(summary.student.email)}</span></td>
-                  ${book.components.map((component) => renderGradeCell(summary, component)).join("")}
-                  <td class="grade-total">${format(summary.total_points)} / ${format(summary.total_possible)}</td>
-                </tr>
-              `,
-            )
-            .join("")}
-        </tbody>
-      </table>
-    </div>
+    <article class="student-grade-card">
+      <div class="student-grade-head">
+        <div>
+          <h4>${escapeHtml(summary.student.display_name)}</h4>
+          <p class="submission-meta">${escapeHtml(summary.student.email)}</p>
+        </div>
+        <div class="grade-total">${format(summary.total_points)} / ${format(summary.total_possible)}</div>
+      </div>
+      ${renderKindTotals(summary)}
+      <div class="student-grade-fields">
+        ${components.map((component) => renderGradeField(summary, component)).join("")}
+      </div>
+    </article>
   `;
 }
 
-function renderGradeCell(summary, component) {
+function renderGradeField(summary, component) {
   const score = summary.scores.find((item) => item.component_id === component.id);
   return `
-    <td>
+    <label class="grade-field">
+      <span>${escapeHtml(component.name)}</span>
+      <small>${escapeHtml(component.kind)} - sobre ${format(component.max_points)} - vale ${format(component.weight_points)}</small>
       <input class="grade-input" type="number" min="0" max="${component.max_points}" step="0.01"
         value="${score?.raw_points ?? ""}"
         data-component-id="${escapeHtml(component.id)}"
         data-student-id="${escapeHtml(summary.student.id)}" />
       <div class="submission-meta">${format(score?.normalized_points ?? 0)} / ${format(component.weight_points)}</div>
-    </td>
+    </label>
   `;
 }
 

@@ -276,6 +276,11 @@ textarea {
   gap: 12px;
 }
 
+.grade-course-filter {
+  max-width: 360px;
+  margin-top: 14px;
+}
+
 .grade-table-wrap {
   overflow-x: auto;
 }
@@ -307,6 +312,48 @@ textarea {
 
 .grade-total {
   font-weight: 800;
+}
+
+.student-grade-list {
+  display: grid;
+  gap: 12px;
+}
+
+.student-grade-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.student-grade-head {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.student-grade-head h4 {
+  font-size: 1rem;
+  margin: 0 0 4px;
+}
+
+.student-grade-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.grade-field {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.grade-field small {
+  color: var(--muted);
+  font-weight: 500;
 }
 
 .catalog-panel {
