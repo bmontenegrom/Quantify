@@ -47,6 +47,25 @@ pub struct LoginResponse {
     pub user: AuthUser,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateUser {
+    pub username: String,
+    pub display_name: String,
+    pub role: String,
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetPassword {
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChangePassword {
+    pub current_password: String,
+    pub new_password: String,
+}
+
 #[derive(Debug, Serialize, FromRow)]
 pub struct Course {
     pub id: String,
@@ -84,6 +103,7 @@ pub struct AcademicContext {
     pub courses: Vec<CourseSummary>,
     pub practices: Vec<Practice>,
     pub students: Vec<AuthUser>,
+    pub users: Vec<AuthUser>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,7 +119,7 @@ pub struct CreateGroup {
 
 #[derive(Debug, Deserialize)]
 pub struct AddGroupMember {
-    pub username: String,
+    pub user_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -440,6 +460,90 @@ pub async fn logout(pool: &SqlitePool, token: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn users(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
+    Ok(sqlx::query_as::<_, AuthUser>(
+        "SELECT id, username, display_name, role FROM users ORDER BY role, display_name",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn create_user(pool: &SqlitePool, input: CreateUser) -> anyhow::Result<AuthUser> {
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        r#"
+        INSERT INTO users (id, username, display_name, role, password_hash, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "#,
+    )
+    .bind(&id)
+    .bind(input.username.trim())
+    .bind(input.display_name.trim())
+    .bind(input.role.trim())
+    .bind(hash_password(&input.password))
+    .bind(Utc::now())
+    .execute(pool)
+    .await?;
+
+    Ok(sqlx::query_as::<_, AuthUser>(
+        "SELECT id, username, display_name, role FROM users WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?)
+}
+
+pub async fn reset_password(
+    pool: &SqlitePool,
+    user_id: &str,
+    input: ResetPassword,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query("UPDATE users SET password_hash = ?2 WHERE id = ?1")
+        .bind(user_id)
+        .bind(hash_password(&input.password))
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn change_password(
+    pool: &SqlitePool,
+    user_id: &str,
+    input: ChangePassword,
+) -> anyhow::Result<bool> {
+    let user = sqlx::query_as::<_, UserWithPassword>(
+        r#"
+        SELECT id, username, display_name, role, password_hash
+        FROM users
+        WHERE id = ?1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(user) = user else {
+        return Ok(false);
+    };
+
+    if !verify_password(&input.current_password, &user.password_hash) {
+        return Ok(false);
+    }
+
+    sqlx::query("UPDATE users SET password_hash = ?2 WHERE id = ?1")
+        .bind(user_id)
+        .bind(hash_password(&input.new_password))
+        .execute(pool)
+        .await?;
+
+    sqlx::query("DELETE FROM sessions WHERE user_id = ?1")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+
+    Ok(true)
+}
+
 pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     let practices = [
         (
@@ -579,6 +683,11 @@ pub async fn academic_context(
         } else {
             Vec::new()
         },
+        users: if matches!(user.role.as_str(), "docente" | "admin") {
+            users(pool).await?
+        } else {
+            Vec::new()
+        },
     })
 }
 
@@ -638,9 +747,9 @@ pub async fn add_group_member(
     input: AddGroupMember,
 ) -> anyhow::Result<Option<()>> {
     let user = sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM users WHERE username = ?1 AND role = 'estudiante'",
+        "SELECT id FROM users WHERE id = ?1 AND role = 'estudiante'",
     )
-    .bind(input.username.trim())
+    .bind(input.user_id)
     .fetch_optional(pool)
     .await?;
 

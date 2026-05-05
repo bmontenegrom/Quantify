@@ -86,6 +86,8 @@ El usuario `docente` o `admin` puede administrar esto desde la pestaña `Cursos`
 
 Las entregas nuevas guardan `course_id`, `group_id`, `practice_id` y `submitted_by_user_id`. Las columnas de texto se mantienen por compatibilidad y para mostrar historico.
 
+Desde la misma pestaña tambien se pueden crear usuarios, asignar estudiantes a grupos y resetear contrasenas. Cada usuario puede cambiar su propia contrasena desde la barra superior.
+
 ## Deploy simple en Ubuntu
 
 Con Docker y Docker Compose:

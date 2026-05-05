@@ -21,6 +21,9 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
+        .route("/auth/password", post(change_password))
+        .route("/users", get(users).post(create_user))
+        .route("/users/{id}/password", post(reset_password))
         .route("/academic/context", get(academic_context))
         .route("/academic/courses", post(create_course))
         .route("/academic/courses/{id}/groups", post(create_group))
@@ -77,6 +80,58 @@ async fn me(
 ) -> Result<Json<db::LoginResponse>, AppError> {
     let user = current_user(&state, &headers).await?;
     Ok(Json(db::LoginResponse { user }))
+}
+
+async fn change_password(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(input): Json<db::ChangePassword>,
+) -> Result<Json<Health>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    validate_password(&input.new_password)?;
+    let changed = db::change_password(&state.pool, &user.id, input).await?;
+    if !changed {
+        return Err(AppError::unauthorized("contrasena actual incorrecta"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+async fn users(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<db::AuthUser>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    Ok(Json(db::users(&state.pool).await?))
+}
+
+async fn create_user(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(input): Json<db::CreateUser>,
+) -> Result<Json<db::AuthUser>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if input.username.trim().is_empty()
+        || input.display_name.trim().is_empty()
+        || !matches!(input.role.as_str(), "estudiante" | "docente" | "admin")
+    {
+        return Err(AppError::bad_request("datos de usuario invalidos"));
+    }
+    validate_password(&input.password)?;
+    Ok(Json(db::create_user(&state.pool, input).await?))
+}
+
+async fn reset_password(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<db::ResetPassword>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_password(&input.password)?;
+    if !db::reset_password(&state.pool, &id, input).await? {
+        return Err(AppError::not_found("usuario no encontrado"));
+    }
+    Ok(Json(Health { status: "ok" }))
 }
 
 async fn practices(
@@ -263,6 +318,15 @@ fn required(value: Option<String>, name: &str) -> Result<String, AppError> {
         return Err(AppError::bad_request(format!("{name} is required")));
     }
     Ok(value)
+}
+
+fn validate_password(password: &str) -> Result<(), AppError> {
+    if password.len() < 8 {
+        return Err(AppError::bad_request(
+            "la contrasena debe tener al menos 8 caracteres",
+        ));
+    }
+    Ok(())
 }
 
 async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::AuthUser, AppError> {

@@ -38,12 +38,28 @@
         </nav>
         <div class="session-box">
           <span id="session-user"></span>
+          <button id="password-toggle" type="button">Contrasena</button>
           <button id="logout-button" type="button">Salir</button>
         </div>
       </div>
     </header>
 
     <main>
+      <section id="password-panel" class="panel password-panel hidden">
+        <form id="password-form" class="inline-form">
+          <label>
+            Actual
+            <input name="current_password" type="password" required autocomplete="current-password" />
+          </label>
+          <label>
+            Nueva
+            <input name="new_password" type="password" required autocomplete="new-password" minlength="8" />
+          </label>
+          <button type="submit">Cambiar</button>
+          <span id="password-status" class="submission-meta"></span>
+        </form>
+      </section>
+
       <section id="student-view" class="view active">
         <div class="section-head">
           <h2>Cargar medidas</h2>
@@ -109,6 +125,33 @@
 
         <div class="admin-grid">
           <section class="panel">
+            <h3>Nuevo usuario</h3>
+            <form id="user-form" class="stack-form">
+              <label>
+                Usuario
+                <input name="username" required placeholder="jperez" />
+              </label>
+              <label>
+                Nombre
+                <input name="display_name" required placeholder="Juan Perez" />
+              </label>
+              <label>
+                Rol
+                <select name="role" required>
+                  <option value="estudiante">estudiante</option>
+                  <option value="docente">docente</option>
+                  <option value="admin">admin</option>
+                </select>
+              </label>
+              <label>
+                Contrasena inicial
+                <input name="password" type="password" required minlength="8" placeholder="minimo 8 caracteres" />
+              </label>
+              <button type="submit">Crear usuario</button>
+            </form>
+          </section>
+
+          <section class="panel">
             <h3>Nuevo curso</h3>
             <form id="course-form" class="stack-form">
               <label>
@@ -146,8 +189,8 @@
                 <select name="group_id" id="admin-group-select" required></select>
               </label>
               <label>
-                Usuario estudiante
-                <input name="username" required placeholder="estudiante" />
+                Estudiante
+                <select name="user_id" id="student-member-select" required></select>
               </label>
               <button type="submit">Agregar</button>
             </form>
@@ -175,6 +218,11 @@
             <span id="admin-status" class="submission-meta"></span>
           </div>
           <div id="course-catalog" class="course-catalog"></div>
+        </section>
+
+        <section class="panel catalog-panel">
+          <h3>Usuarios</h3>
+          <div id="user-list" class="user-list"></div>
         </section>
       </section>
     </main>

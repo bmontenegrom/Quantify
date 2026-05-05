@@ -11,6 +11,10 @@ const appShell = document.querySelector("#app-shell");
 const loginForm = document.querySelector("#login-form");
 const loginStatus = document.querySelector("#login-status");
 const sessionUser = document.querySelector("#session-user");
+const passwordToggle = document.querySelector("#password-toggle");
+const passwordPanel = document.querySelector("#password-panel");
+const passwordForm = document.querySelector("#password-form");
+const passwordStatus = document.querySelector("#password-status");
 const logoutButton = document.querySelector("#logout-button");
 const courseSelect = document.querySelector("#course-select");
 const groupSelect = document.querySelector("#group-select");
@@ -20,15 +24,18 @@ const submitStatus = document.querySelector("#submit-status");
 const latestResult = document.querySelector("#latest-result");
 const submissionList = document.querySelector("#submission-list");
 const submissionDetail = document.querySelector("#submission-detail");
+const userForm = document.querySelector("#user-form");
 const courseForm = document.querySelector("#course-form");
 const groupForm = document.querySelector("#group-form");
 const memberForm = document.querySelector("#member-form");
 const coursePracticeForm = document.querySelector("#course-practice-form");
 const adminCourseSelect = document.querySelector("#admin-course-select");
 const adminGroupSelect = document.querySelector("#admin-group-select");
+const studentMemberSelect = document.querySelector("#student-member-select");
 const practiceCourseSelect = document.querySelector("#practice-course-select");
 const adminPracticeSelect = document.querySelector("#admin-practice-select");
 const courseCatalog = document.querySelector("#course-catalog");
+const userList = document.querySelector("#user-list");
 const adminStatus = document.querySelector("#admin-status");
 
 loginForm.addEventListener("submit", async (event) => {
@@ -62,6 +69,21 @@ logoutButton.addEventListener("click", async () => {
   loginScreen.classList.remove("hidden");
 });
 
+passwordToggle.addEventListener("click", () => {
+  passwordPanel.classList.toggle("hidden");
+});
+
+passwordForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await postJson("/api/auth/password", Object.fromEntries(new FormData(passwordForm).entries()));
+    passwordForm.reset();
+    passwordStatus.textContent = "Contrasena actualizada. Volve a iniciar sesion.";
+  } catch (error) {
+    passwordStatus.textContent = error.message;
+  }
+});
+
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
@@ -74,6 +96,15 @@ document.querySelectorAll(".tab").forEach((tab) => {
 
 document.querySelector("#refresh-submissions").addEventListener("click", loadSubmissions);
 courseSelect.addEventListener("change", updateStudentSelectors);
+
+userForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await withAdminError(async () => {
+    await postJson("/api/users", Object.fromEntries(new FormData(userForm).entries()));
+    userForm.reset();
+    await refreshAcademic("Usuario creado");
+  });
+});
 
 courseForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -98,7 +129,7 @@ memberForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await withAdminError(async () => {
     const data = Object.fromEntries(new FormData(memberForm).entries());
-    await postJson(`/api/academic/groups/${data.group_id}/members`, { username: data.username });
+    await postJson(`/api/academic/groups/${data.group_id}/members`, { user_id: data.user_id });
     memberForm.reset();
     await refreshAcademic("Estudiante agregado");
   });
@@ -229,6 +260,9 @@ function renderAdmin() {
   adminGroupSelect.innerHTML = allGroups
     .map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.courseName)} - ${escapeHtml(group.name)}</option>`)
     .join("");
+  studentMemberSelect.innerHTML = state.academic.students
+    .map((student) => `<option value="${escapeHtml(student.id)}">${escapeHtml(student.display_name)} (${escapeHtml(student.username)})</option>`)
+    .join("");
   adminPracticeSelect.innerHTML = state.practices
     .map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`)
     .join("");
@@ -236,6 +270,39 @@ function renderAdmin() {
   courseCatalog.innerHTML = courses.length
     ? courses.map(renderCourseCard).join("")
     : `<p class="submission-meta">No hay cursos creados.</p>`;
+  renderUsers();
+}
+
+function renderUsers() {
+  userList.innerHTML = state.academic.users
+    .map(
+      (user) => `
+        <article class="user-item" data-user-id="${escapeHtml(user.id)}">
+          <div>
+            <strong>${escapeHtml(user.display_name)}</strong>
+            <div class="submission-meta">${escapeHtml(user.username)} - ${escapeHtml(user.role)}</div>
+          </div>
+          <form class="user-reset">
+            <input name="password" type="password" required minlength="8" placeholder="Nueva contrasena" />
+            <button type="submit">Reset</button>
+          </form>
+        </article>
+      `,
+    )
+    .join("");
+
+  userList.querySelectorAll(".user-reset").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await withAdminError(async () => {
+        const item = form.closest(".user-item");
+        const data = Object.fromEntries(new FormData(form).entries());
+        await postJson(`/api/users/${item.dataset.userId}/password`, data);
+        form.reset();
+        await refreshAcademic("Contrasena reseteada");
+      });
+    });
+  });
 }
 
 function renderCourseCard(course) {

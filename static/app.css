@@ -74,6 +74,17 @@ body {
   font-size: 0.9rem;
 }
 
+.password-panel {
+  margin-bottom: 18px;
+}
+
+.inline-form {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto minmax(120px, 1fr);
+}
+
 .eyebrow {
   color: var(--accent-strong);
   font-size: 0.78rem;
@@ -240,7 +251,7 @@ textarea {
 .admin-grid {
   display: grid;
   gap: 18px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .catalog-panel {
@@ -278,6 +289,27 @@ textarea {
   font-size: 0.78rem;
   font-weight: 650;
   padding: 4px 8px;
+}
+
+.user-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-top: 14px;
+}
+
+.user-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.user-reset {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto;
 }
 
 .submission-list {
@@ -388,6 +420,7 @@ textarea {
 
   .form-grid,
   .admin-grid,
+  .inline-form,
   .teacher-grid,
   .review-row {
     grid-template-columns: 1fr;
