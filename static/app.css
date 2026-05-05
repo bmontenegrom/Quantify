@@ -74,10 +74,6 @@ body {
   font-size: 0.9rem;
 }
 
-.password-panel {
-  margin-bottom: 18px;
-}
-
 .inline-form {
   align-items: end;
   display: grid;
@@ -251,7 +247,15 @@ textarea {
 .admin-grid {
   display: grid;
   gap: 18px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.user-create-form {
+  align-items: end;
+  display: grid;
+  gap: 14px;
   grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 14px;
 }
 
 .catalog-panel {
@@ -421,6 +425,7 @@ textarea {
   .form-grid,
   .admin-grid,
   .inline-form,
+  .user-create-form,
   .teacher-grid,
   .review-row {
     grid-template-columns: 1fr;

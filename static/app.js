@@ -11,8 +11,6 @@ const appShell = document.querySelector("#app-shell");
 const loginForm = document.querySelector("#login-form");
 const loginStatus = document.querySelector("#login-status");
 const sessionUser = document.querySelector("#session-user");
-const passwordToggle = document.querySelector("#password-toggle");
-const passwordPanel = document.querySelector("#password-panel");
 const passwordForm = document.querySelector("#password-form");
 const passwordStatus = document.querySelector("#password-status");
 const logoutButton = document.querySelector("#logout-button");
@@ -37,6 +35,7 @@ const adminPracticeSelect = document.querySelector("#admin-practice-select");
 const courseCatalog = document.querySelector("#course-catalog");
 const userList = document.querySelector("#user-list");
 const adminStatus = document.querySelector("#admin-status");
+const userStatus = document.querySelector("#user-status");
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -69,10 +68,6 @@ logoutButton.addEventListener("click", async () => {
   loginScreen.classList.remove("hidden");
 });
 
-passwordToggle.addEventListener("click", () => {
-  passwordPanel.classList.toggle("hidden");
-});
-
 passwordForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
@@ -86,11 +81,7 @@ passwordForm.addEventListener("submit", async (event) => {
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
-    document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
-    tab.classList.add("active");
-    document.querySelector(`#${tab.dataset.view}-view`).classList.add("active");
-    if (tab.dataset.view === "teacher") loadSubmissions();
+    selectView(tab.dataset.view);
   });
 });
 
@@ -188,7 +179,7 @@ async function startApp() {
     element.classList.toggle("hidden", !canReview());
   });
 
-  selectView("student");
+  selectView("submissions");
   await loadAcademic();
 
   if (canReview()) await loadSubmissions();
@@ -198,6 +189,7 @@ function selectView(view) {
   document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
   document.querySelector(`#${view}-view`).classList.add("active");
+  if (view === "reviews") loadSubmissions();
 }
 
 async function loadSubmissions() {
@@ -216,17 +208,21 @@ async function loadAcademic() {
 async function refreshAcademic(message) {
   await loadAcademic();
   adminStatus.textContent = message;
+  userStatus.textContent = message;
   window.setTimeout(() => {
     adminStatus.textContent = "";
+    userStatus.textContent = "";
   }, 2500);
 }
 
 async function withAdminError(action) {
   try {
     adminStatus.textContent = "";
+    userStatus.textContent = "";
     await action();
   } catch (error) {
     adminStatus.textContent = error.message;
+    userStatus.textContent = error.message;
   }
 }
 
