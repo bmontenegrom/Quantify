@@ -257,7 +257,7 @@ function renderAdmin() {
     .map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.courseName)} - ${escapeHtml(group.name)}</option>`)
     .join("");
   studentMemberSelect.innerHTML = state.academic.students
-    .map((student) => `<option value="${escapeHtml(student.id)}">${escapeHtml(student.display_name)} (${escapeHtml(student.username)})</option>`)
+    .map((student) => `<option value="${escapeHtml(student.id)}">${escapeHtml(student.display_name)} (${escapeHtml(student.email)})</option>`)
     .join("");
   adminPracticeSelect.innerHTML = state.practices
     .map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`)
@@ -276,7 +276,7 @@ function renderUsers() {
         <article class="user-item" data-user-id="${escapeHtml(user.id)}">
           <div>
             <strong>${escapeHtml(user.display_name)}</strong>
-            <div class="submission-meta">${escapeHtml(user.username)} - ${escapeHtml(user.role)}</div>
+            <div class="submission-meta">${escapeHtml(user.email)} - ${escapeHtml(user.role)}</div>
           </div>
           <form class="user-reset">
             <input name="password" type="password" required minlength="8" placeholder="Nueva contrasena" />

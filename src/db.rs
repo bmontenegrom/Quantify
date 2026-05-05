@@ -23,6 +23,7 @@ pub struct Practice {
 pub struct AuthUser {
     pub id: String,
     pub username: String,
+    pub email: String,
     pub display_name: String,
     pub role: String,
 }
@@ -31,6 +32,7 @@ pub struct AuthUser {
 struct UserWithPassword {
     pub id: String,
     pub username: String,
+    pub email: String,
     pub display_name: String,
     pub role: String,
     pub password_hash: String,
@@ -38,7 +40,8 @@ struct UserWithPassword {
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
-    pub username: String,
+    pub email: Option<String>,
+    pub username: Option<String>,
     pub password: String,
 }
 
@@ -49,7 +52,7 @@ pub struct LoginResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateUser {
-    pub username: String,
+    pub email: String,
     pub display_name: String,
     pub role: String,
     pub password: String,
@@ -313,6 +316,26 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "submissions", "submitted_by_user_id", "TEXT").await?;
     add_column_if_missing(pool, "submissions", "course_id", "TEXT").await?;
     add_column_if_missing(pool, "submissions", "group_id", "TEXT").await?;
+    add_column_if_missing(pool, "users", "email", "TEXT").await?;
+
+    sqlx::query(
+        r#"
+        UPDATE users
+        SET email = CASE username
+            WHEN 'admin' THEN 'admin@quantify.local'
+            WHEN 'docente' THEN 'docente@quantify.local'
+            WHEN 'estudiante' THEN 'estudiante@quantify.local'
+            ELSE username
+        END
+        WHERE email IS NULL OR email = ''
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email)")
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
@@ -338,40 +361,41 @@ async fn add_column_if_missing(
 pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     let users = [
         (
-            "admin",
+            "admin@quantify.local",
             "Administrador",
             "admin",
             env::var("SEED_ADMIN_PASSWORD").unwrap_or_else(|_| "admin123".into()),
         ),
         (
-            "docente",
+            "docente@quantify.local",
             "Docente de prueba",
             "docente",
             env::var("SEED_TEACHER_PASSWORD").unwrap_or_else(|_| "docente123".into()),
         ),
         (
-            "estudiante",
+            "estudiante@quantify.local",
             "Estudiante de prueba",
             "estudiante",
             env::var("SEED_STUDENT_PASSWORD").unwrap_or_else(|_| "estudiante123".into()),
         ),
     ];
 
-    for (username, display_name, role, password) in users {
-        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM users WHERE username = ?1")
-            .bind(username)
+    for (email, display_name, role, password) in users {
+        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM users WHERE email = ?1")
+            .bind(email)
             .fetch_optional(pool)
             .await?;
 
         if exists.is_none() {
             sqlx::query(
                 r#"
-                INSERT INTO users (id, username, display_name, role, password_hash, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                INSERT INTO users (id, username, email, display_name, role, password_hash, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
-            .bind(username)
+            .bind(email)
+            .bind(email)
             .bind(display_name)
             .bind(role)
             .bind(hash_password(&password))
@@ -388,14 +412,21 @@ pub async fn login(
     pool: &SqlitePool,
     request: LoginRequest,
 ) -> anyhow::Result<Option<(String, AuthUser)>> {
+    let login = request
+        .email
+        .or(request.username)
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+
     let user = sqlx::query_as::<_, UserWithPassword>(
         r#"
-        SELECT id, username, display_name, role, password_hash
+        SELECT id, username, email, display_name, role, password_hash
         FROM users
-        WHERE username = ?1
+        WHERE lower(email) = ?1 OR lower(username) = ?1
         "#,
     )
-    .bind(request.username.trim())
+    .bind(login)
     .fetch_optional(pool)
     .await?;
 
@@ -429,6 +460,7 @@ pub async fn login(
         AuthUser {
             id: user.id,
             username: user.username,
+            email: user.email,
             display_name: user.display_name,
             role: user.role,
         },
@@ -438,7 +470,7 @@ pub async fn login(
 pub async fn user_by_session(pool: &SqlitePool, token: &str) -> anyhow::Result<Option<AuthUser>> {
     let user = sqlx::query_as::<_, AuthUser>(
         r#"
-        SELECT u.id, u.username, u.display_name, u.role
+        SELECT u.id, u.username, u.email, u.display_name, u.role
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         WHERE s.token = ?1 AND s.expires_at > ?2
@@ -462,7 +494,7 @@ pub async fn logout(pool: &SqlitePool, token: &str) -> anyhow::Result<()> {
 
 pub async fn users(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     Ok(sqlx::query_as::<_, AuthUser>(
-        "SELECT id, username, display_name, role FROM users ORDER BY role, display_name",
+        "SELECT id, username, email, display_name, role FROM users ORDER BY role, display_name",
     )
     .fetch_all(pool)
     .await?)
@@ -470,14 +502,16 @@ pub async fn users(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
 
 pub async fn create_user(pool: &SqlitePool, input: CreateUser) -> anyhow::Result<AuthUser> {
     let id = Uuid::new_v4().to_string();
+    let email = input.email.trim().to_lowercase();
     sqlx::query(
         r#"
-        INSERT INTO users (id, username, display_name, role, password_hash, created_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        INSERT INTO users (id, username, email, display_name, role, password_hash, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#,
     )
     .bind(&id)
-    .bind(input.username.trim())
+    .bind(&email)
+    .bind(&email)
     .bind(input.display_name.trim())
     .bind(input.role.trim())
     .bind(hash_password(&input.password))
@@ -486,7 +520,7 @@ pub async fn create_user(pool: &SqlitePool, input: CreateUser) -> anyhow::Result
     .await?;
 
     Ok(sqlx::query_as::<_, AuthUser>(
-        "SELECT id, username, display_name, role FROM users WHERE id = ?1",
+        "SELECT id, username, email, display_name, role FROM users WHERE id = ?1",
     )
     .bind(id)
     .fetch_one(pool)
@@ -513,7 +547,7 @@ pub async fn change_password(
 ) -> anyhow::Result<bool> {
     let user = sqlx::query_as::<_, UserWithPassword>(
         r#"
-        SELECT id, username, display_name, role, password_hash
+        SELECT id, username, email, display_name, role, password_hash
         FROM users
         WHERE id = ?1
         "#,
@@ -616,6 +650,11 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         sqlx::query_as::<_, (String,)>("SELECT id FROM users WHERE username = 'estudiante'")
             .fetch_optional(pool)
             .await?
+            .or(sqlx::query_as::<_, (String,)>(
+                "SELECT id FROM users WHERE email = 'estudiante@quantify.local'",
+            )
+            .fetch_optional(pool)
+            .await?)
     {
         sqlx::query(
             r#"
@@ -659,7 +698,7 @@ pub async fn practices(pool: &SqlitePool) -> anyhow::Result<Vec<Practice>> {
 
 pub async fn students(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     Ok(sqlx::query_as::<_, AuthUser>(
-        "SELECT id, username, display_name, role FROM users WHERE role = 'estudiante' ORDER BY display_name",
+        "SELECT id, username, email, display_name, role FROM users WHERE role = 'estudiante' ORDER BY display_name",
     )
     .fetch_all(pool)
     .await?)
@@ -890,7 +929,7 @@ async fn groups_for_course(
     for group in groups {
         let members = sqlx::query_as::<_, AuthUser>(
             r#"
-            SELECT u.id, u.username, u.display_name, u.role
+            SELECT u.id, u.username, u.email, u.display_name, u.role
             FROM group_members gm
             JOIN users u ON u.id = gm.user_id
             WHERE gm.group_id = ?1

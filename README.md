@@ -33,9 +33,9 @@ http://localhost:8080
 Usuarios iniciales de desarrollo:
 
 ```text
-admin / admin123
-docente / docente123
-estudiante / estudiante123
+admin@quantify.local / admin123
+docente@quantify.local / docente123
+estudiante@quantify.local / estudiante123
 ```
 
 Variables utiles:
@@ -86,7 +86,7 @@ El usuario `docente` o `admin` puede administrar esto desde la pestaña `Cursos`
 
 Las entregas nuevas guardan `course_id`, `group_id`, `practice_id` y `submitted_by_user_id`. Las columnas de texto se mantienen por compatibilidad y para mostrar historico.
 
-Desde la misma pestaña tambien se pueden crear usuarios, asignar estudiantes a grupos y resetear contrasenas. Cada usuario puede cambiar su propia contrasena desde la barra superior.
+Desde la misma pestaña tambien se pueden crear usuarios, asignar estudiantes a grupos y resetear contrasenas. El usuario de login es el email, que queda unico en la base y permite agregar notificaciones por correo mas adelante. Cada usuario puede cambiar su propia contrasena desde la barra superior.
 
 ## Deploy simple en Ubuntu
 

@@ -53,7 +53,7 @@ async fn login(
     Json(request): Json<db::LoginRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let Some((token, user)) = db::login(&state.pool, request).await? else {
-        return Err(AppError::unauthorized("usuario o contrasena invalidos"));
+        return Err(AppError::unauthorized("email o contrasena invalidos"));
     };
 
     let mut headers = HeaderMap::new();
@@ -110,7 +110,7 @@ async fn create_user(
     Json(input): Json<db::CreateUser>,
 ) -> Result<Json<db::AuthUser>, AppError> {
     require_teacher(&state, &headers).await?;
-    if input.username.trim().is_empty()
+    if !is_valid_email(&input.email)
         || input.display_name.trim().is_empty()
         || !matches!(input.role.as_str(), "estudiante" | "docente" | "admin")
     {
@@ -327,6 +327,14 @@ fn validate_password(password: &str) -> Result<(), AppError> {
         ));
     }
     Ok(())
+}
+
+fn is_valid_email(email: &str) -> bool {
+    let email = email.trim();
+    let Some((local, domain)) = email.split_once('@') else {
+        return false;
+    };
+    !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
 }
 
 async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::AuthUser, AppError> {
