@@ -33,7 +33,9 @@
       <div class="topbar-actions">
         <nav class="tabs" aria-label="Vistas">
           <button class="tab active" data-view="submissions">Entregas</button>
+          <button class="tab" data-view="grades">Notas</button>
           <button class="tab teacher-only" data-view="reviews">Correcciones</button>
+          <button class="tab teacher-only" data-view="gradebook">Cargar notas</button>
           <button class="tab teacher-only" data-view="courses">Cursos</button>
           <button class="tab teacher-only" data-view="users">Usuarios</button>
           <button class="tab" data-view="account">Cuenta</button>
@@ -101,6 +103,60 @@
             Selecciona una entrega para ver el detalle.
           </section>
         </div>
+      </section>
+
+      <section id="grades-view" class="view">
+        <div class="section-head">
+          <h2>Notas</h2>
+          <p>Consulta de preguntas, informes, parciales y total normalizado.</p>
+        </div>
+        <div id="student-grades" class="gradebook-list"></div>
+      </section>
+
+      <section id="gradebook-view" class="view">
+        <div class="section-head">
+          <h2>Cargar notas</h2>
+          <p>Define componentes evaluables y carga puntajes por estudiante.</p>
+        </div>
+
+        <section class="panel">
+          <h3>Nuevo componente</h3>
+          <form id="grade-component-form" class="grade-component-form">
+            <label>
+              Curso
+              <select name="course_id" id="grade-course-select" required></select>
+            </label>
+            <label>
+              Tipo
+              <select name="kind" required>
+                <option value="pregunta">pregunta</option>
+                <option value="informe">informe</option>
+                <option value="parcial">parcial</option>
+              </select>
+            </label>
+            <label>
+              Nombre
+              <input name="name" required placeholder="Pregunta 1" />
+            </label>
+            <label>
+              Sobre
+              <input name="max_points" type="number" required min="0.01" step="0.01" placeholder="10" />
+            </label>
+            <label>
+              Valor normalizado
+              <input name="weight_points" type="number" required min="0.01" step="0.01" placeholder="5" />
+            </label>
+            <button type="submit">Crear</button>
+          </form>
+        </section>
+
+        <section class="panel catalog-panel">
+          <div class="list-head">
+            <h3>Planilla de notas</h3>
+            <span id="grade-status" class="submission-meta"></span>
+          </div>
+          <div id="teacher-gradebook" class="gradebook-list"></div>
+        </section>
       </section>
 
       <section id="courses-view" class="view">

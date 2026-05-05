@@ -3,6 +3,7 @@ const state = {
   academic: null,
   practices: [],
   submissions: [],
+  gradebooks: [],
   selectedId: null,
 };
 
@@ -36,6 +37,11 @@ const courseCatalog = document.querySelector("#course-catalog");
 const userList = document.querySelector("#user-list");
 const adminStatus = document.querySelector("#admin-status");
 const userStatus = document.querySelector("#user-status");
+const gradeComponentForm = document.querySelector("#grade-component-form");
+const gradeCourseSelect = document.querySelector("#grade-course-select");
+const teacherGradebook = document.querySelector("#teacher-gradebook");
+const studentGrades = document.querySelector("#student-grades");
+const gradeStatus = document.querySelector("#grade-status");
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -87,6 +93,21 @@ document.querySelectorAll(".tab").forEach((tab) => {
 
 document.querySelector("#refresh-submissions").addEventListener("click", loadSubmissions);
 courseSelect.addEventListener("change", updateStudentSelectors);
+
+gradeComponentForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await withGradeError(async () => {
+    const payload = Object.fromEntries(new FormData(gradeComponentForm).entries());
+    payload.max_points = Number(payload.max_points);
+    payload.weight_points = Number(payload.weight_points);
+    await postJson("/api/grades/components", payload);
+    gradeComponentForm.reset();
+    await loadGrades();
+    renderGradebookAdmin();
+    renderStudentGrades();
+    gradeStatus.textContent = "Componente creado";
+  });
+});
 
 userForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -190,6 +211,18 @@ function selectView(view) {
   document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
   document.querySelector(`#${view}-view`).classList.add("active");
   if (view === "reviews") loadSubmissions();
+  if (view === "grades") {
+    loadGrades().then(() => {
+      renderStudentGrades();
+      if (canReview()) renderGradebookAdmin();
+    });
+  }
+  if (view === "gradebook") {
+    loadGrades().then(() => {
+      renderStudentGrades();
+      renderGradebookAdmin();
+    });
+  }
 }
 
 async function loadSubmissions() {
@@ -203,6 +236,194 @@ async function loadAcademic() {
   state.practices = state.academic.practices;
   renderStudentSelectors();
   if (canReview()) renderAdmin();
+  if (canReview()) renderGradeCourseOptions();
+}
+
+async function loadGrades() {
+  state.gradebooks = await fetchJson("/api/grades");
+  if (canReview()) renderGradeCourseOptions();
+}
+
+function renderGradeCourseOptions() {
+  const options = state.academic.courses
+    .map((course) => `<option value="${escapeHtml(course.id)}">${escapeHtml(course.name)} (${escapeHtml(course.term)})</option>`)
+    .join("");
+  gradeCourseSelect.innerHTML = options;
+}
+
+function renderStudentGrades() {
+  if (state.gradebooks.length === 0) {
+    studentGrades.innerHTML = `<section class="panel detail-empty">No hay cursos con notas disponibles.</section>`;
+    return;
+  }
+
+  studentGrades.innerHTML = state.gradebooks
+    .map((book) => {
+      const summary = book.students[0];
+      if (!summary) return "";
+      return `
+        <section class="panel grade-course">
+          <div>
+            <h3>${escapeHtml(book.course.name)} (${escapeHtml(book.course.term)})</h3>
+            <p class="submission-meta">Total: ${format(summary.total_points)} / ${format(summary.total_possible)}</p>
+          </div>
+          ${renderKindTotals(summary)}
+          ${renderStudentGradeTable(summary)}
+        </section>
+      `;
+    })
+    .join("");
+}
+
+function renderKindTotals(summary) {
+  return `
+    <div class="metrics">
+      ${summary.totals_by_kind
+        .map(
+          (total) => `
+            <div class="metric">
+              <div class="metric-label">${escapeHtml(total.kind)}</div>
+              <div class="metric-value">${format(total.points)} / ${format(total.possible)}</div>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderStudentGradeTable(summary) {
+  return `
+    <div class="grade-table-wrap">
+      <table class="grade-table">
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>Item</th>
+            <th>Puntaje</th>
+            <th>Aporte</th>
+            <th>Comentario</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${summary.scores
+            .map(
+              (score) => `
+                <tr>
+                  <td>${escapeHtml(score.kind)}</td>
+                  <td>${escapeHtml(score.name)}</td>
+                  <td>${score.raw_points ?? "-"} / ${format(score.max_points)}</td>
+                  <td>${format(score.normalized_points)} / ${format(score.weight_points)}</td>
+                  <td>${escapeHtml(score.comment ?? "")}</td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderGradebookAdmin() {
+  if (state.gradebooks.length === 0) {
+    teacherGradebook.innerHTML = `<section class="detail-empty">No hay cursos cargados.</section>`;
+    return;
+  }
+
+  teacherGradebook.innerHTML = state.gradebooks
+    .map(
+      (book) => `
+        <section class="grade-course" data-course-id="${escapeHtml(book.course.id)}">
+          <div>
+            <h3>${escapeHtml(book.course.name)} (${escapeHtml(book.course.term)})</h3>
+            <p class="submission-meta">${book.components.length} componentes - ${book.students.length} estudiantes</p>
+          </div>
+          ${renderTeacherGradeTable(book)}
+        </section>
+      `,
+    )
+    .join("");
+
+  teacherGradebook.querySelectorAll(".grade-input").forEach((input) => {
+    input.addEventListener("change", () => saveGradeInput(input));
+  });
+}
+
+function renderTeacherGradeTable(book) {
+  if (book.components.length === 0) {
+    return `<p class="submission-meta">Crea componentes para cargar notas.</p>`;
+  }
+
+  return `
+    <div class="grade-table-wrap">
+      <table class="grade-table">
+        <thead>
+          <tr>
+            <th>Estudiante</th>
+            ${book.components
+              .map(
+                (component) => `
+                  <th>${escapeHtml(component.name)}<br><span class="submission-meta">${escapeHtml(component.kind)} - sobre ${format(component.max_points)} - vale ${format(component.weight_points)}</span></th>
+                `,
+              )
+              .join("")}
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${book.students
+            .map(
+              (summary) => `
+                <tr>
+                  <td>${escapeHtml(summary.student.display_name)}<br><span class="submission-meta">${escapeHtml(summary.student.email)}</span></td>
+                  ${book.components.map((component) => renderGradeCell(summary, component)).join("")}
+                  <td class="grade-total">${format(summary.total_points)} / ${format(summary.total_possible)}</td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderGradeCell(summary, component) {
+  const score = summary.scores.find((item) => item.component_id === component.id);
+  return `
+    <td>
+      <input class="grade-input" type="number" min="0" max="${component.max_points}" step="0.01"
+        value="${score?.raw_points ?? ""}"
+        data-component-id="${escapeHtml(component.id)}"
+        data-student-id="${escapeHtml(summary.student.id)}" />
+      <div class="submission-meta">${format(score?.normalized_points ?? 0)} / ${format(component.weight_points)}</div>
+    </td>
+  `;
+}
+
+async function saveGradeInput(input) {
+  if (input.value === "") return;
+  await withGradeError(async () => {
+    await postJson("/api/grades/scores", {
+      component_id: input.dataset.componentId,
+      student_id: input.dataset.studentId,
+      raw_points: Number(input.value),
+      comment: null,
+    });
+    await loadGrades();
+    renderGradebookAdmin();
+    gradeStatus.textContent = "Nota guardada";
+  });
+}
+
+async function withGradeError(action) {
+  try {
+    gradeStatus.textContent = "";
+    await action();
+  } catch (error) {
+    gradeStatus.textContent = error.message;
+  }
 }
 
 async function refreshAcademic(message) {

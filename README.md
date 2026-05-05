@@ -88,6 +88,27 @@ Las entregas nuevas guardan `course_id`, `group_id`, `practice_id` y `submitted_
 
 Desde la misma pestaña tambien se pueden crear usuarios, asignar estudiantes a grupos y resetear contrasenas. El usuario de login es el email, que queda unico en la base y permite agregar notificaciones por correo mas adelante. Cada usuario puede cambiar su propia contrasena desde la barra superior.
 
+## Notas
+
+La seccion `Cargar notas` permite a docentes definir componentes evaluables por curso:
+
+- preguntas
+- informes
+- parciales
+
+Cada componente tiene:
+
+- `Sobre`: puntaje maximo usado al corregir ese item.
+- `Valor normalizado`: puntos que aporta al total del curso.
+
+La normalizacion es:
+
+```text
+puntos_normalizados = puntos_obtenidos / sobre * valor_normalizado
+```
+
+La seccion `Notas` muestra al estudiante sus subtotales por tipo y total normalizado.
+
 ## Deploy simple en Ubuntu
 
 Con Docker y Docker Compose:

@@ -24,6 +24,9 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/auth/password", post(change_password))
         .route("/users", get(users).post(create_user))
         .route("/users/{id}/password", post(reset_password))
+        .route("/grades", get(grades))
+        .route("/grades/components", post(create_grade_component))
+        .route("/grades/scores", post(upsert_grade_score))
         .route("/academic/context", get(academic_context))
         .route("/academic/courses", post(create_course))
         .route("/academic/courses/{id}/groups", post(create_group))
@@ -131,6 +134,45 @@ async fn reset_password(
     if !db::reset_password(&state.pool, &id, input).await? {
         return Err(AppError::not_found("usuario no encontrado"));
     }
+    Ok(Json(Health { status: "ok" }))
+}
+
+async fn grades(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<db::CourseGradebook>>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    Ok(Json(db::gradebook_for_user(&state.pool, &user).await?))
+}
+
+async fn create_grade_component(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(input): Json<db::CreateGradeComponent>,
+) -> Result<Json<db::GradeComponent>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if input.name.trim().is_empty()
+        || !matches!(input.kind.as_str(), "pregunta" | "informe" | "parcial")
+        || input.max_points <= 0.0
+        || input.weight_points <= 0.0
+    {
+        return Err(AppError::bad_request("datos de componente invalidos"));
+    }
+    Ok(Json(db::create_grade_component(&state.pool, input).await?))
+}
+
+async fn upsert_grade_score(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(input): Json<db::UpsertGradeScore>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if input.raw_points < 0.0 {
+        return Err(AppError::bad_request("la nota no puede ser negativa"));
+    }
+    db::upsert_grade_score(&state.pool, input)
+        .await
+        .map_err(|err| AppError::bad_request(err.to_string()))?;
     Ok(Json(Health { status: "ok" }))
 }
 
