@@ -1,5 +1,0 @@
-pub mod practicas_tabs;
-pub mod cronometro_panel;
-pub mod practica_pendulo;
-pub mod app_shell;
-pub mod instrumentos_panel;

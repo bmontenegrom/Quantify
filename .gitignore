@@ -1,3 +1,6 @@
-/dist/
-/target/
-/Cargo.lock
+/target
+/data/*.db
+/data/*.db-*
+/data/uploads
+.env
+dist

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quantify - Laboratorio de fisica</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Laboratorio de fisica</p>
+        <h1>Quantify</h1>
+      </div>
+      <nav class="tabs" aria-label="Vistas">
+        <button class="tab active" data-view="student">Estudiantes</button>
+        <button class="tab" data-view="teacher">Docentes</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="student-view" class="view active">
+        <div class="section-head">
+          <h2>Cargar medidas</h2>
+          <p>Subi un CSV con encabezados y columnas numericas.</p>
+        </div>
+
+        <form id="submission-form" class="panel">
+          <div class="form-grid">
+            <label>
+              Estudiante
+              <input name="student_name" required placeholder="Nombre y apellido" />
+            </label>
+            <label>
+              Grupo
+              <input name="group_name" required placeholder="Grupo 3" />
+            </label>
+            <label>
+              Curso
+              <input name="course" required placeholder="Fisica Experimental I" />
+            </label>
+            <label>
+              Practica
+              <select name="practice_id" id="practice-select" required></select>
+            </label>
+          </div>
+
+          <label>
+            Archivo CSV
+            <input name="csv_file" type="file" accept=".csv,text/csv" required />
+          </label>
+
+          <div class="actions">
+            <button type="submit">Subir y analizar</button>
+            <span id="submit-status" role="status"></span>
+          </div>
+        </form>
+
+        <section id="latest-result" class="panel hidden" aria-live="polite"></section>
+      </section>
+
+      <section id="teacher-view" class="view">
+        <div class="section-head">
+          <h2>Correccion docente</h2>
+          <p>Revisa entregas, advertencias y resultados automaticos.</p>
+        </div>
+
+        <div class="teacher-grid">
+          <section class="panel">
+            <div class="list-head">
+              <h3>Entregas</h3>
+              <button id="refresh-submissions" type="button">Actualizar</button>
+            </div>
+            <div id="submission-list" class="submission-list"></div>
+          </section>
+
+          <section id="submission-detail" class="panel detail-empty">
+            Selecciona una entrega para ver el detalle.
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
