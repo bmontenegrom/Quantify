@@ -5,6 +5,17 @@ const state = {
   submissions: [],
   gradebooks: [],
   selectedId: null,
+  activeStudentId: null,
+  studentDetailSection: "overview",
+  studentActionStatus: "",
+  editingUserId: null,
+  userActionStatus: "",
+  activeGroupId: null,
+  groupActionStatus: "",
+  activeCourseId: null,
+  courseActionStatus: "",
+  highlightedStudentId: null,
+  highlightedCourseId: null,
 };
 
 const loginScreen = document.querySelector("#login-screen");
@@ -12,31 +23,31 @@ const appShell = document.querySelector("#app-shell");
 const loginForm = document.querySelector("#login-form");
 const loginStatus = document.querySelector("#login-status");
 const sessionUser = document.querySelector("#session-user");
+const accountProfileForm = document.querySelector("#account-profile-form");
+const accountDisplayName = document.querySelector("#account-display-name");
+const accountEmail = document.querySelector("#account-email");
+const accountRole = document.querySelector("#account-role");
+const accountStatus = document.querySelector("#account-status");
 const passwordForm = document.querySelector("#password-form");
 const passwordStatus = document.querySelector("#password-status");
 const logoutButton = document.querySelector("#logout-button");
 const courseSelect = document.querySelector("#course-select");
 const groupSelect = document.querySelector("#group-select");
 const practiceSelect = document.querySelector("#practice-select");
+const tableSelect = document.querySelector("#table-select");
 const submissionForm = document.querySelector("#submission-form");
 const submitStatus = document.querySelector("#submit-status");
 const latestResult = document.querySelector("#latest-result");
+const submissionsTitle = document.querySelector("#submissions-title");
+const submissionsSubtitle = document.querySelector("#submissions-subtitle");
+const submissionsListTitle = document.querySelector("#submissions-list-title");
 const submissionList = document.querySelector("#submission-list");
 const submissionDetail = document.querySelector("#submission-detail");
 const userForm = document.querySelector("#user-form");
-const courseForm = document.querySelector("#course-form");
-const groupForm = document.querySelector("#group-form");
 const courseMemberForm = document.querySelector("#course-member-form");
 const memberForm = document.querySelector("#member-form");
-const coursePracticeForm = document.querySelector("#course-practice-form");
-const adminCourseSelect = document.querySelector("#admin-course-select");
-const memberCourseSelect = document.querySelector("#member-course-select");
-const adminGroupSelect = document.querySelector("#admin-group-select");
-const courseMemberSelect = document.querySelector("#course-member-select");
-const studentMemberSelect = document.querySelector("#student-member-select");
-const practiceCourseSelect = document.querySelector("#practice-course-select");
-const adminPracticeSelect = document.querySelector("#admin-practice-select");
 const courseCatalog = document.querySelector("#course-catalog");
+const courseWorkspace = document.querySelector("#course-workspace");
 const userList = document.querySelector("#user-list");
 const adminStatus = document.querySelector("#admin-status");
 const userStatus = document.querySelector("#user-status");
@@ -44,8 +55,11 @@ const gradeComponentForm = document.querySelector("#grade-component-form");
 const gradeCourseSelect = document.querySelector("#grade-course-select");
 const gradebookCourseFilter = document.querySelector("#gradebook-course-filter");
 const teacherGradebook = document.querySelector("#teacher-gradebook");
-const studentGrades = document.querySelector("#student-grades");
 const gradeStatus = document.querySelector("#grade-status");
+const studentDirectory = document.querySelector("#student-directory");
+const studentWorkspace = document.querySelector("#student-workspace");
+const groupDirectory = document.querySelector("#group-directory");
+const groupWorkspace = document.querySelector("#group-workspace");
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -89,14 +103,50 @@ passwordForm.addEventListener("submit", async (event) => {
   }
 });
 
+accountProfileForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    accountStatus.textContent = "";
+    const payload = Object.fromEntries(new FormData(accountProfileForm).entries());
+    const user = await postJson("/api/auth/profile", {
+      display_name: payload.display_name,
+      email: payload.email,
+      role: state.user.role,
+    });
+    state.user = user;
+    renderSessionUser();
+    renderAccount();
+    accountStatus.textContent = "Cambios guardados";
+  } catch (error) {
+    accountStatus.textContent = error.message;
+  }
+});
+
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
+    if (tab.dataset.view === "students" && state.activeStudentId) {
+      closeStudentWorkspace();
+      selectView("students");
+      return;
+    }
+    if (tab.dataset.view === "groups" && state.activeGroupId) {
+      closeGroupWorkspace();
+      selectView("groups");
+      return;
+    }
+    if (tab.dataset.view === "courses" && state.activeCourseId) {
+      closeCourseWorkspace();
+      selectView("courses");
+      return;
+    }
     selectView(tab.dataset.view);
   });
 });
 
 document.querySelector("#refresh-submissions").addEventListener("click", loadSubmissions);
 courseSelect.addEventListener("change", updateStudentSelectors);
+groupSelect.addEventListener("change", updateTableSelector);
+practiceSelect.addEventListener("change", updateTableSelector);
 gradebookCourseFilter.addEventListener("change", renderGradebookAdmin);
 
 gradeComponentForm.addEventListener("submit", async (event) => {
@@ -109,7 +159,6 @@ gradeComponentForm.addEventListener("submit", async (event) => {
     gradeComponentForm.reset();
     await loadGrades();
     renderGradebookAdmin();
-    renderStudentGrades();
     gradeStatus.textContent = "Componente creado";
   });
 });
@@ -123,62 +172,19 @@ userForm.addEventListener("submit", async (event) => {
   });
 });
 
-courseForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await withAdminError(async () => {
-    await postJson("/api/academic/courses", Object.fromEntries(new FormData(courseForm).entries()));
-    courseForm.reset();
-    await refreshAcademic("Curso creado");
-  });
-});
-
-groupForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await withAdminError(async () => {
-    const data = Object.fromEntries(new FormData(groupForm).entries());
-    await postJson(`/api/academic/courses/${data.course_id}/groups`, { name: data.name });
-    groupForm.reset();
-    await refreshAcademic("Grupo creado");
-  });
-});
-
-courseMemberForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await withAdminError(async () => {
-    const data = Object.fromEntries(new FormData(courseMemberForm).entries());
-    await postJson(`/api/academic/courses/${data.course_id}/members`, { user_id: data.user_id });
-    courseMemberForm.reset();
-    await refreshAcademic("Estudiante inscrito");
-  });
-});
-
-memberForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await withAdminError(async () => {
-    const data = Object.fromEntries(new FormData(memberForm).entries());
-    await postJson(`/api/academic/groups/${data.group_id}/members`, { user_id: data.user_id });
-    memberForm.reset();
-    await refreshAcademic("Estudiante agregado");
-  });
-});
-
-coursePracticeForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await withAdminError(async () => {
-    const data = Object.fromEntries(new FormData(coursePracticeForm).entries());
-    await postJson(`/api/academic/courses/${data.course_id}/practices`, { practice_id: data.practice_id });
-    await refreshAcademic("Practica habilitada");
-  });
-});
-
 submissionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   submitStatus.textContent = "Subiendo...";
 
   try {
+    const formData = new FormData(submissionForm);
+    await postJson(`/api/academic/groups/${formData.get("group_id")}/practice-table`, {
+      practice_id: formData.get("practice_id"),
+      table_number: Number(formData.get("table_number")),
+    });
     const response = await fetch("/api/submissions", {
       method: "POST",
-      body: new FormData(submissionForm),
+      body: formData,
     });
 
     if (!response.ok) throw new Error(await errorText(response));
@@ -186,10 +192,10 @@ submissionForm.addEventListener("submit", async (event) => {
     const submission = await response.json();
     submitStatus.textContent = "Entrega guardada";
     submissionForm.reset();
-    renderStudentSelectors();
+    await loadAcademic();
     renderAnalysis(latestResult, submission);
     latestResult.classList.remove("hidden");
-    if (canReview()) await loadSubmissions();
+    await loadSubmissions();
   } catch (error) {
     submitStatus.textContent = error.message;
   }
@@ -209,7 +215,8 @@ async function init() {
 async function startApp() {
   loginScreen.classList.add("hidden");
   appShell.classList.remove("hidden");
-  sessionUser.textContent = `${state.user.display_name} (${state.user.role})`;
+  renderSessionUser();
+  renderAccount();
 
   document.querySelectorAll(".teacher-only").forEach((element) => {
     element.classList.toggle("hidden", !canReview());
@@ -217,40 +224,54 @@ async function startApp() {
 
   selectView("submissions");
   await loadAcademic();
+  await loadSubmissions();
+}
 
-  if (canReview()) await loadSubmissions();
+function renderSessionUser() {
+  sessionUser.textContent = `${state.user.display_name} (${state.user.role})`;
+}
+
+function renderAccount() {
+  if (!state.user) return;
+  accountDisplayName.value = state.user.display_name;
+  accountEmail.value = state.user.email;
+  accountRole.value = state.user.role;
 }
 
 function selectView(view) {
   document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
   document.querySelector(`#${view}-view`).classList.add("active");
-  if (view === "reviews") loadSubmissions();
-  if (view === "grades") {
-    loadGrades().then(() => {
-      renderStudentGrades();
-      if (canReview()) renderGradebookAdmin();
-    });
-  }
+  if (view === "submissions") loadSubmissions();
   if (view === "gradebook") {
     loadGrades().then(() => {
-      renderStudentGrades();
       renderGradebookAdmin();
     });
   }
+  if (view === "students") {
+    loadGrades().then(renderStudentsPage);
+    renderStudentsPage();
+  }
+  if (view === "groups") renderGroupsPage();
+  if (view === "courses") renderCoursesPage();
+  if (view === "account") renderAccount();
 }
 
 async function loadSubmissions() {
-  if (!canReview()) return;
   state.submissions = await fetchJson("/api/submissions");
-  renderSubmissionList();
+  renderSubmissionsPage();
 }
 
 async function loadAcademic() {
   state.academic = await fetchJson("/api/academic/context");
   state.practices = state.academic.practices;
   renderStudentSelectors();
-  if (canReview()) renderAdmin();
+  if (canReview()) {
+    renderAdmin();
+    renderStudentsPage();
+    renderGroupsPage();
+    renderCoursesPage();
+  }
   if (canReview()) renderGradeCourseOptions();
 }
 
@@ -265,30 +286,6 @@ function renderGradeCourseOptions() {
     .join("");
   gradeCourseSelect.innerHTML = options;
   gradebookCourseFilter.innerHTML = options;
-}
-
-function renderStudentGrades() {
-  if (state.gradebooks.length === 0) {
-    studentGrades.innerHTML = `<section class="panel detail-empty">No hay cursos con notas disponibles.</section>`;
-    return;
-  }
-
-  studentGrades.innerHTML = state.gradebooks
-    .map((book) => {
-      const summary = book.students[0];
-      if (!summary) return "";
-      return `
-        <section class="panel grade-course">
-          <div>
-            <h3>${escapeHtml(book.course.name)} (${escapeHtml(book.course.term)})</h3>
-            <p class="submission-meta">Total: ${format(summary.total_points)} / ${format(summary.total_possible)}</p>
-          </div>
-          ${renderKindTotals(summary)}
-          ${renderStudentGradeTable(summary)}
-        </section>
-      `;
-    })
-    .join("");
 }
 
 function renderKindTotals(summary) {
@@ -347,9 +344,10 @@ function renderGradebookAdmin() {
     return;
   }
 
-  const selectedId = gradebookCourseFilter.value || state.gradebooks[0].course.id;
+  const selectedId = state.highlightedCourseId || gradebookCourseFilter.value || state.gradebooks[0].course.id;
   const book = state.gradebooks.find((item) => item.course.id === selectedId) ?? state.gradebooks[0];
   gradebookCourseFilter.value = book.course.id;
+  state.highlightedCourseId = book.course.id;
 
   if (book.components.length === 0) {
     teacherGradebook.innerHTML = `
@@ -375,11 +373,17 @@ function renderGradebookAdmin() {
   teacherGradebook.querySelectorAll(".grade-input").forEach((input) => {
     input.addEventListener("change", () => saveGradeInput(input));
   });
+
+  if (state.highlightedStudentId) {
+    teacherGradebook
+      .querySelector(`[data-student-id="${cssEscape(state.highlightedStudentId)}"]`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 }
 
 function renderStudentGradeCard(summary, components) {
   return `
-    <article class="student-grade-card">
+    <article class="student-grade-card ${summary.student.id === state.highlightedStudentId ? "highlighted" : ""}" data-student-id="${escapeHtml(summary.student.id)}">
       <div class="student-grade-head">
         <div>
           <h4>${escapeHtml(summary.student.display_name)}</h4>
@@ -421,6 +425,7 @@ async function saveGradeInput(input) {
     });
     await loadGrades();
     renderGradebookAdmin();
+    if (state.activeStudentId) renderStudentsPage();
     gradeStatus.textContent = "Nota guardada";
   });
 }
@@ -471,94 +476,1224 @@ function updateStudentSelectors() {
   practiceSelect.innerHTML = course?.practices.length
     ? course.practices.map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`).join("")
     : `<option value="">Sin practicas habilitadas</option>`;
+  updateTableSelector();
+}
+
+function updateTableSelector() {
+  if (!tableSelect) return;
+  const group = selectedCourse()?.groups.find((item) => item.id === groupSelect.value);
+  const assignment = selectedTableAssignment();
+  const tableCount = group?.table_count ?? 0;
+  tableSelect.innerHTML = tableCount
+    ? Array.from({ length: tableCount }, (_, index) => {
+        const tableNumber = index + 1;
+        return `<option value="${tableNumber}" ${assignment?.table_number === tableNumber ? "selected" : ""}>Mesa ${tableNumber}</option>`;
+      }).join("")
+    : `<option value="">Sin mesas</option>`;
+  tableSelect.disabled = !tableCount;
 }
 
 function renderAdmin() {
   const courses = state.academic.courses;
-  const allGroups = courses.flatMap((course) => course.groups.map((group) => ({ ...group, courseName: course.name })));
-
-  const courseOptions = courses
-    .map((course) => `<option value="${escapeHtml(course.id)}">${escapeHtml(course.name)} (${escapeHtml(course.term)})</option>`)
-    .join("");
-  adminCourseSelect.innerHTML = courseOptions;
-  memberCourseSelect.innerHTML = courseOptions;
-  practiceCourseSelect.innerHTML = courseOptions;
-  adminGroupSelect.innerHTML = allGroups
-    .map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.courseName)} - ${escapeHtml(group.name)}</option>`)
-    .join("");
-  courseMemberSelect.innerHTML = state.academic.students
-    .map((student) => `<option value="${escapeHtml(student.id)}">${escapeHtml(student.display_name)} (${escapeHtml(student.email)})</option>`)
-    .join("");
-  studentMemberSelect.innerHTML = state.academic.students
-    .map((student) => `<option value="${escapeHtml(student.id)}">${escapeHtml(student.display_name)} (${escapeHtml(student.email)})</option>`)
-    .join("");
-  adminPracticeSelect.innerHTML = state.practices
-    .map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`)
-    .join("");
-
-  courseCatalog.innerHTML = courses.length
-    ? courses.map(renderCourseCard).join("")
-    : `<p class="submission-meta">No hay cursos creados.</p>`;
+  renderCourseDirectory(courses);
   renderUsers();
 }
 
 function renderUsers() {
-  userList.innerHTML = state.academic.users
-    .map(
-      (user) => `
-        <article class="user-item" data-user-id="${escapeHtml(user.id)}">
-          <div>
-            <strong>${escapeHtml(user.display_name)}</strong>
-            <div class="submission-meta">${escapeHtml(user.email)} - ${escapeHtml(user.role)}</div>
-          </div>
-          <form class="user-reset">
-            <input name="password" type="password" required minlength="8" placeholder="Nueva contrasena" />
-            <button type="submit">Reset</button>
-          </form>
-        </article>
-      `,
-    )
-    .join("");
+  const rows = state.academic.users.flatMap((user) => {
+    const courses = studentCourses(user.id);
+    const groups = studentGroups(user.id);
+    const totals = studentTotals(user.id);
+    const baseRow = `
+      <tr>
+        <td class="directory-primary">
+          <strong>${escapeHtml(user.display_name)}</strong>
+          <div class="submission-meta">${escapeHtml(user.email)}</div>
+        </td>
+        <td><span class="status-chip">${escapeHtml(user.role)}</span></td>
+        <td>
+          <strong>${courses.length}</strong>
+          <div class="submission-meta">${courses.map((course) => escapeHtml(course.name)).join(", ") || "-"}</div>
+        </td>
+        <td>
+          <strong>${groups.length}</strong>
+          <div class="submission-meta">${groups.map((group) => escapeHtml(group.name)).join(", ") || "-"}</div>
+        </td>
+        <td>
+          <strong>${totals ? `${format(totals.points)} / ${format(totals.possible)}` : "-"}</strong>
+          <div class="submission-meta">Puntos acumulados</div>
+        </td>
+        <td class="directory-actions">
+          <button type="button" data-user-action="reset" data-user-id="${escapeHtml(user.id)}">Reset password</button>
+        </td>
+      </tr>`;
+    const detailRow =
+      state.editingUserId === user.id
+        ? `
+            <tr class="directory-detail-row">
+              <td class="directory-detail-cell" colspan="6">
+                ${renderUserDetail(user)}
+              </td>
+            </tr>
+          `
+        : "";
+    return [baseRow, detailRow];
+  });
 
-  userList.querySelectorAll(".user-reset").forEach((form) => {
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      await withAdminError(async () => {
-        const item = form.closest(".user-item");
-        const data = Object.fromEntries(new FormData(form).entries());
-        await postJson(`/api/users/${item.dataset.userId}/password`, data);
-        form.reset();
-        await refreshAcademic("Contrasena reseteada");
-      });
-    });
+  userList.innerHTML = rows.length
+    ? `
+        <div class="directory-table-wrap">
+          <table class="grade-table directory-data-table">
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Rol</th>
+                <th>Cursos</th>
+                <th>Grupos</th>
+                <th>Puntos</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.join("")}
+            </tbody>
+          </table>
+        </div>
+      `
+    : `<p class="submission-meta">No hay usuarios cargados.</p>`;
+
+  userList.querySelectorAll("[data-user-action]").forEach((button) => {
+    button.addEventListener("click", () => toggleUserAction(button.dataset.userId));
+  });
+  userList.querySelectorAll("[data-user-form='reset']").forEach((form) => {
+    form.addEventListener("submit", saveUserReset);
+  });
+  userList.querySelectorAll("[data-user-cancel]").forEach((button) => {
+    button.addEventListener("click", clearUserAction);
   });
 }
 
-function renderCourseCard(course) {
-  const members = course.members
-    .map((member) => `<span class="chip">${escapeHtml(member.display_name)}</span>`)
-    .join("");
+function renderStudentDirectory() {
+  if (!studentDirectory || !state.academic) return;
+
+  const rows = allStudents().map((student) => {
+    const courses = studentCourses(student.id);
+    const groups = studentGroups(student.id);
+    const totals = studentTotals(student.id);
+    return `
+      <tr>
+        <td class="directory-primary">
+          <strong>${escapeHtml(student.display_name)}</strong>
+          <div class="submission-meta">${escapeHtml(student.email)}</div>
+        </td>
+        <td><span class="status-chip">${escapeHtml(student.role)}</span></td>
+        <td>
+          <strong>${courses.length}</strong>
+          <div class="submission-meta">${courses.map((course) => escapeHtml(course.name)).join(", ") || "Sin cursos"}</div>
+        </td>
+        <td>
+          <strong>${groups.length}</strong>
+          <div class="submission-meta">${groups.map((group) => `${escapeHtml(group.courseName)} / ${escapeHtml(group.name)}`).join(", ") || "Sin grupos"}</div>
+        </td>
+        <td>
+          ${renderStudentPoints(totals)}
+        </td>
+        <td class="directory-actions">
+          <button type="button" data-student-open="overview" data-student-id="${escapeHtml(student.id)}">Editar</button>
+        </td>
+      </tr>`;
+  });
+
+  studentDirectory.innerHTML = rows.length
+    ? `
+        <div class="directory-table-wrap">
+          <table class="grade-table directory-data-table">
+            <thead>
+              <tr>
+                <th>Estudiante</th>
+                <th>Rol</th>
+                <th>Cursos</th>
+                <th>Grupos</th>
+                <th>Puntos</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.join("")}
+            </tbody>
+          </table>
+        </div>
+      `
+    : `<p class="submission-meta">No hay estudiantes cargados.</p>`;
+  studentDirectory.querySelectorAll("[data-student-open]").forEach((button) => {
+    button.addEventListener("click", () => openStudentWorkspace(button.dataset.studentId, button.dataset.studentOpen));
+  });
+}
+
+function renderStudentPoints(totals) {
+  if (!totals) return `<span class="submission-meta">Sin notas cargadas</span>`;
   return `
-    <article class="course-card">
-      <h4>${escapeHtml(course.name)} (${escapeHtml(course.term)})</h4>
-      <div class="submission-meta">${course.members.length} inscritos - ${course.groups.length} grupos - ${course.practices.length} practicas habilitadas</div>
-      <div class="chips">
-        ${members || `<span class="chip">Sin inscritos</span>`}
+    <strong>${format(totals.points)} / ${format(totals.possible)}</strong>
+    <div class="submission-meta">Puntos acumulados</div>
+  `;
+}
+
+function renderStudentsPage() {
+  renderStudentDirectory();
+  if (!studentWorkspace) return;
+
+  const student = allStudents().find((item) => item.id === state.activeStudentId);
+  if (!student) {
+    studentWorkspace.innerHTML = "";
+    studentWorkspace.classList.add("hidden");
+    studentDirectory.closest(".panel")?.classList.remove("hidden");
+    return;
+  }
+
+  const totals = studentTotals(student.id);
+  const courses = studentCourses(student.id);
+  const groups = studentGroups(student.id);
+  studentWorkspace.innerHTML = `
+    <div class="workspace-head">
+      <div>
+        <button type="button" class="back-link" id="student-workspace-back">Volver al listado</button>
+        <h3>${escapeHtml(student.display_name)}</h3>
+        <p class="submission-meta">${escapeHtml(student.email)} - ${escapeHtml(student.role)}</p>
       </div>
-      <div class="chips">
-        ${course.practices.map((practice) => `<span class="chip">${escapeHtml(practice.name)}</span>`).join("") || `<span class="chip">Sin practicas</span>`}
+      <div class="metrics compact-metrics">
+        <div class="metric">
+          <div class="metric-label">Cursos</div>
+          <div class="metric-value">${courses.length}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Grupos</div>
+          <div class="metric-value">${groups.length}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Puntos</div>
+          <div class="metric-value">${totals ? `${format(totals.points)} / ${format(totals.possible)}` : "-"}</div>
+        </div>
       </div>
-      ${course.groups
-        .map(
-          (group) => `
-            <div class="metric">
-              <strong>${escapeHtml(group.name)}</strong>
-              <div class="submission-meta">${group.members.map((member) => escapeHtml(member.display_name)).join(", ") || "Sin estudiantes"}</div>
+    </div>
+
+    <div class="workspace-grid">
+      <section class="panel workspace-panel" id="student-profile-panel">
+        <h3>Datos del estudiante</h3>
+        ${renderStudentProfileForm(student)}
+      </section>
+
+      <section class="panel workspace-panel" id="student-groups-panel">
+        <h3>Cursos y grupos</h3>
+        ${renderStudentEnrollmentPanel(student)}
+      </section>
+    </div>
+
+    <section class="panel workspace-panel" id="student-grades-panel">
+      <h3>Notas del estudiante</h3>
+      ${renderStudentGradeEditor(student)}
+    </section>
+  `;
+  studentWorkspace.classList.remove("hidden");
+  studentDirectory.closest(".panel")?.classList.add("hidden");
+
+  document.querySelector("#student-workspace-back")?.addEventListener("click", closeStudentWorkspace);
+  studentWorkspace.querySelector("#student-profile-form")?.addEventListener("submit", saveStudentEdit);
+  studentWorkspace.querySelector("#student-course-form")?.addEventListener("submit", saveStudentEnrollment);
+  studentWorkspace.querySelector("#student-group-form")?.addEventListener("submit", saveStudentGroup);
+  studentWorkspace.querySelectorAll("[data-remove-group-member]").forEach((button) => {
+    button.addEventListener("click", () => removeGroupMember(button.dataset.groupId, button.dataset.studentId, "student"));
+  });
+  studentWorkspace.querySelectorAll(".grade-input").forEach((input) => {
+    input.addEventListener("change", () => saveGradeInput(input));
+  });
+
+  focusStudentSection();
+}
+
+function renderStudentProfileForm(student) {
+  return `
+    <form id="student-profile-form" class="detail-form detail-form-grid">
+      <input name="id" type="hidden" value="${escapeHtml(student.id)}" />
+      <label>
+        Nombre
+        <input name="display_name" value="${escapeHtml(student.display_name)}" required />
+      </label>
+      <label>
+        Email
+        <input name="email" type="email" value="${escapeHtml(student.email)}" required />
+      </label>
+      <label>
+        Rol
+        <select name="role" required>
+          ${["estudiante", "docente", "admin"]
+            .map((role) => `<option value="${role}" ${role === student.role ? "selected" : ""}>${role}</option>`)
+            .join("")}
+        </select>
+      </label>
+      <div class="detail-actions">
+        <button type="submit">Guardar cambios</button>
+        <span class="submission-meta">${escapeHtml(state.studentActionStatus)}</span>
+      </div>
+    </form>
+  `;
+}
+
+function renderStudentEnrollmentPanel(student) {
+  const currentCourses = studentCourses(student.id);
+  const availableCourses = availableCoursesForStudent(student.id);
+  const currentGroups = studentGroups(student.id);
+  const groupOptions = availableGroupsForStudent(student.id);
+
+  return `
+    <div class="stack-form">
+      <div>
+        <strong>Cursos actuales</strong>
+        <div class="chips">
+          ${currentCourses.map((course) => `<span class="chip">${escapeHtml(course.name)} (${escapeHtml(course.term)})</span>`).join("") || `<span class="chip">Sin cursos</span>`}
+        </div>
+      </div>
+
+      <form id="student-course-form" class="detail-form compact">
+        <input name="student_id" type="hidden" value="${escapeHtml(student.id)}" />
+        <label>
+          Inscribir en curso
+          <select name="course_id" ${availableCourses.length ? "" : "disabled"}>
+            ${
+              availableCourses.length
+                ? availableCourses.map((course) => `<option value="${escapeHtml(course.id)}">${escapeHtml(course.name)} (${escapeHtml(course.term)})</option>`).join("")
+                : `<option value="">Sin cursos disponibles</option>`
+            }
+          </select>
+        </label>
+        <div class="detail-actions">
+          <button type="submit" ${availableCourses.length ? "" : "disabled"}>Inscribir</button>
+        </div>
+      </form>
+
+      <div>
+        <strong>Grupos actuales</strong>
+        <div class="stack-list">
+          ${
+            currentGroups.length
+              ? currentGroups
+                  .map(
+                    (group) => `
+                      <div class="inline-row">
+                        <span class="chip">${escapeHtml(group.courseName)} - ${escapeHtml(group.name)}</span>
+                        <button type="button" data-remove-group-member data-group-id="${escapeHtml(group.id)}" data-student-id="${escapeHtml(student.id)}">Quitar</button>
+                      </div>
+                    `,
+                  )
+                  .join("")
+              : `<span class="chip">Sin grupos</span>`
+          }
+        </div>
+      </div>
+
+      <form id="student-group-form" class="detail-form compact">
+        <input name="student_id" type="hidden" value="${escapeHtml(student.id)}" />
+        <label>
+          Asignar a grupo
+          <select name="group_id" ${groupOptions.length ? "" : "disabled"}>
+            ${
+              groupOptions.length
+                ? groupOptions
+                    .map(
+                      (group) =>
+                        `<option value="${escapeHtml(group.id)}">${escapeHtml(group.courseName)} (${escapeHtml(group.courseTerm)}) - ${escapeHtml(group.name)}</option>`,
+                    )
+                    .join("")
+                : `<option value="">Sin grupos disponibles</option>`
+            }
+          </select>
+        </label>
+        <div class="detail-actions">
+          <button type="submit" ${groupOptions.length ? "" : "disabled"}>Asignar grupo</button>
+          <span class="submission-meta">${escapeHtml(state.studentActionStatus)}</span>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function renderStudentGradeEditor(student) {
+  const courses = studentCourses(student.id);
+  if (courses.length === 0) {
+    return `<p class="submission-meta">El estudiante no esta inscrito en ningun curso.</p>`;
+  }
+
+  return courses
+    .map((course) => {
+      const book = state.gradebooks.find((item) => item.course.id === course.id);
+      const summary = book?.students.find((item) => item.student.id === student.id);
+      if (!book || !summary) {
+        return `
+          <section class="grade-course">
+            <div>
+              <h4>${escapeHtml(course.name)} (${escapeHtml(course.term)})</h4>
+              <p class="submission-meta">Sin notas cargadas para este curso.</p>
             </div>
-          `,
-        )
-        .join("")}
-    </article>
+          </section>
+        `;
+      }
+      if (book.components.length === 0) {
+        return `
+          <section class="grade-course">
+            <div>
+              <h4>${escapeHtml(course.name)} (${escapeHtml(course.term)})</h4>
+              <p class="submission-meta">Este curso todavia no tiene componentes evaluables.</p>
+            </div>
+          </section>
+        `;
+      }
+      return `
+        <section class="grade-course">
+          <div>
+            <h4>${escapeHtml(course.name)} (${escapeHtml(course.term)})</h4>
+            <p class="submission-meta">Total: ${format(summary.total_points)} / ${format(summary.total_possible)}</p>
+          </div>
+          ${renderKindTotals(summary)}
+          <div class="student-grade-fields">
+            ${book.components.map((component) => renderGradeField(summary, component)).join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+}
+
+function openStudentWorkspace(studentId, section = "overview") {
+  state.activeStudentId = studentId;
+  state.studentDetailSection = section;
+  renderStudentsPage();
+  selectView("students");
+}
+
+function closeStudentWorkspace() {
+  state.activeStudentId = null;
+  state.studentDetailSection = "overview";
+  state.studentActionStatus = "";
+  renderStudentsPage();
+}
+
+function focusStudentSection() {
+  const map = {
+    overview: "#student-profile-panel",
+    groups: "#student-groups-panel",
+    grades: "#student-grades-panel",
+  };
+  const target = studentWorkspace?.querySelector(map[state.studentDetailSection] ?? map.overview);
+  target?.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+function renderGroupDirectory() {
+  if (!groupDirectory || !state.academic) return;
+  const groups = allGroups();
+
+  const rows = groups.map(
+    (group) => `
+      <tr>
+        <td class="directory-primary">
+          <strong>${escapeHtml(group.name)}</strong>
+        </td>
+        <td>
+          <strong>${escapeHtml(group.courseName)}</strong>
+          <div class="submission-meta">${escapeHtml(group.courseTerm)}</div>
+        </td>
+        <td>
+          <strong>${group.members.length}</strong>
+          <div class="submission-meta">estudiantes</div>
+        </td>
+        <td>
+          <strong>${group.table_count ?? 4}</strong>
+          <div class="submission-meta">${renderGroupType(group.group_type)}</div>
+        </td>
+        <td>
+          <div class="directory-listing">
+            ${group.members.map((member) => `<span class="inline-pill">${escapeHtml(member.display_name)}</span>`).join("") || `<span class="submission-meta">Sin estudiantes</span>`}
+          </div>
+        </td>
+        <td class="directory-actions">
+          <button type="button" data-group-open data-group-id="${escapeHtml(group.id)}">Editar</button>
+        </td>
+      </tr>`,
+  );
+
+  groupDirectory.innerHTML = rows.length
+    ? `
+        <div class="directory-table-wrap">
+          <table class="grade-table directory-data-table">
+            <thead>
+              <tr>
+                <th>Grupo</th>
+                <th>Curso</th>
+                <th>Cantidad</th>
+                <th>Mesas</th>
+                <th>Estudiantes</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.join("")}
+            </tbody>
+          </table>
+        </div>
+      `
+    : `<p class="submission-meta">No hay grupos creados.</p>`;
+
+  groupDirectory.querySelectorAll("[data-group-open]").forEach((button) => {
+    button.addEventListener("click", () => openGroupWorkspace(button.dataset.groupId));
+  });
+}
+
+function renderGroupsPage() {
+  renderGroupDirectory();
+  if (!groupWorkspace) return;
+
+  const group = allGroups().find((item) => item.id === state.activeGroupId);
+  if (!group) {
+    groupWorkspace.innerHTML = "";
+    groupWorkspace.classList.add("hidden");
+    groupDirectory.closest(".panel")?.classList.remove("hidden");
+    return;
+  }
+
+  groupWorkspace.innerHTML = `
+    <div class="workspace-head">
+      <div>
+        <button type="button" class="back-link" id="group-workspace-back">Volver al listado</button>
+        <h3>${escapeHtml(group.name)}</h3>
+        <p class="submission-meta">${escapeHtml(group.courseName)} (${escapeHtml(group.courseTerm)})</p>
+      </div>
+      <div class="metrics compact-metrics">
+        <div class="metric">
+          <div class="metric-label">Estudiantes</div>
+          <div class="metric-value">${group.members.length}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Mesas</div>
+          <div class="metric-value">${group.table_count ?? 4}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Tipo</div>
+          <div class="metric-value metric-text">${renderGroupType(group.group_type)}</div>
+        </div>
+      </div>
+    </div>
+
+    <section class="panel workspace-panel group-profile-panel">
+      <h3>Datos del grupo</h3>
+      ${renderGroupProfileForm(group)}
+    </section>
+
+    <section class="panel workspace-panel">
+      <h3>Mesas del grupo</h3>
+      ${renderGroupTablesPanel(group)}
+    </section>
+
+    <section class="panel workspace-panel">
+      <h3>Estudiantes del grupo</h3>
+      ${renderGroupMembersPanel(group)}
+    </section>
+  `;
+
+  groupWorkspace.classList.remove("hidden");
+  groupDirectory.closest(".panel")?.classList.add("hidden");
+  groupWorkspace.querySelector("#group-workspace-back")?.addEventListener("click", closeGroupWorkspace);
+  groupWorkspace.querySelector("#group-profile-form")?.addEventListener("submit", saveGroupEdit);
+  groupWorkspace.querySelectorAll("[data-student-open]").forEach((button) => {
+    button.addEventListener("click", () => openStudentWorkspace(button.dataset.studentId, button.dataset.studentOpen));
+  });
+  groupWorkspace.querySelectorAll("[data-remove-group-member]").forEach((button) => {
+    button.addEventListener("click", () => removeGroupMember(button.dataset.groupId, button.dataset.studentId, "group"));
+  });
+}
+
+function renderGroupProfileForm(group) {
+  return `
+    <form id="group-profile-form" class="detail-form detail-form-grid">
+      <input name="id" type="hidden" value="${escapeHtml(group.id)}" />
+      <label>
+        Nombre
+        <input name="name" value="${escapeHtml(group.name)}" required />
+      </label>
+      <label>
+        Mesas
+        <input name="table_count" type="number" min="1" max="24" step="1" value="${escapeHtml(group.table_count ?? 4)}" required />
+      </label>
+      <label>
+        Tipo
+        <select name="group_type">
+          <option value="regular" ${group.group_type === "recuperacion" ? "" : "selected"}>Regular</option>
+          <option value="recuperacion" ${group.group_type === "recuperacion" ? "selected" : ""}>Recuperacion</option>
+        </select>
+      </label>
+      <div class="detail-actions">
+        <button type="submit">Guardar cambios</button>
+        <span class="submission-meta">${escapeHtml(state.groupActionStatus)}</span>
+      </div>
+    </form>
+  `;
+}
+
+function renderGroupTablesPanel(group) {
+  const tables = Array.from({ length: group.table_count ?? 4 }, (_, index) => index + 1);
+  return `
+    <div class="directory-listing">
+      ${tables.map((tableNumber) => `<span class="inline-pill">Mesa ${tableNumber}</span>`).join("")}
+    </div>
+  `;
+}
+
+function renderGroupMembersPanel(group) {
+  if (group.members.length === 0) {
+    return `<p class="submission-meta">Sin estudiantes asignados.</p>`;
+  }
+
+  const rows = group.members.map((student) => {
+    const courses = studentCourses(student.id);
+    const groups = studentGroups(student.id);
+    const totals = studentTotals(student.id);
+    return `
+      <tr>
+        <td class="directory-primary">
+          <strong>${escapeHtml(student.display_name)}</strong>
+          <div class="submission-meta">${escapeHtml(student.email)}</div>
+        </td>
+        <td><span class="status-chip">${escapeHtml(student.role)}</span></td>
+        <td>
+          <strong>${courses.length}</strong>
+          <div class="submission-meta">${courses.map((course) => escapeHtml(course.name)).join(", ") || "Sin cursos"}</div>
+        </td>
+        <td>
+          <strong>${groups.length}</strong>
+          <div class="submission-meta">${groups.map((item) => `${escapeHtml(item.courseName)} / ${escapeHtml(item.name)}`).join(", ") || "Sin grupos"}</div>
+        </td>
+        <td>${renderStudentPoints(totals)}</td>
+        <td class="directory-actions">
+          <button type="button" data-student-open="overview" data-student-id="${escapeHtml(student.id)}">Editar</button>
+          <button type="button" data-remove-group-member data-group-id="${escapeHtml(group.id)}" data-student-id="${escapeHtml(student.id)}">Quitar</button>
+        </td>
+      </tr>
+    `;
+  });
+
+  return `
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead>
+          <tr>
+            <th>Estudiante</th>
+            <th>Rol</th>
+            <th>Cursos</th>
+            <th>Grupos</th>
+            <th>Puntos</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openGroupWorkspace(groupId) {
+  state.activeGroupId = groupId;
+  state.groupActionStatus = "";
+  renderGroupsPage();
+  selectView("groups");
+}
+
+function closeGroupWorkspace() {
+  state.activeGroupId = null;
+  state.groupActionStatus = "";
+  renderGroupsPage();
+}
+
+function toggleUserAction(userId) {
+  state.userActionStatus = "";
+  state.editingUserId = state.editingUserId === userId ? null : userId;
+  renderUsers();
+}
+
+function clearUserAction() {
+  state.editingUserId = null;
+  state.userActionStatus = "";
+  renderUsers();
+}
+
+async function saveStudentEdit(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try {
+    state.studentActionStatus = "";
+    await postJson(`/api/users/${payload.id}`, {
+      display_name: payload.display_name,
+      email: payload.email,
+      role: payload.role,
+    });
+    state.studentActionStatus = "Cambios guardados";
+    await refreshAcademic("Estudiante actualizado");
+  } catch (error) {
+    state.studentActionStatus = error.message;
+    renderStudentsPage();
+  }
+}
+
+async function saveStudentEnrollment(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  if (!payload.course_id) return;
+  try {
+    state.studentActionStatus = "";
+    await postJson(`/api/academic/courses/${payload.course_id}/members`, {
+      user_id: payload.student_id,
+    });
+    state.studentActionStatus = "Estudiante inscrito";
+    await refreshAcademic("Estudiante inscrito");
+  } catch (error) {
+    state.studentActionStatus = error.message;
+    renderStudentsPage();
+  }
+}
+
+async function saveStudentGroup(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  if (!payload.group_id) return;
+  try {
+    state.studentActionStatus = "";
+    await postJson(`/api/academic/groups/${payload.group_id}/members`, {
+      user_id: payload.student_id,
+    });
+    state.studentActionStatus = "Grupo asignado";
+    await refreshAcademic("Estudiante asignado a grupo");
+  } catch (error) {
+    state.studentActionStatus = error.message;
+    renderStudentsPage();
+  }
+}
+
+async function removeGroupMember(groupId, studentId, origin) {
+  try {
+    state.studentActionStatus = "";
+    state.groupActionStatus = "";
+    await postJson(`/api/academic/groups/${groupId}/members/remove`, { user_id: studentId });
+    if (origin === "student") {
+      state.studentActionStatus = "Estudiante removido del grupo";
+    } else {
+      state.groupActionStatus = "Estudiante removido del grupo";
+    }
+    await refreshAcademic("Estudiante removido del grupo");
+  } catch (error) {
+    if (origin === "student") {
+      state.studentActionStatus = error.message;
+      renderStudentsPage();
+    } else {
+      state.groupActionStatus = error.message;
+      renderGroupsPage();
+    }
+  }
+}
+
+async function saveGroupEdit(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try {
+    state.groupActionStatus = "";
+    await postJson(`/api/academic/groups/${payload.id}`, {
+      name: payload.name,
+      table_count: Number(payload.table_count),
+      group_type: payload.group_type,
+    });
+    state.groupActionStatus = "Cambios guardados";
+    await refreshAcademic("Grupo actualizado");
+  } catch (error) {
+    state.groupActionStatus = error.message;
+    renderGroupsPage();
+  }
+}
+
+async function saveUserReset(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try {
+    state.userActionStatus = "";
+    await postJson(`/api/users/${payload.id}/password`, { password: payload.password });
+    state.userActionStatus = "Contrasena reseteada";
+    await refreshAcademic("Contrasena reseteada");
+  } catch (error) {
+    state.userActionStatus = error.message;
+    renderUsers();
+  }
+}
+
+function studentCourses(studentId) {
+  return state.academic.courses.filter((course) => course.members.some((member) => member.id === studentId));
+}
+
+function allGroups() {
+  return state.academic.courses.flatMap((course) =>
+    course.groups.map((group) => ({
+      ...group,
+      courseId: course.id,
+      courseName: course.name,
+      courseTerm: course.term,
+    })),
+  );
+}
+
+function renderGroupType(value) {
+  return value === "recuperacion" ? "Recuperacion" : "Regular";
+}
+
+function renderCoursesPage() {
+  renderCourseDirectory(state.academic?.courses ?? []);
+  if (!courseWorkspace) return;
+
+  const course = state.academic?.courses.find((item) => item.id === state.activeCourseId);
+  if (!course) {
+    courseWorkspace.innerHTML = "";
+    courseWorkspace.classList.add("hidden");
+    courseCatalog.closest(".panel")?.classList.remove("hidden");
+    return;
+  }
+
+  courseWorkspace.innerHTML = `
+    <div class="workspace-head">
+      <div>
+        <button type="button" class="back-link" id="course-workspace-back">Volver al listado</button>
+        <h3>${escapeHtml(course.name)}</h3>
+        <p class="submission-meta">${escapeHtml(course.term)}</p>
+      </div>
+      <div class="metrics compact-metrics">
+        <div class="metric">
+          <div class="metric-label">Estudiantes</div>
+          <div class="metric-value">${course.members.length}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Grupos</div>
+          <div class="metric-value">${course.groups.length}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Subgrupos</div>
+          <div class="metric-value">${course.subgroups?.length ?? 0}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Practicas</div>
+          <div class="metric-value">${course.practices.length}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="workspace-grid">
+      <section class="panel workspace-panel">
+        <h3>Datos del curso</h3>
+        ${renderCourseProfileForm(course)}
+      </section>
+      <section class="panel workspace-panel">
+        <h3>Nuevo grupo</h3>
+        ${renderCourseGroupForm(course)}
+      </section>
+    </div>
+
+    <section class="panel workspace-panel group-profile-panel">
+      <h3>Practicas habilitadas</h3>
+      ${renderCoursePracticesPanel(course)}
+    </section>
+
+    <section class="panel workspace-panel">
+      <h3>Grupos del curso</h3>
+      ${renderCourseGroupsTable(course)}
+    </section>
+
+    <section class="panel workspace-panel">
+      <h3>Subgrupos por practica</h3>
+      ${renderCourseSubgroupsPanel(course)}
+    </section>
+  `;
+
+  courseWorkspace.classList.remove("hidden");
+  courseCatalog.closest(".panel")?.classList.add("hidden");
+  courseWorkspace.querySelector("#course-workspace-back")?.addEventListener("click", closeCourseWorkspace);
+  courseWorkspace.querySelector("#course-profile-form")?.addEventListener("submit", saveCourseEdit);
+  courseWorkspace.querySelector("#course-group-form")?.addEventListener("submit", saveCourseGroup);
+  courseWorkspace.querySelector("#course-subgroup-form")?.addEventListener("submit", saveCourseSubgroup);
+  courseWorkspace.querySelector("#course-practice-form")?.addEventListener("submit", saveCoursePractice);
+  courseWorkspace.querySelectorAll("[data-group-open]").forEach((button) => {
+    button.addEventListener("click", () => openGroupWorkspace(button.dataset.groupId));
+  });
+}
+
+function renderCourseDirectory(courses) {
+  if (!courseCatalog) return;
+  const rows = courses.map(
+    (course) => `
+      <tr>
+        <td class="directory-primary">
+          <strong>${escapeHtml(course.name)}</strong>
+          <div class="submission-meta">${escapeHtml(course.term)}</div>
+        </td>
+        <td><strong>${course.members.length}</strong></td>
+        <td><strong>${course.groups.length}</strong></td>
+        <td><strong>${course.subgroups?.length ?? 0}</strong></td>
+        <td><strong>${course.practices.length}</strong></td>
+        <td class="directory-actions">
+          <button type="button" data-course-open data-course-id="${escapeHtml(course.id)}">Editar</button>
+        </td>
+      </tr>
+    `,
+  );
+
+  courseCatalog.innerHTML = rows.length
+    ? `
+      <div class="directory-table-wrap">
+        <table class="grade-table directory-data-table">
+          <thead>
+            <tr>
+              <th>Curso</th>
+              <th>Estudiantes</th>
+              <th>Grupos</th>
+              <th>Subgrupos</th>
+              <th>Practicas</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>${rows.join("")}</tbody>
+        </table>
+      </div>
+    `
+    : `<p class="submission-meta">No hay cursos creados.</p>`;
+
+  courseCatalog.querySelectorAll("[data-course-open]").forEach((button) => {
+    button.addEventListener("click", () => openCourseWorkspace(button.dataset.courseId));
+  });
+}
+
+function renderCourseProfileForm(course) {
+  return `
+    <form id="course-profile-form" class="detail-form detail-form-grid">
+      <input name="id" type="hidden" value="${escapeHtml(course.id)}" />
+      <label>
+        Nombre
+        <input name="name" value="${escapeHtml(course.name)}" required />
+      </label>
+      <label>
+        Periodo
+        <input name="term" value="${escapeHtml(course.term)}" required />
+      </label>
+      <div class="detail-actions">
+        <button type="submit">Guardar cambios</button>
+        <span class="submission-meta">${escapeHtml(state.courseActionStatus)}</span>
+      </div>
+    </form>
+  `;
+}
+
+function renderCourseGroupForm(course) {
+  return `
+    <form id="course-group-form" class="detail-form detail-form-grid">
+      <input name="course_id" type="hidden" value="${escapeHtml(course.id)}" />
+      <label>
+        Nombre
+        <input name="name" required placeholder="Grupo 2" />
+      </label>
+      <label>
+        Mesas
+        <input name="table_count" type="number" min="1" max="24" step="1" value="4" required />
+      </label>
+      <label>
+        Tipo
+        <select name="group_type">
+          <option value="regular" selected>Regular</option>
+          <option value="recuperacion">Recuperacion</option>
+        </select>
+      </label>
+      <div class="detail-actions">
+        <button type="submit">Crear grupo</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderCoursePracticesPanel(course) {
+  const enabled = new Set(course.practices.map((practice) => practice.id));
+  const available = state.practices.filter((practice) => !enabled.has(practice.id));
+  return `
+    <div class="chips">
+      ${course.practices.map((practice) => `<span class="chip">${escapeHtml(practice.name)}</span>`).join("") || `<span class="chip">Sin practicas</span>`}
+    </div>
+    <form id="course-practice-form" class="detail-form compact">
+      <input name="course_id" type="hidden" value="${escapeHtml(course.id)}" />
+      <label>
+        Habilitar practica
+        <select name="practice_id" ${available.length ? "" : "disabled"}>
+          ${
+            available.length
+              ? available.map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`).join("")
+              : `<option value="">Sin practicas disponibles</option>`
+          }
+        </select>
+      </label>
+      <div class="detail-actions">
+        <button type="submit" ${available.length ? "" : "disabled"}>Habilitar</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderCourseGroupsTable(course) {
+  if (course.groups.length === 0) return `<p class="submission-meta">No hay grupos creados.</p>`;
+  const rows = course.groups.map(
+    (group) => `
+      <tr>
+        <td class="directory-primary"><strong>${escapeHtml(group.name)}</strong></td>
+        <td><strong>${group.members.length}</strong></td>
+        <td>
+          <strong>${group.table_count ?? 4}</strong>
+          <div class="submission-meta">${renderGroupType(group.group_type)}</div>
+        </td>
+        <td>
+          <div class="directory-listing">
+            ${group.members.map((member) => `<span class="inline-pill">${escapeHtml(member.display_name)}</span>`).join("") || `<span class="submission-meta">Sin estudiantes</span>`}
+          </div>
+        </td>
+        <td class="directory-actions">
+          <button type="button" data-group-open data-group-id="${escapeHtml(group.id)}">Editar</button>
+        </td>
+      </tr>
+    `,
+  );
+  return `
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead>
+          <tr>
+            <th>Grupo</th>
+            <th>Estudiantes</th>
+            <th>Mesas</th>
+            <th>Integrantes</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderCourseSubgroupsPanel(course) {
+  const subgroups = course.subgroups ?? [];
+  const canCreate = course.groups.length > 0 && course.practices.length > 0;
+  const rows = subgroups.map(
+    (subgroup) => `
+      <tr>
+        <td class="directory-primary">
+          <strong>${escapeHtml(subgroup.name)}</strong>
+        </td>
+        <td>${escapeHtml(subgroup.practice.name)}</td>
+        <td>${escapeHtml(subgroup.group.name)}</td>
+        <td><strong>${subgroup.members.length}</strong></td>
+        <td>
+          <div class="directory-listing">
+            ${subgroup.members.map((member) => `<span class="inline-pill">${escapeHtml(member.display_name)}</span>`).join("") || `<span class="submission-meta">Sin estudiantes</span>`}
+          </div>
+        </td>
+      </tr>
+    `,
+  );
+
+  return `
+    <form id="course-subgroup-form" class="detail-form detail-form-grid">
+      <input name="course_id" type="hidden" value="${escapeHtml(course.id)}" />
+      <label>
+        Practica
+        <select name="practice_id" ${canCreate ? "" : "disabled"}>
+          ${course.practices.map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`).join("") || `<option value="">Sin practicas</option>`}
+        </select>
+      </label>
+      <label>
+        Grupo
+        <select name="group_id" ${canCreate ? "" : "disabled"}>
+          ${course.groups.map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.name)}</option>`).join("") || `<option value="">Sin grupos</option>`}
+        </select>
+      </label>
+      <label>
+        Nombre del subgrupo
+        <input name="name" required ${canCreate ? "" : "disabled"} placeholder="Subgrupo A" />
+      </label>
+      <div class="detail-actions">
+        <button type="submit" ${canCreate ? "" : "disabled"}>Crear subgrupo</button>
+      </div>
+    </form>
+    ${
+      rows.length
+        ? `
+          <div class="directory-table-wrap">
+            <table class="grade-table directory-data-table">
+              <thead>
+                <tr>
+                  <th>Subgrupo</th>
+                  <th>Practica</th>
+                  <th>Grupo</th>
+                  <th>Estudiantes</th>
+                  <th>Integrantes</th>
+                </tr>
+              </thead>
+              <tbody>${rows.join("")}</tbody>
+            </table>
+          </div>
+        `
+        : `<p class="submission-meta">No hay subgrupos creados.</p>`
+    }
+  `;
+}
+
+function openCourseWorkspace(courseId) {
+  state.activeCourseId = courseId;
+  state.courseActionStatus = "";
+  renderCoursesPage();
+  selectView("courses");
+}
+
+function closeCourseWorkspace() {
+  state.activeCourseId = null;
+  state.courseActionStatus = "";
+  renderCoursesPage();
+}
+
+async function saveCourseEdit(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try {
+    state.courseActionStatus = "";
+    await postJson(`/api/academic/courses/${payload.id}`, {
+      name: payload.name,
+      term: payload.term,
+    });
+    state.courseActionStatus = "Cambios guardados";
+    await refreshAcademic("Curso actualizado");
+  } catch (error) {
+    state.courseActionStatus = error.message;
+    renderCoursesPage();
+  }
+}
+
+async function saveCourseGroup(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try {
+    state.courseActionStatus = "";
+    await postJson(`/api/academic/courses/${payload.course_id}/groups`, {
+      name: payload.name,
+      table_count: Number(payload.table_count),
+      group_type: payload.group_type,
+    });
+    state.courseActionStatus = "Grupo creado";
+    await refreshAcademic("Grupo creado");
+  } catch (error) {
+    state.courseActionStatus = error.message;
+    renderCoursesPage();
+  }
+}
+
+async function saveCourseSubgroup(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try {
+    state.courseActionStatus = "";
+    await postJson(`/api/academic/courses/${payload.course_id}/subgroups`, {
+      practice_id: payload.practice_id,
+      group_id: payload.group_id,
+      name: payload.name,
+    });
+    state.courseActionStatus = "Subgrupo creado";
+    await refreshAcademic("Subgrupo creado");
+  } catch (error) {
+    state.courseActionStatus = error.message;
+    renderCoursesPage();
+  }
+}
+
+async function saveCoursePractice(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try {
+    state.courseActionStatus = "";
+    await postJson(`/api/academic/courses/${payload.course_id}/practices`, { practice_id: payload.practice_id });
+    state.courseActionStatus = "Practica habilitada";
+    await refreshAcademic("Practica habilitada");
+  } catch (error) {
+    state.courseActionStatus = error.message;
+    renderCoursesPage();
+  }
+}
+
+function availableCoursesForStudent(studentId) {
+  const currentCourses = new Set(studentCourses(studentId).map((course) => course.id));
+  return state.academic.courses.filter((course) => !currentCourses.has(course.id));
+}
+
+function studentGroups(studentId) {
+  return state.academic.courses.flatMap((course) =>
+    course.groups
+      .filter((group) => group.members.some((member) => member.id === studentId))
+      .map((group) => ({ ...group, courseName: course.name, courseTerm: course.term })),
+  );
+}
+
+function availableGroupsForStudent(studentId) {
+  const currentGroups = new Set(studentGroups(studentId).map((group) => group.id));
+  return studentCourses(studentId).flatMap((course) =>
+    course.groups
+      .filter((group) => !currentGroups.has(group.id))
+      .map((group) => ({ ...group, courseName: course.name, courseTerm: course.term })),
+  );
+}
+
+function studentGradebooks(studentId) {
+  return state.gradebooks
+    .map((book) => ({
+      course: book.course,
+      summary: book.students.find((summary) => summary.student.id === studentId),
+    }))
+    .filter((item) => item.summary);
+}
+
+function studentTotals(studentId) {
+  const gradebooks = studentGradebooks(studentId);
+  if (gradebooks.length === 0) return null;
+  return gradebooks.reduce(
+    (acc, item) => ({
+      points: acc.points + item.summary.total_points,
+      possible: acc.possible + item.summary.total_possible,
+    }),
+    { points: 0, possible: 0 },
+  );
+}
+
+function allStudents() {
+  const direct = state.academic?.students ?? [];
+  if (direct.length > 0) return direct;
+  return (state.academic?.users ?? []).filter((user) => user.role === "estudiante");
+}
+
+function renderUserDetail(user) {
+  return `
+    <form class="detail-form compact" data-user-form="reset">
+      <input name="id" type="hidden" value="${escapeHtml(user.id)}" />
+      <label>
+        Nueva contrasena
+        <input name="password" type="password" required minlength="8" placeholder="Minimo 8 caracteres" />
+      </label>
+      <div class="detail-actions">
+        <button type="submit">Guardar</button>
+        <button type="button" data-user-cancel>Cancelar</button>
+        <span class="submission-meta">${escapeHtml(state.userActionStatus)}</span>
+      </div>
+    </form>
   `;
 }
 
@@ -566,34 +1701,100 @@ function selectedCourse() {
   return state.academic?.courses.find((course) => course.id === courseSelect.value);
 }
 
+function selectedTableAssignment() {
+  const course = selectedCourse();
+  return course?.table_assignments?.find(
+    (assignment) =>
+      assignment.user_id === state.user?.id &&
+      assignment.group_id === groupSelect.value &&
+      assignment.practice_id === practiceSelect.value,
+  );
+}
+
+function renderSubmissionsPage() {
+  const teacher = canReview();
+  submissionsTitle.textContent = teacher ? "Entregas" : "Mis entregas";
+  submissionsSubtitle.textContent = teacher
+    ? "Todas las entregas organizadas por curso y grupo."
+    : "Tus entregas y el estado de correccion.";
+  submissionsListTitle.textContent = teacher ? "Entregas por curso y grupo" : "Mis entregas";
+  submissionForm.classList.toggle("hidden", teacher);
+  latestResult.classList.toggle("hidden", teacher || latestResult.innerHTML.trim() === "");
+  renderSubmissionList();
+}
+
 function renderSubmissionList() {
   if (state.submissions.length === 0) {
     submissionList.innerHTML = `<p class="submission-meta">Todavia no hay entregas.</p>`;
+    submissionDetail.classList.add("hidden");
     return;
   }
 
-  submissionList.innerHTML = state.submissions
-    .map(
-      (item) => `
-        <article class="submission-item ${item.id === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
-          <strong>${escapeHtml(item.student_name)}</strong>
-          <div class="submission-meta">${escapeHtml(item.group_name)} - ${escapeHtml(item.practice_name)}</div>
-          <span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
-        </article>
-      `,
-    )
-    .join("");
+  submissionList.innerHTML = canReview() ? renderTeacherSubmissionGroups() : renderStudentSubmissionRows();
 
   submissionList.querySelectorAll(".submission-item").forEach((item) => {
     item.addEventListener("click", () => loadSubmissionDetail(item.dataset.id));
   });
 }
 
+function renderStudentSubmissionRows() {
+  return state.submissions
+    .map(
+      (item) => `
+        <article class="submission-item ${item.id === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
+          <strong>${escapeHtml(item.practice_name)}</strong>
+          <div class="submission-meta">${escapeHtml(item.course)} - Grupo ${escapeHtml(item.group_name)}</div>
+          <div class="submission-meta">${formatDate(item.submitted_at)}</div>
+          <span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderTeacherSubmissionGroups() {
+  const byCourse = groupBy(state.submissions, (item) => item.course);
+  return Object.entries(byCourse)
+    .map(([course, courseItems]) => {
+      const byGroup = groupBy(courseItems, (item) => item.group_name);
+      return `
+        <section class="submission-group">
+          <h4>${escapeHtml(course)}</h4>
+          ${Object.entries(byGroup)
+            .map(
+              ([group, groupItems]) => `
+                <div class="submission-course-group">
+                  <div class="list-head compact-list-head">
+                    <strong>Grupo ${escapeHtml(group)}</strong>
+                    <span class="submission-meta">${groupItems.length} entregas</span>
+                  </div>
+                  ${groupItems
+                    .map(
+                      (item) => `
+                        <article class="submission-item ${item.id === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
+                          <strong>${escapeHtml(item.student_name)}</strong>
+                          <div class="submission-meta">${escapeHtml(item.practice_name)} - ${formatDate(item.submitted_at)}</div>
+                          <span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
+                        </article>
+                      `,
+                    )
+                    .join("")}
+                </div>
+              `,
+            )
+            .join("")}
+        </section>
+      `;
+    })
+    .join("");
+}
+
 async function loadSubmissionDetail(id) {
   state.selectedId = id;
   renderSubmissionList();
   const submission = await fetchJson(`/api/submissions/${id}`);
-  renderAnalysis(submissionDetail, submission, true);
+  submissionDetail.classList.remove("hidden");
+  renderAnalysis(submissionDetail, submission, canReview());
 }
 
 function renderAnalysis(target, submission, includeReview = false) {
@@ -604,7 +1805,7 @@ function renderAnalysis(target, submission, includeReview = false) {
     <div>
       <h3>${escapeHtml(submission.practice_name)}</h3>
       <p class="submission-meta">
-        ${escapeHtml(submission.student_name)} - ${escapeHtml(submission.group_name)} - ${escapeHtml(submission.course)}
+        ${escapeHtml(submission.student_name)} - Grupo ${escapeHtml(submission.group_name)} - ${escapeHtml(submission.course)}
       </p>
       <span class="status ${escapeHtml(submission.status)}">${escapeHtml(submission.status)}</span>
     </div>
@@ -764,6 +1965,22 @@ function format(value) {
   return Number(value).toLocaleString("es-UY", { maximumSignificantDigits: 5 });
 }
 
+function formatDate(value) {
+  return new Date(value).toLocaleString("es-UY", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function groupBy(items, keyFn) {
+  return items.reduce((groups, item) => {
+    const key = keyFn(item) || "-";
+    groups[key] ??= [];
+    groups[key].push(item);
+    return groups;
+  }, {});
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -771,6 +1988,11 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(String(value));
+  return String(value).replaceAll('"', '\\"');
 }
 
 init();

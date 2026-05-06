@@ -33,9 +33,9 @@
       <div class="topbar-actions">
         <nav class="tabs" aria-label="Vistas">
           <button class="tab active" data-view="submissions">Entregas</button>
-          <button class="tab" data-view="grades">Notas</button>
-          <button class="tab teacher-only" data-view="reviews">Correcciones</button>
           <button class="tab teacher-only" data-view="gradebook">Cargar notas</button>
+          <button class="tab teacher-only" data-view="students">Estudiantes</button>
+          <button class="tab teacher-only" data-view="groups">Grupos</button>
           <button class="tab teacher-only" data-view="courses">Cursos</button>
           <button class="tab teacher-only" data-view="users">Usuarios</button>
           <button class="tab" data-view="account">Cuenta</button>
@@ -50,8 +50,8 @@
     <main>
       <section id="submissions-view" class="view active">
         <div class="section-head">
-          <h2>Cargar medidas</h2>
-          <p>Subi un CSV con encabezados y columnas numericas.</p>
+          <h2 id="submissions-title">Entregas</h2>
+          <p id="submissions-subtitle">Gestion de archivos CSV entregados.</p>
         </div>
 
         <form id="submission-form" class="panel">
@@ -68,6 +68,10 @@
               Practica
               <select name="practice_id" id="practice-select" required></select>
             </label>
+            <label>
+              Mesa
+              <select name="table_number" id="table-select" required></select>
+            </label>
           </div>
 
           <label>
@@ -82,35 +86,18 @@
         </form>
 
         <section id="latest-result" class="panel hidden" aria-live="polite"></section>
-      </section>
 
-      <section id="reviews-view" class="view">
-        <div class="section-head">
-          <h2>Correccion docente</h2>
-          <p>Revisa entregas, advertencias y resultados automaticos.</p>
-        </div>
+        <section class="panel catalog-panel">
+          <div class="list-head">
+            <h3 id="submissions-list-title">Mis entregas</h3>
+            <button id="refresh-submissions" type="button">Actualizar</button>
+          </div>
+          <div id="submission-list" class="submission-list"></div>
+        </section>
 
-        <div class="teacher-grid">
-          <section class="panel">
-            <div class="list-head">
-              <h3>Entregas</h3>
-              <button id="refresh-submissions" type="button">Actualizar</button>
-            </div>
-            <div id="submission-list" class="submission-list"></div>
-          </section>
-
-          <section id="submission-detail" class="panel detail-empty">
-            Selecciona una entrega para ver el detalle.
-          </section>
-        </div>
-      </section>
-
-      <section id="grades-view" class="view">
-        <div class="section-head">
-          <h2>Notas</h2>
-          <p>Consulta de preguntas, informes, parciales y total normalizado.</p>
-        </div>
-        <div id="student-grades" class="gradebook-list"></div>
+        <section id="submission-detail" class="panel detail-empty hidden">
+          Selecciona una entrega para ver el detalle.
+        </section>
       </section>
 
       <section id="gradebook-view" class="view">
@@ -163,92 +150,49 @@
         </section>
       </section>
 
-      <section id="courses-view" class="view">
+      <section id="students-view" class="view">
         <div class="section-head">
-          <h2>Cursos</h2>
-          <p>Administra cursos, inscripciones, grupos y practicas habilitadas.</p>
+          <h2>Estudiantes</h2>
+          <p>Administra cada estudiante desde una ficha unica con datos, cursos, grupos y notas.</p>
         </div>
 
-        <div class="admin-grid courses-grid">
-          <section class="panel">
-            <h3>Nuevo curso</h3>
-            <form id="course-form" class="stack-form">
-              <label>
-                Nombre
-                <input name="name" required placeholder="Fisica Experimental I" />
-              </label>
-              <label>
-                Periodo
-                <input name="term" required placeholder="2026" />
-              </label>
-              <button type="submit">Crear curso</button>
-            </form>
-          </section>
-
-          <section class="panel">
-            <h3>Inscribir estudiante</h3>
-            <form id="course-member-form" class="stack-form">
-              <label>
-                Curso
-                <select name="course_id" id="member-course-select" required></select>
-              </label>
-              <label>
-                Estudiante
-                <select name="user_id" id="course-member-select" required></select>
-              </label>
-              <button type="submit">Inscribir</button>
-            </form>
-          </section>
-
-          <section class="panel">
-            <h3>Nuevo grupo</h3>
-            <form id="group-form" class="stack-form">
-              <label>
-                Curso
-                <select name="course_id" id="admin-course-select" required></select>
-              </label>
-              <label>
-                Nombre
-                <input name="name" required placeholder="Grupo 2" />
-              </label>
-              <button type="submit">Crear grupo</button>
-            </form>
-          </section>
-
-          <section class="panel">
-            <h3>Asignar a grupo</h3>
-            <form id="member-form" class="stack-form">
-              <label>
-                Grupo
-                <select name="group_id" id="admin-group-select" required></select>
-              </label>
-              <label>
-                Estudiante
-                <select name="user_id" id="student-member-select" required></select>
-              </label>
-              <button type="submit">Agregar</button>
-            </form>
-          </section>
-
-          <section class="panel">
-            <h3>Habilitar practica</h3>
-            <form id="course-practice-form" class="stack-form">
-              <label>
-                Curso
-                <select name="course_id" id="practice-course-select" required></select>
-              </label>
-              <label>
-                Practica
-                <select name="practice_id" id="admin-practice-select" required></select>
-              </label>
-              <button type="submit">Habilitar</button>
-            </form>
-          </section>
-        </div>
+        <section id="student-workspace" class="panel hidden"></section>
 
         <section class="panel catalog-panel">
           <div class="list-head">
-            <h3>Catalogo academico</h3>
+            <h3>Directorio de estudiantes</h3>
+          </div>
+          <div id="student-directory" class="directory-list"></div>
+        </section>
+      </section>
+
+      <section id="groups-view" class="view">
+        <div class="section-head">
+          <h2>Grupos</h2>
+          <p>Administra cada grupo desde una ficha con nombre, curso y estudiantes asignados.</p>
+        </div>
+
+        <section id="group-workspace" class="panel hidden"></section>
+
+        <section class="panel catalog-panel">
+          <div class="list-head">
+            <h3>Directorio de grupos</h3>
+          </div>
+          <div id="group-directory" class="directory-list"></div>
+        </section>
+      </section>
+
+      <section id="courses-view" class="view">
+        <div class="section-head">
+          <h2>Cursos</h2>
+          <p>Administra cada curso desde una ficha con grupos, subgrupos y practicas habilitadas.</p>
+        </div>
+
+        <section id="course-workspace" class="panel hidden"></section>
+
+        <section class="panel catalog-panel">
+          <div class="list-head">
+            <h3>Directorio de cursos</h3>
             <span id="admin-status" class="submission-meta"></span>
           </div>
           <div id="course-catalog" class="course-catalog"></div>
@@ -300,23 +244,50 @@
       <section id="account-view" class="view">
         <div class="section-head">
           <h2>Cuenta</h2>
-          <p>Actualiza tu contrasena local.</p>
+          <p>Actualiza tus datos personales y credenciales.</p>
         </div>
 
-        <section class="panel">
-          <form id="password-form" class="inline-form">
-            <label>
-              Actual
-              <input name="current_password" type="password" required autocomplete="current-password" />
-            </label>
-            <label>
-              Nueva
-              <input name="new_password" type="password" required autocomplete="new-password" minlength="8" />
-            </label>
-            <button type="submit">Cambiar contrasena</button>
-            <span id="password-status" class="submission-meta"></span>
-          </form>
-        </section>
+        <div class="workspace-grid">
+          <section class="panel workspace-panel">
+            <h3>Perfil</h3>
+            <form id="account-profile-form" class="detail-form detail-form-grid">
+              <label>
+                Nombre
+                <input name="display_name" id="account-display-name" required />
+              </label>
+              <label>
+                Email
+                <input name="email" id="account-email" type="email" required />
+              </label>
+              <label>
+                Rol
+                <input id="account-role" disabled />
+              </label>
+              <div class="detail-actions">
+                <button type="submit">Guardar cambios</button>
+                <span id="account-status" class="submission-meta"></span>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel workspace-panel">
+            <h3>Seguridad</h3>
+            <form id="password-form" class="detail-form compact">
+              <label>
+                Contrasena actual
+                <input name="current_password" type="password" required autocomplete="current-password" />
+              </label>
+              <label>
+                Nueva contrasena
+                <input name="new_password" type="password" required autocomplete="new-password" minlength="8" />
+              </label>
+              <div class="detail-actions">
+                <button type="submit">Cambiar contrasena</button>
+                <span id="password-status" class="submission-meta"></span>
+              </div>
+            </form>
+          </section>
+        </div>
       </section>
     </main>
     </div>

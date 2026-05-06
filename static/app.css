@@ -123,6 +123,7 @@ main {
   border: 1px solid var(--line);
   border-radius: 8px;
   display: flex;
+  flex-wrap: wrap;
   overflow: hidden;
 }
 
@@ -327,6 +328,11 @@ textarea {
   padding: 14px;
 }
 
+.student-grade-card.highlighted {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
 .student-grade-head {
   align-items: start;
   display: flex;
@@ -358,6 +364,167 @@ textarea {
 
 .catalog-panel {
   margin-top: 18px;
+}
+
+.directory-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.directory-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.workspace-head {
+  align-items: start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.workspace-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1.1fr 1fr;
+  margin-bottom: 14px;
+}
+
+.workspace-panel {
+  padding: 12px;
+}
+
+.group-profile-panel {
+  margin-bottom: 14px;
+}
+
+.compact-metrics {
+  margin: 0;
+  min-width: 320px;
+}
+
+.back-link {
+  background: transparent;
+  color: var(--accent-strong);
+  min-height: auto;
+  padding: 0;
+}
+
+.back-link:hover {
+  filter: none;
+  text-decoration: underline;
+}
+
+.directory-table-wrap {
+  overflow-x: auto;
+}
+
+.directory-data-table {
+  min-width: 980px;
+}
+
+.directory-detail-row {
+  background: #fbfcfe;
+}
+
+.directory-detail-cell {
+  padding: 10px 8px 6px;
+}
+
+.directory-primary strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.directory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 140px;
+}
+
+.directory-listing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stack-list {
+  display: grid;
+  gap: 6px;
+}
+
+.inline-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inline-pill {
+  align-items: center;
+  background: #eef2f7;
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 3px 7px;
+}
+
+.removable-pill button,
+.inline-row button {
+  min-height: auto;
+  padding: 1px 6px;
+}
+
+.grade-summary-line {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.grade-summary-line + .grade-summary-line {
+  margin-top: 6px;
+}
+
+.detail-form {
+  display: grid;
+  gap: 10px;
+}
+
+.detail-form-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.detail-form.compact {
+  grid-template-columns: minmax(240px, 1fr);
+}
+
+.detail-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.detail-form-grid .detail-actions,
+.detail-form.compact .detail-actions {
+  grid-column: 1 / -1;
+}
+
+.status-chip {
+  background: #eef6f5;
+  border-radius: 999px;
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 5px 10px;
+  white-space: nowrap;
 }
 
 .course-catalog {
@@ -394,30 +561,34 @@ textarea {
 }
 
 .user-list {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   margin-top: 14px;
-}
-
-.user-item {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-}
-
-.user-reset {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr auto;
 }
 
 .submission-list {
   display: grid;
   gap: 10px;
   margin-top: 14px;
+}
+
+.submission-group {
+  display: grid;
+  gap: 10px;
+}
+
+.submission-group h4 {
+  margin: 0;
+}
+
+.submission-course-group {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.compact-list-head {
+  margin-top: 0;
 }
 
 .submission-item {
@@ -480,6 +651,10 @@ textarea {
   font-weight: 750;
 }
 
+.metric-text {
+  font-size: 0.98rem;
+}
+
 .warnings {
   border-left: 4px solid var(--warn);
   color: #713f12;
@@ -522,12 +697,27 @@ textarea {
 
   .form-grid,
   .admin-grid,
+  .directory-grid,
   .inline-form,
   .user-create-form,
   .grade-component-form,
   .teacher-grid,
   .review-row {
     grid-template-columns: 1fr;
+  }
+
+  .detail-form-grid,
+  .detail-form.compact,
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-head {
+    flex-direction: column;
+  }
+
+  .compact-metrics {
+    min-width: 0;
   }
 
   .tabs {

@@ -21,21 +21,38 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
+        .route("/auth/profile", post(update_profile))
         .route("/auth/password", post(change_password))
         .route("/users", get(users).post(create_user))
+        .route("/users/{id}", post(update_user))
         .route("/users/{id}/password", post(reset_password))
         .route("/grades", get(grades))
         .route("/grades/components", post(create_grade_component))
         .route("/grades/scores", post(upsert_grade_score))
         .route("/academic/context", get(academic_context))
         .route("/academic/courses", post(create_course))
+        .route("/academic/courses/{id}", post(update_course))
+        .route("/academic/groups/{id}", post(update_group))
         .route("/academic/courses/{id}/groups", post(create_group))
+        .route("/academic/courses/{id}/subgroups", post(create_subgroup))
         .route(
             "/academic/courses/{id}/practices",
             post(enable_course_practice),
         )
         .route("/academic/courses/{id}/members", post(add_course_member))
         .route("/academic/groups/{id}/members", post(add_group_member))
+        .route(
+            "/academic/groups/{id}/members/remove",
+            post(remove_group_member),
+        )
+        .route(
+            "/academic/groups/{id}/practice-table",
+            post(set_practice_table),
+        )
+        .route(
+            "/academic/groups/{group_id}/members/{user_id}/remove",
+            post(remove_group_member_path),
+        )
         .route("/practices", get(practices))
         .route("/submissions", get(submissions).post(create_submission))
         .route("/submissions/{id}", get(submission_detail))
@@ -100,6 +117,29 @@ async fn change_password(
     Ok(Json(Health { status: "ok" }))
 }
 
+async fn update_profile(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(input): Json<db::UpdateUser>,
+) -> Result<Json<db::AuthUser>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    if !is_valid_email(&input.email) || input.display_name.trim().is_empty() {
+        return Err(AppError::bad_request("datos de usuario invalidos"));
+    }
+    let updated = db::update_user(
+        &state.pool,
+        &user.id,
+        db::UpdateUser {
+            email: input.email,
+            display_name: input.display_name,
+            role: user.role,
+        },
+    )
+    .await?
+    .ok_or_else(|| AppError::not_found("usuario no encontrado"))?;
+    Ok(Json(updated))
+}
+
 async fn users(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -136,6 +176,25 @@ async fn reset_password(
         return Err(AppError::not_found("usuario no encontrado"));
     }
     Ok(Json(Health { status: "ok" }))
+}
+
+async fn update_user(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<db::UpdateUser>,
+) -> Result<Json<db::AuthUser>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !is_valid_email(&input.email)
+        || input.display_name.trim().is_empty()
+        || !matches!(input.role.as_str(), "estudiante" | "docente" | "admin")
+    {
+        return Err(AppError::bad_request("datos de usuario invalidos"));
+    }
+    let updated = db::update_user(&state.pool, &id, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("usuario no encontrado"))?;
+    Ok(Json(updated))
 }
 
 async fn grades(
@@ -205,6 +264,22 @@ async fn create_course(
     Ok(Json(db::create_course(&state.pool, input).await?))
 }
 
+async fn update_course(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(course_id): Path<String>,
+    Json(input): Json<db::UpdateCourse>,
+) -> Result<Json<db::Course>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if input.name.trim().is_empty() || input.term.trim().is_empty() {
+        return Err(AppError::bad_request("name and term are required"));
+    }
+    let updated = db::update_course(&state.pool, &course_id, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("curso no encontrado"))?;
+    Ok(Json(updated))
+}
+
 async fn create_group(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -212,11 +287,49 @@ async fn create_group(
     Json(input): Json<db::CreateGroup>,
 ) -> Result<Json<db::LabGroup>, AppError> {
     require_teacher(&state, &headers).await?;
-    if input.name.trim().is_empty() {
-        return Err(AppError::bad_request("name is required"));
+    if input.name.trim().is_empty() || !valid_group_table_count(input.table_count.unwrap_or(4)) {
+        return Err(AppError::bad_request("datos de grupo invalidos"));
     }
     Ok(Json(
         db::create_group(&state.pool, &course_id, input).await?,
+    ))
+}
+
+async fn update_group(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(group_id): Path<String>,
+    Json(input): Json<db::UpdateGroup>,
+) -> Result<Json<db::LabGroup>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if input.name.trim().is_empty() || !valid_group_table_count(input.table_count) {
+        return Err(AppError::bad_request("datos de grupo invalidos"));
+    }
+    let updated = db::update_group(&state.pool, &group_id, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("grupo no encontrado"))?;
+    Ok(Json(updated))
+}
+
+fn valid_group_table_count(value: i64) -> bool {
+    (1..=24).contains(&value)
+}
+
+async fn create_subgroup(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(course_id): Path<String>,
+    Json(input): Json<db::CreateSubgroup>,
+) -> Result<Json<db::PracticeSubgroup>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if input.name.trim().is_empty()
+        || input.practice_id.trim().is_empty()
+        || input.group_id.trim().is_empty()
+    {
+        return Err(AppError::bad_request("datos de subgrupo invalidos"));
+    }
+    Ok(Json(
+        db::create_subgroup(&state.pool, &course_id, input).await?,
     ))
 }
 
@@ -246,6 +359,49 @@ async fn add_course_member(
     Ok(Json(Health { status: "ok" }))
 }
 
+async fn remove_group_member(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(group_id): Path<String>,
+    Json(input): Json<db::AddGroupMember>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let removed = db::remove_group_member(&state.pool, &group_id, &input.user_id).await?;
+    if !removed {
+        return Err(AppError::not_found("miembro de grupo no encontrado"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+async fn remove_group_member_path(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((group_id, user_id)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let removed = db::remove_group_member(&state.pool, &group_id, &user_id).await?;
+    if !removed {
+        return Err(AppError::not_found("miembro de grupo no encontrado"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+async fn set_practice_table(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(group_id): Path<String>,
+    Json(input): Json<db::SetPracticeTable>,
+) -> Result<Json<db::PracticeTableAssignment>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    if input.practice_id.trim().is_empty() || !valid_group_table_count(input.table_number) {
+        return Err(AppError::bad_request("datos de mesa invalidos"));
+    }
+    let assignment = db::set_practice_table_assignment(&state.pool, &group_id, &user.id, input)
+        .await?
+        .ok_or_else(|| AppError::bad_request("mesa no disponible para este grupo"))?;
+    Ok(Json(assignment))
+}
+
 async fn enable_course_practice(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -261,8 +417,10 @@ async fn submissions(
     State(state): State<SharedState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<db::SubmissionListItem>>, AppError> {
-    require_teacher(&state, &headers).await?;
-    Ok(Json(db::submission_list(&state.pool).await?))
+    let user = current_user(&state, &headers).await?;
+    Ok(Json(
+        db::submission_list_for_user(&state.pool, &user).await?,
+    ))
 }
 
 async fn submission_detail(
@@ -270,7 +428,13 @@ async fn submission_detail(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<db::SubmissionDetail>, AppError> {
-    require_teacher(&state, &headers).await?;
+    let user = current_user(&state, &headers).await?;
+    if !matches!(user.role.as_str(), "docente" | "admin") {
+        let owner = db::submission_owner_id(&state.pool, &id).await?;
+        if owner.as_deref() != Some(user.id.as_str()) {
+            return Err(AppError::forbidden("no tenes acceso a esta entrega"));
+        }
+    }
     let submission = db::submission_detail(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("submission not found"))?;
