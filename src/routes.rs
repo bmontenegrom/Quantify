@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 type SharedState = Arc<AppState>;
 
+/// Construye el router de la API bajo `/api`, registrando todas las rutas y el estado compartido.
 pub fn api_router(state: SharedState) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -65,10 +66,12 @@ struct Health {
     status: &'static str,
 }
 
+/// `GET /api/health`: chequeo de vida del servicio; siempre responde `{"status":"ok"}`.
 async fn health() -> Json<Health> {
     Json(Health { status: "ok" })
 }
 
+/// `POST /api/auth/login`: valida credenciales y, si son correctas, setea la cookie de sesión.
 async fn login(
     State(state): State<SharedState>,
     Json(request): Json<db::LoginRequest>,
@@ -82,6 +85,7 @@ async fn login(
     Ok((headers, Json(db::LoginResponse { user })))
 }
 
+/// `POST /api/auth/logout`: elimina la sesión actual y limpia la cookie.
 async fn logout(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -95,6 +99,7 @@ async fn logout(
     Ok((response_headers, Json(Health { status: "ok" })))
 }
 
+/// `GET /api/auth/me`: devuelve el usuario autenticado según la cookie de sesión.
 async fn me(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -103,6 +108,7 @@ async fn me(
     Ok(Json(db::LoginResponse { user }))
 }
 
+/// `POST /api/auth/password`: cambia la contraseña del usuario actual validando la actual.
 async fn change_password(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -117,6 +123,7 @@ async fn change_password(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `POST /api/auth/profile`: actualiza nombre y email del propio usuario (sin cambiar el rol).
 async fn update_profile(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -140,6 +147,7 @@ async fn update_profile(
     Ok(Json(updated))
 }
 
+/// `GET /api/users`: lista de usuarios (solo docente/admin).
 async fn users(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -148,6 +156,7 @@ async fn users(
     Ok(Json(db::users(&state.pool).await?))
 }
 
+/// `POST /api/users`: crea un usuario (solo docente/admin) validando email, rol y contraseña.
 async fn create_user(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -164,6 +173,7 @@ async fn create_user(
     Ok(Json(db::create_user(&state.pool, input).await?))
 }
 
+/// `POST /api/users/{id}/password`: restablece la contraseña de un usuario (solo docente/admin).
 async fn reset_password(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -178,6 +188,7 @@ async fn reset_password(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `POST /api/users/{id}`: actualiza email, nombre y rol de un usuario (solo docente/admin).
 async fn update_user(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -197,6 +208,7 @@ async fn update_user(
     Ok(Json(updated))
 }
 
+/// `GET /api/grades`: libreta de calificaciones según el rol del usuario autenticado.
 async fn grades(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -205,6 +217,7 @@ async fn grades(
     Ok(Json(db::gradebook_for_user(&state.pool, &user).await?))
 }
 
+/// `POST /api/grades/components`: crea un componente evaluable (solo docente/admin), validando tipo y puntajes.
 async fn create_grade_component(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -221,6 +234,7 @@ async fn create_grade_component(
     Ok(Json(db::create_grade_component(&state.pool, input).await?))
 }
 
+/// `POST /api/grades/scores`: carga o actualiza el puntaje de un estudiante (solo docente/admin).
 async fn upsert_grade_score(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -236,6 +250,7 @@ async fn upsert_grade_score(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `GET /api/practices`: catálogo de prácticas (requiere sesión válida).
 async fn practices(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -244,6 +259,7 @@ async fn practices(
     Ok(Json(db::practices(&state.pool).await?))
 }
 
+/// `GET /api/academic/context`: contexto académico (cursos/grupos/prácticas) según el rol.
 async fn academic_context(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -252,6 +268,7 @@ async fn academic_context(
     Ok(Json(db::academic_context(&state.pool, &user).await?))
 }
 
+/// `POST /api/academic/courses`: crea un curso (solo docente/admin).
 async fn create_course(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -264,6 +281,7 @@ async fn create_course(
     Ok(Json(db::create_course(&state.pool, input).await?))
 }
 
+/// `POST /api/academic/courses/{id}`: actualiza un curso (solo docente/admin).
 async fn update_course(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -280,6 +298,7 @@ async fn update_course(
     Ok(Json(updated))
 }
 
+/// `POST /api/academic/courses/{id}/groups`: crea un grupo en el curso (solo docente/admin).
 async fn create_group(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -295,6 +314,7 @@ async fn create_group(
     ))
 }
 
+/// `POST /api/academic/groups/{id}`: actualiza un grupo (solo docente/admin).
 async fn update_group(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -311,10 +331,12 @@ async fn update_group(
     Ok(Json(updated))
 }
 
+/// Valida que la cantidad de mesas esté en el rango permitido (1..=24).
 fn valid_group_table_count(value: i64) -> bool {
     (1..=24).contains(&value)
 }
 
+/// `POST /api/academic/courses/{id}/subgroups`: crea un subgrupo de práctica (solo docente/admin).
 async fn create_subgroup(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -333,6 +355,7 @@ async fn create_subgroup(
     ))
 }
 
+/// `POST /api/academic/groups/{id}/members`: agrega un estudiante a un grupo (solo docente/admin).
 async fn add_group_member(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -346,6 +369,7 @@ async fn add_group_member(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `POST /api/academic/courses/{id}/members`: inscribe un estudiante en un curso (solo docente/admin).
 async fn add_course_member(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -359,6 +383,7 @@ async fn add_course_member(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `POST /api/academic/groups/{id}/members/remove`: quita un estudiante de un grupo (body con `user_id`).
 async fn remove_group_member(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -373,6 +398,7 @@ async fn remove_group_member(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `POST /api/academic/groups/{group_id}/members/{user_id}/remove`: variante que toma ambos ids en la ruta.
 async fn remove_group_member_path(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -386,6 +412,7 @@ async fn remove_group_member_path(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `POST /api/academic/groups/{id}/practice-table`: el usuario elige su mesa para una práctica del grupo.
 async fn set_practice_table(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -402,6 +429,7 @@ async fn set_practice_table(
     Ok(Json(assignment))
 }
 
+/// `POST /api/academic/courses/{id}/practices`: habilita una práctica en el curso (solo docente/admin).
 async fn enable_course_practice(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -413,6 +441,7 @@ async fn enable_course_practice(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `GET /api/submissions`: lista de entregas visibles para el usuario actual.
 async fn submissions(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -423,6 +452,7 @@ async fn submissions(
     ))
 }
 
+/// `GET /api/submissions/{id}`: detalle de una entrega; un estudiante solo puede ver las propias.
 async fn submission_detail(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -441,6 +471,8 @@ async fn submission_detail(
     Ok(Json(submission))
 }
 
+/// `POST /api/submissions`: recibe un multipart (curso/grupo/práctica + CSV), analiza el CSV,
+/// valida permisos y crea la entrega.
 async fn create_submission(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -503,6 +535,7 @@ async fn create_submission(
     Ok(Json(created))
 }
 
+/// `POST /api/submissions/{id}/review`: registra la revisión docente (estado/comentario/nota).
 async fn review_submission(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -525,6 +558,7 @@ async fn review_submission(
     Ok(Json(updated))
 }
 
+/// Lee un campo de texto de un formulario multipart, devolviendo error si no es texto válido.
 async fn read_text(field: axum::extract::multipart::Field<'_>) -> Result<String, AppError> {
     field
         .text()
@@ -532,6 +566,7 @@ async fn read_text(field: axum::extract::multipart::Field<'_>) -> Result<String,
         .map_err(|_| AppError::bad_request("invalid text field"))
 }
 
+/// Exige que un campo opcional esté presente y no vacío; si falta, devuelve 400 con su nombre.
 fn required(value: Option<String>, name: &str) -> Result<String, AppError> {
     let value = value.ok_or_else(|| AppError::bad_request(format!("{name} is required")))?;
     if value.trim().is_empty() {
@@ -540,6 +575,7 @@ fn required(value: Option<String>, name: &str) -> Result<String, AppError> {
     Ok(value)
 }
 
+/// Valida la longitud mínima de una contraseña (8 caracteres); devuelve 400 si no cumple.
 fn validate_password(password: &str) -> Result<(), AppError> {
     if password.len() < 8 {
         return Err(AppError::bad_request(
@@ -549,6 +585,7 @@ fn validate_password(password: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Validación mínima de email: tiene `@`, parte local no vacía y dominio con punto interno.
 fn is_valid_email(email: &str) -> bool {
     let email = email.trim();
     let Some((local, domain)) = email.split_once('@') else {
@@ -557,6 +594,7 @@ fn is_valid_email(email: &str) -> bool {
     !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
 }
 
+/// Resuelve el usuario autenticado a partir de la cookie de sesión; error 401 si no hay sesión válida.
 async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::AuthUser, AppError> {
     let token = session_token(headers).ok_or_else(|| AppError::unauthorized("login requerido"))?;
     db::user_by_session(&state.pool, &token)
@@ -564,6 +602,7 @@ async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::Au
         .ok_or_else(|| AppError::unauthorized("sesion invalida o vencida"))
 }
 
+/// Igual que `current_user` pero exige rol docente o admin; error 403 en caso contrario.
 async fn require_teacher(
     state: &SharedState,
     headers: &HeaderMap,
@@ -576,6 +615,7 @@ async fn require_teacher(
     }
 }
 
+/// Extrae el token de la cookie `quantify_session` de los headers, si está presente.
 fn session_token(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     cookie_header
@@ -584,6 +624,7 @@ fn session_token(headers: &HeaderMap) -> Option<String> {
         .find_map(|(name, value)| (name == "quantify_session").then(|| value.to_string()))
 }
 
+/// Construye el header `Set-Cookie` de sesión (HttpOnly, SameSite=Lax) con el token y su vigencia.
 fn session_cookie(token: &str, max_age_seconds: i64) -> HeaderValue {
     let value = format!(
         "quantify_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_seconds}"

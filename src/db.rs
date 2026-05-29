@@ -343,6 +343,9 @@ pub struct ReviewSubmission {
     pub score: Option<f64>,
 }
 
+/// Crea las tablas si no existen y aplica las migraciones idempotentes de columnas.
+/// Es seguro ejecutarla en cada arranque: usa `CREATE TABLE IF NOT EXISTS` y
+/// `add_column_if_missing`, por lo que no destruye datos existentes.
 pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
@@ -526,6 +529,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "submissions", "course_id", "TEXT").await?;
     add_column_if_missing(pool, "submissions", "group_id", "TEXT").await?;
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
+    add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
 
     sqlx::query(
         r#"
@@ -581,6 +585,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Agrega `column` (con la `definition` dada) a `table` solo si todavía no existe,
+/// inspeccionando `PRAGMA table_info`. Permite evolucionar el esquema sin migraciones destructivas.
 async fn add_column_if_missing(
     pool: &SqlitePool,
     table: &str,
@@ -599,6 +605,8 @@ async fn add_column_if_missing(
     Ok(())
 }
 
+/// Inserta los usuarios iniciales de desarrollo (admin, docente, estudiante) si no existen.
+/// Las contraseñas salen de las variables `SEED_*_PASSWORD` o usan valores por defecto.
 pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     let users = [
         (
@@ -649,6 +657,8 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Valida credenciales (email o username + contraseña) y, si son correctas, crea una
+/// sesión de 12 h. Devuelve `Some((token, usuario))` o `None` si no coinciden.
 pub async fn login(
     pool: &SqlitePool,
     request: LoginRequest,
@@ -708,6 +718,8 @@ pub async fn login(
     )))
 }
 
+/// Resuelve el usuario asociado a un token de sesión vigente (no vencido).
+/// Devuelve `None` si el token no existe o ya expiró.
 pub async fn user_by_session(pool: &SqlitePool, token: &str) -> anyhow::Result<Option<AuthUser>> {
     let user = sqlx::query_as::<_, AuthUser>(
         r#"
@@ -725,6 +737,7 @@ pub async fn user_by_session(pool: &SqlitePool, token: &str) -> anyhow::Result<O
     Ok(user)
 }
 
+/// Elimina la sesión correspondiente al token (cierre de sesión). Es idempotente.
 pub async fn logout(pool: &SqlitePool, token: &str) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM sessions WHERE token = ?1")
         .bind(token)
@@ -733,6 +746,7 @@ pub async fn logout(pool: &SqlitePool, token: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Lista todos los usuarios ordenados por rol y nombre.
 pub async fn users(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     Ok(sqlx::query_as::<_, AuthUser>(
         "SELECT id, username, email, display_name, role FROM users ORDER BY role, display_name",
@@ -741,6 +755,7 @@ pub async fn users(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     .await?)
 }
 
+/// Crea un usuario nuevo (email normalizado a minúsculas, contraseña hasheada) y lo devuelve.
 pub async fn create_user(pool: &SqlitePool, input: CreateUser) -> anyhow::Result<AuthUser> {
     let id = Uuid::new_v4().to_string();
     let email = input.email.trim().to_lowercase();
@@ -768,6 +783,8 @@ pub async fn create_user(pool: &SqlitePool, input: CreateUser) -> anyhow::Result
     .await?)
 }
 
+/// Restablece (sobrescribe) la contraseña de un usuario por id, como acción docente/admin.
+/// Devuelve `true` si el usuario existía y se actualizó.
 pub async fn reset_password(
     pool: &SqlitePool,
     user_id: &str,
@@ -781,6 +798,7 @@ pub async fn reset_password(
     Ok(result.rows_affected() > 0)
 }
 
+/// Actualiza email (= username), nombre y rol de un usuario. Devuelve `None` si no existe.
 pub async fn update_user(
     pool: &SqlitePool,
     user_id: &str,
@@ -821,6 +839,8 @@ pub async fn update_user(
     ))
 }
 
+/// Cambia la contraseña del propio usuario validando la actual. Si tiene éxito invalida
+/// todas sus sesiones. Devuelve `false` si el usuario no existe o la contraseña actual no coincide.
 pub async fn change_password(
     pool: &SqlitePool,
     user_id: &str,
@@ -860,37 +880,43 @@ pub async fn change_password(
 }
 
 pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
+    // Practicas reales del primer bloque de Fisica 103.
     let practices = [
         (
-            "pendulo",
-            "Pendulo simple",
-            "Medicion de periodos y estimacion de g mediante ajuste lineal.",
+            "p1-estadistica",
+            "Tratamiento Estadistico de Datos",
+            "Medidas directas con replicas e instrumentos, incertidumbres tipo A y B, y determinacion indirecta por propagacion de varianzas.",
+            "estadistico",
         ),
         (
-            "hooke",
-            "Ley de Hooke",
-            "Relacion entre fuerza aplicada y elongacion del resorte.",
+            "p2-corriente-continua",
+            "Circuitos de Corriente Continua",
+            "Medidas de voltaje y corriente con tester en distintas escalas y ajuste lineal.",
+            "regresion_lineal",
         ),
         (
-            "caida-libre",
-            "Caida libre",
-            "Analisis de posicion, velocidad y aceleracion a partir de mediciones.",
+            "p3-relajacion",
+            "Relajacion Exponencial",
+            "Descarga V(t)=V0*exp(-t/tau); linealizacion y ajuste para obtener tau con su incertidumbre.",
+            "relajacion_exponencial",
         ),
     ];
 
-    for (id, name, description) in practices {
+    for (id, name, description, analysis_kind) in practices {
         sqlx::query(
             r#"
-            INSERT INTO practices (id, name, description)
-            VALUES (?1, ?2, ?3)
+            INSERT INTO practices (id, name, description, analysis_kind)
+            VALUES (?1, ?2, ?3, ?4)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
-                description = excluded.description
+                description = excluded.description,
+                analysis_kind = excluded.analysis_kind
             "#,
         )
         .bind(id)
         .bind(name)
         .bind(description)
+        .bind(analysis_kind)
         .execute(pool)
         .await?;
     }
@@ -898,6 +924,8 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Asegura que `lab_groups` tenga las columnas `table_count` y `group_type`
+/// (migración para bases creadas antes de introducir mesas y tipo de grupo).
 async fn ensure_lab_group_columns(pool: &SqlitePool) -> anyhow::Result<()> {
     let rows = sqlx::query("PRAGMA table_info(lab_groups)")
         .fetch_all(pool)
@@ -922,6 +950,8 @@ async fn ensure_lab_group_columns(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Crea el curso, grupo y estudiante de prueba, lo inscribe y habilita las prácticas P1/P2/P3.
+/// Idempotente vía `ON CONFLICT DO NOTHING`.
 pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
     let course_id = "fisica-experimental-i-2026";
     let group_id = "fisica-exp-i-grupo-1";
@@ -977,7 +1007,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
-    for practice in ["pendulo", "hooke", "caida-libre"] {
+    for practice in ["p1-estadistica", "p2-corriente-continua", "p3-relajacion"] {
         sqlx::query(
             r#"
             INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -995,6 +1025,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Lista el catálogo completo de prácticas ordenado por nombre.
 pub async fn practices(pool: &SqlitePool) -> anyhow::Result<Vec<Practice>> {
     let rows =
         sqlx::query_as::<_, Practice>("SELECT id, name, description FROM practices ORDER BY name")
@@ -1003,6 +1034,7 @@ pub async fn practices(pool: &SqlitePool) -> anyhow::Result<Vec<Practice>> {
     Ok(rows)
 }
 
+/// Lista los usuarios con rol `estudiante`, ordenados por nombre.
 pub async fn students(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     Ok(sqlx::query_as::<_, AuthUser>(
         "SELECT id, username, email, display_name, role FROM users WHERE role = 'estudiante' ORDER BY display_name",
@@ -1011,6 +1043,8 @@ pub async fn students(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     .await?)
 }
 
+/// Arma el contexto académico que ve un usuario: docentes/admin ven todos los cursos,
+/// estudiantes solo los suyos. Incluye prácticas y, para docentes, listas de estudiantes y usuarios.
 pub async fn academic_context(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -1037,6 +1071,7 @@ pub async fn academic_context(
     })
 }
 
+/// Crea un curso activo (nombre + período) y lo devuelve.
 pub async fn create_course(pool: &SqlitePool, input: CreateCourse) -> anyhow::Result<Course> {
     let id = Uuid::new_v4().to_string();
     sqlx::query(
@@ -1060,6 +1095,7 @@ pub async fn create_course(pool: &SqlitePool, input: CreateCourse) -> anyhow::Re
     )
 }
 
+/// Actualiza nombre y período de un curso. Devuelve `None` si el curso no existe.
 pub async fn update_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -1091,6 +1127,8 @@ pub async fn update_course(
     ))
 }
 
+/// Crea un grupo de laboratorio en un curso. `table_count` se acota a 1..=24 y
+/// `group_type` se normaliza a `regular`/`recuperacion`.
 pub async fn create_group(
     pool: &SqlitePool,
     course_id: &str,
@@ -1122,6 +1160,7 @@ pub async fn create_group(
     .await?)
 }
 
+/// Normaliza el tipo de grupo a uno de los valores válidos: `recuperacion` o `regular` (por defecto).
 fn normalize_group_type(value: Option<&str>) -> &'static str {
     match value.unwrap_or("regular").trim() {
         "recuperacion" => "recuperacion",
@@ -1129,6 +1168,7 @@ fn normalize_group_type(value: Option<&str>) -> &'static str {
     }
 }
 
+/// Actualiza nombre, cantidad de mesas y tipo de un grupo. Devuelve `None` si no existe.
 pub async fn update_group(
     pool: &SqlitePool,
     group_id: &str,
@@ -1175,6 +1215,7 @@ pub async fn update_group(
     ))
 }
 
+/// Crea un subgrupo de práctica (combinación curso/práctica/grupo + nombre) y lo devuelve.
 pub async fn create_subgroup(
     pool: &SqlitePool,
     course_id: &str,
@@ -1208,6 +1249,8 @@ pub async fn create_subgroup(
     .await?)
 }
 
+/// Inscribe a un usuario en un curso (si no lo estaba) y lo agrega al grupo `General`
+/// del curso, creándolo si hace falta. Idempotente.
 pub async fn enroll_course_member(
     pool: &SqlitePool,
     course_id: &str,
@@ -1251,6 +1294,7 @@ pub async fn enroll_course_member(
     Ok(())
 }
 
+/// Devuelve el id del grupo `General` del curso, creándolo si todavía no existe.
 async fn ensure_default_group(pool: &SqlitePool, course_id: &str) -> anyhow::Result<String> {
     let existing = sqlx::query_as::<_, LabGroup>(
         r#"
@@ -1281,6 +1325,7 @@ async fn ensure_default_group(pool: &SqlitePool, course_id: &str) -> anyhow::Res
     Ok(created.id)
 }
 
+/// Agrega un estudiante a un grupo. Devuelve `None` si el usuario no existe o no es estudiante.
 pub async fn add_group_member(
     pool: &SqlitePool,
     group_id: &str,
@@ -1313,6 +1358,7 @@ pub async fn add_group_member(
     Ok(Some(()))
 }
 
+/// Quita a un estudiante de un grupo. Devuelve `true` si había una membresía y se eliminó.
 pub async fn remove_group_member(
     pool: &SqlitePool,
     group_id: &str,
@@ -1332,6 +1378,9 @@ pub async fn remove_group_member(
     Ok(result.rows_affected() > 0)
 }
 
+/// Asigna (o reasigna) la mesa de trabajo de un estudiante para una práctica en un grupo.
+/// Valida que la mesa esté en rango y que el estudiante pertenezca al grupo y la práctica
+/// esté habilitada en el curso; devuelve `None` si algo no aplica.
 pub async fn set_practice_table_assignment(
     pool: &SqlitePool,
     group_id: &str,
@@ -1409,6 +1458,8 @@ pub async fn set_practice_table_assignment(
     ))
 }
 
+/// Inscribe a un estudiante en un curso (vía `enroll_course_member`).
+/// Devuelve `None` si el usuario no existe o no es estudiante.
 pub async fn add_course_member(
     pool: &SqlitePool,
     course_id: &str,
@@ -1429,6 +1480,7 @@ pub async fn add_course_member(
     Ok(Some(()))
 }
 
+/// Habilita una práctica en un curso. Idempotente (`ON CONFLICT DO NOTHING`).
 pub async fn enable_course_practice(
     pool: &SqlitePool,
     course_id: &str,
@@ -1449,6 +1501,8 @@ pub async fn enable_course_practice(
     Ok(())
 }
 
+/// Indica si un usuario puede entregar en (curso, grupo, práctica). Docentes/admin siempre
+/// pueden; un estudiante puede solo si está inscripto, pertenece al grupo y la práctica está habilitada.
 pub async fn user_can_submit(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -1484,6 +1538,8 @@ pub async fn user_can_submit(
     Ok(allowed.is_some())
 }
 
+/// Crea un componente evaluable (pregunta/informe/parcial) en un curso, asignándole la
+/// siguiente posición disponible, y lo devuelve.
 pub async fn create_grade_component(
     pool: &SqlitePool,
     input: CreateGradeComponent,
@@ -1527,6 +1583,8 @@ pub async fn create_grade_component(
     .await?)
 }
 
+/// Inserta o actualiza el puntaje crudo de un estudiante en un componente.
+/// Devuelve error si el componente no existe o si el puntaje supera el máximo del componente.
 pub async fn upsert_grade_score(pool: &SqlitePool, input: UpsertGradeScore) -> anyhow::Result<()> {
     let component: Option<(f64,)> =
         sqlx::query_as("SELECT max_points FROM grade_components WHERE id = ?1")
@@ -1561,6 +1619,8 @@ pub async fn upsert_grade_score(pool: &SqlitePool, input: UpsertGradeScore) -> a
     Ok(())
 }
 
+/// Construye la libreta de calificaciones por curso. Docentes/admin ven todos los cursos y
+/// todos los estudiantes; un estudiante ve solo sus cursos activos y su propio resumen.
 pub async fn gradebook_for_user(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -1611,6 +1671,7 @@ pub async fn gradebook_for_user(
     Ok(gradebooks)
 }
 
+/// Lista los componentes evaluables de un curso, ordenados por posición y nombre.
 async fn grade_components(
     pool: &SqlitePool,
     course_id: &str,
@@ -1628,6 +1689,7 @@ async fn grade_components(
     .await?)
 }
 
+/// Lista los estudiantes inscriptos (vía `course_members`) en un curso, sin duplicados.
 async fn students_for_course(pool: &SqlitePool, course_id: &str) -> anyhow::Result<Vec<AuthUser>> {
     Ok(sqlx::query_as::<_, AuthUser>(
         r#"
@@ -1643,6 +1705,8 @@ async fn students_for_course(pool: &SqlitePool, course_id: &str) -> anyhow::Resu
     .await?)
 }
 
+/// Calcula el resumen de notas de un estudiante: normaliza cada puntaje
+/// (`crudo/sobre*valor`), agrega subtotales por tipo y el total normalizado.
 async fn student_grade_summary(
     pool: &SqlitePool,
     student: AuthUser,
@@ -1715,6 +1779,7 @@ async fn student_grade_summary(
     })
 }
 
+/// Resúmenes de todos los cursos (vista docente/admin), ordenados por período y nombre.
 async fn all_course_summaries(pool: &SqlitePool) -> anyhow::Result<Vec<CourseSummary>> {
     let courses = sqlx::query_as::<_, Course>(
         "SELECT id, name, term, active FROM courses ORDER BY term DESC, name",
@@ -1724,6 +1789,7 @@ async fn all_course_summaries(pool: &SqlitePool) -> anyhow::Result<Vec<CourseSum
     course_summaries(pool, courses).await
 }
 
+/// Resúmenes de los cursos activos en los que está inscripto un estudiante.
 async fn student_course_summaries(
     pool: &SqlitePool,
     user_id: &str,
@@ -1743,6 +1809,7 @@ async fn student_course_summaries(
     course_summaries(pool, courses).await
 }
 
+/// Enriquece una lista de cursos con sus miembros, grupos, prácticas, subgrupos y mesas.
 async fn course_summaries(
     pool: &SqlitePool,
     courses: Vec<Course>,
@@ -1769,6 +1836,7 @@ async fn course_summaries(
     Ok(summaries)
 }
 
+/// Lista los estudiantes miembros de un curso (para el resumen de curso).
 async fn course_members_for_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -1787,6 +1855,7 @@ async fn course_members_for_course(
     .await?)
 }
 
+/// Lista los grupos de un curso, cada uno con sus estudiantes miembros.
 async fn groups_for_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -1825,6 +1894,7 @@ async fn groups_for_course(
     Ok(summaries)
 }
 
+/// Lista los subgrupos de práctica de un curso, resolviendo práctica, grupo y miembros de cada uno.
 async fn subgroups_for_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -1901,6 +1971,7 @@ async fn subgroups_for_course(
     Ok(summaries)
 }
 
+/// Lista las asignaciones de mesa por práctica/grupo/estudiante de un curso.
 async fn table_assignments_for_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -1918,6 +1989,7 @@ async fn table_assignments_for_course(
     .await?)
 }
 
+/// Lista las prácticas habilitadas en un curso, ordenadas por nombre.
 async fn practices_for_course(pool: &SqlitePool, course_id: &str) -> anyhow::Result<Vec<Practice>> {
     Ok(sqlx::query_as::<_, Practice>(
         r#"
@@ -1933,6 +2005,8 @@ async fn practices_for_course(pool: &SqlitePool, course_id: &str) -> anyhow::Res
     .await?)
 }
 
+/// Persiste una entrega: escribe el CSV en `upload_dir`, serializa el análisis y guarda
+/// la fila resolviendo nombres denormalizados (estudiante, grupo, curso). Devuelve el detalle creado.
 pub async fn create_submission(
     pool: &SqlitePool,
     upload_dir: &std::path::Path,
@@ -1977,6 +2051,7 @@ pub async fn create_submission(
         .ok_or_else(|| anyhow::anyhow!("created submission not found"))
 }
 
+/// Lista entregas: docentes/admin ven todas; un estudiante ve solo las propias.
 pub async fn submission_list_for_user(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -2019,6 +2094,7 @@ pub async fn submission_list_for_user(
     Ok(rows)
 }
 
+/// Devuelve el id del usuario que realizó una entrega (para control de acceso), o `None`.
 pub async fn submission_owner_id(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<String>> {
     let owner: Option<(Option<String>,)> =
         sqlx::query_as("SELECT submitted_by_user_id FROM submissions WHERE id = ?1")
@@ -2028,6 +2104,8 @@ pub async fn submission_owner_id(pool: &SqlitePool, id: &str) -> anyhow::Result<
     Ok(owner.and_then(|(user_id,)| user_id))
 }
 
+/// Recupera el detalle completo de una entrega (incluye el análisis deserializado).
+/// Devuelve `None` si no existe.
 pub async fn submission_detail(
     pool: &SqlitePool,
     id: &str,
@@ -2079,6 +2157,8 @@ pub async fn submission_detail(
     .transpose()
 }
 
+/// Registra la revisión docente de una entrega (estado, comentario, nota y fecha) y
+/// devuelve el detalle actualizado.
 pub async fn update_review(
     pool: &SqlitePool,
     id: &str,
@@ -2105,11 +2185,13 @@ pub async fn update_review(
     submission_detail(pool, id).await
 }
 
+/// Genera el hash almacenable de una contraseña con un salt aleatorio, en formato `salt:digest`.
 fn hash_password(password: &str) -> String {
     let salt = Uuid::new_v4().to_string();
     format!("{salt}:{}", digest_password(&salt, password))
 }
 
+/// Verifica una contraseña contra un hash `salt:digest` recalculando el digest con el salt.
 fn verify_password(password: &str, password_hash: &str) -> bool {
     let Some((salt, expected)) = password_hash.split_once(':') else {
         return false;
@@ -2117,6 +2199,7 @@ fn verify_password(password: &str, password_hash: &str) -> bool {
     digest_password(salt, password) == expected
 }
 
+/// Calcula el digest SHA-256 hexadecimal de `salt:password`.
 fn digest_password(salt: &str, password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(salt.as_bytes());
@@ -2125,10 +2208,595 @@ fn digest_password(salt: &str, password: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Colapsa a `0.0` los valores con magnitud despreciable (< 1e-9) para evitar mostrar
+/// "ceros sucios" por error de punto flotante.
 fn clean_zero(value: f64) -> f64 {
     if value.abs() < 1e-9 {
         0.0
     } else {
         value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+    use tempfile::TempDir;
+
+    /// Crea un pool sobre una base SQLite temporal con el esquema ya migrado.
+    /// Devuelve también el `TempDir` para mantenerlo vivo mientras dure el test.
+    async fn pool() -> (SqlitePool, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let url = format!("sqlite:{}", db_path.to_string_lossy());
+        let opts = SqliteConnectOptions::from_str(&url)
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        migrate(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    /// Igual que `pool` pero con las semillas aplicadas (prácticas, usuarios y curso de prueba).
+    async fn seeded() -> (SqlitePool, TempDir) {
+        let (pool, dir) = pool().await;
+        seed_practices(&pool).await.unwrap();
+        seed_users(&pool).await.unwrap();
+        seed_academic(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    /// Busca un usuario sembrado por email.
+    async fn find_user(pool: &SqlitePool, email: &str) -> AuthUser {
+        users(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == email)
+            .unwrap()
+    }
+
+    const TEACHER: &str = "docente@quantify.local";
+    const STUDENT: &str = "estudiante@quantify.local";
+    const COURSE: &str = "fisica-experimental-i-2026";
+    const GROUP: &str = "fisica-exp-i-grupo-1";
+
+    #[tokio::test]
+    async fn migrate_is_idempotent() {
+        let (pool, _dir) = pool().await;
+        // Volver a migrar no debe fallar (cubre add_column_if_missing y ensure_lab_group_columns).
+        migrate(&pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn seed_users_creates_three_and_is_idempotent() {
+        let (pool, _dir) = pool().await;
+        seed_users(&pool).await.unwrap();
+        seed_users(&pool).await.unwrap();
+        assert_eq!(users(&pool).await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn seed_practices_loads_p1_p2_p3() {
+        let (pool, _dir) = pool().await;
+        seed_practices(&pool).await.unwrap();
+        let ids: Vec<String> = practices(&pool).await.unwrap().into_iter().map(|p| p.id).collect();
+        assert!(ids.contains(&"p1-estadistica".to_string()));
+        assert!(ids.contains(&"p2-corriente-continua".to_string()));
+        assert!(ids.contains(&"p3-relajacion".to_string()));
+    }
+
+    #[tokio::test]
+    async fn seed_academic_enrolls_student_and_enables_practices() {
+        let (pool, _dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+        assert!(user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
+            .await
+            .unwrap());
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn login_succeeds_with_email_and_username() {
+        let (pool, _dir) = seeded().await;
+        let by_email = login(
+            &pool,
+            LoginRequest {
+                email: Some(TEACHER.into()),
+                username: None,
+                password: "docente123".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(by_email.is_some());
+
+        let by_username = login(
+            &pool,
+            LoginRequest {
+                email: None,
+                username: Some(TEACHER.into()),
+                password: "docente123".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(by_username.is_some());
+    }
+
+    #[tokio::test]
+    async fn login_fails_with_wrong_password() {
+        let (pool, _dir) = seeded().await;
+        let result = login(
+            &pool,
+            LoginRequest {
+                email: Some(TEACHER.into()),
+                username: None,
+                password: "incorrecta".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn session_lookup_and_logout() {
+        let (pool, _dir) = seeded().await;
+        let (token, user) = login(
+            &pool,
+            LoginRequest {
+                email: Some(TEACHER.into()),
+                username: None,
+                password: "docente123".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let resolved = user_by_session(&pool, &token).await.unwrap().unwrap();
+        assert_eq!(resolved.id, user.id);
+        assert!(user_by_session(&pool, "token-inexistente").await.unwrap().is_none());
+
+        logout(&pool, &token).await.unwrap();
+        assert!(user_by_session(&pool, &token).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn create_user_lowercases_email() {
+        let (pool, _dir) = pool().await;
+        let created = create_user(
+            &pool,
+            CreateUser {
+                email: "Nuevo@Facultad.Edu".into(),
+                display_name: "Nuevo".into(),
+                role: "estudiante".into(),
+                password: "clave1234".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.email, "nuevo@facultad.edu");
+    }
+
+    #[tokio::test]
+    async fn reset_password_changes_login() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        assert!(reset_password(&pool, &teacher.id, ResetPassword { password: "otraclave".into() })
+            .await
+            .unwrap());
+        assert!(login(
+            &pool,
+            LoginRequest { email: Some(TEACHER.into()), username: None, password: "otraclave".into() },
+        )
+        .await
+        .unwrap()
+        .is_some());
+        assert!(!reset_password(&pool, "id-inexistente", ResetPassword { password: "x12345678".into() })
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn update_user_changes_fields_and_handles_missing() {
+        let (pool, _dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+        let updated = update_user(
+            &pool,
+            &student.id,
+            UpdateUser { email: "ESTU2@fq.edu".into(), display_name: "Estu Dos".into(), role: "estudiante".into() },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(updated.email, "estu2@fq.edu");
+        assert_eq!(updated.display_name, "Estu Dos");
+
+        let missing = update_user(
+            &pool,
+            "id-inexistente",
+            UpdateUser { email: "x@y.com".into(), display_name: "X".into(), role: "estudiante".into() },
+        )
+        .await
+        .unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[tokio::test]
+    async fn change_password_validates_current_and_clears_sessions() {
+        let (pool, _dir) = seeded().await;
+        let (token, user) = login(
+            &pool,
+            LoginRequest { email: Some(TEACHER.into()), username: None, password: "docente123".into() },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        // Contraseña actual incorrecta -> false.
+        assert!(!change_password(
+            &pool,
+            &user.id,
+            ChangePassword { current_password: "mala".into(), new_password: "nuevaclave".into() },
+        )
+        .await
+        .unwrap());
+
+        // Correcta -> true y se invalidan las sesiones.
+        assert!(change_password(
+            &pool,
+            &user.id,
+            ChangePassword { current_password: "docente123".into(), new_password: "nuevaclave".into() },
+        )
+        .await
+        .unwrap());
+        assert!(user_by_session(&pool, &token).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn students_lists_only_estudiantes() {
+        let (pool, _dir) = seeded().await;
+        let students = students(&pool).await.unwrap();
+        assert!(students.iter().all(|u| u.role == "estudiante"));
+        assert!(students.iter().any(|u| u.email == STUDENT));
+    }
+
+    #[tokio::test]
+    async fn academic_context_differs_by_role() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        let student = find_user(&pool, STUDENT).await;
+
+        let teacher_ctx = academic_context(&pool, &teacher).await.unwrap();
+        assert!(!teacher_ctx.courses.is_empty());
+        assert!(!teacher_ctx.students.is_empty());
+        assert_eq!(teacher_ctx.users.len(), 3);
+
+        let student_ctx = academic_context(&pool, &student).await.unwrap();
+        assert!(!student_ctx.courses.is_empty());
+        assert!(student_ctx.students.is_empty());
+        assert!(student_ctx.users.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_and_update_course() {
+        let (pool, _dir) = pool().await;
+        let course = create_course(&pool, CreateCourse { name: "Curso".into(), term: "2026".into() })
+            .await
+            .unwrap();
+        assert_eq!(course.name, "Curso");
+
+        let updated = update_course(&pool, &course.id, UpdateCourse { name: "Curso B".into(), term: "2027".into() })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.name, "Curso B");
+        assert_eq!(updated.term, "2027");
+
+        assert!(update_course(&pool, "x", UpdateCourse { name: "n".into(), term: "t".into() })
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn create_group_clamps_and_normalizes() {
+        let (pool, _dir) = pool().await;
+        let course = create_course(&pool, CreateCourse { name: "C".into(), term: "2026".into() })
+            .await
+            .unwrap();
+        // table_count fuera de rango se acota a 24; tipo inválido -> regular.
+        let group = create_group(
+            &pool,
+            &course.id,
+            CreateGroup { name: "G".into(), table_count: Some(999), group_type: Some("raro".into()) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(group.table_count, 24);
+        assert_eq!(group.group_type, "regular");
+
+        let recup = create_group(
+            &pool,
+            &course.id,
+            CreateGroup { name: "GR".into(), table_count: None, group_type: Some("recuperacion".into()) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(recup.table_count, 4);
+        assert_eq!(recup.group_type, "recuperacion");
+    }
+
+    #[tokio::test]
+    async fn update_group_changes_and_handles_missing() {
+        let (pool, _dir) = seeded().await;
+        let updated = update_group(
+            &pool,
+            GROUP,
+            UpdateGroup { name: "Grupo Uno".into(), table_count: 6, group_type: "regular".into() },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(updated.name, "Grupo Uno");
+        assert_eq!(updated.table_count, 6);
+
+        assert!(update_group(&pool, "x", UpdateGroup { name: "n".into(), table_count: 2, group_type: "regular".into() })
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn create_subgroup_persists() {
+        let (pool, _dir) = seeded().await;
+        let subgroup = create_subgroup(
+            &pool,
+            COURSE,
+            CreateSubgroup { practice_id: "p1-estadistica".into(), group_id: GROUP.into(), name: "Sub A".into() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(subgroup.name, "Sub A");
+        assert_eq!(subgroup.practice_id, "p1-estadistica");
+    }
+
+    #[tokio::test]
+    async fn enroll_course_member_is_idempotent_and_creates_general_group() {
+        let (pool, _dir) = seeded().await;
+        let new_student = create_user(
+            &pool,
+            CreateUser { email: "otro@fq.edu".into(), display_name: "Otro".into(), role: "estudiante".into(), password: "clave1234".into() },
+        )
+        .await
+        .unwrap();
+        enroll_course_member(&pool, COURSE, &new_student.id).await.unwrap();
+        enroll_course_member(&pool, COURSE, &new_student.id).await.unwrap();
+
+        // Debe existir el grupo "General" creado por ensure_default_group.
+        let groups = groups_for_course(&pool, COURSE).await.unwrap();
+        assert!(groups.iter().any(|g| g.name == "General"));
+    }
+
+    #[tokio::test]
+    async fn add_and_remove_group_member() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        let student = find_user(&pool, STUDENT).await;
+
+        // Un docente no es estudiante: add_group_member devuelve None.
+        assert!(add_group_member(&pool, GROUP, AddGroupMember { user_id: teacher.id.clone() })
+            .await
+            .unwrap()
+            .is_none());
+
+        // El estudiante ya es miembro; agregarlo de nuevo es idempotente y devuelve Some.
+        assert!(add_group_member(&pool, GROUP, AddGroupMember { user_id: student.id.clone() })
+            .await
+            .unwrap()
+            .is_some());
+
+        assert!(remove_group_member(&pool, GROUP, &student.id).await.unwrap());
+        assert!(!remove_group_member(&pool, GROUP, &student.id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn set_practice_table_validates_membership_and_range() {
+        let (pool, _dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+
+        let ok = set_practice_table_assignment(
+            &pool,
+            GROUP,
+            &student.id,
+            SetPracticeTable { practice_id: "p1-estadistica".into(), table_number: 2 },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(ok.table_number, 2);
+
+        // Mesa fuera de rango (table_count = 4).
+        assert!(set_practice_table_assignment(
+            &pool,
+            GROUP,
+            &student.id,
+            SetPracticeTable { practice_id: "p1-estadistica".into(), table_number: 99 },
+        )
+        .await
+        .unwrap()
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn add_course_member_requires_student() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        let new_student = create_user(
+            &pool,
+            CreateUser { email: "tercero@fq.edu".into(), display_name: "Tercero".into(), role: "estudiante".into(), password: "clave1234".into() },
+        )
+        .await
+        .unwrap();
+
+        assert!(add_course_member(&pool, COURSE, EnrollCourseMember { user_id: new_student.id })
+            .await
+            .unwrap()
+            .is_some());
+        assert!(add_course_member(&pool, COURSE, EnrollCourseMember { user_id: teacher.id })
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn enable_course_practice_is_idempotent() {
+        let (pool, _dir) = seeded().await;
+        let course = create_course(&pool, CreateCourse { name: "Vacio".into(), term: "2026".into() })
+            .await
+            .unwrap();
+        assert_eq!(practices_for_course(&pool, &course.id).await.unwrap().len(), 0);
+        enable_course_practice(&pool, &course.id, SetCoursePractice { practice_id: "p1-estadistica".into() })
+            .await
+            .unwrap();
+        enable_course_practice(&pool, &course.id, SetCoursePractice { practice_id: "p1-estadistica".into() })
+            .await
+            .unwrap();
+        assert_eq!(practices_for_course(&pool, &course.id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn user_can_submit_rules() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        let student = find_user(&pool, STUDENT).await;
+
+        // Docente siempre puede.
+        assert!(user_can_submit(&pool, &teacher, COURSE, GROUP, "p1-estadistica").await.unwrap());
+        // Estudiante con curso/grupo/práctica válidos.
+        assert!(user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica").await.unwrap());
+        // Práctica no habilitada / inexistente -> false.
+        assert!(!user_can_submit(&pool, &student, COURSE, GROUP, "p9-inexistente").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn grade_component_position_increments() {
+        let (pool, _dir) = seeded().await;
+        let c1 = create_grade_component(
+            &pool,
+            CreateGradeComponent { course_id: COURSE.into(), kind: "pregunta".into(), name: "P1".into(), max_points: 10.0, weight_points: 5.0 },
+        )
+        .await
+        .unwrap();
+        let c2 = create_grade_component(
+            &pool,
+            CreateGradeComponent { course_id: COURSE.into(), kind: "informe".into(), name: "I1".into(), max_points: 20.0, weight_points: 10.0 },
+        )
+        .await
+        .unwrap();
+        assert_eq!(c1.position, 1);
+        assert_eq!(c2.position, 2);
+    }
+
+    #[tokio::test]
+    async fn upsert_grade_score_normalizes_and_rejects_over_max() {
+        let (pool, _dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+        let component = create_grade_component(
+            &pool,
+            CreateGradeComponent { course_id: COURSE.into(), kind: "pregunta".into(), name: "P1".into(), max_points: 10.0, weight_points: 5.0 },
+        )
+        .await
+        .unwrap();
+
+        upsert_grade_score(
+            &pool,
+            UpsertGradeScore { component_id: component.id.clone(), student_id: student.id.clone(), raw_points: 8.0, comment: None },
+        )
+        .await
+        .unwrap();
+
+        // Supera el máximo -> error.
+        assert!(upsert_grade_score(
+            &pool,
+            UpsertGradeScore { component_id: component.id.clone(), student_id: student.id.clone(), raw_points: 11.0, comment: None },
+        )
+        .await
+        .is_err());
+
+        // Componente inexistente -> error.
+        assert!(upsert_grade_score(
+            &pool,
+            UpsertGradeScore { component_id: "no-existe".into(), student_id: student.id.clone(), raw_points: 1.0, comment: None },
+        )
+        .await
+        .is_err());
+
+        let teacher = find_user(&pool, TEACHER).await;
+        let books = gradebook_for_user(&pool, &teacher).await.unwrap();
+        let course_book = books.into_iter().find(|b| b.course.id == COURSE).unwrap();
+        let summary = course_book.students.into_iter().find(|s| s.student.id == student.id).unwrap();
+        // 8/10 * 5 = 4.0 normalizado.
+        assert!((summary.total_points - 4.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn submission_lifecycle() {
+        let (pool, dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+        let analysis = crate::analysis::analyze_csv("x,y\n1,2\n2,4\n3,6\n").unwrap();
+
+        let created = create_submission(
+            &pool,
+            dir.path(),
+            NewSubmission {
+                submitted_by_user_id: student.id.clone(),
+                course_id: COURSE.into(),
+                group_id: GROUP.into(),
+                practice_id: "p1-estadistica".into(),
+                file_name: "medidas.csv".into(),
+                csv_content: "x,y\n1,2\n2,4\n3,6\n".into(),
+                analysis,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.status, "pendiente");
+
+        // El docente ve la entrega; el estudiante también la suya.
+        let teacher = find_user(&pool, TEACHER).await;
+        assert_eq!(submission_list_for_user(&pool, &teacher).await.unwrap().len(), 1);
+        assert_eq!(submission_list_for_user(&pool, &student).await.unwrap().len(), 1);
+
+        assert_eq!(
+            submission_owner_id(&pool, &created.id).await.unwrap().as_deref(),
+            Some(student.id.as_str())
+        );
+        assert!(submission_detail(&pool, &created.id).await.unwrap().is_some());
+
+        let reviewed = update_review(
+            &pool,
+            &created.id,
+            ReviewSubmission { status: "aprobada".into(), teacher_comment: Some("ok".into()), score: Some(10.0) },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(reviewed.status, "aprobada");
+        assert_eq!(reviewed.score, Some(10.0));
+    }
+
+    #[test]
+    fn clean_zero_collapses_tiny_values() {
+        assert_eq!(clean_zero(1e-12), 0.0);
+        assert_eq!(clean_zero(2.5), 2.5);
     }
 }

@@ -1,11 +1,9 @@
-mod analysis;
-mod db;
-mod error;
-mod routes;
+//! Binario de Quantify: arranca el servidor HTTP usando la biblioteca `quantify`.
 
 use anyhow::Context;
 use axum::Router;
-use db::AppState;
+use quantify::db::{self, AppState};
+use quantify::routes;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
 use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
@@ -13,6 +11,8 @@ use tokio::net::TcpListener;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Punto de entrada del binario: configura logging, prepara la base de datos
+/// (migraciones + seeds) y arranca el servidor Axum escuchando en `APP_BIND_ADDR`.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
