@@ -408,7 +408,8 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         ),
         (
             instrument("Cronometro digital", "digital", "tiempo", "s"),
-            vec![reso("centesimas", 0.01, None, "s")],
+            // Resolucion R = 0.001 s segun la tecnica de Estadistica.
+            vec![reso("milesimas", 0.001, None, "s")],
         ),
         (
             instrument("Balanza digital", "digital", "masa", "g"),
@@ -441,13 +442,19 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
             ],
         ),
         (
-            instrument("Osciloscopio GW Instek GDS-1052-U", "digital", "voltaje", "V"),
+            instrument("Osciloscopio GW Instek GDS-1052-U (voltaje)", "digital", "voltaje", "V"),
+            // Eje Y (voltaje): U = 3%*V + 0.1*(VOLTS/DIV) + 1 mV (Tecnica de Alterna).
             vec![
                 fab("5 V/div", 5.0, 3.0, 0.1, 0.001, None, None, None, "V"),
                 fab("2 V/div", 2.0, 3.0, 0.1, 0.001, None, None, None, "V"),
                 fab("1 V/div", 1.0, 3.0, 0.1, 0.001, None, None, None, "V"),
                 fab("0.5 V/div", 0.5, 3.0, 0.1, 0.001, None, None, None, "V"),
             ],
+        ),
+        (
+            instrument("Osciloscopio GW Instek GDS-1052-U (tiempo)", "digital", "tiempo", "s"),
+            // Eje X (tiempo): U = 1% de la medida (Tecnica de RC). Solo termino porcentual.
+            vec![fab("tiempo (1% de la medida)", 1.0, 1.0, 0.0, 0.0, None, None, None, "s")],
         ),
     ];
 
@@ -692,5 +699,13 @@ mod tests {
             .scales
             .iter()
             .any(|s| s.b_model == "fabricante" && s.internal_res.is_some()));
+
+        // El osciloscopio mide tiempo con incertidumbre tipo fabricante (1% de la medida).
+        let osc_t = first
+            .iter()
+            .find(|i| i.instrument.name.contains("Osciloscopio") && i.instrument.quantity == "tiempo")
+            .unwrap();
+        assert_eq!(osc_t.scales[0].spec_pct_reading, Some(1.0));
+        assert_eq!(osc_t.scales[0].spec_step_coeff, Some(0.0));
     }
 }
