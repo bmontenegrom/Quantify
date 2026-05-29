@@ -6,7 +6,7 @@
 use crate::db::{Instrument, InstrumentScale};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 /// Datos para crear un instrumento en un curso.
@@ -129,11 +129,12 @@ async fn fetch_scale(pool: &SqlitePool, id: &str) -> anyhow::Result<InstrumentSc
     .await?)
 }
 
-/// Crea un instrumento en un curso y lo devuelve.
-pub async fn create_instrument(
-    pool: &SqlitePool,
-    input: CreateInstrument,
-) -> anyhow::Result<Instrument> {
+/// Inserta un instrumento con el ejecutor dado y devuelve el id generado. Permite reutilizar
+/// la misma lógica sobre el pool o dentro de una transacción (export/import).
+async fn insert_instrument(
+    conn: &mut SqliteConnection,
+    input: &CreateInstrument,
+) -> anyhow::Result<String> {
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO instruments (id, course_id, name, kind, quantity, unit, created_at) \
@@ -146,8 +147,55 @@ pub async fn create_instrument(
     .bind(input.quantity.trim())
     .bind(input.unit.trim())
     .bind(Utc::now())
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
+    Ok(id)
+}
+
+/// Inserta una escala en la posición dada usando el ejecutor, y devuelve el id generado.
+async fn insert_scale(
+    conn: &mut SqliteConnection,
+    instrument_id: &str,
+    position: i64,
+    input: &ScaleInput,
+) -> anyhow::Result<String> {
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO instrument_scales (id, instrument_id, label, full_scale, step, appreciation, \
+         internal_res, internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, \
+         unit, position, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+    )
+    .bind(&id)
+    .bind(instrument_id)
+    .bind(input.label.trim())
+    .bind(input.full_scale)
+    .bind(input.step)
+    .bind(input.appreciation)
+    .bind(input.internal_res)
+    .bind(input.internal_res_u)
+    .bind(input.b_model.trim())
+    .bind(input.spec_pct_reading)
+    .bind(input.spec_step_coeff)
+    .bind(input.spec_fixed)
+    .bind(input.unit.trim())
+    .bind(position)
+    .bind(Utc::now())
+    .execute(&mut *conn)
+    .await?;
+    Ok(id)
+}
+
+/// Crea un instrumento en un curso y lo devuelve.
+pub async fn create_instrument(
+    pool: &SqlitePool,
+    input: CreateInstrument,
+) -> anyhow::Result<Instrument> {
+    // La conexión se libera al cerrar el bloque, antes del fetch (evita bloquear pools chicos).
+    let id = {
+        let mut conn = pool.acquire().await?;
+        insert_instrument(&mut conn, &input).await?
+    };
     fetch_instrument(pool, &id).await
 }
 
@@ -193,37 +241,16 @@ pub async fn create_scale(
     instrument_id: &str,
     input: ScaleInput,
 ) -> anyhow::Result<InstrumentScale> {
-    let id = Uuid::new_v4().to_string();
     let position: (i64,) = sqlx::query_as(
         "SELECT COALESCE(MAX(position), 0) + 1 FROM instrument_scales WHERE instrument_id = ?1",
     )
     .bind(instrument_id)
     .fetch_one(pool)
     .await?;
-
-    sqlx::query(
-        "INSERT INTO instrument_scales (id, instrument_id, label, full_scale, step, appreciation, \
-         internal_res, internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, \
-         unit, position, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-    )
-    .bind(&id)
-    .bind(instrument_id)
-    .bind(input.label.trim())
-    .bind(input.full_scale)
-    .bind(input.step)
-    .bind(input.appreciation)
-    .bind(input.internal_res)
-    .bind(input.internal_res_u)
-    .bind(input.b_model.trim())
-    .bind(input.spec_pct_reading)
-    .bind(input.spec_step_coeff)
-    .bind(input.spec_fixed)
-    .bind(input.unit.trim())
-    .bind(position.0)
-    .bind(Utc::now())
-    .execute(pool)
-    .await?;
+    let id = {
+        let mut conn = pool.acquire().await?;
+        insert_scale(&mut conn, instrument_id, position.0, &input).await?
+    };
     fetch_scale(pool, &id).await
 }
 
@@ -303,29 +330,29 @@ pub async fn export_course(pool: &SqlitePool, course_id: &str) -> anyhow::Result
 }
 
 /// Importa un catálogo a un curso destino, recreando instrumentos y escalas con ids nuevos.
-/// Devuelve la cantidad de instrumentos importados.
+/// Corre dentro de una transacción: si algún instrumento o escala falla, no queda nada
+/// importado (todo o nada). Devuelve la cantidad de instrumentos importados.
 pub async fn import_course(
     pool: &SqlitePool,
     course_id: &str,
     payload: CatalogExport,
 ) -> anyhow::Result<usize> {
     let count = payload.instruments.len();
-    for instrument in payload.instruments {
-        let created = create_instrument(
-            pool,
-            CreateInstrument {
-                course_id: course_id.to_string(),
-                name: instrument.name,
-                kind: instrument.kind,
-                quantity: instrument.quantity,
-                unit: instrument.unit,
-            },
-        )
-        .await?;
-        for scale in instrument.scales {
-            create_scale(pool, &created.id, scale).await?;
+    let mut tx = pool.begin().await?;
+    for instrument in &payload.instruments {
+        let create = CreateInstrument {
+            course_id: course_id.to_string(),
+            name: instrument.name.clone(),
+            kind: instrument.kind.clone(),
+            quantity: instrument.quantity.clone(),
+            unit: instrument.unit.clone(),
+        };
+        let inst_id = insert_instrument(&mut tx, &create).await?;
+        for (index, scale) in instrument.scales.iter().enumerate() {
+            insert_scale(&mut tx, &inst_id, index as i64 + 1, scale).await?;
         }
     }
+    tx.commit().await?;
     Ok(count)
 }
 
@@ -676,6 +703,37 @@ mod tests {
         assert_eq!(dest_list[0].scales.len(), 1);
         assert_eq!(dest_list[0].scales[0].b_model, "fabricante");
         assert_eq!(dest_list[0].scales[0].spec_step_coeff, Some(5.0));
+    }
+
+    #[tokio::test]
+    async fn import_rolls_back_on_error() {
+        let (pool, _dir, course_id) = setup().await;
+        // El segundo instrumento trae una escala con b_model invalido (viola el CHECK).
+        let mut bad_scale = sample_scale();
+        bad_scale.b_model = "invalido".into();
+        let payload = CatalogExport {
+            instruments: vec![
+                InstrumentExport {
+                    name: "Bueno".into(),
+                    kind: "digital".into(),
+                    quantity: "tiempo".into(),
+                    unit: "s".into(),
+                    scales: vec![],
+                },
+                InstrumentExport {
+                    name: "Malo".into(),
+                    kind: "digital".into(),
+                    quantity: "tiempo".into(),
+                    unit: "s".into(),
+                    scales: vec![bad_scale],
+                },
+            ],
+        };
+
+        let result = import_course(&pool, &course_id, payload).await;
+        assert!(result.is_err());
+        // Rollback total: no debe quedar ni siquiera el primer instrumento.
+        assert!(list_instruments(&pool, &course_id).await.unwrap().is_empty());
     }
 
     #[tokio::test]
