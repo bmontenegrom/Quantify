@@ -6,6 +6,14 @@ import {
   groupBy,
   renderGroupType,
   scalePayload,
+  canReview,
+  studentCourses,
+  studentGroups,
+  studentTotals,
+  availableCoursesForStudent,
+  availableGroupsForStudent,
+  allStudents,
+  allGroups,
 } from "./lib.js";
 
 const state = {
@@ -249,7 +257,7 @@ async function startApp() {
   renderAccount();
 
   document.querySelectorAll(".teacher-only").forEach((element) => {
-    element.classList.toggle("hidden", !canReview());
+    element.classList.toggle("hidden", !canReview(state.user));
   });
 
   selectView("submissions");
@@ -300,19 +308,19 @@ async function loadAcademic() {
   state.academic = await fetchJson("/api/academic/context");
   state.practices = state.academic.practices;
   renderStudentSelectors();
-  if (canReview()) {
+  if (canReview(state.user)) {
     renderAdmin();
     renderStudentsPage();
     renderGroupsPage();
     renderCoursesPage();
   }
-  if (canReview()) renderGradeCourseOptions();
-  if (canReview()) renderInstrumentCourseOptions();
+  if (canReview(state.user)) renderGradeCourseOptions();
+  if (canReview(state.user)) renderInstrumentCourseOptions();
 }
 
 async function loadGrades() {
   state.gradebooks = await fetchJson("/api/grades");
-  if (canReview()) renderGradeCourseOptions();
+  if (canReview(state.user)) renderGradeCourseOptions();
 }
 
 function renderGradeCourseOptions() {
@@ -536,9 +544,9 @@ function renderAdmin() {
 
 function renderUsers() {
   const rows = state.academic.users.flatMap((user) => {
-    const courses = studentCourses(user.id);
-    const groups = studentGroups(user.id);
-    const totals = studentTotals(user.id);
+    const courses = studentCourses(state.academic, user.id);
+    const groups = studentGroups(state.academic, user.id);
+    const totals = studentTotals(state.gradebooks, user.id);
     const baseRow = `
       <tr>
         <td class="directory-primary">
@@ -611,10 +619,10 @@ function renderUsers() {
 function renderStudentDirectory() {
   if (!studentDirectory || !state.academic) return;
 
-  const rows = allStudents().map((student) => {
-    const courses = studentCourses(student.id);
-    const groups = studentGroups(student.id);
-    const totals = studentTotals(student.id);
+  const rows = allStudents(state.academic).map((student) => {
+    const courses = studentCourses(state.academic, student.id);
+    const groups = studentGroups(state.academic, student.id);
+    const totals = studentTotals(state.gradebooks, student.id);
     return `
       <tr>
         <td class="directory-primary">
@@ -677,7 +685,7 @@ function renderStudentsPage() {
   renderStudentDirectory();
   if (!studentWorkspace) return;
 
-  const student = allStudents().find((item) => item.id === state.activeStudentId);
+  const student = allStudents(state.academic).find((item) => item.id === state.activeStudentId);
   if (!student) {
     studentWorkspace.innerHTML = "";
     studentWorkspace.classList.add("hidden");
@@ -685,9 +693,9 @@ function renderStudentsPage() {
     return;
   }
 
-  const totals = studentTotals(student.id);
-  const courses = studentCourses(student.id);
-  const groups = studentGroups(student.id);
+  const totals = studentTotals(state.gradebooks, student.id);
+  const courses = studentCourses(state.academic, student.id);
+  const groups = studentGroups(state.academic, student.id);
   studentWorkspace.innerHTML = `
     <div class="workspace-head">
       <div>
@@ -774,10 +782,10 @@ function renderStudentProfileForm(student) {
 }
 
 function renderStudentEnrollmentPanel(student) {
-  const currentCourses = studentCourses(student.id);
-  const availableCourses = availableCoursesForStudent(student.id);
-  const currentGroups = studentGroups(student.id);
-  const groupOptions = availableGroupsForStudent(student.id);
+  const currentCourses = studentCourses(state.academic, student.id);
+  const availableCourses = availableCoursesForStudent(state.academic, student.id);
+  const currentGroups = studentGroups(state.academic, student.id);
+  const groupOptions = availableGroupsForStudent(state.academic, student.id);
 
   return `
     <div class="stack-form">
@@ -852,7 +860,7 @@ function renderStudentEnrollmentPanel(student) {
 }
 
 function renderStudentGradeEditor(student) {
-  const courses = studentCourses(student.id);
+  const courses = studentCourses(state.academic, student.id);
   if (courses.length === 0) {
     return `<p class="submission-meta">El estudiante no esta inscrito en ningun curso.</p>`;
   }
@@ -923,7 +931,7 @@ function focusStudentSection() {
 
 function renderGroupDirectory() {
   if (!groupDirectory || !state.academic) return;
-  const groups = allGroups();
+  const groups = allGroups(state.academic);
 
   const rows = groups.map(
     (group) => `
@@ -985,7 +993,7 @@ function renderGroupsPage() {
   renderGroupDirectory();
   if (!groupWorkspace) return;
 
-  const group = allGroups().find((item) => item.id === state.activeGroupId);
+  const group = allGroups(state.academic).find((item) => item.id === state.activeGroupId);
   if (!group) {
     groupWorkspace.innerHTML = "";
     groupWorkspace.classList.add("hidden");
@@ -1086,9 +1094,9 @@ function renderGroupMembersPanel(group) {
   }
 
   const rows = group.members.map((student) => {
-    const courses = studentCourses(student.id);
-    const groups = studentGroups(student.id);
-    const totals = studentTotals(student.id);
+    const courses = studentCourses(state.academic, student.id);
+    const groups = studentGroups(state.academic, student.id);
+    const totals = studentTotals(state.gradebooks, student.id);
     return `
       <tr>
         <td class="directory-primary">
@@ -1264,22 +1272,6 @@ async function saveUserReset(event) {
     renderUsers();
   }
 }
-
-function studentCourses(studentId) {
-  return state.academic.courses.filter((course) => course.members.some((member) => member.id === studentId));
-}
-
-function allGroups() {
-  return state.academic.courses.flatMap((course) =>
-    course.groups.map((group) => ({
-      ...group,
-      courseId: course.id,
-      courseName: course.name,
-      courseTerm: course.term,
-    })),
-  );
-}
-
 
 function renderCoursesPage() {
   renderCourseDirectory(state.academic?.courses ?? []);
@@ -1663,55 +1655,6 @@ async function saveCoursePractice(event) {
   }
 }
 
-function availableCoursesForStudent(studentId) {
-  const currentCourses = new Set(studentCourses(studentId).map((course) => course.id));
-  return state.academic.courses.filter((course) => !currentCourses.has(course.id));
-}
-
-function studentGroups(studentId) {
-  return state.academic.courses.flatMap((course) =>
-    course.groups
-      .filter((group) => group.members.some((member) => member.id === studentId))
-      .map((group) => ({ ...group, courseName: course.name, courseTerm: course.term })),
-  );
-}
-
-function availableGroupsForStudent(studentId) {
-  const currentGroups = new Set(studentGroups(studentId).map((group) => group.id));
-  return studentCourses(studentId).flatMap((course) =>
-    course.groups
-      .filter((group) => !currentGroups.has(group.id))
-      .map((group) => ({ ...group, courseName: course.name, courseTerm: course.term })),
-  );
-}
-
-function studentGradebooks(studentId) {
-  return state.gradebooks
-    .map((book) => ({
-      course: book.course,
-      summary: book.students.find((summary) => summary.student.id === studentId),
-    }))
-    .filter((item) => item.summary);
-}
-
-function studentTotals(studentId) {
-  const gradebooks = studentGradebooks(studentId);
-  if (gradebooks.length === 0) return null;
-  return gradebooks.reduce(
-    (acc, item) => ({
-      points: acc.points + item.summary.total_points,
-      possible: acc.possible + item.summary.total_possible,
-    }),
-    { points: 0, possible: 0 },
-  );
-}
-
-function allStudents() {
-  const direct = state.academic?.students ?? [];
-  if (direct.length > 0) return direct;
-  return (state.academic?.users ?? []).filter((user) => user.role === "estudiante");
-}
-
 function renderUserDetail(user) {
   return `
     <form class="detail-form compact" data-user-form="reset">
@@ -1744,7 +1687,7 @@ function selectedTableAssignment() {
 }
 
 function renderSubmissionsPage() {
-  const teacher = canReview();
+  const teacher = canReview(state.user);
   submissionsTitle.textContent = teacher ? "Entregas" : "Mis entregas";
   submissionsSubtitle.textContent = teacher
     ? "Todas las entregas organizadas por curso y grupo."
@@ -1762,7 +1705,7 @@ function renderSubmissionList() {
     return;
   }
 
-  submissionList.innerHTML = canReview() ? renderTeacherSubmissionGroups() : renderStudentSubmissionRows();
+  submissionList.innerHTML = canReview(state.user) ? renderTeacherSubmissionGroups() : renderStudentSubmissionRows();
 
   submissionList.querySelectorAll(".submission-item").forEach((item) => {
     item.addEventListener("click", () => loadSubmissionDetail(item.dataset.id));
@@ -1826,7 +1769,7 @@ async function loadSubmissionDetail(id) {
   renderSubmissionList();
   const submission = await fetchJson(`/api/submissions/${id}`);
   submissionDetail.classList.remove("hidden");
-  renderAnalysis(submissionDetail, submission, canReview());
+  renderAnalysis(submissionDetail, submission, canReview(state.user));
 }
 
 function renderAnalysis(target, submission, includeReview = false) {
@@ -1987,10 +1930,6 @@ async function errorText(response) {
   } catch {
     return response.statusText;
   }
-}
-
-function canReview() {
-  return state.user && ["docente", "admin"].includes(state.user.role);
 }
 
 // ── Instrumentos ──────────────────────────────────────────────────────────────

@@ -70,3 +70,87 @@ export function scalePayload(raw) {
     internal_res_u: num("internal_res_u"),
   };
 }
+
+// ── Selectores de datos ───────────────────────────────────────────────────────
+// Derivan información del contexto académico (`academic`) o las libretas
+// (`gradebooks`); reciben el estado por parámetro para ser puros y testeables.
+
+/// `true` si el usuario tiene rol docente o admin (puede revisar/administrar).
+export function canReview(user) {
+  return !!(user && ["docente", "admin"].includes(user.role));
+}
+
+/// Cursos en los que el estudiante figura como miembro.
+export function studentCourses(academic, studentId) {
+  return academic.courses.filter((course) =>
+    course.members.some((member) => member.id === studentId),
+  );
+}
+
+/// Todos los grupos de todos los cursos, anotados con datos del curso.
+export function allGroups(academic) {
+  return academic.courses.flatMap((course) =>
+    course.groups.map((group) => ({
+      ...group,
+      courseId: course.id,
+      courseName: course.name,
+      courseTerm: course.term,
+    })),
+  );
+}
+
+/// Grupos en los que el estudiante es miembro, anotados con nombre/periodo del curso.
+export function studentGroups(academic, studentId) {
+  return academic.courses.flatMap((course) =>
+    course.groups
+      .filter((group) => group.members.some((member) => member.id === studentId))
+      .map((group) => ({ ...group, courseName: course.name, courseTerm: course.term })),
+  );
+}
+
+/// Cursos donde el estudiante todavía NO está inscrito (para ofrecer inscripción).
+export function availableCoursesForStudent(academic, studentId) {
+  const currentCourses = new Set(studentCourses(academic, studentId).map((course) => course.id));
+  return academic.courses.filter((course) => !currentCourses.has(course.id));
+}
+
+/// Grupos disponibles (dentro de los cursos del estudiante) a los que aún no pertenece.
+export function availableGroupsForStudent(academic, studentId) {
+  const currentGroups = new Set(studentGroups(academic, studentId).map((group) => group.id));
+  return studentCourses(academic, studentId).flatMap((course) =>
+    course.groups
+      .filter((group) => !currentGroups.has(group.id))
+      .map((group) => ({ ...group, courseName: course.name, courseTerm: course.term })),
+  );
+}
+
+/// Libretas del estudiante: pares curso + resumen, solo donde tiene resumen cargado.
+export function studentGradebooks(gradebooks, studentId) {
+  return gradebooks
+    .map((book) => ({
+      course: book.course,
+      summary: book.students.find((summary) => summary.student.id === studentId),
+    }))
+    .filter((item) => item.summary);
+}
+
+/// Totales acumulados (puntos / posibles) del estudiante sobre todas sus libretas;
+/// `null` si no tiene ninguna nota cargada.
+export function studentTotals(gradebooks, studentId) {
+  const books = studentGradebooks(gradebooks, studentId);
+  if (books.length === 0) return null;
+  return books.reduce(
+    (acc, item) => ({
+      points: acc.points + item.summary.total_points,
+      possible: acc.possible + item.summary.total_possible,
+    }),
+    { points: 0, possible: 0 },
+  );
+}
+
+/// Lista de estudiantes: usa `academic.students` si viene, si no filtra `users` por rol.
+export function allStudents(academic) {
+  const direct = academic?.students ?? [];
+  if (direct.length > 0) return direct;
+  return (academic?.users ?? []).filter((user) => user.role === "estudiante");
+}
