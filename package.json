@@ -1,0 +1,8 @@
+{
+  "name": "quantify-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

@@ -1,3 +1,13 @@
+import {
+  escapeHtml,
+  cssEscape,
+  format,
+  formatDate,
+  groupBy,
+  renderGroupType,
+  scalePayload,
+} from "./lib.js";
+
 const state = {
   user: null,
   academic: null,
@@ -1270,9 +1280,6 @@ function allGroups() {
   );
 }
 
-function renderGroupType(value) {
-  return value === "recuperacion" ? "Recuperacion" : "Regular";
-}
 
 function renderCoursesPage() {
   renderCourseDirectory(state.academic?.courses ?? []);
@@ -1986,40 +1993,6 @@ function canReview() {
   return state.user && ["docente", "admin"].includes(state.user.role);
 }
 
-function format(value) {
-  return Number(value).toLocaleString("es-UY", { maximumSignificantDigits: 5 });
-}
-
-function formatDate(value) {
-  return new Date(value).toLocaleString("es-UY", {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
-}
-
-function groupBy(items, keyFn) {
-  return items.reduce((groups, item) => {
-    const key = keyFn(item) || "-";
-    groups[key] ??= [];
-    groups[key].push(item);
-    return groups;
-  }, {});
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function cssEscape(value) {
-  if (window.CSS?.escape) return window.CSS.escape(String(value));
-  return String(value).replaceAll('"', '\\"');
-}
-
 // ── Instrumentos ──────────────────────────────────────────────────────────────
 
 function renderInstrumentCourseOptions() {
@@ -2374,21 +2347,7 @@ async function saveInstrumentEdit(event) {
 }
 
 function scalePayloadFromForm(form) {
-  const raw = Object.fromEntries(new FormData(form).entries());
-  const num = (key) => raw[key] !== "" && raw[key] != null ? Number(raw[key]) : null;
-  return {
-    label: raw.label,
-    unit: raw.unit,
-    b_model: raw.b_model,
-    step: Number(raw.step),
-    full_scale: num("full_scale"),
-    appreciation: num("appreciation"),
-    spec_pct_reading: num("spec_pct_reading"),
-    spec_step_coeff: num("spec_step_coeff"),
-    spec_fixed: num("spec_fixed"),
-    internal_res: num("internal_res"),
-    internal_res_u: num("internal_res_u"),
-  };
+  return scalePayload(Object.fromEntries(new FormData(form).entries()));
 }
 
 async function saveNewScale(event) {
