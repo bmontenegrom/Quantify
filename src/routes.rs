@@ -733,6 +733,20 @@ fn validate_scale(input: &ScaleInput) -> Result<(), AppError> {
     if !(input.step > 0.0) {
         return Err(AppError::bad_request("step debe ser positivo"));
     }
+    // Una escala de fabricante sin ningun termino positivo daria u_B = 0 silenciosamente.
+    if input.b_model.trim() == "fabricante"
+        && ![
+            input.spec_pct_reading,
+            input.spec_step_coeff,
+            input.spec_fixed,
+        ]
+        .iter()
+        .any(|value| matches!(value, Some(x) if *x > 0.0))
+    {
+        return Err(AppError::bad_request(
+            "una escala de fabricante requiere al menos un termino de spec positivo",
+        ));
+    }
     if input.label.trim().is_empty() || input.unit.trim().is_empty() {
         return Err(AppError::bad_request("datos de escala invalidos"));
     }
@@ -846,9 +860,18 @@ mod tests {
     fn validate_scale_checks_model_and_step() {
         assert!(validate_scale(&scale("resolucion", 0.1)).is_ok());
         assert!(validate_scale(&scale("apreciacion", 0.5)).is_ok());
-        assert!(validate_scale(&scale("fabricante", 1.0)).is_ok());
         assert!(validate_scale(&scale("raro", 1.0)).is_err());
         assert!(validate_scale(&scale("resolucion", 0.0)).is_err());
+    }
+
+    #[test]
+    fn validate_scale_fabricante_requires_spec() {
+        // Sin ningún término de spec -> error (evita u_B = 0 silencioso).
+        assert!(validate_scale(&scale("fabricante", 1.0)).is_err());
+        // Con al menos un término positivo -> ok.
+        let mut s = scale("fabricante", 1.0);
+        s.spec_pct_reading = Some(1.0);
+        assert!(validate_scale(&s).is_ok());
     }
 
     #[test]
