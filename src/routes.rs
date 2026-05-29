@@ -571,7 +571,6 @@ async fn review_submission(
     Ok(Json(updated))
 }
 
-/// Lee un campo de texto de un formulario multipart, devolviendo error si no es texto válido.
 /// Parámetro de query `?course_id=...` para las operaciones de catálogo por curso.
 #[derive(Debug, Deserialize)]
 struct CourseQuery {
@@ -740,6 +739,7 @@ fn validate_scale(input: &ScaleInput) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Lee un campo de texto de un formulario multipart, devolviendo error si no es texto válido.
 async fn read_text(field: axum::extract::multipart::Field<'_>) -> Result<String, AppError> {
     field
         .text()
