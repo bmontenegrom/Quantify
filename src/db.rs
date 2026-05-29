@@ -19,6 +19,50 @@ pub struct Practice {
     pub description: String,
 }
 
+/// Instrumento de medida del catálogo de un curso. El `kind` (`analogico`/`digital`) es
+/// la clasificación física; el modelo de incertidumbre concreto vive en cada escala.
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct Instrument {
+    pub id: String,
+    pub course_id: String,
+    pub name: String,
+    pub kind: String,
+    /// Magnitud que mide (longitud, masa, tiempo, voltaje, corriente...).
+    pub quantity: String,
+    /// Unidad base del instrumento (m, kg, s, V, A...).
+    pub unit: String,
+}
+
+/// Escala de un instrumento, con los datos necesarios para calcular la incertidumbre tipo B.
+/// `b_model` selecciona la fórmula: `resolucion` (`step`), `apreciacion` (`appreciation`) o
+/// `fabricante` (`spec_pct_reading`/`spec_step_coeff`/`spec_fixed`). Ver [`crate::uncertainty`].
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct InstrumentScale {
+    pub id: String,
+    pub instrument_id: String,
+    pub label: String,
+    /// Fondo de escala (valor máximo); opcional.
+    pub full_scale: Option<f64>,
+    /// Resolución (digital), menor división (analógico) o VOLTS/DIV (osciloscopio).
+    pub step: f64,
+    /// Apreciación efectiva del operador (analógico); por defecto se usa `step`.
+    pub appreciation: Option<f64>,
+    /// Resistencia interna de la escala (P2; ohm), opcional.
+    pub internal_res: Option<f64>,
+    /// Incertidumbre de la resistencia interna (p. ej. ±10 en 1002±10), opcional.
+    pub internal_res_u: Option<f64>,
+    /// Modelo de incertidumbre tipo B: `resolucion`, `apreciacion` o `fabricante`.
+    pub b_model: String,
+    /// Fabricante: porcentaje del valor leído (p. ej. 3.0 = 3 %).
+    pub spec_pct_reading: Option<f64>,
+    /// Fabricante: coeficiente que multiplica `step` (5 = "5 dgt"; 0.1 osciloscopio).
+    pub spec_step_coeff: Option<f64>,
+    /// Fabricante: término fijo en unidad base (p. ej. 0.001 V = 1 mV).
+    pub spec_fixed: Option<f64>,
+    pub unit: String,
+    pub position: i64,
+}
+
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct AuthUser {
     pub id: String,
@@ -557,6 +601,47 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
             comment TEXT,
             updated_at TEXT NOT NULL,
             PRIMARY KEY(component_id, student_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS instruments (
+            id TEXT PRIMARY KEY,
+            course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('analogico', 'digital')),
+            quantity TEXT NOT NULL,
+            unit TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS instrument_scales (
+            id TEXT PRIMARY KEY,
+            instrument_id TEXT NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+            label TEXT NOT NULL,
+            full_scale REAL,
+            step REAL NOT NULL,
+            appreciation REAL,
+            internal_res REAL,
+            internal_res_u REAL,
+            b_model TEXT NOT NULL DEFAULT 'resolucion'
+                CHECK(b_model IN ('resolucion', 'apreciacion', 'fabricante')),
+            spec_pct_reading REAL,
+            spec_step_coeff REAL,
+            spec_fixed REAL,
+            unit TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
         )
         "#,
     )
@@ -2798,5 +2883,114 @@ mod tests {
     fn clean_zero_collapses_tiny_values() {
         assert_eq!(clean_zero(1e-12), 0.0);
         assert_eq!(clean_zero(2.5), 2.5);
+    }
+
+    #[tokio::test]
+    async fn instruments_schema_roundtrip() {
+        let (pool, _dir) = seeded().await;
+        let now = chrono::Utc::now();
+
+        sqlx::query(
+            "INSERT INTO instruments (id, course_id, name, kind, quantity, unit, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )
+        .bind("inst-1")
+        .bind(COURSE)
+        .bind("Calibre")
+        .bind("analogico")
+        .bind("longitud")
+        .bind("mm")
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO instrument_scales (id, instrument_id, label, full_scale, step, \
+             appreciation, internal_res, internal_res_u, b_model, spec_pct_reading, \
+             spec_step_coeff, spec_fixed, unit, position, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        )
+        .bind("scale-1")
+        .bind("inst-1")
+        .bind("0-150 mm")
+        .bind(Option::<f64>::None) // full_scale
+        .bind(0.05_f64) // step
+        .bind(Some(0.05_f64)) // appreciation
+        .bind(Option::<f64>::None) // internal_res
+        .bind(Option::<f64>::None) // internal_res_u
+        .bind("apreciacion")
+        .bind(Option::<f64>::None) // spec_pct_reading
+        .bind(Option::<f64>::None) // spec_step_coeff
+        .bind(Option::<f64>::None) // spec_fixed
+        .bind("mm")
+        .bind(0_i64)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let inst = sqlx::query_as::<_, Instrument>(
+            "SELECT id, course_id, name, kind, quantity, unit FROM instruments WHERE id = ?1",
+        )
+        .bind("inst-1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(inst.kind, "analogico");
+        assert_eq!(inst.quantity, "longitud");
+        assert_eq!(inst.course_id, COURSE);
+
+        let scale = sqlx::query_as::<_, InstrumentScale>(
+            "SELECT id, instrument_id, label, full_scale, step, appreciation, internal_res, \
+             internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, unit, \
+             position FROM instrument_scales WHERE id = ?1",
+        )
+        .bind("scale-1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(scale.b_model, "apreciacion");
+        assert_eq!(scale.step, 0.05);
+        assert_eq!(scale.appreciation, Some(0.05));
+        assert!(scale.full_scale.is_none());
+        assert_eq!(scale.position, 0);
+    }
+
+    #[tokio::test]
+    async fn instrument_scale_rejects_invalid_b_model() {
+        let (pool, _dir) = seeded().await;
+        let now = chrono::Utc::now();
+        sqlx::query(
+            "INSERT INTO instruments (id, course_id, name, kind, quantity, unit, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )
+        .bind("inst-2")
+        .bind(COURSE)
+        .bind("X")
+        .bind("digital")
+        .bind("tiempo")
+        .bind("s")
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // El CHECK de b_model debe rechazar un valor fuera del conjunto permitido.
+        let result = sqlx::query(
+            "INSERT INTO instrument_scales (id, instrument_id, label, step, b_model, unit, position, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+        .bind("scale-2")
+        .bind("inst-2")
+        .bind("escala")
+        .bind(0.1_f64)
+        .bind("inventado")
+        .bind("s")
+        .bind(0_i64)
+        .bind(now)
+        .execute(&pool)
+        .await;
+        assert!(result.is_err());
     }
 }
