@@ -166,7 +166,7 @@ instrumentCourseFilter.addEventListener("change", () => {
   state.instrumentCourseId = instrumentCourseFilter.value;
   state.activeInstrumentId = null;
   state.editingScaleId = null;
-  loadInstruments().then(renderInstrumentsPage);
+  refreshInstruments();
 });
 
 gradeComponentForm.addEventListener("submit", async (event) => {
@@ -276,7 +276,7 @@ function selectView(view) {
   if (view === "courses") renderCoursesPage();
   if (view === "instruments") {
     renderInstrumentsPage();
-    loadInstruments().then(renderInstrumentsPage);
+    refreshInstruments();
   }
   if (view === "account") renderAccount();
 }
@@ -2040,6 +2040,18 @@ async function loadInstruments() {
   state.instruments = await fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`);
 }
 
+// Carga los instrumentos y re-renderiza, mostrando el error en el status si la carga falla.
+async function refreshInstruments() {
+  try {
+    await loadInstruments();
+    renderInstrumentsPage();
+  } catch (error) {
+    state.instruments = [];
+    renderInstrumentsPage();
+    withInstrumentStatus(error.message);
+  }
+}
+
 function renderInstrumentsPage() {
   renderInstrumentDirectory();
   if (!instrumentWorkspace) return;
@@ -2079,7 +2091,10 @@ function renderInstrumentsPage() {
     </div>
 
     <section class="panel workspace-panel">
-      <h3>Escalas</h3>
+      <div class="list-head">
+        <h3>Escalas</h3>
+        <span class="submission-meta">${escapeHtml(state.instrumentActionStatus)}</span>
+      </div>
       ${renderScalesList(item)}
     </section>
   `;
@@ -2133,17 +2148,14 @@ function renderInstrumentDirectory() {
 
   const courseId = state.instrumentCourseId ?? "";
   const exportImportBar = `
-    <div class="detail-actions" style="margin-bottom:12px;gap:8px;display:flex;flex-wrap:wrap;align-items:center">
+    <div class="detail-actions instrument-toolbar">
       <button type="button" id="instrument-export-btn">Exportar JSON</button>
-      <label style="margin:0">
-        <span style="display:none">Importar</span>
-        <button type="button" id="instrument-import-btn">Importar JSON</button>
-        <input type="file" id="instrument-import-file" accept=".json,application/json" style="display:none" />
-      </label>
+      <button type="button" id="instrument-import-btn">Importar JSON</button>
+      <input type="file" id="instrument-import-file" accept=".json,application/json" class="hidden" />
       <span id="instrument-import-status" class="submission-meta"></span>
     </div>
-    <div class="panel" style="margin-bottom:12px">
-      <h3 style="margin-top:0">Nuevo instrumento</h3>
+    <div class="panel instrument-new-panel">
+      <h3>Nuevo instrumento</h3>
       <form id="new-instrument-form" class="detail-form detail-form-grid">
         <input name="course_id" type="hidden" value="${escapeHtml(courseId)}" />
         <label>Nombre <input name="name" required placeholder="Tester A830L" /></label>
@@ -2284,7 +2296,7 @@ function renderScalesList(item) {
       </tr>
     `;
     const editRow = state.editingScaleId === scale.id
-      ? `<tr><td colspan="6" style="padding:12px 0">${renderScaleForm(scale, item.id)}</td></tr>`
+      ? `<tr><td colspan="6" class="scale-edit-cell">${renderScaleForm(scale, item.id)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
@@ -2381,16 +2393,12 @@ function scalePayloadFromForm(form) {
 
 async function saveNewScale(event) {
   event.preventDefault();
+  const form = event.currentTarget;
+  const instrumentId = form.querySelector('[name="instrument_id"]').value;
   try {
-    state.instrumentActionStatus = "";
-    const form = event.currentTarget;
-    const instrumentId = form.querySelector('[name="instrument_id"]').value;
     await postJson(`/api/instruments/${instrumentId}/scales`, scalePayloadFromForm(form));
-    form.reset();
-    form.querySelector('[name="instrument_id"]').value = instrumentId;
     await loadInstruments();
     state.editingScaleId = null;
-    renderInstrumentsPage();
     state.instrumentActionStatus = "Escala agregada";
     renderInstrumentsPage();
   } catch (error) {
@@ -2405,11 +2413,9 @@ async function saveEditScale(event) {
   const instrumentId = form.querySelector('[name="instrument_id"]').value;
   const scaleId = form.querySelector('[name="scale_id"]').value;
   try {
-    state.instrumentActionStatus = "";
     await postJson(`/api/instruments/${instrumentId}/scales/${scaleId}`, scalePayloadFromForm(form));
     await loadInstruments();
     state.editingScaleId = null;
-    renderInstrumentsPage();
     state.instrumentActionStatus = "Escala actualizada";
     renderInstrumentsPage();
   } catch (error) {
@@ -2419,13 +2425,12 @@ async function saveEditScale(event) {
 }
 
 async function deleteScale(scaleId, instrumentId) {
+  if (!window.confirm("¿Eliminar esta escala? Esta accion no se puede deshacer.")) return;
   try {
-    state.instrumentActionStatus = "";
     const response = await fetch(`/api/instruments/${instrumentId}/scales/${scaleId}`, { method: "DELETE" });
     if (!response.ok) throw new Error(await errorText(response));
     await loadInstruments();
     state.editingScaleId = null;
-    renderInstrumentsPage();
     state.instrumentActionStatus = "Escala eliminada";
     renderInstrumentsPage();
   } catch (error) {
@@ -2435,6 +2440,9 @@ async function deleteScale(scaleId, instrumentId) {
 }
 
 async function deleteInstrument(instrumentId) {
+  const item = state.instruments.find((i) => i.id === instrumentId);
+  const extra = item?.scales.length ? ` y sus ${item.scales.length} escala(s)` : "";
+  if (!window.confirm(`¿Eliminar el instrumento "${item?.name ?? ""}"${extra}? Esta accion no se puede deshacer.`)) return;
   try {
     withInstrumentStatus("");
     const response = await fetch(`/api/instruments/${instrumentId}`, { method: "DELETE" });

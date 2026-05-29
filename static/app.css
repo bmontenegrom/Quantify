@@ -376,6 +376,26 @@ textarea {
   margin-top: 12px;
 }
 
+.instrument-toolbar {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  margin-bottom: 12px;
+}
+
+.instrument-new-panel {
+  margin-bottom: 12px;
+}
+
+.instrument-new-panel h3 {
+  margin-top: 0;
+}
+
+.scale-edit-cell {
+  padding: 12px 0;
+}
+
 .workspace-head {
   align-items: start;
   display: flex;
