@@ -38,6 +38,7 @@
           <button class="tab teacher-only" data-view="groups">Grupos</button>
           <button class="tab teacher-only" data-view="courses">Cursos</button>
           <button class="tab teacher-only" data-view="users">Usuarios</button>
+          <button class="tab teacher-only" data-view="instruments">Instrumentos</button>
           <button class="tab" data-view="account">Cuenta</button>
         </nav>
         <div class="session-box">
@@ -238,6 +239,27 @@
             <span id="user-status" class="submission-meta"></span>
           </div>
           <div id="user-list" class="user-list"></div>
+        </section>
+      </section>
+
+      <section id="instruments-view" class="view">
+        <div class="section-head">
+          <h2>Instrumentos</h2>
+          <p>Administra el catalogo de instrumentos por curso.</p>
+        </div>
+
+        <section id="instrument-workspace" class="panel hidden"></section>
+
+        <section class="panel catalog-panel">
+          <div class="list-head">
+            <h3>Catalogo de instrumentos</h3>
+            <span id="instrument-status" class="submission-meta"></span>
+          </div>
+          <label class="grade-course-filter">
+            Curso
+            <select id="instrument-course-filter"></select>
+          </label>
+          <div id="instrument-catalog" class="directory-list"></div>
         </section>
       </section>
 
