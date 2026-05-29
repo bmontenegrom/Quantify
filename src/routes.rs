@@ -747,6 +747,14 @@ fn validate_scale(input: &ScaleInput) -> Result<(), AppError> {
             "una escala de fabricante requiere al menos un termino de spec positivo",
         ));
     }
+    // Una escala de apreciacion sin apreciacion positiva daria u_B = 0 silenciosamente.
+    if input.b_model.trim() == "apreciacion"
+        && !matches!(input.appreciation, Some(x) if x > 0.0)
+    {
+        return Err(AppError::bad_request(
+            "una escala de apreciacion requiere una apreciacion positiva",
+        ));
+    }
     if input.label.trim().is_empty() || input.unit.trim().is_empty() {
         return Err(AppError::bad_request("datos de escala invalidos"));
     }
@@ -859,9 +867,25 @@ mod tests {
     #[test]
     fn validate_scale_checks_model_and_step() {
         assert!(validate_scale(&scale("resolucion", 0.1)).is_ok());
-        assert!(validate_scale(&scale("apreciacion", 0.5)).is_ok());
+        let mut apre = scale("apreciacion", 0.5);
+        apre.appreciation = Some(0.5);
+        assert!(validate_scale(&apre).is_ok());
         assert!(validate_scale(&scale("raro", 1.0)).is_err());
         assert!(validate_scale(&scale("resolucion", 0.0)).is_err());
+    }
+
+    #[test]
+    fn validate_scale_apreciacion_requires_appreciation() {
+        // Sin apreciacion -> error (evita u_B = 0 silencioso).
+        assert!(validate_scale(&scale("apreciacion", 1.0)).is_err());
+        // Con apreciacion no positiva -> error.
+        let mut zero = scale("apreciacion", 1.0);
+        zero.appreciation = Some(0.0);
+        assert!(validate_scale(&zero).is_err());
+        // Con apreciacion positiva -> ok.
+        let mut ok = scale("apreciacion", 1.0);
+        ok.appreciation = Some(0.5);
+        assert!(validate_scale(&ok).is_ok());
     }
 
     #[test]
