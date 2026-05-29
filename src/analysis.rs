@@ -163,7 +163,7 @@ fn first_regression(headers: &StringRecord, columns: &[Vec<f64>]) -> Option<Line
         .map(|(idx, _)| idx)
         .collect();
 
-    let x_idx = *numeric_indices.get(0)?;
+    let x_idx = *numeric_indices.first()?;
     let y_idx = *numeric_indices.get(1)?;
     let paired: Vec<(f64, f64)> = columns[x_idx]
         .iter()
@@ -236,10 +236,7 @@ fn linear_regression(
     let (u_slope, u_intercept) = if n >= 3 {
         let s2 = ss_res / (n_f - 2.0); // varianza residual
         let sum_x2 = points.iter().map(|(x, _)| x * x).sum::<f64>();
-        (
-            (s2 / ss_xx).sqrt(),
-            (s2 * sum_x2 / (n_f * ss_xx)).sqrt(),
-        )
+        ((s2 / ss_xx).sqrt(), (s2 * sum_x2 / (n_f * ss_xx)).sqrt())
     } else {
         (0.0, 0.0)
     };

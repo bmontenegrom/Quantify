@@ -1,8 +1,8 @@
 // Lógica pura y testeable del frontend (sin DOM, sin red, sin efectos al cargar).
 // Se importa desde app.js y desde los tests en tests/. Cada función exportada
-// lleva su doc y tiene un test en tests/lib.test.js (espeja la convención Rust).
+// lleva su doc (JSDoc) y tiene un test en tests/lib.test.js (espeja la convención Rust).
 
-/// Escapa los caracteres con significado especial en HTML para interpolar texto seguro.
+/** Escapa los caracteres con significado especial en HTML para interpolar texto seguro. */
 export function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -12,8 +12,10 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-/// Escapa un valor para usarlo dentro de un selector CSS; usa `CSS.escape` si está
-/// disponible (browser) y cae a un escape mínimo de comillas en su ausencia (Node/tests).
+/**
+ * Escapa un valor para usarlo dentro de un selector CSS; usa `CSS.escape` si está
+ * disponible (browser) y cae a un escape mínimo de comillas en su ausencia (Node/tests).
+ */
 export function cssEscape(value) {
   if (typeof window !== "undefined" && window.CSS?.escape) {
     return window.CSS.escape(String(value));
@@ -21,12 +23,12 @@ export function cssEscape(value) {
   return String(value).replaceAll('"', '\\"');
 }
 
-/// Formatea un número con locale es-UY y hasta 5 cifras significativas.
+/** Formatea un número con locale es-UY y hasta 5 cifras significativas. */
 export function format(value) {
   return Number(value).toLocaleString("es-UY", { maximumSignificantDigits: 5 });
 }
 
-/// Formatea un timestamp (ISO o Date) como fecha y hora cortas en locale es-UY.
+/** Formatea un timestamp (ISO o Date) como fecha y hora cortas en locale es-UY. */
 export function formatDate(value) {
   return new Date(value).toLocaleString("es-UY", {
     dateStyle: "short",
@@ -34,8 +36,10 @@ export function formatDate(value) {
   });
 }
 
-/// Agrupa los elementos de `items` por la clave que devuelve `keyFn`; las claves
-/// nulas o vacías caen en el grupo "-".
+/**
+ * Agrupa los elementos de `items` por la clave que devuelve `keyFn`; las claves
+ * nulas o vacías caen en el grupo "-".
+ */
 export function groupBy(items, keyFn) {
   return items.reduce((groups, item) => {
     const key = keyFn(item) || "-";
@@ -45,15 +49,19 @@ export function groupBy(items, keyFn) {
   }, {});
 }
 
-/// Traduce el tipo de grupo a su etiqueta legible (cualquier valor distinto de
-/// "recuperacion" se muestra como "Regular").
+/**
+ * Traduce el tipo de grupo a su etiqueta legible (cualquier valor distinto de
+ * "recuperacion" se muestra como "Regular").
+ */
 export function renderGroupType(value) {
   return value === "recuperacion" ? "Recuperacion" : "Regular";
 }
 
-/// Convierte los campos crudos de una escala (strings de un formulario) al payload
-/// del API: `step` siempre numérico; el resto de los campos opcionales pasan a número
-/// o `null` si vienen vacíos.
+/**
+ * Convierte los campos crudos de una escala (strings de un formulario) al payload
+ * del API: `step` siempre numérico; el resto de los campos opcionales pasan a número
+ * o `null` si vienen vacíos.
+ */
 export function scalePayload(raw) {
   const num = (key) => (raw[key] !== "" && raw[key] != null ? Number(raw[key]) : null);
   return {
@@ -75,19 +83,19 @@ export function scalePayload(raw) {
 // Derivan información del contexto académico (`academic`) o las libretas
 // (`gradebooks`); reciben el estado por parámetro para ser puros y testeables.
 
-/// `true` si el usuario tiene rol docente o admin (puede revisar/administrar).
+/** `true` si el usuario tiene rol docente o admin (puede revisar/administrar). */
 export function canReview(user) {
   return !!(user && ["docente", "admin"].includes(user.role));
 }
 
-/// Cursos en los que el estudiante figura como miembro.
+/** Cursos en los que el estudiante figura como miembro. */
 export function studentCourses(academic, studentId) {
   return academic.courses.filter((course) =>
     course.members.some((member) => member.id === studentId),
   );
 }
 
-/// Todos los grupos de todos los cursos, anotados con datos del curso.
+/** Todos los grupos de todos los cursos, anotados con datos del curso. */
 export function allGroups(academic) {
   return academic.courses.flatMap((course) =>
     course.groups.map((group) => ({
@@ -99,7 +107,7 @@ export function allGroups(academic) {
   );
 }
 
-/// Grupos en los que el estudiante es miembro, anotados con nombre/periodo del curso.
+/** Grupos en los que el estudiante es miembro, anotados con nombre/periodo del curso. */
 export function studentGroups(academic, studentId) {
   return academic.courses.flatMap((course) =>
     course.groups
@@ -108,13 +116,13 @@ export function studentGroups(academic, studentId) {
   );
 }
 
-/// Cursos donde el estudiante todavía NO está inscrito (para ofrecer inscripción).
+/** Cursos donde el estudiante todavía NO está inscrito (para ofrecer inscripción). */
 export function availableCoursesForStudent(academic, studentId) {
   const currentCourses = new Set(studentCourses(academic, studentId).map((course) => course.id));
   return academic.courses.filter((course) => !currentCourses.has(course.id));
 }
 
-/// Grupos disponibles (dentro de los cursos del estudiante) a los que aún no pertenece.
+/** Grupos disponibles (dentro de los cursos del estudiante) a los que aún no pertenece. */
 export function availableGroupsForStudent(academic, studentId) {
   const currentGroups = new Set(studentGroups(academic, studentId).map((group) => group.id));
   return studentCourses(academic, studentId).flatMap((course) =>
@@ -124,7 +132,7 @@ export function availableGroupsForStudent(academic, studentId) {
   );
 }
 
-/// Libretas del estudiante: pares curso + resumen, solo donde tiene resumen cargado.
+/** Libretas del estudiante: pares curso + resumen, solo donde tiene resumen cargado. */
 export function studentGradebooks(gradebooks, studentId) {
   return gradebooks
     .map((book) => ({
@@ -134,8 +142,10 @@ export function studentGradebooks(gradebooks, studentId) {
     .filter((item) => item.summary);
 }
 
-/// Totales acumulados (puntos / posibles) del estudiante sobre todas sus libretas;
-/// `null` si no tiene ninguna nota cargada.
+/**
+ * Totales acumulados (puntos / posibles) del estudiante sobre todas sus libretas;
+ * `null` si no tiene ninguna nota cargada.
+ */
 export function studentTotals(gradebooks, studentId) {
   const books = studentGradebooks(gradebooks, studentId);
   if (books.length === 0) return null;
@@ -148,7 +158,7 @@ export function studentTotals(gradebooks, studentId) {
   );
 }
 
-/// Lista de estudiantes: usa `academic.students` si viene, si no filtra `users` por rol.
+/** Lista de estudiantes: usa `academic.students` si viene, si no filtra `users` por rol. */
 export function allStudents(academic) {
   const direct = academic?.students ?? [];
   if (direct.length > 0) return direct;
