@@ -18,6 +18,7 @@ import {
   availableGroupsForStudent,
   allStudents,
   allGroups,
+  analysisKindLabel,
 } from "../static/lib.js";
 
 // Fixture chico de contexto académico: 2 cursos, el estudiante s1 está en c1 (grupo g1)
@@ -226,4 +227,13 @@ test("allGroups aplana todos los grupos anotando el curso", () => {
   const g3 = groups.find((g) => g.id === "g3");
   assert.equal(g3.courseId, "c2");
   assert.equal(g3.courseName, "Quimica");
+});
+
+test("analysisKindLabel devuelve etiqueta legible o 'Sin definir'", () => {
+  assert.equal(analysisKindLabel("estadistico"), "Estadístico");
+  assert.equal(analysisKindLabel("regresion_lineal"), "Regresión lineal");
+  assert.equal(analysisKindLabel("relajacion_exponencial"), "Relajación exponencial");
+  assert.equal(analysisKindLabel(null), "Sin definir");
+  assert.equal(analysisKindLabel(undefined), "Sin definir");
+  assert.equal(analysisKindLabel("desconocido"), "Sin definir");
 });

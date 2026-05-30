@@ -17,6 +17,38 @@ pub struct Practice {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// Tipo de análisis: `estadistico`, `regresion_lineal` o `relajacion_exponencial`.
+    pub analysis_kind: Option<String>,
+}
+
+/// Magnitud medida directamente dentro de una práctica (variable de entrada).
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct PracticeQuantity {
+    pub id: String,
+    pub practice_id: String,
+    /// Símbolo corto usado en fórmulas: `l`, `a`, `T`, `V`, `i`.
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    /// `true` si admite varias réplicas (tipo A); `false` para medida única.
+    pub repeated: bool,
+    /// Magnitud física (para sugerir instrumentos compatibles en Fase 4).
+    pub quantity: Option<String>,
+    pub position: i64,
+}
+
+/// Mensurando derivado de una práctica (determinación indirecta).
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct PracticeResult {
+    pub id: String,
+    pub practice_id: String,
+    /// Símbolo del mensurando: `Q`, `g`, `tau`.
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    /// Expresión matemática en función de los símbolos de `practice_quantities`.
+    pub formula: String,
+    pub position: i64,
 }
 
 /// Instrumento de medida del catálogo de un curso. El `kind` (`analogico`/`digital`) es
@@ -650,6 +682,41 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS practice_quantities (
+            id          TEXT PRIMARY KEY,
+            practice_id TEXT NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+            symbol      TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            unit        TEXT NOT NULL,
+            repeated    INTEGER NOT NULL DEFAULT 1,
+            quantity    TEXT,
+            position    INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(practice_id, symbol)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_results (
+            id          TEXT PRIMARY KEY,
+            practice_id TEXT NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+            symbol      TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            unit        TEXT NOT NULL,
+            formula     TEXT NOT NULL,
+            position    INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(practice_id, symbol)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         UPDATE users
         SET email = CASE username
             WHEN 'admin' THEN 'admin@quantify.local'
@@ -1112,10 +1179,11 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
 
 /// Lista el catálogo completo de prácticas ordenado por nombre.
 pub async fn practices(pool: &SqlitePool) -> anyhow::Result<Vec<Practice>> {
-    let rows =
-        sqlx::query_as::<_, Practice>("SELECT id, name, description FROM practices ORDER BY name")
-            .fetch_all(pool)
-            .await?;
+    let rows = sqlx::query_as::<_, Practice>(
+        "SELECT id, name, description, analysis_kind FROM practices ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await?;
     Ok(rows)
 }
 
@@ -1999,7 +2067,7 @@ async fn subgroups_for_course(
     let mut summaries = Vec::with_capacity(subgroups.len());
     for subgroup in subgroups {
         let practice = sqlx::query_as::<_, Practice>(
-            "SELECT id, name, description FROM practices WHERE id = ?1",
+            "SELECT id, name, description, analysis_kind FROM practices WHERE id = ?1",
         )
         .bind(&subgroup.practice_id)
         .fetch_one(pool)
@@ -2078,7 +2146,7 @@ async fn table_assignments_for_course(
 async fn practices_for_course(pool: &SqlitePool, course_id: &str) -> anyhow::Result<Vec<Practice>> {
     Ok(sqlx::query_as::<_, Practice>(
         r#"
-        SELECT p.id, p.name, p.description
+        SELECT p.id, p.name, p.description, p.analysis_kind
         FROM course_practices cp
         JOIN practices p ON p.id = cp.practice_id
         WHERE cp.course_id = ?1
