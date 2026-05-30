@@ -3,6 +3,7 @@ use crate::{
     db::{self, AppState, NewSubmission, ReviewSubmission},
     error::AppError,
     instruments::{self, CatalogExport, CreateInstrument, ScaleInput, UpdateInstrument},
+    practices::{self, QuantityInput, ResultInput},
 };
 use axum::{
     extract::{Multipart, Path, Query, State},
@@ -55,7 +56,22 @@ pub fn api_router(state: SharedState) -> Router {
             "/academic/groups/{group_id}/members/{user_id}/remove",
             post(remove_group_member_path),
         )
-        .route("/practices", get(practices))
+        .route("/practices", get(list_practices))
+        .route("/practices/{id}/definition", get(practice_definition))
+        .route(
+            "/practices/{id}/analysis-kind",
+            post(set_practice_analysis_kind),
+        )
+        .route("/practices/{id}/quantities", post(create_quantity))
+        .route(
+            "/practices/{id}/quantities/{qid}",
+            post(update_quantity).delete(delete_quantity),
+        )
+        .route("/practices/{id}/results", post(create_result))
+        .route(
+            "/practices/{id}/results/{rid}",
+            post(update_result).delete(delete_result),
+        )
         .route(
             "/instruments",
             get(list_instruments).post(create_instrument),
@@ -267,7 +283,8 @@ async fn upsert_grade_score(
 }
 
 /// `GET /api/practices`: catálogo de prácticas (requiere sesión válida).
-async fn practices(
+/// `GET /api/practices`: catálogo completo de prácticas (requiere sesión válida).
+async fn list_practices(
     State(state): State<SharedState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<db::Practice>>, AppError> {
@@ -716,6 +733,160 @@ async fn import_instruments(
     )
     .await?;
     Ok(Json(Health { status: "ok" }))
+}
+
+// ── Definición de prácticas ───────────────────────────────────────────────────
+
+/// Cuerpo para actualizar el tipo de análisis de una práctica.
+#[derive(Debug, Deserialize)]
+struct SetAnalysisKindBody {
+    analysis_kind: String,
+}
+
+/// `GET /api/practices/{id}/definition`: magnitudes + mensurandos de una práctica (requiere sesión).
+async fn practice_definition(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<practices::PracticeDefinition>, AppError> {
+    current_user(&state, &headers).await?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    Ok(Json(def))
+}
+
+/// `POST /api/practices/{id}/analysis-kind`: actualiza el tipo de análisis (docente/admin).
+async fn set_practice_analysis_kind(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<SetAnalysisKindBody>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !matches!(
+        body.analysis_kind.trim(),
+        "estadistico" | "regresion_lineal" | "relajacion_exponencial"
+    ) {
+        return Err(AppError::bad_request(
+            "analysis_kind debe ser estadistico, regresion_lineal o relajacion_exponencial",
+        ));
+    }
+    if !practices::set_analysis_kind(&state.pool, &id, body.analysis_kind.trim()).await? {
+        return Err(AppError::not_found("practica no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// `POST /api/practices/{id}/quantities`: agrega una magnitud a la práctica (docente/admin).
+async fn create_quantity(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<QuantityInput>,
+) -> Result<Json<db::PracticeQuantity>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_quantity(&input)?;
+    practices::create_quantity(&state.pool, &id, input)
+        .await
+        .map(Json)
+        .map_err(|err| AppError::bad_request(err.to_string()))
+}
+
+/// `POST /api/practices/{id}/quantities/{qid}`: actualiza una magnitud (docente/admin).
+async fn update_quantity(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((_id, qid)): Path<(String, String)>,
+    Json(input): Json<QuantityInput>,
+) -> Result<Json<db::PracticeQuantity>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_quantity(&input)?;
+    let updated = practices::update_quantity(&state.pool, &qid, input)
+        .await
+        .map_err(|err| AppError::bad_request(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("magnitud no encontrada"))?;
+    Ok(Json(updated))
+}
+
+/// `DELETE /api/practices/{id}/quantities/{qid}`: elimina una magnitud (docente/admin).
+async fn delete_quantity(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((_id, qid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_quantity(&state.pool, &qid).await? {
+        return Err(AppError::not_found("magnitud no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// `POST /api/practices/{id}/results`: agrega un mensurando derivado (docente/admin).
+async fn create_result(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<ResultInput>,
+) -> Result<Json<db::PracticeResult>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_result(&input)?;
+    practices::create_result(&state.pool, &id, input)
+        .await
+        .map(Json)
+        .map_err(|err| AppError::bad_request(err.to_string()))
+}
+
+/// `POST /api/practices/{id}/results/{rid}`: actualiza un mensurando derivado (docente/admin).
+async fn update_result(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((_id, rid)): Path<(String, String)>,
+    Json(input): Json<ResultInput>,
+) -> Result<Json<db::PracticeResult>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_result(&input)?;
+    let updated = practices::update_result(&state.pool, &rid, input)
+        .await
+        .map_err(|err| AppError::bad_request(err.to_string()))?
+        .ok_or_else(|| AppError::not_found("mensurando no encontrado"))?;
+    Ok(Json(updated))
+}
+
+/// `DELETE /api/practices/{id}/results/{rid}`: elimina un mensurando derivado (docente/admin).
+async fn delete_result(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((_id, rid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_result(&state.pool, &rid).await? {
+        return Err(AppError::not_found("mensurando no encontrado"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// Valida los campos de una magnitud: símbolo, nombre y unidad no vacíos.
+fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
+    if input.symbol.trim().is_empty()
+        || input.name.trim().is_empty()
+        || input.unit.trim().is_empty()
+    {
+        return Err(AppError::bad_request("datos de magnitud invalidos"));
+    }
+    Ok(())
+}
+
+/// Valida los campos de un mensurando derivado: símbolo, nombre, unidad y fórmula no vacíos.
+fn validate_result(input: &ResultInput) -> Result<(), AppError> {
+    if input.symbol.trim().is_empty()
+        || input.name.trim().is_empty()
+        || input.unit.trim().is_empty()
+        || input.formula.trim().is_empty()
+    {
+        return Err(AppError::bad_request("datos de mensurando invalidos"));
+    }
+    Ok(())
 }
 
 /// Valida los campos de un instrumento: tipo en {analogico, digital} y textos no vacíos.
