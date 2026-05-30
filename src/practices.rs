@@ -222,54 +222,146 @@ pub async fn set_analysis_kind(
     Ok(result.rows_affected() > 0)
 }
 
-/// Siembra la definición de P1 (magnitudes `l`, `a`, `b` + mensurando `Q = l*a + l*b`).
-/// Idempotente: no hace nada si P1 ya tiene magnitudes cargadas.
-pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'p1-estadistica'",
-    )
-    .fetch_one(pool)
-    .await?;
+/// Helpers cortos para construir las definiciones del seed.
+fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> QuantityInput {
+    QuantityInput {
+        symbol: symbol.into(),
+        name: name.into(),
+        unit: unit.into(),
+        repeated,
+        quantity: Some(quantity.into()),
+    }
+}
+
+fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
+    ResultInput {
+        symbol: symbol.into(),
+        name: name.into(),
+        unit: unit.into(),
+        formula: formula.into(),
+    }
+}
+
+/// Siembra la definición de una práctica (magnitudes + mensurandos). Idempotente:
+/// no hace nada si la práctica ya tiene magnitudes cargadas.
+async fn seed_practice(
+    pool: &SqlitePool,
+    practice_id: &str,
+    quantities: &[QuantityInput],
+    results: &[ResultInput],
+) -> anyhow::Result<()> {
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1")
+            .bind(practice_id)
+            .fetch_one(pool)
+            .await?;
     if count.0 > 0 {
         return Ok(());
     }
-
-    let quantities = [
-        QuantityInput {
-            symbol: "l".into(),
-            name: "Longitud del cordon".into(),
-            unit: "mm".into(),
-            repeated: true,
-            quantity: Some("longitud".into()),
-        },
-        QuantityInput {
-            symbol: "a".into(),
-            name: "Ancho del cordon".into(),
-            unit: "mm".into(),
-            repeated: true,
-            quantity: Some("longitud".into()),
-        },
-        QuantityInput {
-            symbol: "b".into(),
-            name: "Espesor del cordon".into(),
-            unit: "mm".into(),
-            repeated: true,
-            quantity: Some("longitud".into()),
-        },
-    ];
     let mut conn = pool.acquire().await?;
     for (pos, q) in quantities.iter().enumerate() {
-        insert_quantity(&mut conn, "p1-estadistica", pos as i64 + 1, q).await?;
+        insert_quantity(&mut conn, practice_id, pos as i64 + 1, q).await?;
     }
+    for (pos, r) in results.iter().enumerate() {
+        insert_result(&mut conn, practice_id, pos as i64 + 1, r).await?;
+    }
+    Ok(())
+}
 
-    // Q = l*a + l*b (area transversal del cordon, ejemplo de la cuaderneta Fisica 103)
-    let result = ResultInput {
-        symbol: "Q".into(),
-        name: "Area transversal del cordon".into(),
-        unit: "mm2".into(),
-        formula: "l*a + l*b".into(),
-    };
-    insert_result(&mut conn, "p1-estadistica", 1, &result).await?;
+/// Siembra las definiciones iniciales de las prácticas (idempotente por práctica).
+/// Las magnitudes/fórmulas salen de las técnicas de trabajo de Física 103.
+pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
+    // P1 — Tratamiento estadístico: área del cordón Q = l*a + l*b (ejemplo de la cuaderneta).
+    seed_practice(
+        pool,
+        "p1-estadistica",
+        &[
+            qty("l", "Longitud del cordon", "mm", true, "longitud"),
+            qty("a", "Ancho del cordon", "mm", true, "longitud"),
+            qty("b", "Espesor del cordon", "mm", true, "longitud"),
+        ],
+        &[res("Q", "Area transversal del cordon", "mm2", "l*a + l*b")],
+    )
+    .await?;
+
+    // P3 — Relajación exponencial (parte 1, determinación directa de tau en un RC serie).
+    // tau_teorico = (R + Rint)*C ; tau_exp = t_medio/ln2 (porque t_1/2 = tau*ln2).
+    // Unidades SI (ohm, F, s) para que tau salga en segundos. Tipo A despreciable -> medida unica.
+    // (La parte 2 por desfasaje es regresion_lineal y se agregara cuando este implementada.)
+    seed_practice(
+        pool,
+        "p3-relajacion",
+        &[
+            qty("R", "Resistencia", "ohm", false, "resistencia"),
+            qty(
+                "Rint",
+                "Resistencia interna de la fuente",
+                "ohm",
+                false,
+                "resistencia",
+            ),
+            qty("C", "Capacitancia", "F", false, "capacitancia"),
+            qty(
+                "tmedio",
+                "Tiempo de semidescarga (t1/2)",
+                "s",
+                false,
+                "tiempo",
+            ),
+        ],
+        &[
+            res(
+                "tau_teorico",
+                "Tiempo de relajacion teorico",
+                "s",
+                "(R + Rint) * C",
+            ),
+            res(
+                "tau_exp",
+                "Tiempo de relajacion experimental",
+                "s",
+                "tmedio / 0.6931471805599453",
+            ),
+        ],
+    )
+    .await?;
+
+    // P2 — Corriente continua. Circuito: R1 y RA (resistencia interna del amperimetro) en serie
+    // con el paralelo de R2 y R3. Req = R1 + RA + 1/(1/R2 + 1/R3); I = Vg/Req.
+    // Tipo A despreciable -> medida unica; incertidumbre tipo B (fabricante) del tester/amperimetro.
+    seed_practice(
+        pool,
+        "p2-corriente-continua",
+        &[
+            qty("Vg", "Voltaje de la fuente", "V", false, "voltaje"),
+            qty("R1", "Resistencia R1", "ohm", false, "resistencia"),
+            qty("R2", "Resistencia R2", "ohm", false, "resistencia"),
+            qty("R3", "Resistencia R3", "ohm", false, "resistencia"),
+            qty(
+                "RA",
+                "Resistencia interna del amperimetro",
+                "ohm",
+                false,
+                "resistencia",
+            ),
+        ],
+        &[
+            res(
+                "Req",
+                "Resistencia equivalente",
+                "ohm",
+                "R1 + RA + 1/(1/R2 + 1/R3)",
+            ),
+            res(
+                "I",
+                "Intensidad de corriente teorica",
+                "A",
+                "Vg / (R1 + RA + 1/(1/R2 + 1/R3))",
+            ),
+        ],
+    )
+    .await?;
+
     Ok(())
 }
 
@@ -546,16 +638,109 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn p2_and_p3_start_empty() {
+    async fn seed_definitions_populates_p2_corriente_continua() {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
-        for id in ["p2-corriente-continua", "p3-relajacion"] {
-            let def = definition(&pool, id).await.unwrap().unwrap();
+        let def = definition(&pool, "p2-corriente-continua")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(def.quantities.len(), 5);
+        for symbol in ["Vg", "R1", "R2", "R3", "RA"] {
             assert!(
-                def.quantities.is_empty(),
-                "{id} should start with no quantities"
+                def.quantities.iter().any(|q| q.symbol == symbol),
+                "falta la magnitud {symbol}"
             );
-            assert!(def.results.is_empty(), "{id} should start with no results");
         }
+        assert!(def.results.iter().any(|r| r.symbol == "I"));
+    }
+
+    #[tokio::test]
+    async fn seed_definitions_populates_p3_relajacion() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+        assert_eq!(def.quantities.len(), 4);
+        for symbol in ["R", "Rint", "C", "tmedio"] {
+            assert!(
+                def.quantities.iter().any(|q| q.symbol == symbol),
+                "falta la magnitud {symbol}"
+            );
+        }
+        let tau_t = def
+            .results
+            .iter()
+            .find(|r| r.symbol == "tau_teorico")
+            .unwrap();
+        assert_eq!(tau_t.formula, "(R + Rint) * C");
+        assert!(def.results.iter().any(|r| r.symbol == "tau_exp"));
+    }
+
+    // Verifica que las fórmulas sembradas de P2/P3 son evaluables por el motor (sin NaN/errores).
+    #[tokio::test]
+    async fn seeded_p2_p3_formulas_compute() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+
+        // P3: R=10000, Rint=100, C=1e-8, tmedio=7e-5 -> tau_teorico=(10100)*1e-8=1.01e-4
+        let def3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+        let m3: Vec<crate::computation::MeasurementInput> = def3
+            .quantities
+            .iter()
+            .map(|q| {
+                let v = match q.symbol.as_str() {
+                    "R" => 10000.0,
+                    "Rint" => 100.0,
+                    "C" => 1e-8,
+                    _ => 7e-5,
+                };
+                crate::computation::MeasurementInput {
+                    quantity_id: q.id.clone(),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![v],
+                }
+            })
+            .collect();
+        let a3 =
+            crate::computation::compute(&def3.quantities, &def3.results, &Default::default(), &m3)
+                .unwrap();
+        let tau_t = a3
+            .derived
+            .iter()
+            .find(|d| d.symbol == "tau_teorico")
+            .unwrap();
+        assert!((tau_t.value - 1.01e-4).abs() < 1e-12);
+
+        // P2: Vg=8, R1=100, R2=200, R3=200, RA=10 -> Req=100+10+100=210; I=8/210
+        let def2 = definition(&pool, "p2-corriente-continua")
+            .await
+            .unwrap()
+            .unwrap();
+        let m2: Vec<crate::computation::MeasurementInput> = def2
+            .quantities
+            .iter()
+            .map(|q| {
+                let v = match q.symbol.as_str() {
+                    "Vg" => 8.0,
+                    "RA" => 10.0,
+                    "R1" => 100.0,
+                    _ => 200.0,
+                };
+                crate::computation::MeasurementInput {
+                    quantity_id: q.id.clone(),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![v],
+                }
+            })
+            .collect();
+        let a2 =
+            crate::computation::compute(&def2.quantities, &def2.results, &Default::default(), &m2)
+                .unwrap();
+        let req = a2.derived.iter().find(|d| d.symbol == "Req").unwrap();
+        assert!((req.value - 210.0).abs() < 1e-9);
+        let i = a2.derived.iter().find(|d| d.symbol == "I").unwrap();
+        assert!((i.value - 8.0 / 210.0).abs() < 1e-9);
     }
 }
