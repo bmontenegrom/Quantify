@@ -1073,39 +1073,57 @@ pub async fn change_password(
 }
 
 pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
-    // Practicas reales del primer bloque de Fisica 103.
+    // Practicas reales del primer bloque de Fisica 103. Las columnas `x_formula`/`y_formula`
+    // solo se usan en el camino `regresion_lineal`; en las estadisticas van en `None`.
     let practices = [
         (
             "p1-estadistica",
             "Tratamiento Estadistico de Datos",
             "Medidas directas con replicas e instrumentos, incertidumbres tipo A y B, y determinacion indirecta por propagacion de varianzas.",
             "estadistico",
+            None,
+            None,
         ),
-        // P2 y P3 se modelan hoy con el camino `estadistico` (medidas directas + propagacion),
-        // que es lo que sus definiciones sembradas calculan. Las partes con ajuste (P(R) en P2,
-        // desfasaje en P3) pasaran a `regresion_lineal` cuando ese motor este implementado.
+        // P2 y P3-parte1 se modelan con el camino `estadistico` (medidas directas + propagacion),
+        // que es lo que sus definiciones sembradas calculan. La parte con ajuste de P2 (P(R))
+        // pasara a `regresion_lineal` mas adelante.
         (
             "p2-corriente-continua",
             "Circuitos de Corriente Continua",
             "Medidas de voltaje y corriente con tester; intensidad teorica por leyes de circuito.",
             "estadistico",
+            None,
+            None,
         ),
         (
             "p3-relajacion",
             "Relajacion Exponencial",
             "Determinacion del tiempo de relajacion tau de un circuito RC (parte 1: medida directa).",
             "estadistico",
+            None,
+            None,
+        ),
+        // P3-parte2 — desfasaje por figura de Lissajous: se ajusta tg(phi) vs omega y la
+        // pendiente del ajuste es RC = tau. El alumno carga f, a y b por punto; las formulas
+        // de eje derivan x = 2*pi*f y y = b/sqrt(a^2 - b^2).
+        (
+            "p3-relajacion-desfasaje",
+            "Relajacion Exponencial - Desfasaje",
+            "Determinacion de tau = RC por desfasaje (parte 2): ajuste lineal de tg(phi) contra omega = 2*pi*f.",
+            "regresion_lineal",
+            Some("2*pi*f"),
+            Some("b / math::sqrt(a*a - b*b)"),
         ),
     ];
 
-    for (id, name, description, analysis_kind) in practices {
+    for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
         // `DO NOTHING`: solo siembra las prácticas faltantes y nunca pisa las existentes, para
         // respetar ediciones del docente (p. ej. `analysis_kind`) entre reinicios. En dev, para
         // re-sembrar valores nuevos se resetea la base.
         sqlx::query(
             r#"
-            INSERT INTO practices (id, name, description, analysis_kind)
-            VALUES (?1, ?2, ?3, ?4)
+            INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -1113,6 +1131,8 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(name)
         .bind(description)
         .bind(analysis_kind)
+        .bind(x_formula)
+        .bind(y_formula)
         .execute(pool)
         .await?;
     }
@@ -1203,7 +1223,12 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
-    for practice in ["p1-estadistica", "p2-corriente-continua", "p3-relajacion"] {
+    for practice in [
+        "p1-estadistica",
+        "p2-corriente-continua",
+        "p3-relajacion",
+        "p3-relajacion-desfasaje",
+    ] {
         sqlx::query(
             r#"
             INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -2499,6 +2524,7 @@ mod tests {
         assert!(ids.contains(&"p1-estadistica".to_string()));
         assert!(ids.contains(&"p2-corriente-continua".to_string()));
         assert!(ids.contains(&"p3-relajacion".to_string()));
+        assert!(ids.contains(&"p3-relajacion-desfasaje".to_string()));
     }
 
     #[tokio::test]
@@ -2532,7 +2558,12 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 3);
+        assert!(
+            user_can_submit(&pool, &student, COURSE, GROUP, "p3-relajacion-desfasaje")
+                .await
+                .unwrap()
+        );
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 4);
     }
 
     #[tokio::test]

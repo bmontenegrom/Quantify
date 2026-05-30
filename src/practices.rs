@@ -392,6 +392,34 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
+    // P3 — parte 2 (desfasaje por figura de Lissajous). El alumno carga una serie de puntos
+    // con f, a y b; las fórmulas de eje (en `practices.x_formula`/`y_formula`) derivan
+    // x = 2*pi*f (= omega) y y = b/sqrt(a^2 - b^2) (= tg phi). La pendiente del ajuste es
+    // RC = tau, que se referencia con el símbolo especial `slope`.
+    seed_practice(
+        pool,
+        "p3-relajacion-desfasaje",
+        &[
+            qty("f", "Frecuencia", "Hz", true, "frecuencia"),
+            qty(
+                "a",
+                "Amplitud de la senal en el eje y de la elipse",
+                "div",
+                true,
+                "longitud",
+            ),
+            qty(
+                "b",
+                "Interseccion de la elipse con el eje y",
+                "div",
+                true,
+                "longitud",
+            ),
+        ],
+        &[res("tau", "Constante de tiempo RC", "s", "slope")],
+    )
+    .await?;
+
     Ok(())
 }
 
@@ -801,5 +829,97 @@ mod tests {
         assert!((req.value - 210.0).abs() < 1e-9);
         let i = a2.derived.iter().find(|d| d.symbol == "I").unwrap();
         assert!((i.value - 8.0 / 210.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn seed_definitions_populates_p3_desfasaje() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "p3-relajacion-desfasaje")
+            .await
+            .unwrap()
+            .unwrap();
+        // Es una práctica de regresión con las fórmulas de eje ya sembradas.
+        assert_eq!(def.analysis_kind.as_deref(), Some("regresion_lineal"));
+        assert_eq!(def.x_formula.as_deref(), Some("2*pi*f"));
+        assert_eq!(def.y_formula.as_deref(), Some("b / math::sqrt(a*a - b*b)"));
+        assert_eq!(def.quantities.len(), 3);
+        for symbol in ["f", "a", "b"] {
+            assert!(
+                def.quantities.iter().any(|q| q.symbol == symbol),
+                "falta la magnitud {symbol}"
+            );
+        }
+        assert_eq!(def.results.len(), 1);
+        assert_eq!(def.results[0].symbol, "tau");
+        assert_eq!(def.results[0].formula, "slope");
+    }
+
+    // Ajuste de extremo a extremo sobre la definición sembrada de P3-parte2, con un caso
+    // construido: si tg(phi) = tau*omega, con a=1 y b=sin(phi)=t/sqrt(1+t^2), entonces
+    // y = b/sqrt(a^2-b^2) = tg(phi) = tau*omega, así que el ajuste recupera slope = tau.
+    #[tokio::test]
+    async fn seeded_p3_desfasaje_fits_known_tau() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "p3-relajacion-desfasaje")
+            .await
+            .unwrap()
+            .unwrap();
+
+        let tau = 1e-3_f64;
+        let freqs = [10.0_f64, 20.0, 30.0, 40.0, 50.0];
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let b_vals: Vec<f64> = freqs
+            .iter()
+            .map(|f| {
+                let t = tau * 2.0 * std::f64::consts::PI * f;
+                t / (1.0 + t * t).sqrt()
+            })
+            .collect();
+        let measurements = vec![
+            crate::computation::MeasurementInput {
+                quantity_id: id("f"),
+                instrument_id: None,
+                scale_id: None,
+                values: freqs.to_vec(),
+            },
+            crate::computation::MeasurementInput {
+                quantity_id: id("a"),
+                instrument_id: None,
+                scale_id: None,
+                values: freqs.iter().map(|_| 1.0).collect(),
+            },
+            crate::computation::MeasurementInput {
+                quantity_id: id("b"),
+                instrument_id: None,
+                scale_id: None,
+                values: b_vals,
+            },
+        ];
+        let analysis = crate::computation::compute_regresion(
+            &def.quantities,
+            &def.results,
+            def.x_formula.as_deref().unwrap(),
+            def.y_formula.as_deref().unwrap(),
+            &measurements,
+        )
+        .unwrap();
+        let reg = analysis.regression.unwrap();
+        assert!(
+            (reg.slope - tau).abs() < 1e-9,
+            "slope {} != tau {tau}",
+            reg.slope
+        );
+        assert!(reg.intercept.abs() < 1e-9);
+        let tau_d = analysis.derived.iter().find(|d| d.symbol == "tau").unwrap();
+        assert!((tau_d.value - tau).abs() < 1e-9);
     }
 }
