@@ -644,6 +644,9 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .await?;
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
+    // Fórmulas de eje (x, y) por punto, solo para prácticas `regresion_lineal`.
+    add_column_if_missing(pool, "practices", "x_formula", "TEXT").await?;
+    add_column_if_missing(pool, "practices", "y_formula", "TEXT").await?;
 
     sqlx::query(
         r#"

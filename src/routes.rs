@@ -63,6 +63,10 @@ pub fn api_router(state: SharedState) -> Router {
             "/practices/{id}/analysis-kind",
             post(set_practice_analysis_kind),
         )
+        .route(
+            "/practices/{id}/regression-formulas",
+            post(set_practice_regression_formulas),
+        )
         .route("/practices/{id}/quantities", post(create_quantity))
         .route(
             "/practices/{id}/quantities/{qid}",
@@ -833,6 +837,29 @@ async fn set_practice_analysis_kind(
         ));
     }
     if !practices::set_analysis_kind(&state.pool, &id, body.analysis_kind.trim()).await? {
+        return Err(AppError::not_found("practica no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// Cuerpo para definir las fórmulas de eje de una práctica de regresión.
+#[derive(Debug, Deserialize)]
+struct RegressionFormulasBody {
+    x_formula: String,
+    y_formula: String,
+}
+
+/// `POST /api/practices/{id}/regression-formulas`: define las fórmulas de eje `x`/`y` (docente/admin).
+async fn set_practice_regression_formulas(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<RegressionFormulasBody>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::set_regression_formulas(&state.pool, &id, &body.x_formula, &body.y_formula)
+        .await?
+    {
         return Err(AppError::not_found("practica no encontrada"));
     }
     Ok(Json(Health { status: "ok" }))

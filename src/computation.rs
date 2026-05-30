@@ -6,6 +6,7 @@
 //! [`crate::uncertainty`]; este módulo lo cablea con la base y evalúa las fórmulas (texto)
 //! con `evalexpr`.
 
+use crate::analysis;
 use crate::db::{self, AuthUser, InstrumentScale, PracticeQuantity, PracticeResult};
 use crate::uncertainty::{self, BModel, QuantityResult, ScaleSpec};
 use chrono::Utc;
@@ -58,10 +59,24 @@ pub struct DerivedComputation {
     pub u_expanded: f64,
 }
 
-/// Resultado completo del cálculo de una entrega por formulario.
+/// Resultado de un ajuste lineal `y = slope*x + intercept` sobre una serie de puntos.
+#[derive(Debug, Serialize)]
+pub struct RegressionResult {
+    pub points: Vec<(f64, f64)>,
+    pub slope: f64,
+    pub intercept: f64,
+    pub u_slope: f64,
+    pub u_intercept: f64,
+    pub r_squared: f64,
+}
+
+/// Resultado completo del cálculo de una entrega por formulario. En el camino estadístico se
+/// llenan `quantities` (incertidumbres por magnitud); en el de regresión, `regression` (ajuste).
+/// `derived` y `warnings` se usan en ambos.
 #[derive(Debug, Serialize)]
 pub struct FormAnalysis {
     pub quantities: Vec<QuantityComputation>,
+    pub regression: Option<RegressionResult>,
     pub derived: Vec<DerivedComputation>,
     pub warnings: Vec<String>,
 }
@@ -87,13 +102,17 @@ pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
     })
 }
 
+/// Constantes disponibles en cualquier fórmula (además de las funciones `math::*` de evalexpr).
+const CONSTANTS: [(&str, f64); 2] = [("pi", std::f64::consts::PI), ("e", std::f64::consts::E)];
+
 /// Compila una fórmula y valida que todas sus variables sean símbolos declarados (los de
-/// `allowed`). Devuelve el árbol precompilado para evaluarlo muchas veces (propagación).
+/// `allowed`) o constantes conocidas (`pi`, `e`). Devuelve el árbol precompilado.
 fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
     let tree = build_operator_tree(formula)
         .map_err(|err| anyhow::anyhow!("la formula \"{formula}\" no es valida: {err}"))?;
     for var in tree.iter_variable_identifiers() {
-        if !allowed.iter().any(|s| s == var) {
+        let is_constant = CONSTANTS.iter().any(|(name, _)| *name == var);
+        if !is_constant && !allowed.iter().any(|s| s == var) {
             anyhow::bail!(
                 "la formula \"{formula}\" usa el simbolo \"{var}\", que no es una magnitud de la practica"
             );
@@ -102,10 +121,13 @@ fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
     Ok(tree)
 }
 
-/// Evalúa una fórmula precompilada con los valores dados por símbolo. Devuelve `NaN` si la
-/// evaluación falla (p. ej. división por cero), para no romper la propagación numérica.
+/// Evalúa una fórmula precompilada con los valores dados por símbolo (más las constantes
+/// `pi`/`e`). Devuelve `NaN` si la evaluación falla, para no romper la propagación numérica.
 fn eval_compiled(tree: &Node, values: &HashMap<&str, f64>) -> f64 {
     let mut context = HashMapContext::new();
+    for (name, value) in CONSTANTS {
+        let _ = context.set_value(name.to_string(), Value::Float(value));
+    }
     for (symbol, value) in values {
         if context
             .set_value((*symbol).to_string(), Value::Float(*value))
@@ -168,12 +190,128 @@ pub fn compute(
     }
 
     let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
+    let derived = derive_results(
+        results,
+        &symbols,
+        &means_by_symbol,
+        &u_by_symbol,
+        &mut warnings,
+    )?;
+
+    Ok(FormAnalysis {
+        quantities: computed,
+        regression: None,
+        derived,
+        warnings,
+    })
+}
+
+/// Calcula el [`FormAnalysis`] de una práctica `regresion_lineal`: empareja las mediciones por
+/// punto, evalúa las fórmulas de eje `x_formula`/`y_formula` en cada punto, ajusta una recta
+/// (`analysis::linear_regression`) y deriva los mensurandos desde `slope`/`intercept`.
+pub fn compute_regresion(
+    quantities: &[PracticeQuantity],
+    results: &[PracticeResult],
+    x_formula: &str,
+    y_formula: &str,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<FormAnalysis> {
+    let mut warnings = Vec::new();
+    let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
+    let by_quantity: HashMap<&str, &MeasurementInput> = measurements
+        .iter()
+        .map(|m| (m.quantity_id.as_str(), m))
+        .collect();
+
+    // Cantidad de puntos = mínimo de réplicas entre las magnitudes (deben venir parejas).
+    let lengths: Vec<usize> = quantities
+        .iter()
+        .map(|q| by_quantity.get(q.id.as_str()).map_or(0, |m| m.values.len()))
+        .collect();
+    let n_points = lengths.iter().copied().min().unwrap_or(0);
+    if lengths.iter().any(|&l| l != n_points) {
+        warnings.push(
+            "Las magnitudes tienen distinta cantidad de puntos; se usa la menor cantidad comun."
+                .into(),
+        );
+    }
+    if n_points < 2 {
+        anyhow::bail!("se necesitan al menos 2 puntos para el ajuste lineal");
+    }
+
+    let x_tree = compile_formula(x_formula, &symbols)?;
+    let y_tree = compile_formula(y_formula, &symbols)?;
+
+    let mut points = Vec::with_capacity(n_points);
+    for i in 0..n_points {
+        let bound: HashMap<&str, f64> = quantities
+            .iter()
+            .filter_map(|q| {
+                by_quantity
+                    .get(q.id.as_str())
+                    .map(|m| (q.symbol.as_str(), m.values[i]))
+            })
+            .collect();
+        let x = eval_compiled(&x_tree, &bound);
+        let y = eval_compiled(&y_tree, &bound);
+        if !x.is_finite() || !y.is_finite() {
+            anyhow::bail!(
+                "un punto produjo un valor no finito al evaluar los ejes (revisa las formulas y las lecturas)"
+            );
+        }
+        points.push((x, y));
+    }
+
+    let fit = analysis::linear_regression("x", "y", &points)
+        .ok_or_else(|| anyhow::anyhow!("no se pudo ajustar la recta (¿todos los x iguales?)"))?;
+
+    // Mensurandos derivados de la pendiente/intercepto.
+    let means: HashMap<String, f64> = [
+        ("slope".to_string(), fit.slope),
+        ("intercept".to_string(), fit.intercept),
+    ]
+    .into();
+    let us: HashMap<String, f64> = [
+        ("slope".to_string(), fit.u_slope),
+        ("intercept".to_string(), fit.u_intercept),
+    ]
+    .into();
+    let allowed = vec!["slope".to_string(), "intercept".to_string()];
+    let derived = derive_results(results, &allowed, &means, &us, &mut warnings)?;
+
+    Ok(FormAnalysis {
+        quantities: Vec::new(),
+        regression: Some(RegressionResult {
+            points,
+            slope: fit.slope,
+            intercept: fit.intercept,
+            u_slope: fit.u_slope,
+            u_intercept: fit.u_intercept,
+            r_squared: fit.r_squared,
+        }),
+        derived,
+        warnings,
+    })
+}
+
+/// Calcula los mensurandos derivados por propagación de varianzas: cada fórmula se evalúa y
+/// propaga usando los valores/incertidumbres de los símbolos disponibles (`means_by_symbol` /
+/// `u_by_symbol`). Sirve tanto para el camino estadístico (símbolos = magnitudes) como para el
+/// de regresión (símbolos = `slope`/`intercept`). Acumula advertencias por valores no finitos.
+fn derive_results(
+    results: &[PracticeResult],
+    allowed: &[String],
+    means_by_symbol: &HashMap<String, f64>,
+    u_by_symbol: &HashMap<String, f64>,
+    warnings: &mut Vec<String>,
+) -> anyhow::Result<Vec<DerivedComputation>> {
     let mut derived = Vec::with_capacity(results.len());
     for result in results {
-        let tree = compile_formula(&result.formula, &symbols)?;
-        // Variables que la fórmula realmente usa, en orden estable.
+        let tree = compile_formula(&result.formula, allowed)?;
+        // Variables que la fórmula realmente usa (sin constantes), en orden estable.
         let vars: Vec<String> = tree
             .iter_variable_identifiers()
+            .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
             .map(|s| s.to_string())
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
@@ -214,12 +352,7 @@ pub fn compute(
             u_expanded: uncertainty::expand(u, uncertainty::EXPANSION_K),
         });
     }
-
-    Ok(FormAnalysis {
-        quantities: computed,
-        derived,
-        warnings,
-    })
+    Ok(derived)
 }
 
 /// Lee la definición de la práctica y las escalas referidas por las mediciones, y calcula el
@@ -259,6 +392,25 @@ pub async fn analyze(
                 }
             }
         }
+    }
+
+    // Camino de regresión lineal: requiere las fórmulas de eje definidas.
+    if definition.analysis_kind.as_deref() == Some("regresion_lineal") {
+        let (Some(x_formula), Some(y_formula)) = (
+            definition.x_formula.as_deref(),
+            definition.y_formula.as_deref(),
+        ) else {
+            anyhow::bail!(
+                "la practica es de regresion pero no tiene definidas las formulas de los ejes"
+            );
+        };
+        return compute_regresion(
+            &definition.quantities,
+            &definition.results,
+            x_formula,
+            y_formula,
+            measurements,
+        );
     }
 
     compute(
@@ -685,5 +837,85 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(subs.0, 0);
+    }
+
+    fn result(symbol: &str, formula: &str) -> PracticeResult {
+        PracticeResult {
+            id: format!("r-{symbol}"),
+            practice_id: "p".into(),
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "u".into(),
+            formula: formula.into(),
+            position: 0,
+        }
+    }
+
+    #[test]
+    fn compute_regresion_fits_known_line() {
+        // y = 2x + 1 con ejes triviales (x = px, y = py).
+        let quantities = vec![quantity("px"), quantity("py")];
+        let results = vec![result("m", "slope"), result("b0", "intercept")];
+        let measurements = vec![
+            measurement("px", &[0.0, 1.0, 2.0, 3.0]),
+            measurement("py", &[1.0, 3.0, 5.0, 7.0]),
+        ];
+        let a = compute_regresion(&quantities, &results, "px", "py", &measurements).unwrap();
+        let reg = a.regression.unwrap();
+        assert!(close(reg.slope, 2.0, 1e-9));
+        assert!(close(reg.intercept, 1.0, 1e-9));
+        assert!(close(reg.r_squared, 1.0, 1e-9));
+        assert_eq!(reg.points.len(), 4);
+        // Los mensurandos derivan de slope/intercept.
+        assert!(close(
+            a.derived.iter().find(|d| d.symbol == "m").unwrap().value,
+            2.0,
+            1e-9
+        ));
+        assert!(close(
+            a.derived.iter().find(|d| d.symbol == "b0").unwrap().value,
+            1.0,
+            1e-9
+        ));
+    }
+
+    #[test]
+    fn compute_regresion_uses_pi_and_sqrt_in_axis_formulas() {
+        // x = 2*pi*f ; y = math::sqrt(a). f=[1,2,3], a=[4,9,16] -> x=2pi*{1,2,3}, y={2,3,4}.
+        // y crece 1 por unidad de f, x crece 2pi por unidad de f -> slope = 1/(2pi), intercept = 1.
+        let quantities = vec![quantity("f"), quantity("a")];
+        let results = vec![result("tau", "slope")];
+        let measurements = vec![
+            measurement("f", &[1.0, 2.0, 3.0]),
+            measurement("a", &[4.0, 9.0, 16.0]),
+        ];
+        let analysis = compute_regresion(
+            &quantities,
+            &results,
+            "2*pi*f",
+            "math::sqrt(a)",
+            &measurements,
+        )
+        .unwrap();
+        let reg = analysis.regression.unwrap();
+        assert!(close(reg.slope, 1.0 / (2.0 * std::f64::consts::PI), 1e-9));
+        assert!(close(reg.intercept, 1.0, 1e-9));
+        assert!(close(
+            analysis
+                .derived
+                .iter()
+                .find(|d| d.symbol == "tau")
+                .unwrap()
+                .value,
+            1.0 / (2.0 * std::f64::consts::PI),
+            1e-9
+        ));
+    }
+
+    #[test]
+    fn compute_regresion_needs_at_least_two_points() {
+        let quantities = vec![quantity("px"), quantity("py")];
+        let measurements = vec![measurement("px", &[1.0]), measurement("py", &[2.0])];
+        assert!(compute_regresion(&quantities, &[], "px", "py", &measurements).is_err());
     }
 }

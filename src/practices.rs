@@ -36,6 +36,9 @@ pub struct ResultInput {
 pub struct PracticeDefinition {
     pub practice_id: String,
     pub analysis_kind: Option<String>,
+    /// Solo para `regresion_lineal`: expresiones por punto de los ejes `x` e `y` del ajuste.
+    pub x_formula: Option<String>,
+    pub y_formula: Option<String>,
     pub quantities: Vec<PracticeQuantity>,
     pub results: Vec<PracticeResult>,
 }
@@ -45,12 +48,12 @@ pub async fn definition(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT analysis_kind FROM practices WHERE id = ?1")
+    let row: Option<(Option<String>, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT analysis_kind, x_formula, y_formula FROM practices WHERE id = ?1")
             .bind(practice_id)
             .fetch_optional(pool)
             .await?;
-    let Some((analysis_kind,)) = row else {
+    let Some((analysis_kind, x_formula, y_formula)) = row else {
         return Ok(None);
     };
     let quantities = quantities_for(pool, practice_id).await?;
@@ -58,6 +61,8 @@ pub async fn definition(
     Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
         analysis_kind,
+        x_formula,
+        y_formula,
         quantities,
         results,
     }))
@@ -217,6 +222,31 @@ pub async fn set_analysis_kind(
     let result = sqlx::query("UPDATE practices SET analysis_kind = ?2 WHERE id = ?1")
         .bind(practice_id)
         .bind(kind)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Actualiza las fórmulas de eje (`x`, `y`) usadas en el ajuste de una práctica de regresión.
+/// Una cadena vacía guarda `NULL`. Devuelve `true` si la práctica existía.
+pub async fn set_regression_formulas(
+    pool: &SqlitePool,
+    practice_id: &str,
+    x_formula: &str,
+    y_formula: &str,
+) -> anyhow::Result<bool> {
+    let norm = |s: &str| {
+        let t = s.trim();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        }
+    };
+    let result = sqlx::query("UPDATE practices SET x_formula = ?2, y_formula = ?3 WHERE id = ?1")
+        .bind(practice_id)
+        .bind(norm(x_formula))
+        .bind(norm(y_formula))
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
@@ -586,6 +616,35 @@ mod tests {
         );
         let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
         assert_eq!(def.analysis_kind.as_deref(), Some("regresion_lineal"));
+    }
+
+    #[tokio::test]
+    async fn set_regression_formulas_updates_and_normalizes_empty() {
+        let (pool, _dir) = setup().await;
+        assert!(set_regression_formulas(
+            &pool,
+            "p1-estadistica",
+            "2*pi*f",
+            "b / math::sqrt(a*a - b*b)"
+        )
+        .await
+        .unwrap());
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        assert_eq!(def.x_formula.as_deref(), Some("2*pi*f"));
+        assert_eq!(def.y_formula.as_deref(), Some("b / math::sqrt(a*a - b*b)"));
+
+        // Una cadena vacía (o solo espacios) guarda NULL.
+        assert!(set_regression_formulas(&pool, "p1-estadistica", "   ", "")
+            .await
+            .unwrap());
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        assert_eq!(def.x_formula, None);
+        assert_eq!(def.y_formula, None);
+
+        // Práctica inexistente devuelve false.
+        assert!(!set_regression_formulas(&pool, "no-existe", "f", "f")
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
