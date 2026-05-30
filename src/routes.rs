@@ -96,6 +96,10 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/submissions/form", post(create_form_submission))
         .route("/submissions/{id}", get(submission_detail))
         .route("/submissions/{id}/review", post(review_submission))
+        .route(
+            "/submissions/{id}/student-results",
+            post(set_student_results),
+        )
         .with_state(state)
 }
 
@@ -650,6 +654,41 @@ async fn review_submission(
         .await?
         .ok_or_else(|| AppError::not_found("submission not found"))?;
     Ok(Json(updated))
+}
+
+/// Cuerpo para guardar los mensurandos calculados por el estudiante.
+#[derive(Debug, Deserialize)]
+struct SaveStudentResults {
+    results: Vec<db::StudentResultInput>,
+}
+
+/// `POST /api/submissions/{id}/student-results`: el estudiante dueño guarda sus mensurandos
+/// finales (valor ± U) para compararlos con el cálculo automático. Solo se permite mientras el
+/// docente no haya habilitado la visibilidad del cálculo (para no copiar el resultado).
+async fn set_student_results(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<SaveStudentResults>,
+) -> Result<Json<db::SubmissionDetail>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    let owner = db::submission_owner_id(&state.pool, &id).await?;
+    if owner.as_deref() != Some(user.id.as_str()) {
+        return Err(AppError::forbidden("no tenes acceso a esta entrega"));
+    }
+    let submission = db::submission_detail(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("submission not found"))?;
+    if submission.results_visible_to_student {
+        return Err(AppError::bad_request(
+            "no podes modificar tus calculos una vez que el docente habilito los resultados",
+        ));
+    }
+    db::save_student_results(&state.pool, &id, &body.results).await?;
+    let updated = db::submission_detail(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("submission not found"))?;
+    Ok(Json(gate_analysis(updated, &user)))
 }
 
 /// Parámetro de query `?course_id=...` para las operaciones de catálogo por curso.

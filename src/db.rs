@@ -404,11 +404,30 @@ pub struct SubmissionDetail {
     /// es un `computation::FormAnalysis`. El cliente decide cómo renderizarlo según `entry_mode`.
     /// Se devuelve `null` a un estudiante mientras `results_visible_to_student` sea `false`.
     pub analysis: serde_json::Value,
+    /// Mensurandos finales calculados por el estudiante (a mano), para comparar con el cálculo
+    /// automático. No se gatea: el estudiante ve los suyos siempre y el docente también.
+    pub student_results: Vec<StudentResult>,
     pub status: String,
     pub teacher_comment: Option<String>,
     pub score: Option<f64>,
     pub submitted_at: DateTime<Utc>,
     pub reviewed_at: Option<DateTime<Utc>>,
+}
+
+/// Un mensurando final calculado por el estudiante (valor ± U), por símbolo.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct StudentResult {
+    pub symbol: String,
+    pub value: f64,
+    pub u_expanded: Option<f64>,
+}
+
+/// Una fila del cuerpo para guardar los cálculos del estudiante.
+#[derive(Debug, Deserialize)]
+pub struct StudentResultInput {
+    pub symbol: String,
+    pub value: f64,
+    pub u_expanded: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -623,6 +642,24 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
             scale_id        TEXT REFERENCES instrument_scales(id),
             replicate_index INTEGER NOT NULL DEFAULT 0,
             value           REAL NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    // Mensurandos finales calculados por el estudiante (a mano), para comparar con el cálculo
+    // automático. Uno por símbolo de mensurando; `u_expanded` opcional (puede no calcular U).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS submission_student_results (
+            id            TEXT PRIMARY KEY,
+            submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+            symbol        TEXT NOT NULL,
+            value         REAL NOT NULL,
+            u_expanded    REAL,
+            created_at    TEXT NOT NULL,
+            UNIQUE(submission_id, symbol)
         )
         "#,
     )
@@ -2361,27 +2398,78 @@ pub async fn submission_detail(
     .fetch_optional(pool)
     .await?;
 
-    row.map(|row| {
-        let analysis = serde_json::from_str(&row.analysis_json)?;
-        Ok(SubmissionDetail {
-            id: row.id,
-            student_name: row.student_name,
-            group_name: row.group_name,
-            course: row.course,
-            practice_id: row.practice_id,
-            practice_name: row.practice_name,
-            file_name: row.file_name,
-            entry_mode: row.entry_mode,
-            results_visible_to_student: row.results_visible_to_student,
-            analysis,
-            status: row.status,
-            teacher_comment: row.teacher_comment,
-            score: row.score,
-            submitted_at: row.submitted_at,
-            reviewed_at: row.reviewed_at,
-        })
-    })
-    .transpose()
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let analysis = serde_json::from_str(&row.analysis_json)?;
+    let student_results = student_results_for(pool, &row.id).await?;
+    Ok(Some(SubmissionDetail {
+        id: row.id,
+        student_name: row.student_name,
+        group_name: row.group_name,
+        course: row.course,
+        practice_id: row.practice_id,
+        practice_name: row.practice_name,
+        file_name: row.file_name,
+        entry_mode: row.entry_mode,
+        results_visible_to_student: row.results_visible_to_student,
+        analysis,
+        student_results,
+        status: row.status,
+        teacher_comment: row.teacher_comment,
+        score: row.score,
+        submitted_at: row.submitted_at,
+        reviewed_at: row.reviewed_at,
+    }))
+}
+
+/// Devuelve los mensurandos calculados por el estudiante para una entrega (ordenados por símbolo).
+pub async fn student_results_for(
+    pool: &SqlitePool,
+    submission_id: &str,
+) -> anyhow::Result<Vec<StudentResult>> {
+    Ok(sqlx::query_as::<_, StudentResult>(
+        "SELECT symbol, value, u_expanded FROM submission_student_results \
+         WHERE submission_id = ?1 ORDER BY symbol",
+    )
+    .bind(submission_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Reemplaza por completo los cálculos del estudiante de una entrega (borra los previos e
+/// inserta los nuevos), en una transacción. Ignora filas con valor no finito.
+pub async fn save_student_results(
+    pool: &SqlitePool,
+    submission_id: &str,
+    results: &[StudentResultInput],
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM submission_student_results WHERE submission_id = ?1")
+        .bind(submission_id)
+        .execute(&mut *tx)
+        .await?;
+    for input in results {
+        if !input.value.is_finite() {
+            continue;
+        }
+        let u = input.u_expanded.filter(|u| u.is_finite());
+        sqlx::query(
+            "INSERT INTO submission_student_results \
+             (id, submission_id, symbol, value, u_expanded, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(submission_id)
+        .bind(input.symbol.trim())
+        .bind(input.value)
+        .bind(u)
+        .bind(Utc::now())
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// Registra la revisión docente de una entrega (estado, comentario, nota y fecha) y
@@ -2495,6 +2583,27 @@ mod tests {
     const STUDENT: &str = "estudiante@quantify.local";
     const COURSE: &str = "fisica-experimental-i-2026";
     const GROUP: &str = "fisica-exp-i-grupo-1";
+
+    /// Crea una entrega de prueba (vía CSV) del estudiante dado y devuelve su id.
+    async fn make_submission(pool: &SqlitePool, dir: &std::path::Path, student_id: &str) -> String {
+        let analysis = crate::analysis::analyze_csv("x,y\n1,2\n2,4\n3,6\n").unwrap();
+        create_submission(
+            pool,
+            dir,
+            NewSubmission {
+                submitted_by_user_id: student_id.to_string(),
+                course_id: COURSE.into(),
+                group_id: GROUP.into(),
+                practice_id: "p1-estadistica".into(),
+                file_name: "medidas.csv".into(),
+                csv_content: "x,y\n1,2\n2,4\n3,6\n".into(),
+                analysis,
+            },
+        )
+        .await
+        .unwrap()
+        .id
+    }
 
     #[tokio::test]
     async fn migrate_is_idempotent() {
@@ -3307,6 +3416,101 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(again.results_visible_to_student);
+    }
+
+    #[tokio::test]
+    async fn student_results_save_read_and_replace() {
+        let (pool, dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+        let id = make_submission(&pool, dir.path(), &student.id).await;
+
+        // Sin cálculos al inicio.
+        assert!(student_results_for(&pool, &id).await.unwrap().is_empty());
+
+        // Guarda dos mensurandos (uno con U, otro sin); la fila con valor NaN se ignora.
+        save_student_results(
+            &pool,
+            &id,
+            &[
+                StudentResultInput {
+                    symbol: "Q".into(),
+                    value: 11.0,
+                    u_expanded: Some(0.5),
+                },
+                StudentResultInput {
+                    symbol: "R".into(),
+                    value: 3.0,
+                    u_expanded: None,
+                },
+                StudentResultInput {
+                    symbol: "bad".into(),
+                    value: f64::NAN,
+                    u_expanded: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+        let saved = student_results_for(&pool, &id).await.unwrap();
+        assert_eq!(saved.len(), 2); // NaN ignorado
+        assert_eq!(saved[0].symbol, "Q"); // ordenado por símbolo
+        assert!((saved[0].value - 11.0).abs() < 1e-12);
+        assert_eq!(saved[0].u_expanded, Some(0.5));
+        assert_eq!(saved[1].symbol, "R");
+        assert_eq!(saved[1].u_expanded, None);
+
+        // Aparecen en el detalle de la entrega.
+        let detail = submission_detail(&pool, &id).await.unwrap().unwrap();
+        assert_eq!(detail.student_results.len(), 2);
+
+        // Replace-all: un nuevo set reemplaza por completo al anterior.
+        save_student_results(
+            &pool,
+            &id,
+            &[StudentResultInput {
+                symbol: "Q".into(),
+                value: 12.0,
+                u_expanded: Some(0.7),
+            }],
+        )
+        .await
+        .unwrap();
+        let replaced = student_results_for(&pool, &id).await.unwrap();
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(replaced[0].symbol, "Q");
+        assert!((replaced[0].value - 12.0).abs() < 1e-12);
+    }
+
+    #[tokio::test]
+    async fn student_results_cascade_on_submission_delete() {
+        let (pool, dir) = seeded().await;
+        // El pool de test no fuerza FKs por defecto; las activamos para ver el ON DELETE CASCADE.
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let student = find_user(&pool, STUDENT).await;
+        let id = make_submission(&pool, dir.path(), &student.id).await;
+        save_student_results(
+            &pool,
+            &id,
+            &[StudentResultInput {
+                symbol: "Q".into(),
+                value: 1.0,
+                u_expanded: None,
+            }],
+        )
+        .await
+        .unwrap();
+        assert_eq!(student_results_for(&pool, &id).await.unwrap().len(), 1);
+
+        sqlx::query("DELETE FROM submissions WHERE id = ?1")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(student_results_for(&pool, &id).await.unwrap().is_empty());
     }
 
     #[test]
