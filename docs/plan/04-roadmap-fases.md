@@ -9,10 +9,15 @@ Las fases 1–3 son backend puro (bajo riesgo, muy testeable); 4–6 agregan API
 > agrega tests JS de su lógica (extrayéndola a `lib.js` cuando haga falta), y el CI
 > (`.github/workflows/ci.yml`) corre ambas suites en cada push/PR.
 
-**Estado al 30-05-2026:** Fases 0–4 **hechas**: prácticas reales; `uncertainty.rs`; catálogo de
-instrumentos (API + UI); base de tests JS + CI; definición de prácticas (editor teacher-only) con
-**P1/P2/P3 sembradas**; entrega por formulario con cálculo automático; y visibilidad del cálculo
-controlada por el docente. Próximo: P3 parte 2 / `regresion_lineal`, o la fase de comparación.
+**Estado al 30-05-2026:** Fases 0–5 **hechas** + motor `regresion_lineal` + comparación
+alumno-vs-automático. Resumen: prácticas reales; `uncertainty.rs`; catálogo de instrumentos
+(API + UI); base de tests JS + CI; definición de prácticas (editor teacher-only) con **P1/P2/P3
+sembradas**; entrega por formulario con cálculo automático; visibilidad del cálculo controlada por
+el docente; **motor de ajuste lineal** (`regresion_lineal`) con editor de fórmulas de eje, tabla de
+serie y gráfico SVG; **P3-parte2 (desfasaje) sembrada**; y la **comparación** (el alumno carga sus
+mensurandos y se contrastan con los automáticos). Convención de docs reforzada: toda `fn` con `///`
++ test, y **doctest con `assert`** en funciones públicas puras (`cargo test --doc` en verde).
+Próximo: ver "Mejoras y próximos pasos" al final.
 
 ---
 
@@ -134,9 +139,15 @@ ajustar cualquier definición desde el editor.
 
 ---
 
-## Fase 4 — Entrega por formulario + cálculo
+## Fase 4 — Entrega por formulario + cálculo ✅
 
 **Objetivo**: el estudiante carga datos guiado y recibe incertidumbres.
+
+**Implementado:** `submission_measurements` + `submissions.entry_mode`; `computation::create_form_submission`
+calcula y persiste `analysis_json` (`quantities[]` + `derived[]` + `warnings`); `POST /submissions/form`
+con validación de permisos; formulario dinámico por práctica con instrumento/escala y réplicas. El
+cálculo se persiste (no se recalcula). El ⚠️ de unicidad de símbolos cruzada **sigue abierto** (ver
+"Mejoras y próximos pasos").
 
 **Visión confirmada:** el estudiante sube **solo las lecturas crudas** (valores medidos +
 instrumento/escala elegido por magnitud) → la app **genera automáticamente** las
@@ -163,17 +174,53 @@ muestra incertidumbres correctas (validadas contra cálculo manual).
 
 ---
 
-## Fase 5 — Visualización y revisión docente
+## Fase 5 — Visualización y revisión docente ✅
 
 **Objetivo**: detalle rico y corrección.
 
 - Detalle de entrega: tabla de magnitudes con incertidumbres y mensurandos derivados con `U`;
-  gráfico para `regresion_lineal`/`relajacion_exponencial` (con la recta/linealización).
-- Revisión docente sobre la entrega (ya existe `POST /submissions/{id}/review`); evaluar
-  el enfoque **por mesa de trabajo** (las hojas de resultados se califican por mesa).
-  ⚠️ Decisión de modelado de "entrega por mesa" — puede empujarse a la iteración de evaluación.
+  **gráfico SVG** para `regresion_lineal` (scatter + recta + ejes rotulados con las fórmulas).
+- Revisión docente sobre la entrega (`POST /submissions/{id}/review`: estado, comentario, nota,
+  visibilidad).
+
+**Implementado** (parte vía el motor de regresión, abajo). Pendiente menor: el gráfico de
+`relajacion_exponencial` como kind propio (hoy P3-parte1 es estadístico y la linealización se
+cubre con `regresion_lineal`). El enfoque **por mesa de trabajo** sigue postergado a la iteración
+de evaluación (⚠️ no bloquea).
 
 **Aceptación**: el docente abre una entrega, ve incertidumbres y gráfico, y registra revisión.
+
+---
+
+## Motor `regresion_lineal` (ajuste lineal con incertidumbre) ✅
+
+**Objetivo**: prácticas cuyo resultado sale de la pendiente/intercepto de un ajuste lineal.
+
+- **Backend** (`computation::compute_regresion`): el alumno carga una serie de puntos con
+  magnitudes crudas; dos **fórmulas de eje** por práctica (`practices.x_formula`/`y_formula`)
+  derivan `(x, y)` por punto; `analysis::linear_regression` da pendiente, intercepto, sus
+  incertidumbres y R²; los mensurandos se propagan desde `slope`/`intercept`. `evalexpr` con
+  constantes `pi`/`e` y funciones `math::*`. API `POST /practices/{id}/regression-formulas`.
+- **Frontend**: editor de fórmulas de eje; **tabla de serie** (un punto por fila) en la entrega;
+  render del ajuste (`valor ± U`, R²) + **gráfico SVG** (helper puro `regressionPlot` en `lib.js`).
+- **P3-parte2 sembrada** (`p3-relajacion-desfasaje`): `x = 2*pi*f`, `y = b/math::sqrt(a*a - b*b)`
+  (= tg φ por figura de Lissajous), mensurando `tau = slope` (= RC).
+
+---
+
+## Fase de comparación — Cálculo del estudiante vs. automático ✅
+
+**Objetivo**: el alumno ingresa sus mensurandos finales calculados a mano y se contrastan con los
+automáticos.
+
+- **Backend**: tabla `submission_student_results` (`UNIQUE(submission_id, symbol)`,
+  `ON DELETE CASCADE`); `POST /submissions/{id}/student-results` (solo el alumno dueño; bloqueado
+  una vez que el docente habilita la visibilidad, para no copiar el automático; valida que los
+  símbolos sean mensurandos de la práctica). `SubmissionDetail.student_results` (sin gatear).
+- **Frontend**: formulario "Mis cálculos" (editable hasta habilitar, luego solo lectura) + **tabla
+  de comparación** auto-vs-alumno con diferencia absoluta y relativa (%) de valor y de U (sin
+  veredicto). Helper puro `compareResults` en `lib.js`.
+- Verificado de punta a punta con un **test de navegador (Playwright)** además de los unit tests.
 
 ---
 
@@ -188,15 +235,7 @@ lecturas ("a ciegas") y, una vez habilitado, ve la tabla de incertidumbres para 
 - Gating **en el servidor**: a un estudiante se le devuelve `analysis: null` mientras no esté
   habilitado (no solo se oculta en la UI). Se eliminó `POST /submissions/preview` (exponía el cálculo).
 
-## Fase de comparación (futuro) — Cálculo del estudiante vs. automático
-
-**Objetivo**: el estudiante ingresa en la app sus propios cálculos de incertidumbre → se
-contrastan lado a lado con los automáticos, marcando divergencias. Mejora opcional sobre lo
-ya hecho (la visibilidad ya está); esbozo:
-
-- Tabla `submission_student_calculations[]` (misma forma que `quantity_results`, cargada por el alumno).
-- API `POST /submissions/{id}/student-calc`; vista comparativa con un helper de divergencia en `lib.js`.
-- El docente ve ambas columnas y puede usarlas como criterio de corrección.
+> **La fase de comparación ya está implementada** — ver la sección "Fase de comparación" arriba.
 
 ---
 
@@ -223,6 +262,47 @@ ya hecho (la visibilidad ya está); esbozo:
 
 ## Orden sugerido de ejecución
 
-`Fase 0 → 1 → 2 → 2.5 → 3 → 4 → 5 → Comparación → 6`. La **Fase 2.5** (tests + CI) es
-transversal; se hizo tras la 2. El primer hito demostrable end-to-end es el final de la
-**Fase 4** (el estudiante sube lecturas y ve incertidumbres calculadas automáticamente).
+`Fase 0 → 1 → 2 → 2.5 → 3 → 4 → 5 → regresion_lineal → Comparación → 6`. La **Fase 2.5**
+(tests + CI) es transversal; se hizo tras la 2. El primer hito demostrable end-to-end fue el final
+de la **Fase 4**. Hecho hasta **Comparación** inclusive; queda la **Fase 6** y las mejoras de abajo.
+
+---
+
+## Mejoras y próximos pasos (al 30-05-2026)
+
+Detectadas con el código ya construido. Ordenadas por valor/riesgo; ninguna bloquea lo hecho.
+
+### Correctitud / robustez
+1. **Unicidad de símbolos cruzada por práctica** (deuda de Fase 3/4, ahora más relevante con
+   regresión y comparación). Hoy `practice_quantities` y `practice_results` validan
+   `UNIQUE(practice_id, symbol)` por separado: una magnitud `l` y un mensurando `l` pueden
+   coexistir y la fórmula/`compareResults` quedan ambiguos. **Acción**: validar unicidad global
+   de símbolos por práctica (al crear/editar magnitud o mensurando) + que el símbolo sea un
+   identificador válido (sin espacios/operadores). Reservar `slope`/`intercept` en regresión.
+2. **`relajacion_exponencial` es un `analysis_kind` sin motor** (solo etiqueta). O bien se
+   implementa (linealizar `V(t)=V0·e^{-t/τ}` → `ln V` vs `t`, que ya cubre `regresion_lineal`
+   con `y_formula = math::ln(V)`), o se **elimina el kind** y se modela esa parte como
+   `regresion_lineal`. Decisión a tomar con el docente.
+3. **Mensajes de error internos en inglés** ("submission not found", "submission not found")
+   en `routes.rs`: normalizar a español por la convención de errores amigables (son casos
+   "no debería pasar", de bajo impacto).
+
+### Calidad / infra
+4. **E2E de navegador en CI (Playwright)**. Ya validamos el flujo de comparación/regresión con un
+   script Playwright a mano; conviene versionarlo y correrlo en CI (job aparte, con el server
+   levantado) para fijar el comportamiento de la UI. Hoy el CI solo corre `cargo test` + `node --test`.
+5. **Ergonomía de dev DB**. Las pruebas manuales dejan entregas y ediciones en `data/quantify.db`
+   (p. ej. el símbolo de P1 quedó como `Area`). Documentar/automatizar un reset (`rm data/quantify.db`
+   + re-seed) o un script `dev-reset`.
+
+### Funcionalidad (con el docente)
+6. **P2-parte2 como `regresion_lineal`**: la parte de ajuste `P(R)`/recta de P2 puede sembrarse
+   como práctica de regresión (el motor ya existe), igual que P3-parte2.
+7. **Comparación — veredicto opcional**: hoy solo se muestran las diferencias. Evaluar un umbral
+   de tolerancia configurable por el docente (✓/✗) si lo piden; se dejó fuera a propósito.
+8. **Entrega/corrección por mesa de trabajo** (postergado): las hojas se califican por mesa;
+   modelar la entrega por mesa cuando se encare la iteración de evaluación.
+
+### Fase 6 (pulido, sin cambios)
+- Completar P2/P3 con definiciones reales confirmadas; documentar formato y fórmulas en el README;
+  revisar seeds y eventual migración de datos del curso.
