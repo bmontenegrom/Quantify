@@ -1,6 +1,6 @@
 use crate::{
     analysis,
-    computation::{self, FormSubmissionInput, PreviewInput},
+    computation::{self, FormSubmissionInput},
     db::{self, AppState, NewSubmission, ReviewSubmission},
     error::AppError,
     instruments::{self, CatalogExport, CreateInstrument, ScaleInput, UpdateInstrument},
@@ -89,7 +89,6 @@ pub fn api_router(state: SharedState) -> Router {
             post(update_scale).delete(delete_scale),
         )
         .route("/submissions", get(submissions).post(create_submission))
-        .route("/submissions/preview", post(preview_submission))
         .route("/submissions/form", post(create_form_submission))
         .route("/submissions/{id}", get(submission_detail))
         .route("/submissions/{id}/review", post(review_submission))
@@ -504,7 +503,24 @@ async fn submission_detail(
     let submission = db::submission_detail(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("submission not found"))?;
-    Ok(Json(submission))
+    Ok(Json(gate_analysis(submission, &user)))
+}
+
+/// `true` si hay que ocultarle el cálculo a este viewer: solo los estudiantes, y solo
+/// mientras el docente no haya habilitado la visibilidad de la entrega. Docente/admin nunca.
+fn analysis_hidden_for(role: &str, results_visible: bool) -> bool {
+    !matches!(role, "docente" | "admin") && !results_visible
+}
+
+/// Oculta el cálculo automático (`analysis = null`) cuando corresponde según [`analysis_hidden_for`].
+fn gate_analysis(
+    mut submission: db::SubmissionDetail,
+    user: &db::AuthUser,
+) -> db::SubmissionDetail {
+    if analysis_hidden_for(&user.role, submission.results_visible_to_student) {
+        submission.analysis = serde_json::Value::Null;
+    }
+    submission
 }
 
 /// `POST /api/submissions`: recibe un multipart (curso/grupo/práctica + CSV), analiza el CSV,
@@ -558,7 +574,7 @@ async fn create_submission(
     }
 
     let submission = NewSubmission {
-        submitted_by_user_id: user.id,
+        submitted_by_user_id: user.id.clone(),
         course_id,
         group_id,
         practice_id,
@@ -568,7 +584,7 @@ async fn create_submission(
     };
 
     let created = db::create_submission(&state.pool, &state.upload_dir, submission).await?;
-    Ok(Json(created))
+    Ok(Json(gate_analysis(created, &user)))
 }
 
 /// Mapea un error del cálculo de incertidumbres: los de base de datos van a un 500 genérico
@@ -580,20 +596,6 @@ fn analysis_error(err: anyhow::Error) -> AppError {
     } else {
         AppError::bad_request(err.to_string())
     }
-}
-
-/// `POST /api/submissions/preview`: calcula las incertidumbres de unas lecturas **sin** persistir.
-/// Es el endpoint de cálculo que usa el formulario para la previsualización en vivo.
-async fn preview_submission(
-    State(state): State<SharedState>,
-    headers: HeaderMap,
-    Json(input): Json<PreviewInput>,
-) -> Result<Json<computation::FormAnalysis>, AppError> {
-    current_user(&state, &headers).await?;
-    let analysis = computation::analyze(&state.pool, &input.practice_id, &input.measurements)
-        .await
-        .map_err(analysis_error)?;
-    Ok(Json(analysis))
 }
 
 /// `POST /api/submissions/form`: crea una entrega por formulario (lecturas crudas) calculando
@@ -620,7 +622,7 @@ async fn create_form_submission(
     let detail = computation::create_form_submission(&state.pool, &user, input)
         .await
         .map_err(analysis_error)?;
-    Ok(Json(detail))
+    Ok(Json(gate_analysis(detail, &user)))
 }
 
 /// `POST /api/submissions/{id}/review`: registra la revisión docente (estado/comentario/nota).
@@ -1085,6 +1087,17 @@ fn session_cookie(token: &str, max_age_seconds: i64) -> HeaderValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn analysis_hidden_only_for_students_without_visibility() {
+        // Docente/admin: nunca se oculta, esté o no habilitado.
+        assert!(!analysis_hidden_for("docente", false));
+        assert!(!analysis_hidden_for("admin", false));
+        assert!(!analysis_hidden_for("docente", true));
+        // Estudiante: oculto hasta que el docente habilite.
+        assert!(analysis_hidden_for("estudiante", false));
+        assert!(!analysis_hidden_for("estudiante", true));
+    }
 
     /// Construye una escala mínima para los tests de validación.
     fn scale(b_model: &str, step: f64) -> ScaleInput {
