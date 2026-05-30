@@ -204,3 +204,40 @@ export function measureText(value, u) {
   if (u == null || !Number.isFinite(u) || u <= 0) return base;
   return `${base} ± ${format(u)}`;
 }
+
+/**
+ * Calcula las coordenadas (en píxeles del lienzo SVG, con `y` hacia abajo) para dibujar un
+ * scatter de `points` (pares `[x, y]`) junto a la recta ajustada `y = slope*x + intercept`,
+ * en un lienzo `width`×`height` con margen `pad`. El rango se ajusta al bounding box de los
+ * datos extendido con los extremos de la recta. Función pura (sin DOM): el SVG se arma en
+ * `app.js` a partir de lo que devuelve. Devuelve `null` si hay menos de 2 puntos o el rango
+ * en `x` o `y` es nulo (no se puede escalar).
+ */
+export function regressionPlot(points, slope, intercept, width = 320, height = 220, pad = 32) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  // Extiende el rango en Y para que la recta entre en el lienzo en ambos extremos de X.
+  const lineYmin = slope * minX + intercept;
+  const lineYmax = slope * maxX + intercept;
+  const minY = Math.min(...ys, lineYmin, lineYmax);
+  const maxY = Math.max(...ys, lineYmin, lineYmax);
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  if (spanX === 0 || spanY === 0) return null;
+  const innerW = width - 2 * pad;
+  const innerH = height - 2 * pad;
+  const sx = (x) => pad + ((x - minX) / spanX) * innerW;
+  // Eje Y invertido: el píxel 0 está arriba, así que los valores grandes van arriba.
+  const sy = (y) => height - pad - ((y - minY) / spanY) * innerH;
+  return {
+    width,
+    height,
+    pad,
+    scatter: points.map((p) => ({ cx: sx(p[0]), cy: sy(p[1]) })),
+    line: { x1: sx(minX), y1: sy(lineYmin), x2: sx(maxX), y2: sy(lineYmax) },
+    bounds: { minX, maxX, minY, maxY },
+  };
+}

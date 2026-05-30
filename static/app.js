@@ -17,6 +17,7 @@ import {
   analysisKindLabel,
   compatibleInstruments,
   measureText,
+  regressionPlot,
 } from "./lib.js";
 
 const state = {
@@ -1979,6 +1980,13 @@ function renderMeasurementFields() {
     return;
   }
 
+  // Prácticas de regresión: una tabla de serie (un punto por fila) en vez de la grilla
+  // por-magnitud con réplicas/instrumentos.
+  if (definition.analysis_kind === "regresion_lineal") {
+    renderSeriesTable(definition);
+    return;
+  }
+
   measurementFields.innerHTML = definition.quantities
     .map((q) => {
       const options = compatibleInstruments(instruments, q.quantity);
@@ -2045,6 +2053,50 @@ function wireRemoveReplica(row) {
   }
 }
 
+// Tabla de serie para prácticas de regresión: una columna por magnitud y una fila por punto.
+// El alumno carga magnitudes crudas (p. ej. f, a, b); las fórmulas de eje derivan (x, y).
+function renderSeriesTable(definition) {
+  const cols = definition.quantities;
+  const header = cols
+    .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${escapeHtml(q.symbol)} <span class="submission-meta">(${escapeHtml(q.unit)})</span></th>`)
+    .join("");
+  const INITIAL_ROWS = 3;
+  const body = Array.from({ length: INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
+  measurementFields.innerHTML = `
+    <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
+    <div class="directory-table-wrap">
+      <table class="series-table grade-table directory-data-table">
+        <thead><tr>${header}<th></th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    <button type="button" class="add-series-row">＋ agregar punto</button>
+  `;
+  measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
+    measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
+    wireSeriesRemove();
+  });
+  wireSeriesRemove();
+}
+
+// HTML de una fila (un punto) de la tabla de serie: un input numérico por magnitud.
+function seriesRowHtml(cols) {
+  const cells = cols
+    .map((q) => `<td><input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`)
+    .join("");
+  return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
+}
+
+// Conecta los botones de quitar punto (deja al menos una fila).
+function wireSeriesRemove() {
+  measurementFields.querySelectorAll(".remove-series-row").forEach((btn) => {
+    btn.onclick = () => {
+      if (measurementFields.querySelectorAll(".series-row").length <= 1) return;
+      btn.closest(".series-row").remove();
+    };
+  });
+}
+
 // Repuebla el selector de escala de una fila según el instrumento elegido.
 function populateScaleOptions(row) {
   const instrumentId = row.querySelector(".measure-instrument").value;
@@ -2058,6 +2110,28 @@ function populateScaleOptions(row) {
 
 // Lee el DOM y arma el array de mediciones para el backend (descarta lecturas vacías).
 function collectMeasurements() {
+  // Modo serie (regresión): tabla de puntos (filas) × magnitudes (columnas). Cada magnitud
+  // viaja como una entrada con sus N valores paralelos; se omiten las filas incompletas para
+  // que las columnas queden alineadas (el backend empareja por índice de punto).
+  const seriesTable = measurementFields.querySelector(".series-table");
+  if (seriesTable) {
+    const quantityIds = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
+    const byQuantity = new Map(quantityIds.map((id) => [id, []]));
+    seriesTable.querySelectorAll(".series-row").forEach((row) => {
+      const cells = [...row.querySelectorAll(".series-value")];
+      const nums = cells.map((cell) => Number(cell.value.trim()));
+      const complete = cells.every((cell) => cell.value.trim() !== "") && nums.every(Number.isFinite);
+      if (!complete) return;
+      cells.forEach((cell, i) => byQuantity.get(cell.dataset.quantityId).push(nums[i]));
+    });
+    return quantityIds.map((id) => ({
+      quantity_id: id,
+      instrument_id: null,
+      scale_id: null,
+      values: byQuantity.get(id),
+    }));
+  }
+
   return [...measurementFields.querySelectorAll(".measurement-row")].map((row) => {
     const values = [...row.querySelectorAll(".measure-value")]
       .map((input) => input.value.trim())
@@ -2159,11 +2233,67 @@ function formAnalysisMarkup(analysis) {
       </div>`
     : "";
 
+  // Camino regresión lineal: ajuste (pendiente/intercepto/R²) + gráfico, en vez de la
+  // tabla de incertidumbres por magnitud.
+  if (analysis.regression) {
+    return `
+      <h3>Ajuste lineal</h3>
+      ${regressionMarkup(analysis.regression)}
+      ${derivedBlock}
+      ${renderWarnings(analysis.warnings ?? [])}
+    `;
+  }
+
   return `
     <h3>Incertidumbres por magnitud</h3>
     ${quantitiesTable}
     ${derivedBlock}
     ${renderWarnings(analysis.warnings ?? [])}
+  `;
+}
+
+// Markup del ajuste lineal de una entrega por formulario: pendiente ± u, intercepto ± u,
+// R², cantidad de puntos y un gráfico SVG (scatter + recta) si el rango es graficable.
+function regressionMarkup(regression) {
+  const plot = regressionPlot(regression.points ?? [], regression.slope, regression.intercept);
+  return `
+    <div class="metrics">
+      <div class="metric">
+        <div class="metric-label">Pendiente</div>
+        <div class="metric-value metric-text">${escapeHtml(measureText(regression.slope, regression.u_slope))}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Intercepto</div>
+        <div class="metric-value metric-text">${escapeHtml(measureText(regression.intercept, regression.u_intercept))}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">R²</div>
+        <div class="metric-value">${format(regression.r_squared)}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Puntos</div>
+        <div class="metric-value">${(regression.points ?? []).length}</div>
+      </div>
+    </div>
+    ${plot ? regressionSvg(plot) : `<p class="submission-meta">No se puede graficar: el rango de los datos es nulo.</p>`}
+  `;
+}
+
+// Arma el SVG del gráfico a partir de las coordenadas ya escaladas por `regressionPlot`
+// (función pura): ejes, recta ajustada y los puntos.
+function regressionSvg(plot) {
+  const f = (n) => n.toFixed(1);
+  const points = plot.scatter
+    .map((p) => `<circle cx="${f(p.cx)}" cy="${f(p.cy)}" r="3" class="reg-point" />`)
+    .join("");
+  const axisY = plot.height - plot.pad;
+  return `
+    <svg class="reg-plot" viewBox="0 0 ${plot.width} ${plot.height}" role="img" aria-label="Gráfico del ajuste lineal">
+      <line class="reg-axis" x1="${plot.pad}" y1="${axisY}" x2="${plot.width - plot.pad}" y2="${axisY}" />
+      <line class="reg-axis" x1="${plot.pad}" y1="${plot.pad}" x2="${plot.pad}" y2="${axisY}" />
+      <line class="reg-line" x1="${f(plot.line.x1)}" y1="${f(plot.line.y1)}" x2="${f(plot.line.x2)}" y2="${f(plot.line.y2)}" />
+      ${points}
+    </svg>
   `;
 }
 
@@ -2701,6 +2831,7 @@ function renderPracticesPage() {
       <section class="panel workspace-panel">
         <h3>Tipo de análisis</h3>
         ${renderAnalysisKindForm(practice, def)}
+        ${def?.analysis_kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
       </section>
       <section class="panel workspace-panel">
         <h3>Nueva magnitud</h3>
@@ -2733,6 +2864,7 @@ function renderPracticesPage() {
 
   practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", closePracticeWorkspace);
   practiceWorkspace.querySelector("#practice-kind-form")?.addEventListener("submit", savePracticeKind);
+  practiceWorkspace.querySelector("#practice-regression-form")?.addEventListener("submit", savePracticeRegressionFormulas);
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
 
@@ -2825,6 +2957,24 @@ function renderAnalysisKindForm(practice, def) {
       </label>
       <div class="detail-actions">
         <button type="submit">Guardar</button>
+      </div>
+    </form>
+  `;
+}
+
+// Formulario (solo en modo `regresion_lineal`) para las fórmulas de eje x/y del ajuste.
+// Se evalúan por punto sobre los símbolos de las magnitudes; admiten `pi`, `e` y `math::*`.
+function renderRegressionFormulasForm(practice, def) {
+  const x = escapeHtml(def?.x_formula ?? "");
+  const y = escapeHtml(def?.y_formula ?? "");
+  return `
+    <form id="practice-regression-form" class="detail-form detail-form-grid">
+      <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
+      <label>Fórmula eje X <input name="x_formula" value="${x}" placeholder="2*pi*f" /></label>
+      <label>Fórmula eje Y <input name="y_formula" value="${y}" placeholder="b / math::sqrt(a*a - b*b)" /></label>
+      <p class="submission-meta">Usá los símbolos de las magnitudes. Disponibles: <code>pi</code>, <code>e</code> y funciones <code>math::*</code> (p. ej. <code>math::sqrt</code>). La pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code> en los mensurandos.</p>
+      <div class="detail-actions">
+        <button type="submit">Guardar fórmulas</button>
       </div>
     </form>
   `;
@@ -2979,6 +3129,23 @@ async function savePracticeKind(event) {
     // Refrescar state.practices para que el directorio muestre el nuevo analysis_kind.
     state.practices = await fetchJson("/api/practices");
     state.practiceActionStatus = "Tipo de análisis guardado";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function savePracticeRegressionFormulas(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try {
+    await postJson(`/api/practices/${payload.practice_id}/regression-formulas`, {
+      x_formula: payload.x_formula ?? "",
+      y_formula: payload.y_formula ?? "",
+    });
+    state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
+    state.practiceActionStatus = "Fórmulas de ajuste guardadas";
     renderPracticesPage();
   } catch (error) {
     state.practiceActionStatus = error.message;
