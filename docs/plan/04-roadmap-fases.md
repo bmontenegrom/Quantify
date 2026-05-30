@@ -171,21 +171,26 @@ muestra incertidumbres correctas (validadas contra cálculo manual).
 
 ---
 
-## Fase de comparación — Cálculo del estudiante vs. cálculo automático
+## Visibilidad del cálculo (hecho) — el docente decide cuándo mostrarlo al alumno ✅
 
-**Objetivo**: el estudiante ingresa sus propios cálculos de incertidumbre → la app los
-contrasta con los que generó automáticamente en la entrega. Insumo didáctico (el alumno
-ve dónde difiere) y de corrección (el docente ve ambos).
+El curso entrega el informe **en papel**: el alumno calcula a mano. Por eso el cálculo
+automático queda **oculto al estudiante por defecto** y el **docente lo habilita por entrega**
+al revisar (checkbox "Mostrar el cálculo automático al estudiante"). El alumno carga solo las
+lecturas ("a ciegas") y, una vez habilitado, ve la tabla de incertidumbres para contrastar.
 
-> ⚠️ Esta fase se planifica con más detalle una vez cerrada la Fase 5 (el modelo de entrega
-> ya estabilizado). Lo que sigue es un esbozo:
+- `submissions.results_visible_to_student` (default 0); `ReviewSubmission.results_visible`.
+- Gating **en el servidor**: a un estudiante se le devuelve `analysis: null` mientras no esté
+  habilitado (no solo se oculta en la UI). Se eliminó `POST /submissions/preview` (exponía el cálculo).
 
-- Nuevo `entry_mode` o tabla complementaria: `submission_student_calculations[]`
-  (misma estructura que `quantity_results` pero ingresada por el alumno).
-- API: `POST /submissions/{id}/student-calc` para cargar los valores del alumno.
-- Frontend: formulario de carga del cálculo propio (por magnitud: u_A, u_B, u_c, U)
-  y vista comparativa lado a lado (automático vs. alumno) con indicación de divergencias.
-- El docente tiene acceso a ambas columnas; puede usar la comparación como criterio de revisión.
+## Fase de comparación (futuro) — Cálculo del estudiante vs. automático
+
+**Objetivo**: el estudiante ingresa en la app sus propios cálculos de incertidumbre → se
+contrastan lado a lado con los automáticos, marcando divergencias. Mejora opcional sobre lo
+ya hecho (la visibilidad ya está); esbozo:
+
+- Tabla `submission_student_calculations[]` (misma forma que `quantity_results`, cargada por el alumno).
+- API `POST /submissions/{id}/student-calc`; vista comparativa con un helper de divergencia en `lib.js`.
+- El docente ve ambas columnas y puede usarlas como criterio de corrección.
 
 ---
 
