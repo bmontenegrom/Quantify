@@ -9,9 +9,10 @@ Las fases 1–3 son backend puro (bajo riesgo, muy testeable); 4–6 agregan API
 > agrega tests JS de su lógica (extrayéndola a `lib.js` cuando haga falta), y el CI
 > (`.github/workflows/ci.yml`) corre ambas suites en cada push/PR.
 
-**Estado al 29-05-2026:** Fases 0, 1, 2 y 2.5 **hechas** (prácticas reales sembradas;
-`uncertainty.rs`; catálogo de instrumentos con API + UI; base de tests JS + CI).
-Próximo: Fase 3.
+**Estado al 30-05-2026:** Fases 0, 1, 2, 2.5 y 3 **hechas** (prácticas reales sembradas;
+`uncertainty.rs`; catálogo de instrumentos con API + UI; base de tests JS + CI;
+definición de prácticas con magnitudes/mensurandos/editor teacher-only).
+Próximo: Fase 4.
 
 ---
 
@@ -106,7 +107,7 @@ Tests render/DOM (jsdom) y E2E (Playwright) quedan como follow-up.
 
 ---
 
-## Fase 3 — Definición de prácticas (magnitudes y mensurandos)
+## Fase 3 — Definición de prácticas (magnitudes y mensurandos) ✅
 
 **Objetivo**: cada práctica declara qué se mide y qué se deriva.
 
@@ -119,17 +120,29 @@ Tests render/DOM (jsdom) y E2E (Playwright) quedan como follow-up.
 **Aceptación**: `GET /practices/p1-estadistica/definition` devuelve magnitudes + fórmula;
 editable desde la UI.
 
+**Implementado:** `practice_quantities`/`practice_results` + CRUD en `src/practices.rs`;
+API `/practices/{id}/definition` + endpoints de alta/edición/borrado; pestaña "Prácticas"
+teacher-only con editor inline; seed P1 (`l/a/b` → `Q = l*a + l*b`, ejemplo del cordón).
+P2/P3 quedan como esqueleto — el docente los completa vía el editor una vez confirmadas las
+magnitudes y fórmulas reales.
+
 ---
 
 ## Fase 4 — Entrega por formulario + cálculo
 
 **Objetivo**: el estudiante carga datos guiado y recibe incertidumbres.
 
+**Visión confirmada:** el estudiante sube **solo las lecturas crudas** (valores medidos +
+instrumento/escala elegido por magnitud) → la app **genera automáticamente** las
+incertidumbres (u_A, u_B, u_c, U y mensurandos derivados con su U). El comparativo con el
+cálculo manual del estudiante se modela en la **Fase de comparación** (ver más abajo).
+
 - Migraciones: `submission_measurements` + `submissions.entry_mode`.
 - `db::create_submission` (variante `form`): persiste mediciones y llama al motor para
   producir `analysis_json` con `quantity_results[]` + `derived_results[]`.
 - API: `GET /submissions/new?practice_id=...` (formulario), `POST /submissions` con
   `measurements[]`; mantener validación de permisos (`user_can_submit`) y mesa asignada.
+  Requiere agregar `evalexpr` (o similar) para parsear/evaluar la fórmula del mensurando.
 - Frontend: formulario dinámico por práctica con selector de instrumento/escala por magnitud,
   réplicas, y **previsualización en vivo** de `n, media, s, u_A, u_B, u_c, U`.
 
@@ -149,6 +162,24 @@ muestra incertidumbres correctas (validadas contra cálculo manual).
   ⚠️ Decisión de modelado de "entrega por mesa" — puede empujarse a la iteración de evaluación.
 
 **Aceptación**: el docente abre una entrega, ve incertidumbres y gráfico, y registra revisión.
+
+---
+
+## Fase de comparación — Cálculo del estudiante vs. cálculo automático
+
+**Objetivo**: el estudiante ingresa sus propios cálculos de incertidumbre → la app los
+contrasta con los que generó automáticamente en la entrega. Insumo didáctico (el alumno
+ve dónde difiere) y de corrección (el docente ve ambos).
+
+> ⚠️ Esta fase se planifica con más detalle una vez cerrada la Fase 5 (el modelo de entrega
+> ya estabilizado). Lo que sigue es un esbozo:
+
+- Nuevo `entry_mode` o tabla complementaria: `submission_student_calculations[]`
+  (misma estructura que `quantity_results` pero ingresada por el alumno).
+- API: `POST /submissions/{id}/student-calc` para cargar los valores del alumno.
+- Frontend: formulario de carga del cálculo propio (por magnitud: u_A, u_B, u_c, U)
+  y vista comparativa lado a lado (automático vs. alumno) con indicación de divergencias.
+- El docente tiene acceso a ambas columnas; puede usar la comparación como criterio de revisión.
 
 ---
 
@@ -175,7 +206,6 @@ muestra incertidumbres correctas (validadas contra cálculo manual).
 
 ## Orden sugerido de ejecución
 
-`Fase 0 → 1 → 2 → 2.5 → 3 → 4 → 5 → 6`. Las fases 1–3 pueden adelantarse en paralelo al diseño de
-UI, ya que son backend testeable. La **Fase 2.5** (tests de frontend + CI) es transversal y se
-hizo tras la 2 para que la UI de las fases 4–5 nazca testeable. El primer hito demostrable
-end-to-end es el final de la **Fase 4**.
+`Fase 0 → 1 → 2 → 2.5 → 3 → 4 → 5 → Comparación → 6`. La **Fase 2.5** (tests + CI) es
+transversal; se hizo tras la 2. El primer hito demostrable end-to-end es el final de la
+**Fase 4** (el estudiante sube lecturas y ve incertidumbres calculadas automáticamente).
