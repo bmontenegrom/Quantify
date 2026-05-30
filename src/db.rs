@@ -364,6 +364,7 @@ pub struct SubmissionListItem {
     pub status: String,
     pub score: Option<f64>,
     pub submitted_at: DateTime<Utc>,
+    pub entry_mode: String,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -2245,7 +2246,8 @@ pub async fn submission_list_for_user(
             p.name AS practice_name,
             s.status,
             s.score,
-            s.submitted_at
+            s.submitted_at,
+            COALESCE(s.entry_mode, 'csv') AS entry_mode
         FROM submissions s
         JOIN practices p ON p.id = s.practice_id
         "#,

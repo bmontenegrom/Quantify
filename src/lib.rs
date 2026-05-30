@@ -6,12 +6,14 @@
 //! - [`db`]: persistencia y lógica de dominio (usuarios, cursos, entregas, notas).
 //! - [`instruments`]: catálogo de instrumentos por curso (CRUD y export/import).
 //! - [`practices`]: definición de prácticas (magnitudes de entrada y mensurandos derivados).
+//! - [`computation`]: cálculo de incertidumbres de una entrega por formulario.
 //! - [`routes`]: handlers HTTP de la API bajo `/api`.
 //! - [`error`]: tipo de error de la aplicación y su mapeo a respuestas HTTP.
 //!
 //! El binario (`main.rs`) es un shim delgado que arranca el servidor usando estos módulos.
 
 pub mod analysis;
+pub mod computation;
 pub mod db;
 pub mod error;
 pub mod instruments;
