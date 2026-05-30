@@ -822,6 +822,11 @@ textarea {
   fill: var(--accent-strong);
 }
 
+.reg-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
 /* Tabla de serie para cargar puntos (modo regresión). */
 .series-table input.series-value {
   width: 100%;

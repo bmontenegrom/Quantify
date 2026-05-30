@@ -2087,13 +2087,17 @@ function seriesRowHtml(cols) {
   return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
 }
 
-// Conecta los botones de quitar punto (deja al menos una fila).
+// Conecta los botones de quitar punto (deja al menos una fila). Oculta la "✕" cuando
+// queda una sola fila, igual que las réplicas.
 function wireSeriesRemove() {
+  const rows = measurementFields.querySelectorAll(".series-row");
   measurementFields.querySelectorAll(".remove-series-row").forEach((btn) => {
     btn.onclick = () => {
       if (measurementFields.querySelectorAll(".series-row").length <= 1) return;
       btn.closest(".series-row").remove();
+      wireSeriesRemove();
     };
+    btn.style.visibility = rows.length <= 1 ? "hidden" : "visible";
   });
 }
 
@@ -2275,24 +2279,26 @@ function regressionMarkup(regression) {
         <div class="metric-value">${(regression.points ?? []).length}</div>
       </div>
     </div>
-    ${plot ? regressionSvg(plot) : `<p class="submission-meta">No se puede graficar: el rango de los datos es nulo.</p>`}
+    ${plot ? regressionSvg(plot, regression.x_label, regression.y_label) : `<p class="submission-meta">No se puede graficar: el rango de los datos es nulo.</p>`}
   `;
 }
 
 // Arma el SVG del gráfico a partir de las coordenadas ya escaladas por `regressionPlot`
-// (función pura): ejes, recta ajustada y los puntos.
-function regressionSvg(plot) {
+// (función pura): ejes rotulados con las fórmulas (`xLabel`/`yLabel`), recta y puntos.
+function regressionSvg(plot, xLabel = "x", yLabel = "y") {
   const f = (n) => n.toFixed(1);
   const points = plot.scatter
     .map((p) => `<circle cx="${f(p.cx)}" cy="${f(p.cy)}" r="3" class="reg-point" />`)
     .join("");
   const axisY = plot.height - plot.pad;
   return `
-    <svg class="reg-plot" viewBox="0 0 ${plot.width} ${plot.height}" role="img" aria-label="Gráfico del ajuste lineal">
+    <svg class="reg-plot" viewBox="0 0 ${plot.width} ${plot.height}" role="img" aria-label="Gráfico del ajuste lineal de ${escapeHtml(yLabel)} contra ${escapeHtml(xLabel)}">
       <line class="reg-axis" x1="${plot.pad}" y1="${axisY}" x2="${plot.width - plot.pad}" y2="${axisY}" />
       <line class="reg-axis" x1="${plot.pad}" y1="${plot.pad}" x2="${plot.pad}" y2="${axisY}" />
       <line class="reg-line" x1="${f(plot.line.x1)}" y1="${f(plot.line.y1)}" x2="${f(plot.line.x2)}" y2="${f(plot.line.y2)}" />
       ${points}
+      <text class="reg-label" x="${plot.width - plot.pad}" y="${plot.height - 8}" text-anchor="end">x: ${escapeHtml(xLabel)}</text>
+      <text class="reg-label" x="${plot.pad}" y="${plot.pad - 12}" text-anchor="start">y: ${escapeHtml(yLabel)}</text>
     </svg>
   `;
 }
