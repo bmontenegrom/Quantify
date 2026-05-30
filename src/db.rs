@@ -1096,14 +1096,14 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     ];
 
     for (id, name, description, analysis_kind) in practices {
+        // `DO NOTHING`: solo siembra las prácticas faltantes y nunca pisa las existentes, para
+        // respetar ediciones del docente (p. ej. `analysis_kind`) entre reinicios. En dev, para
+        // re-sembrar valores nuevos se resetea la base.
         sqlx::query(
             r#"
             INSERT INTO practices (id, name, description, analysis_kind)
             VALUES (?1, ?2, ?3, ?4)
-            ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                description = excluded.description,
-                analysis_kind = excluded.analysis_kind
+            ON CONFLICT(id) DO NOTHING
             "#,
         )
         .bind(id)
@@ -2496,6 +2496,28 @@ mod tests {
         assert!(ids.contains(&"p1-estadistica".to_string()));
         assert!(ids.contains(&"p2-corriente-continua".to_string()));
         assert!(ids.contains(&"p3-relajacion".to_string()));
+    }
+
+    #[tokio::test]
+    async fn seed_practices_does_not_clobber_edits() {
+        let (pool, _dir) = pool().await;
+        seed_practices(&pool).await.unwrap();
+        // El docente edita el tipo de análisis de una práctica.
+        sqlx::query(
+            "UPDATE practices SET analysis_kind = 'regresion_lineal' WHERE id = 'p1-estadistica'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Un reinicio re-corre el seed: NO debe pisar la edición.
+        seed_practices(&pool).await.unwrap();
+        let p = practices(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == "p1-estadistica")
+            .unwrap();
+        assert_eq!(p.analysis_kind.as_deref(), Some("regresion_lineal"));
     }
 
     #[tokio::test]
