@@ -41,7 +41,11 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let connect_options = SqliteConnectOptions::from_str(&database_url)?.create_if_missing(true);
+    // `foreign_keys(true)` hace que SQLite respete las claves foráneas y los `ON DELETE CASCADE`
+    // declarados en el esquema (por defecto SQLite las ignora).
+    let connect_options = SqliteConnectOptions::from_str(&database_url)?
+        .create_if_missing(true)
+        .foreign_keys(true);
 
     let pool = SqlitePoolOptions::new()
         .max_connections(10)

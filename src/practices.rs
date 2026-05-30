@@ -168,6 +168,46 @@ pub async fn delete_result(pool: &SqlitePool, result_id: &str) -> anyhow::Result
     Ok(result.rows_affected() > 0)
 }
 
+/// `true` si ya existe otra magnitud con ese `symbol` en la práctica. `exclude_id` permite
+/// ignorar la fila que se está editando (para que renombrar a su propio símbolo no falle).
+pub async fn quantity_symbol_taken(
+    pool: &SqlitePool,
+    practice_id: &str,
+    symbol: &str,
+    exclude_id: Option<&str>,
+) -> anyhow::Result<bool> {
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_quantities \
+         WHERE practice_id = ?1 AND symbol = ?2 AND id <> ?3",
+    )
+    .bind(practice_id)
+    .bind(symbol.trim())
+    .bind(exclude_id.unwrap_or(""))
+    .fetch_one(pool)
+    .await?;
+    Ok(count.0 > 0)
+}
+
+/// `true` si ya existe otro mensurando con ese `symbol` en la práctica. `exclude_id` permite
+/// ignorar la fila que se está editando.
+pub async fn result_symbol_taken(
+    pool: &SqlitePool,
+    practice_id: &str,
+    symbol: &str,
+    exclude_id: Option<&str>,
+) -> anyhow::Result<bool> {
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_results \
+         WHERE practice_id = ?1 AND symbol = ?2 AND id <> ?3",
+    )
+    .bind(practice_id)
+    .bind(symbol.trim())
+    .bind(exclude_id.unwrap_or(""))
+    .fetch_one(pool)
+    .await?;
+    Ok(count.0 > 0)
+}
+
 /// Actualiza el tipo de análisis de una práctica. Devuelve `true` si existía.
 pub async fn set_analysis_kind(
     pool: &SqlitePool,
@@ -341,7 +381,8 @@ mod tests {
         let url = format!("sqlite:{}", dir.path().join("t.db").to_string_lossy());
         let opts = SqliteConnectOptions::from_str(&url)
             .unwrap()
-            .create_if_missing(true);
+            .create_if_missing(true)
+            .foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(opts)
@@ -472,6 +513,36 @@ mod tests {
         let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
         assert_eq!(def2.quantities.len(), 3);
         assert_eq!(def2.results.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn deleting_practice_cascades_to_definition() {
+        let (pool, _dir) = setup().await;
+        create_quantity(&pool, "p1-estadistica", sample_quantity())
+            .await
+            .unwrap();
+        create_result(&pool, "p1-estadistica", sample_result())
+            .await
+            .unwrap();
+        // Con foreign_keys activo, borrar la práctica debe arrastrar magnitudes y mensurandos.
+        sqlx::query("DELETE FROM practices WHERE id = 'p1-estadistica'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let quantities: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'p1-estadistica'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let results: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM practice_results WHERE practice_id = 'p1-estadistica'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(quantities.0, 0);
+        assert_eq!(results.0, 0);
     }
 
     #[tokio::test]

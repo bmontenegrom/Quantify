@@ -65,13 +65,17 @@ impl IntoResponse for AppError {
     }
 }
 
+/// Mensaje genérico para errores internos: claro para el usuario, sin filtrar detalle técnico
+/// (el detalle real queda en el log del servidor).
+const INTERNAL_MESSAGE: &str = "Ocurrio un error interno. Volve a intentar en un momento.";
+
 impl From<sqlx::Error> for AppError {
     /// Mapea errores de base de datos a un 500 genérico, registrando el detalle real en el log.
     fn from(err: sqlx::Error) -> Self {
         tracing::error!(error = ?err, "database error");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "database error".into(),
+            message: INTERNAL_MESSAGE.into(),
         }
     }
 }
@@ -82,7 +86,7 @@ impl From<anyhow::Error> for AppError {
         tracing::error!(error = ?err, "application error");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "application error".into(),
+            message: INTERNAL_MESSAGE.into(),
         }
     }
 }

@@ -2564,11 +2564,17 @@ function renderPracticeDirectory() {
 
 function renderAnalysisKindForm(practice, def) {
   const current = def?.analysis_kind ?? "";
+  // Si la práctica aún no tiene tipo, mostramos un placeholder no seleccionable para no
+  // sugerir un valor falso; `required` obliga al docente a elegir antes de guardar.
+  const placeholder = current
+    ? ""
+    : `<option value="" disabled selected>Sin definir</option>`;
   return `
     <form id="practice-kind-form" class="detail-form detail-form-grid">
       <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
       <label>Tipo de análisis
         <select name="analysis_kind" required>
+          ${placeholder}
           ${["estadistico", "regresion_lineal", "relajacion_exponencial"].map((k) =>
             `<option value="${k}" ${k === current ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
           ).join("")}

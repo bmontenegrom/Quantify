@@ -624,7 +624,8 @@ mod tests {
         let url = format!("sqlite:{}", dir.path().join("t.db").to_string_lossy());
         let opts = SqliteConnectOptions::from_str(&url)
             .unwrap()
-            .create_if_missing(true);
+            .create_if_missing(true)
+            .foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(opts)

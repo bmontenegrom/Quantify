@@ -787,24 +787,30 @@ async fn create_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
-    practices::create_quantity(&state.pool, &id, input)
-        .await
-        .map(Json)
-        .map_err(|err| AppError::bad_request(err.to_string()))
+    if practices::quantity_symbol_taken(&state.pool, &id, &input.symbol, None).await? {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
+    Ok(Json(
+        practices::create_quantity(&state.pool, &id, input).await?,
+    ))
 }
 
 /// `POST /api/practices/{id}/quantities/{qid}`: actualiza una magnitud (docente/admin).
 async fn update_quantity(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Path((_id, qid)): Path<(String, String)>,
+    Path((practice_id, qid)): Path<(String, String)>,
     Json(input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
+    if practices::quantity_symbol_taken(&state.pool, &practice_id, &input.symbol, Some(&qid))
+        .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
     let updated = practices::update_quantity(&state.pool, &qid, input)
-        .await
-        .map_err(|err| AppError::bad_request(err.to_string()))?
+        .await?
         .ok_or_else(|| AppError::not_found("magnitud no encontrada"))?;
     Ok(Json(updated))
 }
@@ -831,24 +837,28 @@ async fn create_result(
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
-    practices::create_result(&state.pool, &id, input)
-        .await
-        .map(Json)
-        .map_err(|err| AppError::bad_request(err.to_string()))
+    if practices::result_symbol_taken(&state.pool, &id, &input.symbol, None).await? {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
+    Ok(Json(
+        practices::create_result(&state.pool, &id, input).await?,
+    ))
 }
 
 /// `POST /api/practices/{id}/results/{rid}`: actualiza un mensurando derivado (docente/admin).
 async fn update_result(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Path((_id, rid)): Path<(String, String)>,
+    Path((practice_id, rid)): Path<(String, String)>,
     Json(input): Json<ResultInput>,
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
+    if practices::result_symbol_taken(&state.pool, &practice_id, &input.symbol, Some(&rid)).await? {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
     let updated = practices::update_result(&state.pool, &rid, input)
-        .await
-        .map_err(|err| AppError::bad_request(err.to_string()))?
+        .await?
         .ok_or_else(|| AppError::not_found("mensurando no encontrado"))?;
     Ok(Json(updated))
 }
@@ -864,6 +874,14 @@ async fn delete_result(
         return Err(AppError::not_found("mensurando no encontrado"));
     }
     Ok(Json(Health { status: "ok" }))
+}
+
+/// Error 400 amigable para un símbolo ya usado dentro de la misma práctica.
+fn duplicate_symbol_error(symbol: &str) -> AppError {
+    AppError::bad_request(format!(
+        "Ya existe una magnitud o mensurando con el simbolo \"{}\" en esta practica. Elegi otro simbolo.",
+        symbol.trim()
+    ))
 }
 
 /// Valida los campos de una magnitud: símbolo, nombre y unidad no vacíos.
