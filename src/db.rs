@@ -1078,17 +1078,20 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             "Medidas directas con replicas e instrumentos, incertidumbres tipo A y B, y determinacion indirecta por propagacion de varianzas.",
             "estadistico",
         ),
+        // P2 y P3 se modelan hoy con el camino `estadistico` (medidas directas + propagacion),
+        // que es lo que sus definiciones sembradas calculan. Las partes con ajuste (P(R) en P2,
+        // desfasaje en P3) pasaran a `regresion_lineal` cuando ese motor este implementado.
         (
             "p2-corriente-continua",
             "Circuitos de Corriente Continua",
-            "Medidas de voltaje y corriente con tester en distintas escalas y ajuste lineal.",
-            "regresion_lineal",
+            "Medidas de voltaje y corriente con tester; intensidad teorica por leyes de circuito.",
+            "estadistico",
         ),
         (
             "p3-relajacion",
             "Relajacion Exponencial",
-            "Descarga V(t)=V0*exp(-t/tau); linealizacion y ajuste para obtener tau con su incertidumbre.",
-            "relajacion_exponencial",
+            "Determinacion del tiempo de relajacion tau de un circuito RC (parte 1: medida directa).",
+            "estadistico",
         ),
     ];
 
