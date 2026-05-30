@@ -53,7 +53,7 @@
       <section id="submissions-view" class="view active">
         <div class="section-head">
           <h2 id="submissions-title">Entregas</h2>
-          <p id="submissions-subtitle">Gestion de archivos CSV entregados.</p>
+          <p id="submissions-subtitle">Carga tus medidas y obtene las incertidumbres.</p>
         </div>
 
         <form id="submission-form" class="panel">
@@ -76,17 +76,16 @@
             </label>
           </div>
 
-          <label>
-            Archivo CSV
-            <input name="csv_file" type="file" accept=".csv,text/csv" required />
-          </label>
+          <div id="measurement-fields" class="measurement-fields"></div>
 
           <div class="actions">
-            <button type="submit">Subir y analizar</button>
+            <button type="submit" id="preview-button">Calcular</button>
+            <button type="button" id="submit-button">Entregar</button>
             <span id="submit-status" role="status"></span>
           </div>
         </form>
 
+        <section id="preview-result" class="panel hidden" aria-live="polite"></section>
         <section id="latest-result" class="panel hidden" aria-live="polite"></section>
 
         <section class="panel catalog-panel">
