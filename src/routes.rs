@@ -506,14 +506,18 @@ async fn submission_detail(
     Ok(Json(gate_analysis(submission, &user)))
 }
 
-/// Oculta el cálculo automático (`analysis = null`) cuando el viewer es estudiante y el docente
-/// todavía no habilitó la visibilidad de esa entrega. El docente/admin siempre ve el resultado.
+/// `true` si hay que ocultarle el cálculo a este viewer: solo los estudiantes, y solo
+/// mientras el docente no haya habilitado la visibilidad de la entrega. Docente/admin nunca.
+fn analysis_hidden_for(role: &str, results_visible: bool) -> bool {
+    !matches!(role, "docente" | "admin") && !results_visible
+}
+
+/// Oculta el cálculo automático (`analysis = null`) cuando corresponde según [`analysis_hidden_for`].
 fn gate_analysis(
     mut submission: db::SubmissionDetail,
     user: &db::AuthUser,
 ) -> db::SubmissionDetail {
-    let is_teacher = matches!(user.role.as_str(), "docente" | "admin");
-    if !is_teacher && !submission.results_visible_to_student {
+    if analysis_hidden_for(&user.role, submission.results_visible_to_student) {
         submission.analysis = serde_json::Value::Null;
     }
     submission
@@ -1083,6 +1087,17 @@ fn session_cookie(token: &str, max_age_seconds: i64) -> HeaderValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn analysis_hidden_only_for_students_without_visibility() {
+        // Docente/admin: nunca se oculta, esté o no habilitado.
+        assert!(!analysis_hidden_for("docente", false));
+        assert!(!analysis_hidden_for("admin", false));
+        assert!(!analysis_hidden_for("docente", true));
+        // Estudiante: oculto hasta que el docente habilite.
+        assert!(analysis_hidden_for("estudiante", false));
+        assert!(!analysis_hidden_for("estudiante", true));
+    }
 
     /// Construye una escala mínima para los tests de validación.
     fn scale(b_model: &str, step: f64) -> ScaleInput {
