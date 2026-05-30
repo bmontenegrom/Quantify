@@ -377,6 +377,7 @@ pub struct SubmissionRecord {
     pub file_name: String,
     pub csv_path: String,
     pub analysis_json: String,
+    pub entry_mode: String,
     pub status: String,
     pub teacher_comment: Option<String>,
     pub score: Option<f64>,
@@ -393,7 +394,11 @@ pub struct SubmissionDetail {
     pub practice_id: String,
     pub practice_name: String,
     pub file_name: String,
-    pub analysis: AnalysisResult,
+    /// Modo de carga: `"csv"` (legacy) o `"form"` (lecturas crudas con cálculo de incertidumbres).
+    pub entry_mode: String,
+    /// Resultado calculado, crudo como JSON: para `csv` es un `AnalysisResult`; para `form`
+    /// es un `computation::FormAnalysis`. El cliente decide cómo renderizarlo según `entry_mode`.
+    pub analysis: serde_json::Value,
     pub status: String,
     pub teacher_comment: Option<String>,
     pub score: Option<f64>,
@@ -601,9 +606,27 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS submission_measurements (
+            id              TEXT PRIMARY KEY,
+            submission_id   TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+            quantity_id     TEXT NOT NULL REFERENCES practice_quantities(id),
+            instrument_id   TEXT REFERENCES instruments(id),
+            scale_id        TEXT REFERENCES instrument_scales(id),
+            replicate_index INTEGER NOT NULL DEFAULT 0,
+            value           REAL NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     add_column_if_missing(pool, "submissions", "submitted_by_user_id", "TEXT").await?;
     add_column_if_missing(pool, "submissions", "course_id", "TEXT").await?;
     add_column_if_missing(pool, "submissions", "group_id", "TEXT").await?;
+    // Modo de carga de la entrega: 'csv' (legacy) o 'form' (lecturas crudas). NULL = csv.
+    add_column_if_missing(pool, "submissions", "entry_mode", "TEXT").await?;
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
 
@@ -2275,6 +2298,7 @@ pub async fn submission_detail(
             s.file_name,
             s.csv_path,
             s.analysis_json,
+            COALESCE(s.entry_mode, 'csv') AS entry_mode,
             s.status,
             s.teacher_comment,
             s.score,
@@ -2299,6 +2323,7 @@ pub async fn submission_detail(
             practice_id: row.practice_id,
             practice_name: row.practice_name,
             file_name: row.file_name,
+            entry_mode: row.entry_mode,
             analysis,
             status: row.status,
             teacher_comment: row.teacher_comment,
