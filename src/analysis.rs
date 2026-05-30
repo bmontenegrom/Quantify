@@ -181,7 +181,7 @@ fn first_regression(headers: &StringRecord, columns: &[Vec<f64>]) -> Option<Line
 /// Ajuste de mínimos cuadrados de `y = slope*x + intercept` sobre los puntos dados.
 /// Calcula R² y los errores estándar de pendiente e intercepto (estos últimos solo con n ≥ 3).
 /// Devuelve `None` si hay menos de 2 puntos o la varianza en x es nula.
-fn linear_regression(
+pub fn linear_regression(
     x_name: &str,
     y_name: &str,
     points: &[(f64, f64)],
