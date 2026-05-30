@@ -181,6 +181,16 @@ fn first_regression(headers: &StringRecord, columns: &[Vec<f64>]) -> Option<Line
 /// Ajuste de mínimos cuadrados de `y = slope*x + intercept` sobre los puntos dados.
 /// Calcula R² y los errores estándar de pendiente e intercepto (estos últimos solo con n ≥ 3).
 /// Devuelve `None` si hay menos de 2 puntos o la varianza en x es nula.
+///
+/// # Ejemplos
+///
+/// ```
+/// let puntos = [(0.0, 1.0), (1.0, 3.0), (2.0, 5.0)];
+/// let ajuste = quantify::analysis::linear_regression("x", "y", &puntos).unwrap();
+/// assert!((ajuste.slope - 2.0).abs() < 1e-9);
+/// assert!((ajuste.intercept - 1.0).abs() < 1e-9);
+/// assert!((ajuste.r_squared - 1.0).abs() < 1e-9);
+/// ```
 pub fn linear_regression(
     x_name: &str,
     y_name: &str,

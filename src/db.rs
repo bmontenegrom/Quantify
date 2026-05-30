@@ -1109,6 +1109,9 @@ pub async fn change_password(
     Ok(true)
 }
 
+/// Siembra las prácticas del primer bloque de Física 103 en la tabla `practices` (id, nombre,
+/// descripción, tipo de análisis y, en regresión, las fórmulas de eje). Idempotente: usa
+/// `ON CONFLICT(id) DO NOTHING`, así que no pisa ediciones del docente entre reinicios.
 pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     // Practicas reales del primer bloque de Fisica 103. Las columnas `x_formula`/`y_formula`
     // solo se usan en el camino `regresion_lineal`; en las estadisticas van en `None`.

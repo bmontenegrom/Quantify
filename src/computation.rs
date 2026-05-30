@@ -86,6 +86,32 @@ pub struct FormAnalysis {
 
 /// Convierte una escala del catálogo ([`InstrumentScale`]) en la especificación que entiende
 /// el motor ([`ScaleSpec`]). Error si el `b_model` guardado no es uno de los modelos conocidos.
+///
+/// # Ejemplos
+///
+/// ```
+/// use quantify::db::InstrumentScale;
+/// use quantify::uncertainty::BModel;
+/// let escala = InstrumentScale {
+///     id: "s1".into(),
+///     instrument_id: "i1".into(),
+///     label: "200 mm".into(),
+///     full_scale: Some(200.0),
+///     step: 0.01,
+///     appreciation: None,
+///     internal_res: None,
+///     internal_res_u: None,
+///     b_model: "resolucion".into(),
+///     spec_pct_reading: None,
+///     spec_step_coeff: None,
+///     spec_fixed: None,
+///     unit: "mm".into(),
+///     position: 0,
+/// };
+/// let spec = quantify::computation::scale_spec(&escala).unwrap();
+/// assert!(matches!(spec.b_model, BModel::Resolucion));
+/// assert_eq!(spec.step, 0.01);
+/// ```
 pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
     let b_model = match scale.b_model.as_str() {
         "resolucion" => BModel::Resolucion,

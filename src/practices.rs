@@ -252,7 +252,7 @@ pub async fn set_regression_formulas(
     Ok(result.rows_affected() > 0)
 }
 
-/// Helpers cortos para construir las definiciones del seed.
+/// Construye un `QuantityInput` (magnitud de entrada) para el seed de definiciones.
 fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> QuantityInput {
     QuantityInput {
         symbol: symbol.into(),
@@ -263,6 +263,7 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
     }
 }
 
+/// Construye un `ResultInput` (mensurando derivado) para el seed de definiciones.
 fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
         symbol: symbol.into(),
@@ -425,6 +426,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
 
 // ── Helpers internos ─────────────────────────────────────────────────────────
 
+/// Lee las magnitudes de entrada de una práctica, ordenadas por posición y símbolo.
 async fn quantities_for(
     pool: &SqlitePool,
     practice_id: &str,
@@ -438,6 +440,7 @@ async fn quantities_for(
     .await?)
 }
 
+/// Lee los mensurandos derivados de una práctica, ordenados por posición y símbolo.
 async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticeResult>> {
     Ok(sqlx::query_as::<_, PracticeResult>(
         "SELECT id, practice_id, symbol, name, unit, formula, position \
@@ -448,6 +451,7 @@ async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec
     .await?)
 }
 
+/// Lee una magnitud de entrada por su id.
 async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQuantity> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position \
@@ -458,6 +462,7 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
     .await?)
 }
 
+/// Lee un mensurando derivado por su id.
 async fn fetch_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeResult> {
     Ok(sqlx::query_as::<_, PracticeResult>(
         "SELECT id, practice_id, symbol, name, unit, formula, position \
@@ -468,6 +473,7 @@ async fn fetch_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeRes
     .await?)
 }
 
+/// Inserta una magnitud de entrada en la práctica con la posición dada; devuelve su id generado.
 async fn insert_quantity(
     conn: &mut SqliteConnection,
     practice_id: &str,
@@ -493,6 +499,7 @@ async fn insert_quantity(
     Ok(id)
 }
 
+/// Inserta un mensurando derivado en la práctica con la posición dada; devuelve su id generado.
 async fn insert_result(
     conn: &mut SqliteConnection,
     practice_id: &str,
