@@ -3,7 +3,7 @@
 use anyhow::Context;
 use axum::Router;
 use quantify::db::{self, AppState};
-use quantify::{instruments, routes};
+use quantify::{instruments, practices, routes};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
 use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
     db::seed_users(&pool).await?;
     db::seed_academic(&pool).await?;
     instruments::seed_instruments(&pool, "fisica-experimental-i-2026").await?;
+    practices::seed_definitions(&pool).await?;
 
     let state = Arc::new(AppState { pool, upload_dir });
     let app = Router::new()

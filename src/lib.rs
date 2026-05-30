@@ -5,6 +5,7 @@
 //! - [`uncertainty`]: motor de incertidumbres (tipo A/B, combinada, expandida, propagación).
 //! - [`db`]: persistencia y lógica de dominio (usuarios, cursos, entregas, notas).
 //! - [`instruments`]: catálogo de instrumentos por curso (CRUD y export/import).
+//! - [`practices`]: definición de prácticas (magnitudes de entrada y mensurandos derivados).
 //! - [`routes`]: handlers HTTP de la API bajo `/api`.
 //! - [`error`]: tipo de error de la aplicación y su mapeo a respuestas HTTP.
 //!
@@ -14,5 +15,6 @@ pub mod analysis;
 pub mod db;
 pub mod error;
 pub mod instruments;
+pub mod practices;
 pub mod routes;
 pub mod uncertainty;
