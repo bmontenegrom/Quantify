@@ -19,6 +19,8 @@ import {
   allStudents,
   allGroups,
   analysisKindLabel,
+  compatibleInstruments,
+  measureText,
 } from "../static/lib.js";
 
 // Fixture chico de contexto académico: 2 cursos, el estudiante s1 está en c1 (grupo g1)
@@ -236,4 +238,30 @@ test("analysisKindLabel devuelve etiqueta legible o 'Sin definir'", () => {
   assert.equal(analysisKindLabel(null), "Sin definir");
   assert.equal(analysisKindLabel(undefined), "Sin definir");
   assert.equal(analysisKindLabel("desconocido"), "Sin definir");
+});
+
+test("compatibleInstruments filtra por magnitud, o devuelve todos si no hay match", () => {
+  const instruments = [
+    { id: "i1", quantity: "longitud" },
+    { id: "i2", quantity: "longitud" },
+    { id: "i3", quantity: "masa" },
+  ];
+  assert.deepEqual(
+    compatibleInstruments(instruments, "longitud").map((i) => i.id),
+    ["i1", "i2"],
+  );
+  // Sin coincidencias -> devuelve todos (no bloquear la elección).
+  assert.equal(compatibleInstruments(instruments, "tiempo").length, 3);
+  // Sin magnitud -> todos.
+  assert.equal(compatibleInstruments(instruments, null).length, 3);
+  // Lista vacía/indefinida -> []
+  assert.deepEqual(compatibleInstruments(undefined, "longitud"), []);
+});
+
+test("measureText formatea 'valor ± U' y omite U inválida", () => {
+  assert.equal(measureText(50, 5), "50 ± 5");
+  assert.equal(measureText(1234.5, 0), "1.234,5");
+  assert.equal(measureText(10, null), "10");
+  assert.equal(measureText(10, NaN), "10");
+  assert.equal(measureText(10, -1), "10");
 });

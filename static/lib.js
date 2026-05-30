@@ -182,3 +182,25 @@ export function analysisKindLabel(kind) {
       return "Sin definir";
   }
 }
+
+/**
+ * Instrumentos compatibles con una magnitud física (p. ej. "longitud"): filtra por el campo
+ * `quantity` del instrumento. Si ninguno coincide (o no se da magnitud), devuelve todos, para
+ * no bloquear la elección del estudiante.
+ */
+export function compatibleInstruments(instruments, magnitude) {
+  const list = instruments ?? [];
+  if (!magnitude) return list;
+  const matches = list.filter((instrument) => instrument.quantity === magnitude);
+  return matches.length > 0 ? matches : list;
+}
+
+/**
+ * Formatea una medida como `"valor ± U"` (locale es-UY). Si `u` es nula, no positiva o no
+ * finita, muestra solo el valor.
+ */
+export function measureText(value, u) {
+  const base = format(value);
+  if (u == null || !Number.isFinite(u) || u <= 0) return base;
+  return `${base} ± ${format(u)}`;
+}
