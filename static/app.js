@@ -72,6 +72,7 @@ const submitStatus = document.querySelector("#submit-status");
 const latestResult = document.querySelector("#latest-result");
 const measurementFields = document.querySelector("#measurement-fields");
 const previewResult = document.querySelector("#preview-result");
+const previewButton = document.querySelector("#preview-button");
 const submitButton = document.querySelector("#submit-button");
 const submissionsTitle = document.querySelector("#submissions-title");
 const submissionsSubtitle = document.querySelector("#submissions-subtitle");
@@ -1934,8 +1935,8 @@ async function saveReview(event, id) {
 
 // ── Entrega por formulario ────────────────────────────────────────────────────
 
-/// Carga la definición de la práctica elegida + el catálogo de instrumentos del curso y
-/// renderiza los campos de carga. Solo para estudiantes (el docente no entrega por formulario).
+// Carga la definición de la práctica elegida + el catálogo de instrumentos del curso y
+// renderiza los campos de carga. Solo para estudiantes (el docente no entrega por formulario).
 async function loadSubmissionForm() {
   if (!measurementFields) return;
   if (canReview(state.user)) return;
@@ -1959,8 +1960,8 @@ async function loadSubmissionForm() {
   }
 }
 
-/// Renderiza una fila por magnitud: selector de instrumento/escala compatible + lecturas
-/// (réplicas dinámicas si la magnitud las admite, o un único valor si no).
+// Renderiza una fila por magnitud: selector de instrumento/escala compatible + lecturas
+// (réplicas dinámicas si la magnitud las admite, o un único valor si no).
 function renderMeasurementFields() {
   if (!state.practiceForm) {
     measurementFields.innerHTML = "";
@@ -2010,7 +2011,7 @@ function renderMeasurementFields() {
   });
 }
 
-/// HTML de un input de lectura (una réplica) con botón de quitar.
+// HTML de un input de lectura (una réplica) con botón de quitar.
 function renderReplicaInput(unit) {
   return `
     <div class="replica">
@@ -2020,7 +2021,7 @@ function renderReplicaInput(unit) {
   `;
 }
 
-/// Conecta los botones de quitar réplica de una fila (deja al menos una).
+// Conecta los botones de quitar réplica de una fila (deja al menos una).
 function wireRemoveReplica(row) {
   const replicas = row.querySelectorAll(".replica");
   row.querySelectorAll(".remove-replica").forEach((btn) => {
@@ -2038,7 +2039,7 @@ function wireRemoveReplica(row) {
   }
 }
 
-/// Repuebla el selector de escala de una fila según el instrumento elegido.
+// Repuebla el selector de escala de una fila según el instrumento elegido.
 function populateScaleOptions(row) {
   const instrumentId = row.querySelector(".measure-instrument").value;
   const scaleSelect = row.querySelector(".measure-scale");
@@ -2049,7 +2050,7 @@ function populateScaleOptions(row) {
     .join("");
 }
 
-/// Lee el DOM y arma el array de mediciones para el backend (descarta lecturas vacías).
+// Lee el DOM y arma el array de mediciones para el backend (descarta lecturas vacías).
 function collectMeasurements() {
   return [...measurementFields.querySelectorAll(".measurement-row")].map((row) => {
     const values = [...row.querySelectorAll(".measure-value")]
@@ -2066,9 +2067,16 @@ function collectMeasurements() {
   });
 }
 
-/// Botón "Calcular": previsualiza las incertidumbres sin persistir.
+// Deshabilita Calcular/Entregar mientras corre una operación, para evitar doble envío.
+function setSubmissionBusy(busy) {
+  if (previewButton) previewButton.disabled = busy;
+  if (submitButton) submitButton.disabled = busy;
+}
+
+// Botón "Calcular": previsualiza las incertidumbres sin persistir.
 async function previewSubmission() {
   if (!practiceSelect.value) return;
+  setSubmissionBusy(true);
   submitStatus.textContent = "Calculando...";
   try {
     const analysis = await postJson("/api/submissions/preview", {
@@ -2080,12 +2088,15 @@ async function previewSubmission() {
     submitStatus.textContent = "";
   } catch (error) {
     submitStatus.textContent = error.message;
+  } finally {
+    setSubmissionBusy(false);
   }
 }
 
-/// Botón "Entregar": asigna la mesa (si corresponde) y crea la entrega por formulario.
+// Botón "Entregar": asigna la mesa (si corresponde) y crea la entrega por formulario.
 async function submitFormSubmission() {
   if (!practiceSelect.value) return;
+  setSubmissionBusy(true);
   submitStatus.textContent = "Entregando...";
   try {
     const groupId = groupSelect.value;
@@ -2108,11 +2119,13 @@ async function submitFormSubmission() {
     await loadSubmissions();
   } catch (error) {
     submitStatus.textContent = error.message;
+  } finally {
+    setSubmissionBusy(false);
   }
 }
 
-/// Markup del resultado de una entrega por formulario: tabla de magnitudes con sus
-/// incertidumbres, mensurandos derivados (`valor ± U`) y advertencias.
+// Markup del resultado de una entrega por formulario: tabla de magnitudes con sus
+// incertidumbres, mensurandos derivados (`valor ± U`) y advertencias.
 function formAnalysisMarkup(analysis) {
   const quantities = analysis.quantities ?? [];
   const derived = analysis.derived ?? [];
