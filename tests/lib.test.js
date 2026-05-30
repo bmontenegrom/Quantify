@@ -22,6 +22,7 @@ import {
   compatibleInstruments,
   measureText,
   regressionPlot,
+  compareResults,
 } from "../static/lib.js";
 
 // Fixture chico de contexto académico: 2 cursos, el estudiante s1 está en c1 (grupo g1)
@@ -296,4 +297,46 @@ test("regressionPlot devuelve null con <2 puntos o rango nulo", () => {
   assert.equal(regressionPlot([[1, 2], [1, 4]], 0, 1), null);
   // y constante y recta plana -> spanY 0.
   assert.equal(regressionPlot([[0, 3], [2, 3]], 0, 3), null);
+});
+
+test("compareResults empareja por símbolo y calcula Δ abs y %", () => {
+  const auto = [{ symbol: "Q", name: "Area", unit: "mm2", value: 70, u_expanded: 2 }];
+  const student = [{ symbol: "Q", value: 73.5, u_expanded: 2.2 }];
+  const [row] = compareResults(auto, student);
+  assert.deepEqual(row.auto, { value: 70, u: 2 });
+  assert.deepEqual(row.student, { value: 73.5, u: 2.2 });
+  assert.ok(Math.abs(row.dValue - 3.5) < 1e-9);
+  assert.ok(Math.abs(row.dValuePct - 5) < 1e-9); // 3.5/70*100
+  assert.ok(Math.abs(row.dU - 0.2) < 1e-9);
+  assert.ok(Math.abs(row.dUPct - 10) < 1e-9); // 0.2/2*100
+});
+
+test("compareResults marca null cuando el alumno no cargó el mensurando", () => {
+  const auto = [{ symbol: "Q", name: "Area", unit: "mm2", value: 70, u_expanded: 2 }];
+  const [row] = compareResults(auto, []);
+  assert.equal(row.student, null);
+  assert.equal(row.dValue, null);
+  assert.equal(row.dValuePct, null);
+  assert.equal(row.dU, null);
+  assert.equal(row.dUPct, null);
+});
+
+test("compareResults: % null si el automático es 0; Δ U null si falta una U", () => {
+  const auto = [
+    { symbol: "Z", name: "Cero", unit: "u", value: 0, u_expanded: 0 },
+    { symbol: "W", name: "SinU", unit: "u", value: 10, u_expanded: 1 },
+  ];
+  const student = [
+    { symbol: "Z", value: 5, u_expanded: 1 },
+    { symbol: "W", value: 12, u_expanded: null },
+  ];
+  const rows = compareResults(auto, student);
+  // Z: valor automático 0 -> % null, pero Δ abs sí (5). U automática 0 -> % null.
+  assert.ok(Math.abs(rows[0].dValue - 5) < 1e-9);
+  assert.equal(rows[0].dValuePct, null);
+  assert.equal(rows[0].dUPct, null);
+  // W: el alumno no cargó U -> dU y dUPct null; el valor sí compara.
+  assert.ok(Math.abs(rows[1].dValue - 2) < 1e-9);
+  assert.equal(rows[1].dU, null);
+  assert.equal(rows[1].dUPct, null);
 });

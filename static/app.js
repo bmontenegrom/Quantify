@@ -18,6 +18,7 @@ import {
   compatibleInstruments,
   measureText,
   regressionPlot,
+  compareResults,
 } from "./lib.js";
 
 const state = {
@@ -1772,8 +1773,18 @@ async function loadSubmissionDetail(id) {
   state.selectedId = id;
   renderSubmissionList();
   const submission = await fetchJson(`/api/submissions/${id}`);
+  // Para que el alumno cargue sus cálculos necesitamos la lista de mensurandos de la práctica,
+  // que está disponible aunque el cálculo automático siga oculto.
+  let definition = null;
+  if (submission.entry_mode === "form" && !canReview(state.user)) {
+    try {
+      definition = await fetchJson(`/api/practices/${encodeURIComponent(submission.practice_id)}/definition`);
+    } catch {
+      definition = null;
+    }
+  }
   submissionDetail.classList.remove("hidden");
-  renderAnalysis(submissionDetail, submission, canReview(state.user));
+  renderAnalysis(submissionDetail, submission, canReview(state.user), definition);
 }
 
 function submissionHeader(submission) {
@@ -1787,15 +1798,28 @@ function submissionHeader(submission) {
     </div>`;
 }
 
-function renderAnalysis(target, submission, includeReview = false) {
+function renderAnalysis(target, submission, includeReview = false, definition = null) {
   target.classList.remove("detail-empty");
 
   // Entregas por formulario: tabla de incertidumbres calculadas.
   if (submission.entry_mode === "form") {
+    const isTeacher = canReview(state.user);
+    const studentResults = submission.student_results ?? [];
     // El servidor manda `analysis: null` mientras el docente no habilite la visibilidad.
-    const body = submission.analysis
-      ? formAnalysisMarkup(submission.analysis)
-      : `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
+    let body = "";
+    if (submission.analysis) {
+      body += formAnalysisMarkup(submission.analysis);
+      // Comparación auto vs alumno (cuando el alumno cargó algo y el cálculo es visible).
+      if (studentResults.length) {
+        body += comparisonMarkup(submission.analysis.derived ?? [], studentResults);
+      }
+    } else {
+      body += `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
+    }
+    // Formulario "Mis cálculos" del alumno dueño (editable hasta que el docente habilite).
+    if (!isTeacher) {
+      body += studentResultsFormMarkup(submission, definition);
+    }
     target.innerHTML = `
       ${submissionHeader(submission)}
       ${body}
@@ -1803,6 +1827,10 @@ function renderAnalysis(target, submission, includeReview = false) {
     `;
     const reviewForm = target.querySelector(".review-form");
     if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
+    const studentForm = target.querySelector(".student-results-form");
+    if (studentForm && !submission.results_visible_to_student) {
+      studentForm.addEventListener("submit", (event) => saveStudentResults(event, submission.id));
+    }
     return;
   }
 
@@ -2301,6 +2329,105 @@ function regressionSvg(plot, xLabel = "x", yLabel = "y") {
       <text class="reg-label" x="${plot.pad}" y="${plot.pad - 12}" text-anchor="start">y: ${escapeHtml(yLabel)}</text>
     </svg>
   `;
+}
+
+// Tabla de comparación entre los mensurandos automáticos y los que cargó el alumno: por
+// mensurando, valor ± U de cada lado y las diferencias absoluta y relativa (%). Sin veredicto.
+function comparisonMarkup(autoDerived, studentResults) {
+  const rows = compareResults(autoDerived, studentResults);
+  if (!rows.length) return "";
+  const num = (v) => (v == null ? "—" : escapeHtml(format(v)));
+  const pct = (v) => (v == null ? "—" : `${escapeHtml(format(v))} %`);
+  return `
+    <h3>Comparación: tus cálculos vs automático</h3>
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table compare-table">
+        <thead>
+          <tr><th>Mensurando</th><th>Automático</th><th>Tus cálculos</th><th>Δ valor</th><th>Δ valor (%)</th><th>Δ U</th><th>Δ U (%)</th></tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (r) => `
+            <tr>
+              <td class="directory-primary"><strong>${escapeHtml(r.symbol)}</strong> <span class="submission-meta">${escapeHtml(r.unit)}</span></td>
+              <td>${escapeHtml(measureText(r.auto.value, r.auto.u))}</td>
+              <td>${r.student ? escapeHtml(measureText(r.student.value, r.student.u)) : "—"}</td>
+              <td>${num(r.dValue)}</td>
+              <td>${pct(r.dValuePct)}</td>
+              <td>${num(r.dU)}</td>
+              <td>${pct(r.dUPct)}</td>
+            </tr>`,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// Formulario "Mis cálculos": una fila por mensurando de la práctica (valor y U). Editable hasta
+// que el docente habilite el cálculo automático; luego queda en solo lectura.
+function studentResultsFormMarkup(submission, definition) {
+  const measurands = definition?.results ?? [];
+  if (!measurands.length) return "";
+  const locked = submission.results_visible_to_student;
+  const saved = new Map((submission.student_results ?? []).map((s) => [s.symbol, s]));
+  const rows = measurands
+    .map((m) => {
+      const s = saved.get(m.symbol);
+      const v = s ? escapeHtml(String(s.value)) : "";
+      const u = s && s.u_expanded != null ? escapeHtml(String(s.u_expanded)) : "";
+      const dis = locked ? "disabled" : "";
+      return `
+        <tr>
+          <td class="directory-primary"><strong>${escapeHtml(m.symbol)}</strong> <span class="submission-meta">${escapeHtml(m.name)} (${escapeHtml(m.unit)})</span></td>
+          <td><input class="student-value" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${v}" ${dis} placeholder="valor" /></td>
+          <td><input class="student-u" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${u}" ${dis} placeholder="U" /></td>
+        </tr>`;
+    })
+    .join("");
+  return `
+    <form class="student-results-form detail-form">
+      <h3>Mis cálculos</h3>
+      <p class="submission-meta">${
+        locked
+          ? "El docente habilitó los resultados; tus cálculos quedaron congelados."
+          : "Ingresá tu valor y tu U para cada mensurando (calculados por tu cuenta). Podés editarlos hasta que el docente habilite los resultados."
+      }</p>
+      <div class="directory-table-wrap">
+        <table class="grade-table directory-data-table">
+          <thead><tr><th>Mensurando</th><th>Valor</th><th>U</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <span class="student-results-status submission-meta"></span>
+      ${locked ? "" : `<div class="detail-actions"><button type="submit">Guardar mis cálculos</button></div>`}
+    </form>
+  `;
+}
+
+// Recolecta los mensurandos cargados (omite los de valor vacío) y los guarda; luego recarga el
+// detalle. Muestra el error en una línea de estado del propio formulario.
+async function saveStudentResults(event, submissionId) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const results = [];
+  form.querySelectorAll(".student-value").forEach((input) => {
+    const value = input.value.trim();
+    if (value === "") return;
+    const symbol = input.dataset.symbol;
+    const uInput = form.querySelector(`.student-u[data-symbol="${cssEscape(symbol)}"]`);
+    const u = uInput && uInput.value.trim() !== "" ? Number(uInput.value) : null;
+    results.push({ symbol, value: Number(value), u_expanded: u });
+  });
+  try {
+    await postJson(`/api/submissions/${submissionId}/student-results`, { results });
+    await loadSubmissionDetail(submissionId);
+  } catch (error) {
+    const note = form.querySelector(".student-results-status");
+    if (note) note.textContent = error.message;
+  }
 }
 
 async function fetchJson(url) {

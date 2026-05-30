@@ -241,3 +241,40 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
     bounds: { minX, maxX, minY, maxY },
   };
 }
+
+/** Diferencia relativa porcentual `(b - a) / a * 100`, o `null` si no es calculable. */
+function relPct(b, a) {
+  if (b == null || a == null || !Number.isFinite(b) || !Number.isFinite(a) || a === 0) {
+    return null;
+  }
+  return ((b - a) / a) * 100;
+}
+
+/**
+ * Compara los mensurandos automáticos (`autoDerived`: lista con `symbol`, `name`, `unit`, `value`,
+ * `u_expanded`) contra los que cargó el estudiante (`studentResults`: lista con `symbol`, `value`,
+ * `u_expanded`). Itera sobre los automáticos (la fuente de los mensurandos) y empareja por símbolo.
+ * Para cada uno devuelve la medida automática, la del estudiante (o `null` si no la cargó) y las
+ * diferencias absoluta y relativa (%) de valor y de U. Las relativas son `null` si el denominador
+ * automático es nulo o no finito. Función pura: el render arma la tabla con esto.
+ */
+export function compareResults(autoDerived, studentResults) {
+  const auto = autoDerived ?? [];
+  const byStudent = new Map((studentResults ?? []).map((s) => [s.symbol, s]));
+  return auto.map((d) => {
+    const s = byStudent.get(d.symbol) ?? null;
+    const sv = s ? s.value : null;
+    const su = s && s.u_expanded != null ? s.u_expanded : null;
+    return {
+      symbol: d.symbol,
+      name: d.name,
+      unit: d.unit,
+      auto: { value: d.value, u: d.u_expanded },
+      student: s ? { value: sv, u: su } : null,
+      dValue: sv == null ? null : sv - d.value,
+      dValuePct: relPct(sv, d.value),
+      dU: su == null || d.u_expanded == null ? null : su - d.u_expanded,
+      dUPct: relPct(su, d.u_expanded),
+    };
+  });
+}
