@@ -20,6 +20,14 @@ struct ErrorBody<'a> {
 
 impl AppError {
     /// Crea un error 400 Bad Request con el mensaje dado.
+    ///
+    /// # Ejemplos
+    ///
+    /// ```
+    /// use axum::response::IntoResponse;
+    /// let resp = quantify::error::AppError::bad_request("dato invalido").into_response();
+    /// assert_eq!(resp.status().as_u16(), 400);
+    /// ```
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
@@ -28,6 +36,14 @@ impl AppError {
     }
 
     /// Crea un error 404 Not Found con el mensaje dado.
+    ///
+    /// # Ejemplos
+    ///
+    /// ```
+    /// use axum::response::IntoResponse;
+    /// let resp = quantify::error::AppError::not_found("no existe").into_response();
+    /// assert_eq!(resp.status().as_u16(), 404);
+    /// ```
     pub fn not_found(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
@@ -36,6 +52,14 @@ impl AppError {
     }
 
     /// Crea un error 401 Unauthorized con el mensaje dado.
+    ///
+    /// # Ejemplos
+    ///
+    /// ```
+    /// use axum::response::IntoResponse;
+    /// let resp = quantify::error::AppError::unauthorized("inicia sesion").into_response();
+    /// assert_eq!(resp.status().as_u16(), 401);
+    /// ```
     pub fn unauthorized(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
@@ -44,6 +68,14 @@ impl AppError {
     }
 
     /// Crea un error 403 Forbidden con el mensaje dado.
+    ///
+    /// # Ejemplos
+    ///
+    /// ```
+    /// use axum::response::IntoResponse;
+    /// let resp = quantify::error::AppError::forbidden("sin permiso").into_response();
+    /// assert_eq!(resp.status().as_u16(), 403);
+    /// ```
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
