@@ -379,6 +379,7 @@ pub struct SubmissionRecord {
     pub csv_path: String,
     pub analysis_json: String,
     pub entry_mode: String,
+    pub results_visible_to_student: bool,
     pub status: String,
     pub teacher_comment: Option<String>,
     pub score: Option<f64>,
@@ -397,8 +398,11 @@ pub struct SubmissionDetail {
     pub file_name: String,
     /// Modo de carga: `"csv"` (legacy) o `"form"` (lecturas crudas con cálculo de incertidumbres).
     pub entry_mode: String,
+    /// Si el docente habilitó que el estudiante vea el cálculo automático de esta entrega.
+    pub results_visible_to_student: bool,
     /// Resultado calculado, crudo como JSON: para `csv` es un `AnalysisResult`; para `form`
     /// es un `computation::FormAnalysis`. El cliente decide cómo renderizarlo según `entry_mode`.
+    /// Se devuelve `null` a un estudiante mientras `results_visible_to_student` sea `false`.
     pub analysis: serde_json::Value,
     pub status: String,
     pub teacher_comment: Option<String>,
@@ -423,6 +427,8 @@ pub struct ReviewSubmission {
     pub status: String,
     pub teacher_comment: Option<String>,
     pub score: Option<f64>,
+    /// Si se incluye, actualiza la visibilidad del cálculo para el estudiante.
+    pub results_visible: Option<bool>,
 }
 
 /// Crea las tablas si no existen y aplica las migraciones idempotentes de columnas.
@@ -628,6 +634,14 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "submissions", "group_id", "TEXT").await?;
     // Modo de carga de la entrega: 'csv' (legacy) o 'form' (lecturas crudas). NULL = csv.
     add_column_if_missing(pool, "submissions", "entry_mode", "TEXT").await?;
+    // Visibilidad del calculo automatico para el estudiante (la habilita el docente). 0 = oculto.
+    add_column_if_missing(
+        pool,
+        "submissions",
+        "results_visible_to_student",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
 
@@ -2301,6 +2315,7 @@ pub async fn submission_detail(
             s.csv_path,
             s.analysis_json,
             COALESCE(s.entry_mode, 'csv') AS entry_mode,
+            COALESCE(s.results_visible_to_student, 0) AS results_visible_to_student,
             s.status,
             s.teacher_comment,
             s.score,
@@ -2326,6 +2341,7 @@ pub async fn submission_detail(
             practice_name: row.practice_name,
             file_name: row.file_name,
             entry_mode: row.entry_mode,
+            results_visible_to_student: row.results_visible_to_student,
             analysis,
             status: row.status,
             teacher_comment: row.teacher_comment,
@@ -2350,7 +2366,8 @@ pub async fn update_review(
         SET status = ?2,
             teacher_comment = ?3,
             score = ?4,
-            reviewed_at = ?5
+            reviewed_at = ?5,
+            results_visible_to_student = COALESCE(?6, results_visible_to_student)
         WHERE id = ?1
         "#,
     )
@@ -2359,6 +2376,7 @@ pub async fn update_review(
     .bind(review.teacher_comment)
     .bind(review.score)
     .bind(Utc::now())
+    .bind(review.results_visible)
     .execute(pool)
     .await?;
 
@@ -3190,10 +3208,12 @@ mod tests {
                 .as_deref(),
             Some(student.id.as_str())
         );
-        assert!(submission_detail(&pool, &created.id)
+        let detail = submission_detail(&pool, &created.id)
             .await
             .unwrap()
-            .is_some());
+            .unwrap();
+        // Por defecto el calculo no es visible para el estudiante.
+        assert!(!detail.results_visible_to_student);
 
         let reviewed = update_review(
             &pool,
@@ -3202,6 +3222,7 @@ mod tests {
                 status: "aprobada".into(),
                 teacher_comment: Some("ok".into()),
                 score: Some(10.0),
+                results_visible: Some(true),
             },
         )
         .await
@@ -3209,6 +3230,24 @@ mod tests {
         .unwrap();
         assert_eq!(reviewed.status, "aprobada");
         assert_eq!(reviewed.score, Some(10.0));
+        // El docente habilito la visibilidad.
+        assert!(reviewed.results_visible_to_student);
+
+        // Una revision sin `results_visible` (None) no cambia la visibilidad ya habilitada.
+        let again = update_review(
+            &pool,
+            &created.id,
+            ReviewSubmission {
+                status: "observada".into(),
+                teacher_comment: None,
+                score: None,
+                results_visible: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(again.results_visible_to_student);
     }
 
     #[test]

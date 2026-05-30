@@ -24,13 +24,6 @@ pub struct MeasurementInput {
     pub values: Vec<f64>,
 }
 
-/// Cuerpo para previsualizar el cálculo (sin persistir).
-#[derive(Debug, Deserialize)]
-pub struct PreviewInput {
-    pub practice_id: String,
-    pub measurements: Vec<MeasurementInput>,
-}
-
 /// Cuerpo para crear una entrega por formulario.
 #[derive(Debug, Deserialize)]
 pub struct FormSubmissionInput {
