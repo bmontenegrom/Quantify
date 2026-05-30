@@ -9,10 +9,10 @@ Las fases 1–3 son backend puro (bajo riesgo, muy testeable); 4–6 agregan API
 > agrega tests JS de su lógica (extrayéndola a `lib.js` cuando haga falta), y el CI
 > (`.github/workflows/ci.yml`) corre ambas suites en cada push/PR.
 
-**Estado al 30-05-2026:** Fases 0, 1, 2, 2.5 y 3 **hechas** (prácticas reales sembradas;
-`uncertainty.rs`; catálogo de instrumentos con API + UI; base de tests JS + CI;
-definición de prácticas con magnitudes/mensurandos/editor teacher-only).
-Próximo: Fase 4.
+**Estado al 30-05-2026:** Fases 0–4 **hechas**: prácticas reales; `uncertainty.rs`; catálogo de
+instrumentos (API + UI); base de tests JS + CI; definición de prácticas (editor teacher-only) con
+**P1/P2/P3 sembradas**; entrega por formulario con cálculo automático; y visibilidad del cálculo
+controlada por el docente. Próximo: P3 parte 2 / `regresion_lineal`, o la fase de comparación.
 
 ---
 
@@ -122,9 +122,15 @@ editable desde la UI.
 
 **Implementado:** `practice_quantities`/`practice_results` + CRUD en `src/practices.rs`;
 API `/practices/{id}/definition` + endpoints de alta/edición/borrado; pestaña "Prácticas"
-teacher-only con editor inline; seed P1 (`l/a/b` → `Q = l*a + l*b`, ejemplo del cordón).
-P2/P3 quedan como esqueleto — el docente los completa vía el editor una vez confirmadas las
-magnitudes y fórmulas reales.
+teacher-only con editor inline. **Seeds de las 3 prácticas** (de las técnicas de Física 103):
+- **P1** — `l/a/b` → `Q = l*a + l*b` (área del cordón).
+- **P2 (CC)** — `Vg, R1, R2, R3, RA` → `Req = R1 + RA + 1/(1/R2 + 1/R3)`, `I = Vg/Req`
+  (R1 y RA en serie con el paralelo de R2/R3).
+- **P3 (relajación, parte 1)** — `R, Rint, C, tmedio` → `tau_teorico = (R+Rint)*C`,
+  `tau_exp = tmedio/ln2`. La **parte 2** (desfasaje, recta tg φ vs ω) espera `regresion_lineal`.
+
+Las tres calzan con el motor estadístico actual (tipo A/B + propagación). El docente puede
+ajustar cualquier definición desde el editor.
 
 ---
 
