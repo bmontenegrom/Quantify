@@ -619,6 +619,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn set_regression_formulas_updates_and_normalizes_empty() {
+        let (pool, _dir) = setup().await;
+        assert!(set_regression_formulas(
+            &pool,
+            "p1-estadistica",
+            "2*pi*f",
+            "b / math::sqrt(a*a - b*b)"
+        )
+        .await
+        .unwrap());
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        assert_eq!(def.x_formula.as_deref(), Some("2*pi*f"));
+        assert_eq!(def.y_formula.as_deref(), Some("b / math::sqrt(a*a - b*b)"));
+
+        // Una cadena vacía (o solo espacios) guarda NULL.
+        assert!(set_regression_formulas(&pool, "p1-estadistica", "   ", "")
+            .await
+            .unwrap());
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        assert_eq!(def.x_formula, None);
+        assert_eq!(def.y_formula, None);
+
+        // Práctica inexistente devuelve false.
+        assert!(!set_regression_formulas(&pool, "no-existe", "f", "f")
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
     async fn seed_definitions_populates_p1_and_is_idempotent() {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
