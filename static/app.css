@@ -796,3 +796,44 @@ textarea {
     flex: 1;
   }
 }
+
+/* Gráfico SVG del ajuste lineal (entregas por formulario, modo regresión). */
+.reg-plot {
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+  margin-top: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.reg-axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.reg-line {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.reg-point {
+  fill: var(--accent-strong);
+}
+
+.reg-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+/* Tabla de serie para cargar puntos (modo regresión). */
+.series-table input.series-value {
+  width: 100%;
+  min-width: 72px;
+}
+
+.remove-series-row,
+.add-series-row {
+  cursor: pointer;
+}

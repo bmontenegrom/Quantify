@@ -21,6 +21,7 @@ import {
   analysisKindLabel,
   compatibleInstruments,
   measureText,
+  regressionPlot,
 } from "../static/lib.js";
 
 // Fixture chico de contexto académico: 2 cursos, el estudiante s1 está en c1 (grupo g1)
@@ -264,4 +265,35 @@ test("measureText formatea 'valor ± U' y omite U inválida", () => {
   assert.equal(measureText(10, null), "10");
   assert.equal(measureText(10, NaN), "10");
   assert.equal(measureText(10, -1), "10");
+});
+
+test("regressionPlot escala puntos y recta al lienzo (recta conocida)", () => {
+  // y = 2x + 1 sobre x = 0,1,2; lienzo 320x220, pad 32.
+  const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1, 320, 220, 32);
+  assert.deepEqual(plot.bounds, { minX: 0, maxX: 2, minY: 1, maxY: 5 });
+  // Eje X: minX -> pad, maxX -> width-pad, medio -> centro.
+  assert.deepEqual(plot.scatter, [
+    { cx: 32, cy: 188 },
+    { cx: 160, cy: 110 },
+    { cx: 288, cy: 32 },
+  ]);
+  // La recta cruza desde (minX, minY) abajo-izquierda hasta (maxX, maxY) arriba-derecha.
+  assert.deepEqual(plot.line, { x1: 32, y1: 188, x2: 288, y2: 32 });
+});
+
+test("regressionPlot extiende el rango Y para incluir la recta", () => {
+  // Puntos planos (y=0) pero recta con pendiente: el rango Y debe llegar hasta y=5.
+  const plot = regressionPlot([[0, 0], [1, 0]], 5, 0, 320, 220, 32);
+  assert.equal(plot.bounds.minY, 0);
+  assert.equal(plot.bounds.maxY, 5);
+  assert.deepEqual(plot.line, { x1: 32, y1: 188, x2: 288, y2: 32 });
+});
+
+test("regressionPlot devuelve null con <2 puntos o rango nulo", () => {
+  assert.equal(regressionPlot([], 1, 0), null);
+  assert.equal(regressionPlot([[1, 2]], 1, 0), null);
+  // Todos los x iguales -> spanX 0.
+  assert.equal(regressionPlot([[1, 2], [1, 4]], 0, 1), null);
+  // y constante y recta plana -> spanY 0.
+  assert.equal(regressionPlot([[0, 3], [2, 3]], 0, 3), null);
 });

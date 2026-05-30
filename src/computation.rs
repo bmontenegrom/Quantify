@@ -60,6 +60,7 @@ pub struct DerivedComputation {
 }
 
 /// Resultado de un ajuste lineal `y = slope*x + intercept` sobre una serie de puntos.
+/// `x_label`/`y_label` son las fórmulas de eje (texto), para rotular el gráfico.
 #[derive(Debug, Serialize)]
 pub struct RegressionResult {
     pub points: Vec<(f64, f64)>,
@@ -68,6 +69,8 @@ pub struct RegressionResult {
     pub u_slope: f64,
     pub u_intercept: f64,
     pub r_squared: f64,
+    pub x_label: String,
+    pub y_label: String,
 }
 
 /// Resultado completo del cálculo de una entrega por formulario. En el camino estadístico se
@@ -288,6 +291,8 @@ pub fn compute_regresion(
             u_slope: fit.u_slope,
             u_intercept: fit.u_intercept,
             r_squared: fit.r_squared,
+            x_label: x_formula.to_string(),
+            y_label: y_formula.to_string(),
         }),
         derived,
         warnings,
@@ -900,6 +905,9 @@ mod tests {
         let reg = analysis.regression.unwrap();
         assert!(close(reg.slope, 1.0 / (2.0 * std::f64::consts::PI), 1e-9));
         assert!(close(reg.intercept, 1.0, 1e-9));
+        // Las etiquetas de eje conservan las fórmulas para rotular el gráfico.
+        assert_eq!(reg.x_label, "2*pi*f");
+        assert_eq!(reg.y_label, "math::sqrt(a)");
         assert!(close(
             analysis
                 .derived
