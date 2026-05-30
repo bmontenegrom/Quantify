@@ -143,6 +143,12 @@ cálculo manual del estudiante se modela en la **Fase de comparación** (ver má
 - API: `GET /submissions/new?practice_id=...` (formulario), `POST /submissions` con
   `measurements[]`; mantener validación de permisos (`user_can_submit`) y mesa asignada.
   Requiere agregar `evalexpr` (o similar) para parsear/evaluar la fórmula del mensurando.
+- ⚠️ **Unicidad de símbolos cruzada (heredado de Fase 3):** hoy `practice_quantities` y
+  `practice_results` tienen su `UNIQUE(practice_id, symbol)` por separado, así que una magnitud
+  `l` y un mensurando `l` pueden coexistir. Para el evaluador de fórmulas hay que garantizar que
+  **todos** los símbolos de una práctica (magnitudes + mensurandos) sean únicos entre sí, o la
+  fórmula queda ambigua. Validar el símbolo como identificador (sin espacios/operadores) y que
+  la fórmula solo referencie símbolos declarados.
 - Frontend: formulario dinámico por práctica con selector de instrumento/escala por magnitud,
   réplicas, y **previsualización en vivo** de `n, media, s, u_A, u_B, u_c, U`.
 
