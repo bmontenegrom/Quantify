@@ -71,8 +71,6 @@ const submissionForm = document.querySelector("#submission-form");
 const submitStatus = document.querySelector("#submit-status");
 const latestResult = document.querySelector("#latest-result");
 const measurementFields = document.querySelector("#measurement-fields");
-const previewResult = document.querySelector("#preview-result");
-const previewButton = document.querySelector("#preview-button");
 const submitButton = document.querySelector("#submit-button");
 const submissionsTitle = document.querySelector("#submissions-title");
 const submissionsSubtitle = document.querySelector("#submissions-subtitle");
@@ -234,13 +232,11 @@ userForm.addEventListener("submit", async (event) => {
   });
 });
 
-// "Calcular" (submit del form / Enter): previsualiza las incertidumbres sin entregar.
+// "Entregar" (submit del form / Enter): crea la entrega por formulario.
 submissionForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  previewSubmission();
+  submitFormSubmission();
 });
-// "Entregar": crea la entrega por formulario.
-submitButton.addEventListener("click", submitFormSubmission);
 
 async function init() {
   try {
@@ -1795,9 +1791,13 @@ function renderAnalysis(target, submission, includeReview = false) {
 
   // Entregas por formulario: tabla de incertidumbres calculadas.
   if (submission.entry_mode === "form") {
+    // El servidor manda `analysis: null` mientras el docente no habilite la visibilidad.
+    const body = submission.analysis
+      ? formAnalysisMarkup(submission.analysis)
+      : `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
     target.innerHTML = `
       ${submissionHeader(submission)}
-      ${formAnalysisMarkup(submission.analysis)}
+      ${body}
       ${includeReview ? renderReviewForm(submission) : ""}
     `;
     const reviewForm = target.querySelector(".review-form");
@@ -1903,6 +1903,10 @@ function renderReviewForm(submission) {
         Comentario docente
         <textarea name="teacher_comment">${escapeHtml(submission.teacher_comment ?? "")}</textarea>
       </label>
+      <label class="review-visibility">
+        <input type="checkbox" name="results_visible" ${submission.results_visible_to_student ? "checked" : ""} />
+        Mostrar el calculo automatico al estudiante
+      </label>
       <div class="review-actions">
         <button type="submit">Guardar correccion</button>
         <span class="submission-meta">${submission.reviewed_at ? `Revisada: ${new Date(submission.reviewed_at).toLocaleString()}` : ""}</span>
@@ -1916,6 +1920,8 @@ async function saveReview(event, id) {
   const form = event.currentTarget;
   const payload = Object.fromEntries(new FormData(form).entries());
   payload.score = payload.score === "" ? null : Number(payload.score);
+  // El checkbox no aparece en FormData cuando está desmarcado; lo mandamos como booleano explícito.
+  payload.results_visible = form.querySelector('[name="results_visible"]').checked;
 
   const response = await fetch(`/api/submissions/${id}/review`, {
     method: "POST",
@@ -2067,33 +2073,13 @@ function collectMeasurements() {
   });
 }
 
-// Deshabilita Calcular/Entregar mientras corre una operación, para evitar doble envío.
+// Deshabilita Entregar mientras corre la operación, para evitar doble envío.
 function setSubmissionBusy(busy) {
-  if (previewButton) previewButton.disabled = busy;
   if (submitButton) submitButton.disabled = busy;
 }
 
-// Botón "Calcular": previsualiza las incertidumbres sin persistir.
-async function previewSubmission() {
-  if (!practiceSelect.value) return;
-  setSubmissionBusy(true);
-  submitStatus.textContent = "Calculando...";
-  try {
-    const analysis = await postJson("/api/submissions/preview", {
-      practice_id: practiceSelect.value,
-      measurements: collectMeasurements(),
-    });
-    previewResult.innerHTML = `<h3>Previsualizacion</h3>${formAnalysisMarkup(analysis)}`;
-    previewResult.classList.remove("hidden");
-    submitStatus.textContent = "";
-  } catch (error) {
-    submitStatus.textContent = error.message;
-  } finally {
-    setSubmissionBusy(false);
-  }
-}
-
 // Botón "Entregar": asigna la mesa (si corresponde) y crea la entrega por formulario.
+// El cálculo automático queda oculto hasta que el docente lo habilite.
 async function submitFormSubmission() {
   if (!practiceSelect.value) return;
   setSubmissionBusy(true);
@@ -2113,7 +2099,6 @@ async function submitFormSubmission() {
       measurements: collectMeasurements(),
     });
     submitStatus.textContent = "Entrega guardada";
-    previewResult.classList.add("hidden");
     renderAnalysis(latestResult, submission);
     latestResult.classList.remove("hidden");
     await loadSubmissions();

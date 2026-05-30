@@ -376,6 +376,17 @@ textarea {
   margin-top: 12px;
 }
 
+.review-visibility {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.review-visibility input {
+  width: auto;
+}
+
 .measurement-fields {
   display: grid;
   gap: 12px;
