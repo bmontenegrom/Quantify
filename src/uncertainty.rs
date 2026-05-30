@@ -190,7 +190,14 @@ where
     let mut variance = 0.0;
     let mut x = means.to_vec();
     for i in 0..means.len() {
-        let h = means[i].abs().max(1.0) * 1e-6;
+        // Paso relativo al valor: preciso también para magnitudes muy chicas (p. ej.
+        // capacitancias ~1e-8). Un piso absoluto grande perturbaría tanto que el punto
+        // evaluado podría cambiar de signo. Para x = 0 se usa un paso absoluto pequeño.
+        let h = if means[i] == 0.0 {
+            1e-6
+        } else {
+            means[i].abs() * 1e-6
+        };
         let original = x[i];
         x[i] = original + h;
         let f_plus = f(&x);
@@ -298,6 +305,17 @@ mod tests {
         assert!(close(value, 14.0, 1e-9));
         // u_Q^2 = 7^2*0.01 + 4*0.04 + 4*0.04 = 0.49+0.16+0.16 = 0.81 -> 0.9
         assert!(close(u_q, 0.9, 1e-6));
+    }
+
+    #[test]
+    fn propagate_is_accurate_for_tiny_nonlinear_magnitudes() {
+        // f = 1/x con x = 1e-8 (escala de una capacitancia). df/dx = -1/x^2 = -1e16.
+        // u_q = |df/dx| * u_x = 1e16 * 1e-10 = 1e6.
+        // Con un paso absoluto (piso 1.0) el punto evaluado cambiaba de signo y daba basura;
+        // con paso relativo la propagacion es correcta.
+        let (value, u_q) = propagate(|x| 1.0 / x[0], &[1e-8], &[1e-10]);
+        assert!(close(value, 1e8, 1.0));
+        assert!((u_q - 1e6).abs() / 1e6 < 1e-3);
     }
 
     #[test]
