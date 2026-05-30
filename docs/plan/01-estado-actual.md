@@ -1,12 +1,15 @@
 # 01 — Estado actual del repo
 
-Snapshot del MVP tal como está en `main` al 29-05-2026.
+Snapshot del MVP tal como está en `main` al 29-05-2026 (post Fases 0–2.5).
 
 ## Stack
 
 - **Backend**: Rust + Axum 0.8, SQLite vía `sqlx` 0.8, Tokio.
 - **Frontend**: HTML/CSS/JS estático (`static/`) servido por el backend con `ServeDir`.
+  Lógica pura/selectores extraída a `static/lib.js` (ES module) para poder testearla.
 - **Auth**: sesiones por cookie `quantify_session` (12 h), hash de contraseña SHA-256 con salt.
+- **Tests**: backend con `cargo test`; frontend con `node --test` (`node:test`, sin
+  dependencias) sobre `static/lib.js`. CI en `.github/workflows/ci.yml` corre ambas suites.
 - **Deploy**: binario Rust o Docker Compose (`Dockerfile`, `docker-compose.yml`, `deploy/ubuntu.md`).
 
 ## Estructura de código (`src/`)
@@ -14,13 +17,15 @@ Snapshot del MVP tal como está en `main` al 29-05-2026.
 | Archivo | Responsabilidad |
 |---------|-----------------|
 | `main.rs` | Bootstrap: env vars, pool SQLite, `migrate`, `seed_*`, router, `ServeDir`. |
-| `db.rs` | **Toda la persistencia y lógica de dominio** (≈2100 líneas): tipos, migraciones, seeds, queries. |
+| `db.rs` | **Persistencia y lógica de dominio** (≈2100 líneas): tipos, migraciones, seeds, queries. |
 | `routes.rs` | Handlers HTTP de la API (`/api/*`), auth helpers, validaciones. |
-| `analysis.rs` | Análisis CSV genérico: stats por columna + regresión lineal. |
+| `instruments.rs` | Catálogo de instrumentos por curso: CRUD de instrumentos/escalas, export/import, seed. |
+| `uncertainty.rs` | Motor de incertidumbres: `type_a`, `type_b` (resolución/apreciación/fabricante), `combine`, `expand`, `propagate`. |
+| `analysis.rs` | Análisis CSV: stats por columna + regresión lineal (usa `uncertainty`). |
 | `error.rs` | Tipo `AppError` → respuestas HTTP. |
 
-> Nota: `db.rs` concentra demasiada responsabilidad. El plan propone empezar a
-> separar módulos (`instruments`, `uncertainty`, `practices`) sin reescribir lo existente.
+> Nota: `db.rs` todavía concentra mucha responsabilidad. Ya se extrajeron `instruments`
+> y `uncertainty`; `practices` queda pendiente (Fase 3).
 
 ## Modelo de datos actual (tablas)
 
@@ -38,7 +43,10 @@ Snapshot del MVP tal como está en `main` al 29-05-2026.
 - Usuarios: `GET/POST /users`, `POST /users/{id}`, `/users/{id}/password`.
 - Académico: `GET /academic/context`, CRUD de cursos/grupos/subgrupos/miembros/prácticas/mesas.
 - Notas: `GET /grades`, `POST /grades/components`, `/grades/scores`.
-- Prácticas: `GET /practices`.
+- Prácticas: `GET /practices` (P1/P2/P3 reales, ver doc 02).
+- Instrumentos (docente/admin): `GET/POST /instruments`, `POST/DELETE /instruments/{id}`,
+  escalas `/instruments/{id}/scales[/{scale_id}]`, y `GET /instruments/export` +
+  `POST /instruments/import`.
 - Entregas: `GET/POST /submissions`, `GET /submissions/{id}`, `POST /submissions/{id}/review`.
 
 ## Análisis CSV (`analysis.rs`) — lo que hace hoy
@@ -48,13 +56,18 @@ Dado un CSV con encabezados, por cada columna numérica calcula `count`, `mean`,
 entre las dos primeras columnas numéricas (pendiente, intercepto, R²) y junta
 **advertencias** por celdas vacías o no numéricas.
 
-### Limitaciones frente a Física 103
+### Limitaciones del flujo CSV frente a Física 103
 
-1. **No calcula incertidumbres** (ni tipo A `sₘ = s/√n`, ni tipo B desde instrumento, ni combinada/expandida).
-2. `std_dev` es **poblacional** (`/n`); para tipo A se necesita la **muestral** (`/(n-1)`) y luego `sₘ = s/√n`. ⚠️ CONFIRMAR convención del curso.
-3. No conoce **instrumentos** ni **tipos de instrumento** → no puede aportar la componente tipo B.
-4. No modela **determinaciones indirectas** (`Q = f(a,b,c)`) ni **propagación de varianzas**.
-5. No soporta el ajuste de **relajación exponencial** (P3) ni el manejo de escalas/resistencia interna de amperímetro/voltímetro (P2).
-6. Las **prácticas sembradas son ficticias** (péndulo, Hooke, caída libre), no las de Física 103.
+> Los bloques de cálculo ya **existen** (`uncertainty.rs` cubre tipo A/B/combinada/expandida y
+> propagación numérica; el catálogo de instrumentos está en `instruments.rs` + UI), pero el flujo
+> de entrega por CSV **todavía no los usa**: integrarlos al ingreso de datos es la Fase 4
+> (entrega por formulario). Estado de cada punto:
 
-Estas limitaciones son exactamente el objetivo de la próxima iteración.
+1. ~~No calcula incertidumbres~~ → **motor disponible** (`uncertainty.rs`); falta conectarlo a la entrega (Fase 4).
+2. `std_dev` de `analysis.rs` sigue siendo **poblacional** (`/n`); el motor de tipo A usa la muestral. ⚠️ CONFIRMAR convención del curso.
+3. ~~No conoce instrumentos~~ → **catálogo implementado** (Fase 2); falta que el estudiante elija instrumento por magnitud al cargar (Fase 4).
+4. **Determinaciones indirectas** (`Q = f(a,b,c)`) y **propagación**: el motor las soporta; falta la definición de prácticas (Fase 3) y el formulario (Fase 4).
+5. **Relajación exponencial** (P3) y escalas/resistencia interna de amperímetro/voltímetro (P2): pendiente de completar (Fase 6).
+6. ~~Prácticas ficticias~~ → **P1/P2/P3 reales sembradas** (Fase 0).
+
+El cierre de estas brechas es el objetivo de las Fases 3–6.

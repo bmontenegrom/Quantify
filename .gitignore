@@ -2,5 +2,8 @@
 /data/*.db
 /data/*.db-*
 /data/uploads
+/data/*.out
+/data/*.err
 .env
 dist
+node_modules

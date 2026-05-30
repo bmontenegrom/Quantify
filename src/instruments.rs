@@ -445,31 +445,131 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         (
             instrument("Tester A830L (corriente)", "digital", "corriente", "A"),
             vec![
-                fab("200 uA", 0.1e-6, 1.0, 5.0, 0.0, Some(1002.0), Some(10.0), Some(200e-6), "A"),
-                fab("2 mA", 1e-6, 1.0, 5.0, 0.0, Some(101.2), Some(1.2), Some(2e-3), "A"),
-                fab("20 mA", 10e-6, 1.0, 5.0, 0.0, Some(11.30), Some(0.49), Some(20e-3), "A"),
-                fab("200 mA", 100e-6, 2.0, 5.0, 0.0, Some(2.40), Some(0.42), Some(200e-3), "A"),
+                fab(
+                    "200 uA",
+                    0.1e-6,
+                    1.0,
+                    5.0,
+                    0.0,
+                    Some(1002.0),
+                    Some(10.0),
+                    Some(200e-6),
+                    "A",
+                ),
+                fab(
+                    "2 mA",
+                    1e-6,
+                    1.0,
+                    5.0,
+                    0.0,
+                    Some(101.2),
+                    Some(1.2),
+                    Some(2e-3),
+                    "A",
+                ),
+                fab(
+                    "20 mA",
+                    10e-6,
+                    1.0,
+                    5.0,
+                    0.0,
+                    Some(11.30),
+                    Some(0.49),
+                    Some(20e-3),
+                    "A",
+                ),
+                fab(
+                    "200 mA",
+                    100e-6,
+                    2.0,
+                    5.0,
+                    0.0,
+                    Some(2.40),
+                    Some(0.42),
+                    Some(200e-3),
+                    "A",
+                ),
             ],
         ),
         (
             instrument("Tester EXTECH MN35 (voltaje)", "digital", "voltaje", "V"),
             vec![
-                fab("200 mV", 0.1e-3, 0.5, 2.0, 0.0, None, None, Some(200e-3), "V"),
+                fab(
+                    "200 mV",
+                    0.1e-3,
+                    0.5,
+                    2.0,
+                    0.0,
+                    None,
+                    None,
+                    Some(200e-3),
+                    "V",
+                ),
                 fab("2 V", 1e-3, 0.5, 2.0, 0.0, None, None, Some(2.0), "V"),
                 fab("20 V", 10e-3, 0.5, 2.0, 0.0, None, None, Some(20.0), "V"),
             ],
         ),
         (
-            instrument("Tester EXTECH MN35 (resistencia)", "digital", "resistencia", "ohm"),
+            instrument(
+                "Tester EXTECH MN35 (resistencia)",
+                "digital",
+                "resistencia",
+                "ohm",
+            ),
             vec![
-                fab("200 ohm", 0.1, 0.8, 4.0, 0.0, None, None, Some(200.0), "ohm"),
-                fab("2 kohm", 1.0, 0.8, 2.0, 0.0, None, None, Some(2000.0), "ohm"),
-                fab("20 kohm", 10.0, 0.8, 2.0, 0.0, None, None, Some(20000.0), "ohm"),
-                fab("200 kohm", 100.0, 0.8, 2.0, 0.0, None, None, Some(200000.0), "ohm"),
+                fab(
+                    "200 ohm",
+                    0.1,
+                    0.8,
+                    4.0,
+                    0.0,
+                    None,
+                    None,
+                    Some(200.0),
+                    "ohm",
+                ),
+                fab(
+                    "2 kohm",
+                    1.0,
+                    0.8,
+                    2.0,
+                    0.0,
+                    None,
+                    None,
+                    Some(2000.0),
+                    "ohm",
+                ),
+                fab(
+                    "20 kohm",
+                    10.0,
+                    0.8,
+                    2.0,
+                    0.0,
+                    None,
+                    None,
+                    Some(20000.0),
+                    "ohm",
+                ),
+                fab(
+                    "200 kohm",
+                    100.0,
+                    0.8,
+                    2.0,
+                    0.0,
+                    None,
+                    None,
+                    Some(200000.0),
+                    "ohm",
+                ),
             ],
         ),
         (
-            instrument("Osciloscopio GW Instek GDS-1052-U (voltaje)", "digital", "voltaje", "V"),
+            instrument(
+                "Osciloscopio GW Instek GDS-1052-U (voltaje)",
+                "digital",
+                "voltaje",
+                "V",
+            ),
             // Eje Y (voltaje): U = 3%*V + 0.1*(VOLTS/DIV) + 1 mV (Tecnica de Alterna).
             vec![
                 fab("5 V/div", 5.0, 3.0, 0.1, 0.001, None, None, None, "V"),
@@ -479,9 +579,24 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
             ],
         ),
         (
-            instrument("Osciloscopio GW Instek GDS-1052-U (tiempo)", "digital", "tiempo", "s"),
+            instrument(
+                "Osciloscopio GW Instek GDS-1052-U (tiempo)",
+                "digital",
+                "tiempo",
+                "s",
+            ),
             // Eje X (tiempo): U = 1% de la medida (Tecnica de RC). Solo termino porcentual.
-            vec![fab("tiempo (1% de la medida)", 1.0, 1.0, 0.0, 0.0, None, None, None, "s")],
+            vec![fab(
+                "tiempo (1% de la medida)",
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                None,
+                None,
+                None,
+                "s",
+            )],
         ),
     ];
 
@@ -608,7 +723,10 @@ mod tests {
 
         assert!(delete_instrument(&pool, &created.id).await.unwrap());
         assert!(!delete_instrument(&pool, &created.id).await.unwrap());
-        assert!(list_instruments(&pool, &course_id).await.unwrap().is_empty());
+        assert!(list_instruments(&pool, &course_id)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -733,7 +851,10 @@ mod tests {
         let result = import_course(&pool, &course_id, payload).await;
         assert!(result.is_err());
         // Rollback total: no debe quedar ni siquiera el primer instrumento.
-        assert!(list_instruments(&pool, &course_id).await.unwrap().is_empty());
+        assert!(list_instruments(&pool, &course_id)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -761,7 +882,9 @@ mod tests {
         // El osciloscopio mide tiempo con incertidumbre tipo fabricante (1% de la medida).
         let osc_t = first
             .iter()
-            .find(|i| i.instrument.name.contains("Osciloscopio") && i.instrument.quantity == "tiempo")
+            .find(|i| {
+                i.instrument.name.contains("Osciloscopio") && i.instrument.quantity == "tiempo"
+            })
             .unwrap();
         assert_eq!(osc_t.scales[0].spec_pct_reading, Some(1.0));
         assert_eq!(osc_t.scales[0].spec_step_coeff, Some(0.0));

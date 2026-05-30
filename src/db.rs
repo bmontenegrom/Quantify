@@ -2371,7 +2371,12 @@ mod tests {
     async fn seed_practices_loads_p1_p2_p3() {
         let (pool, _dir) = pool().await;
         seed_practices(&pool).await.unwrap();
-        let ids: Vec<String> = practices(&pool).await.unwrap().into_iter().map(|p| p.id).collect();
+        let ids: Vec<String> = practices(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
         assert!(ids.contains(&"p1-estadistica".to_string()));
         assert!(ids.contains(&"p2-corriente-continua".to_string()));
         assert!(ids.contains(&"p3-relajacion".to_string()));
@@ -2381,9 +2386,11 @@ mod tests {
     async fn seed_academic_enrolls_student_and_enables_practices() {
         let (pool, _dir) = seeded().await;
         let student = find_user(&pool, STUDENT).await;
-        assert!(user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
-            .await
-            .unwrap());
+        assert!(
+            user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
+                .await
+                .unwrap()
+        );
         assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 3);
     }
 
@@ -2448,7 +2455,10 @@ mod tests {
 
         let resolved = user_by_session(&pool, &token).await.unwrap().unwrap();
         assert_eq!(resolved.id, user.id);
-        assert!(user_by_session(&pool, "token-inexistente").await.unwrap().is_none());
+        assert!(user_by_session(&pool, "token-inexistente")
+            .await
+            .unwrap()
+            .is_none());
 
         logout(&pool, &token).await.unwrap();
         assert!(user_by_session(&pool, &token).await.unwrap().is_none());
@@ -2475,19 +2485,35 @@ mod tests {
     async fn reset_password_changes_login() {
         let (pool, _dir) = seeded().await;
         let teacher = find_user(&pool, TEACHER).await;
-        assert!(reset_password(&pool, &teacher.id, ResetPassword { password: "otraclave".into() })
-            .await
-            .unwrap());
+        assert!(reset_password(
+            &pool,
+            &teacher.id,
+            ResetPassword {
+                password: "otraclave".into()
+            }
+        )
+        .await
+        .unwrap());
         assert!(login(
             &pool,
-            LoginRequest { email: Some(TEACHER.into()), username: None, password: "otraclave".into() },
+            LoginRequest {
+                email: Some(TEACHER.into()),
+                username: None,
+                password: "otraclave".into()
+            },
         )
         .await
         .unwrap()
         .is_some());
-        assert!(!reset_password(&pool, "id-inexistente", ResetPassword { password: "x12345678".into() })
-            .await
-            .unwrap());
+        assert!(!reset_password(
+            &pool,
+            "id-inexistente",
+            ResetPassword {
+                password: "x12345678".into()
+            }
+        )
+        .await
+        .unwrap());
     }
 
     #[tokio::test]
@@ -2497,7 +2523,11 @@ mod tests {
         let updated = update_user(
             &pool,
             &student.id,
-            UpdateUser { email: "ESTU2@fq.edu".into(), display_name: "Estu Dos".into(), role: "estudiante".into() },
+            UpdateUser {
+                email: "ESTU2@fq.edu".into(),
+                display_name: "Estu Dos".into(),
+                role: "estudiante".into(),
+            },
         )
         .await
         .unwrap()
@@ -2508,7 +2538,11 @@ mod tests {
         let missing = update_user(
             &pool,
             "id-inexistente",
-            UpdateUser { email: "x@y.com".into(), display_name: "X".into(), role: "estudiante".into() },
+            UpdateUser {
+                email: "x@y.com".into(),
+                display_name: "X".into(),
+                role: "estudiante".into(),
+            },
         )
         .await
         .unwrap();
@@ -2520,7 +2554,11 @@ mod tests {
         let (pool, _dir) = seeded().await;
         let (token, user) = login(
             &pool,
-            LoginRequest { email: Some(TEACHER.into()), username: None, password: "docente123".into() },
+            LoginRequest {
+                email: Some(TEACHER.into()),
+                username: None,
+                password: "docente123".into(),
+            },
         )
         .await
         .unwrap()
@@ -2530,7 +2568,10 @@ mod tests {
         assert!(!change_password(
             &pool,
             &user.id,
-            ChangePassword { current_password: "mala".into(), new_password: "nuevaclave".into() },
+            ChangePassword {
+                current_password: "mala".into(),
+                new_password: "nuevaclave".into()
+            },
         )
         .await
         .unwrap());
@@ -2539,7 +2580,10 @@ mod tests {
         assert!(change_password(
             &pool,
             &user.id,
-            ChangePassword { current_password: "docente123".into(), new_password: "nuevaclave".into() },
+            ChangePassword {
+                current_password: "docente123".into(),
+                new_password: "nuevaclave".into()
+            },
         )
         .await
         .unwrap());
@@ -2574,35 +2618,65 @@ mod tests {
     #[tokio::test]
     async fn create_and_update_course() {
         let (pool, _dir) = pool().await;
-        let course = create_course(&pool, CreateCourse { name: "Curso".into(), term: "2026".into() })
-            .await
-            .unwrap();
+        let course = create_course(
+            &pool,
+            CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(course.name, "Curso");
 
-        let updated = update_course(&pool, &course.id, UpdateCourse { name: "Curso B".into(), term: "2027".into() })
-            .await
-            .unwrap()
-            .unwrap();
+        let updated = update_course(
+            &pool,
+            &course.id,
+            UpdateCourse {
+                name: "Curso B".into(),
+                term: "2027".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(updated.name, "Curso B");
         assert_eq!(updated.term, "2027");
 
-        assert!(update_course(&pool, "x", UpdateCourse { name: "n".into(), term: "t".into() })
-            .await
-            .unwrap()
-            .is_none());
+        assert!(update_course(
+            &pool,
+            "x",
+            UpdateCourse {
+                name: "n".into(),
+                term: "t".into()
+            }
+        )
+        .await
+        .unwrap()
+        .is_none());
     }
 
     #[tokio::test]
     async fn create_group_clamps_and_normalizes() {
         let (pool, _dir) = pool().await;
-        let course = create_course(&pool, CreateCourse { name: "C".into(), term: "2026".into() })
-            .await
-            .unwrap();
+        let course = create_course(
+            &pool,
+            CreateCourse {
+                name: "C".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
         // table_count fuera de rango se acota a 24; tipo inválido -> regular.
         let group = create_group(
             &pool,
             &course.id,
-            CreateGroup { name: "G".into(), table_count: Some(999), group_type: Some("raro".into()) },
+            CreateGroup {
+                name: "G".into(),
+                table_count: Some(999),
+                group_type: Some("raro".into()),
+            },
         )
         .await
         .unwrap();
@@ -2612,7 +2686,11 @@ mod tests {
         let recup = create_group(
             &pool,
             &course.id,
-            CreateGroup { name: "GR".into(), table_count: None, group_type: Some("recuperacion".into()) },
+            CreateGroup {
+                name: "GR".into(),
+                table_count: None,
+                group_type: Some("recuperacion".into()),
+            },
         )
         .await
         .unwrap();
@@ -2626,7 +2704,11 @@ mod tests {
         let updated = update_group(
             &pool,
             GROUP,
-            UpdateGroup { name: "Grupo Uno".into(), table_count: 6, group_type: "regular".into() },
+            UpdateGroup {
+                name: "Grupo Uno".into(),
+                table_count: 6,
+                group_type: "regular".into(),
+            },
         )
         .await
         .unwrap()
@@ -2634,10 +2716,18 @@ mod tests {
         assert_eq!(updated.name, "Grupo Uno");
         assert_eq!(updated.table_count, 6);
 
-        assert!(update_group(&pool, "x", UpdateGroup { name: "n".into(), table_count: 2, group_type: "regular".into() })
-            .await
-            .unwrap()
-            .is_none());
+        assert!(update_group(
+            &pool,
+            "x",
+            UpdateGroup {
+                name: "n".into(),
+                table_count: 2,
+                group_type: "regular".into()
+            }
+        )
+        .await
+        .unwrap()
+        .is_none());
     }
 
     #[tokio::test]
@@ -2646,7 +2736,11 @@ mod tests {
         let subgroup = create_subgroup(
             &pool,
             COURSE,
-            CreateSubgroup { practice_id: "p1-estadistica".into(), group_id: GROUP.into(), name: "Sub A".into() },
+            CreateSubgroup {
+                practice_id: "p1-estadistica".into(),
+                group_id: GROUP.into(),
+                name: "Sub A".into(),
+            },
         )
         .await
         .unwrap();
@@ -2659,12 +2753,21 @@ mod tests {
         let (pool, _dir) = seeded().await;
         let new_student = create_user(
             &pool,
-            CreateUser { email: "otro@fq.edu".into(), display_name: "Otro".into(), role: "estudiante".into(), password: "clave1234".into() },
+            CreateUser {
+                email: "otro@fq.edu".into(),
+                display_name: "Otro".into(),
+                role: "estudiante".into(),
+                password: "clave1234".into(),
+            },
         )
         .await
         .unwrap();
-        enroll_course_member(&pool, COURSE, &new_student.id).await.unwrap();
-        enroll_course_member(&pool, COURSE, &new_student.id).await.unwrap();
+        enroll_course_member(&pool, COURSE, &new_student.id)
+            .await
+            .unwrap();
+        enroll_course_member(&pool, COURSE, &new_student.id)
+            .await
+            .unwrap();
 
         // Debe existir el grupo "General" creado por ensure_default_group.
         let groups = groups_for_course(&pool, COURSE).await.unwrap();
@@ -2678,19 +2781,35 @@ mod tests {
         let student = find_user(&pool, STUDENT).await;
 
         // Un docente no es estudiante: add_group_member devuelve None.
-        assert!(add_group_member(&pool, GROUP, AddGroupMember { user_id: teacher.id.clone() })
-            .await
-            .unwrap()
-            .is_none());
+        assert!(add_group_member(
+            &pool,
+            GROUP,
+            AddGroupMember {
+                user_id: teacher.id.clone()
+            }
+        )
+        .await
+        .unwrap()
+        .is_none());
 
         // El estudiante ya es miembro; agregarlo de nuevo es idempotente y devuelve Some.
-        assert!(add_group_member(&pool, GROUP, AddGroupMember { user_id: student.id.clone() })
-            .await
-            .unwrap()
-            .is_some());
+        assert!(add_group_member(
+            &pool,
+            GROUP,
+            AddGroupMember {
+                user_id: student.id.clone()
+            }
+        )
+        .await
+        .unwrap()
+        .is_some());
 
-        assert!(remove_group_member(&pool, GROUP, &student.id).await.unwrap());
-        assert!(!remove_group_member(&pool, GROUP, &student.id).await.unwrap());
+        assert!(remove_group_member(&pool, GROUP, &student.id)
+            .await
+            .unwrap());
+        assert!(!remove_group_member(&pool, GROUP, &student.id)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -2702,7 +2821,10 @@ mod tests {
             &pool,
             GROUP,
             &student.id,
-            SetPracticeTable { practice_id: "p1-estadistica".into(), table_number: 2 },
+            SetPracticeTable {
+                practice_id: "p1-estadistica".into(),
+                table_number: 2,
+            },
         )
         .await
         .unwrap()
@@ -2714,7 +2836,10 @@ mod tests {
             &pool,
             GROUP,
             &student.id,
-            SetPracticeTable { practice_id: "p1-estadistica".into(), table_number: 99 },
+            SetPracticeTable {
+                practice_id: "p1-estadistica".into(),
+                table_number: 99
+            },
         )
         .await
         .unwrap()
@@ -2727,35 +2852,76 @@ mod tests {
         let teacher = find_user(&pool, TEACHER).await;
         let new_student = create_user(
             &pool,
-            CreateUser { email: "tercero@fq.edu".into(), display_name: "Tercero".into(), role: "estudiante".into(), password: "clave1234".into() },
+            CreateUser {
+                email: "tercero@fq.edu".into(),
+                display_name: "Tercero".into(),
+                role: "estudiante".into(),
+                password: "clave1234".into(),
+            },
         )
         .await
         .unwrap();
 
-        assert!(add_course_member(&pool, COURSE, EnrollCourseMember { user_id: new_student.id })
-            .await
-            .unwrap()
-            .is_some());
-        assert!(add_course_member(&pool, COURSE, EnrollCourseMember { user_id: teacher.id })
-            .await
-            .unwrap()
-            .is_none());
+        assert!(add_course_member(
+            &pool,
+            COURSE,
+            EnrollCourseMember {
+                user_id: new_student.id
+            }
+        )
+        .await
+        .unwrap()
+        .is_some());
+        assert!(add_course_member(
+            &pool,
+            COURSE,
+            EnrollCourseMember {
+                user_id: teacher.id
+            }
+        )
+        .await
+        .unwrap()
+        .is_none());
     }
 
     #[tokio::test]
     async fn enable_course_practice_is_idempotent() {
         let (pool, _dir) = seeded().await;
-        let course = create_course(&pool, CreateCourse { name: "Vacio".into(), term: "2026".into() })
-            .await
-            .unwrap();
-        assert_eq!(practices_for_course(&pool, &course.id).await.unwrap().len(), 0);
-        enable_course_practice(&pool, &course.id, SetCoursePractice { practice_id: "p1-estadistica".into() })
-            .await
-            .unwrap();
-        enable_course_practice(&pool, &course.id, SetCoursePractice { practice_id: "p1-estadistica".into() })
-            .await
-            .unwrap();
-        assert_eq!(practices_for_course(&pool, &course.id).await.unwrap().len(), 1);
+        let course = create_course(
+            &pool,
+            CreateCourse {
+                name: "Vacio".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            practices_for_course(&pool, &course.id).await.unwrap().len(),
+            0
+        );
+        enable_course_practice(
+            &pool,
+            &course.id,
+            SetCoursePractice {
+                practice_id: "p1-estadistica".into(),
+            },
+        )
+        .await
+        .unwrap();
+        enable_course_practice(
+            &pool,
+            &course.id,
+            SetCoursePractice {
+                practice_id: "p1-estadistica".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            practices_for_course(&pool, &course.id).await.unwrap().len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -2765,11 +2931,23 @@ mod tests {
         let student = find_user(&pool, STUDENT).await;
 
         // Docente siempre puede.
-        assert!(user_can_submit(&pool, &teacher, COURSE, GROUP, "p1-estadistica").await.unwrap());
+        assert!(
+            user_can_submit(&pool, &teacher, COURSE, GROUP, "p1-estadistica")
+                .await
+                .unwrap()
+        );
         // Estudiante con curso/grupo/práctica válidos.
-        assert!(user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica").await.unwrap());
+        assert!(
+            user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
+                .await
+                .unwrap()
+        );
         // Práctica no habilitada / inexistente -> false.
-        assert!(!user_can_submit(&pool, &student, COURSE, GROUP, "p9-inexistente").await.unwrap());
+        assert!(
+            !user_can_submit(&pool, &student, COURSE, GROUP, "p9-inexistente")
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -2777,13 +2955,25 @@ mod tests {
         let (pool, _dir) = seeded().await;
         let c1 = create_grade_component(
             &pool,
-            CreateGradeComponent { course_id: COURSE.into(), kind: "pregunta".into(), name: "P1".into(), max_points: 10.0, weight_points: 5.0 },
+            CreateGradeComponent {
+                course_id: COURSE.into(),
+                kind: "pregunta".into(),
+                name: "P1".into(),
+                max_points: 10.0,
+                weight_points: 5.0,
+            },
         )
         .await
         .unwrap();
         let c2 = create_grade_component(
             &pool,
-            CreateGradeComponent { course_id: COURSE.into(), kind: "informe".into(), name: "I1".into(), max_points: 20.0, weight_points: 10.0 },
+            CreateGradeComponent {
+                course_id: COURSE.into(),
+                kind: "informe".into(),
+                name: "I1".into(),
+                max_points: 20.0,
+                weight_points: 10.0,
+            },
         )
         .await
         .unwrap();
@@ -2797,14 +2987,25 @@ mod tests {
         let student = find_user(&pool, STUDENT).await;
         let component = create_grade_component(
             &pool,
-            CreateGradeComponent { course_id: COURSE.into(), kind: "pregunta".into(), name: "P1".into(), max_points: 10.0, weight_points: 5.0 },
+            CreateGradeComponent {
+                course_id: COURSE.into(),
+                kind: "pregunta".into(),
+                name: "P1".into(),
+                max_points: 10.0,
+                weight_points: 5.0,
+            },
         )
         .await
         .unwrap();
 
         upsert_grade_score(
             &pool,
-            UpsertGradeScore { component_id: component.id.clone(), student_id: student.id.clone(), raw_points: 8.0, comment: None },
+            UpsertGradeScore {
+                component_id: component.id.clone(),
+                student_id: student.id.clone(),
+                raw_points: 8.0,
+                comment: None,
+            },
         )
         .await
         .unwrap();
@@ -2812,7 +3013,12 @@ mod tests {
         // Supera el máximo -> error.
         assert!(upsert_grade_score(
             &pool,
-            UpsertGradeScore { component_id: component.id.clone(), student_id: student.id.clone(), raw_points: 11.0, comment: None },
+            UpsertGradeScore {
+                component_id: component.id.clone(),
+                student_id: student.id.clone(),
+                raw_points: 11.0,
+                comment: None
+            },
         )
         .await
         .is_err());
@@ -2820,7 +3026,12 @@ mod tests {
         // Componente inexistente -> error.
         assert!(upsert_grade_score(
             &pool,
-            UpsertGradeScore { component_id: "no-existe".into(), student_id: student.id.clone(), raw_points: 1.0, comment: None },
+            UpsertGradeScore {
+                component_id: "no-existe".into(),
+                student_id: student.id.clone(),
+                raw_points: 1.0,
+                comment: None
+            },
         )
         .await
         .is_err());
@@ -2828,7 +3039,11 @@ mod tests {
         let teacher = find_user(&pool, TEACHER).await;
         let books = gradebook_for_user(&pool, &teacher).await.unwrap();
         let course_book = books.into_iter().find(|b| b.course.id == COURSE).unwrap();
-        let summary = course_book.students.into_iter().find(|s| s.student.id == student.id).unwrap();
+        let summary = course_book
+            .students
+            .into_iter()
+            .find(|s| s.student.id == student.id)
+            .unwrap();
         // 8/10 * 5 = 4.0 normalizado.
         assert!((summary.total_points - 4.0).abs() < 1e-9);
     }
@@ -2858,19 +3073,41 @@ mod tests {
 
         // El docente ve la entrega; el estudiante también la suya.
         let teacher = find_user(&pool, TEACHER).await;
-        assert_eq!(submission_list_for_user(&pool, &teacher).await.unwrap().len(), 1);
-        assert_eq!(submission_list_for_user(&pool, &student).await.unwrap().len(), 1);
+        assert_eq!(
+            submission_list_for_user(&pool, &teacher)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            submission_list_for_user(&pool, &student)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         assert_eq!(
-            submission_owner_id(&pool, &created.id).await.unwrap().as_deref(),
+            submission_owner_id(&pool, &created.id)
+                .await
+                .unwrap()
+                .as_deref(),
             Some(student.id.as_str())
         );
-        assert!(submission_detail(&pool, &created.id).await.unwrap().is_some());
+        assert!(submission_detail(&pool, &created.id)
+            .await
+            .unwrap()
+            .is_some());
 
         let reviewed = update_review(
             &pool,
             &created.id,
-            ReviewSubmission { status: "aprobada".into(), teacher_comment: Some("ok".into()), score: Some(10.0) },
+            ReviewSubmission {
+                status: "aprobada".into(),
+                teacher_comment: Some("ok".into()),
+                score: Some(10.0),
+            },
         )
         .await
         .unwrap()

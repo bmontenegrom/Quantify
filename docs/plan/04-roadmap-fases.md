@@ -3,6 +3,16 @@
 Secuencia incremental. Cada fase deja la app compilando, con tests verdes y desplegable.
 Las fases 1–3 son backend puro (bajo riesgo, muy testeable); 4–6 agregan API y UI.
 
+> **Convención transversal de tests.** "Tests verdes" abarca **backend y frontend**:
+> el backend con `cargo test` y el frontend con `node --test` (módulo puro
+> `static/lib.js`, ver Fase 2.5). De aquí en más, toda fase que toque `static/`
+> agrega tests JS de su lógica (extrayéndola a `lib.js` cuando haga falta), y el CI
+> (`.github/workflows/ci.yml`) corre ambas suites en cada push/PR.
+
+**Estado al 29-05-2026:** Fases 0, 1, 2 y 2.5 **hechas** (prácticas reales sembradas;
+`uncertainty.rs`; catálogo de instrumentos con API + UI; base de tests JS + CI).
+Próximo: Fase 3.
+
 ---
 
 ## Fase 0 — Prácticas reales y limpieza de seeds
@@ -68,6 +78,31 @@ Las fases 1–3 son backend puro (bajo riesgo, muy testeable); 4–6 agregan API
 
 **Aceptación**: un docente crea un instrumento digital y uno analógico con escalas en un curso,
 se listan, persisten tras reinicio, y puede exportar el catálogo de un curso e importarlo en otro.
+
+---
+
+## Fase 2.5 — Infraestructura de tests de frontend + CI (transversal) ✅
+
+**Objetivo**: que el frontend sea testeable y que "tests verdes" incluya al JS, antes de
+las fases con UI pesada (4–5, con previsualización en vivo de incertidumbres).
+
+- Runner **`node:test`** (built-in de Node, sin dependencias ni `node_modules`); `package.json`
+  mínimo con `"type": "module"` y `scripts.test = "node --test"`.
+- **`static/lib.js`**: módulo ES puro (sin DOM, sin efectos al cargar) con la lógica testeable
+  extraída de `app.js`:
+  - helpers puros: `escapeHtml`, `cssEscape`, `format`, `formatDate`, `groupBy`,
+    `renderGroupType`, `scalePayload`;
+  - selectores de datos (reciben `state`/`academic`/`gradebooks` por parámetro): `canReview`,
+    `studentCourses`, `studentGroups`, `studentGradebooks`, `studentTotals`,
+    `availableCoursesForStudent`, `availableGroupsForStudent`, `allStudents`, `allGroups`.
+  `app.js` importa de `lib.js`; quedan en `app.js` los selectores acoplados al DOM
+  (`selectedCourse`, `selectedTableAssignment`) y todo lo de render/red.
+- **`tests/lib.test.js`**: un test por función exportada (helpers + lógica de negocio de los
+  selectores), fuera de `static/` para no servirlo.
+- **CI** (`.github/workflows/ci.yml`): jobs `rust` (`cargo test`) y `js` (`node --test`).
+
+**Aceptación**: `node --test` y `cargo test` verdes; el CI corre ambas suites en cada push/PR.
+Tests render/DOM (jsdom) y E2E (Playwright) quedan como follow-up.
 
 ---
 
@@ -140,5 +175,7 @@ muestra incertidumbres correctas (validadas contra cálculo manual).
 
 ## Orden sugerido de ejecución
 
-`Fase 0 → 1 → 2 → 3 → 4 → 5 → 6`. Las fases 1–3 pueden adelantarse en paralelo al diseño de
-UI, ya que son backend testeable. El primer hito demostrable end-to-end es el final de la **Fase 4**.
+`Fase 0 → 1 → 2 → 2.5 → 3 → 4 → 5 → 6`. Las fases 1–3 pueden adelantarse en paralelo al diseño de
+UI, ya que son backend testeable. La **Fase 2.5** (tests de frontend + CI) es transversal y se
+hizo tras la 2 para que la UI de las fases 4–5 nazca testeable. El primer hito demostrable
+end-to-end es el final de la **Fase 4**.

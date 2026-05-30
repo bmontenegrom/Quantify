@@ -56,7 +56,10 @@ pub fn api_router(state: SharedState) -> Router {
             post(remove_group_member_path),
         )
         .route("/practices", get(practices))
-        .route("/instruments", get(list_instruments).post(create_instrument))
+        .route(
+            "/instruments",
+            get(list_instruments).post(create_instrument),
+        )
         .route("/instruments/export", get(export_instruments))
         .route("/instruments/import", post(import_instruments))
         .route(
@@ -607,7 +610,9 @@ async fn create_instrument(
         return Err(AppError::bad_request("course_id requerido"));
     }
     validate_instrument(&input.kind, &input.name, &input.quantity, &input.unit)?;
-    Ok(Json(instruments::create_instrument(&state.pool, input).await?))
+    Ok(Json(
+        instruments::create_instrument(&state.pool, input).await?,
+    ))
 }
 
 /// `POST /api/instruments/{id}`: actualiza un instrumento (docente/admin).
@@ -647,7 +652,9 @@ async fn create_scale(
 ) -> Result<Json<db::InstrumentScale>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_scale(&input)?;
-    Ok(Json(instruments::create_scale(&state.pool, &id, input).await?))
+    Ok(Json(
+        instruments::create_scale(&state.pool, &id, input).await?,
+    ))
 }
 
 /// `POST /api/instruments/{id}/scales/{scale_id}`: actualiza una escala (docente/admin).
@@ -730,7 +737,8 @@ fn validate_scale(input: &ScaleInput) -> Result<(), AppError> {
     ) {
         return Err(AppError::bad_request("b_model invalido"));
     }
-    if !(input.step > 0.0) {
+    // Rechaza step no positivo y NaN (equivalente a un `> 0.0` negado, pero explícito).
+    if input.step <= 0.0 || input.step.is_nan() {
         return Err(AppError::bad_request("step debe ser positivo"));
     }
     // Una escala de fabricante sin ningun termino positivo daria u_B = 0 silenciosamente.
