@@ -659,13 +659,16 @@ struct ImportRequest {
     instruments: Vec<instruments::InstrumentExport>,
 }
 
-/// `GET /api/instruments?course_id=...`: lista los instrumentos de un curso con sus escalas (docente/admin).
+/// `GET /api/instruments?course_id=...`: lista los instrumentos de un curso con sus escalas.
+/// Solo lectura del catálogo (material del curso): accesible a cualquier usuario autenticado,
+/// para que el estudiante pueda elegir instrumento/escala al cargar una entrega por formulario.
+/// La gestión (alta/edición/baja) sigue siendo solo docente/admin.
 async fn list_instruments(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Query(query): Query<CourseQuery>,
 ) -> Result<Json<Vec<instruments::InstrumentWithScales>>, AppError> {
-    require_teacher(&state, &headers).await?;
+    current_user(&state, &headers).await?;
     Ok(Json(
         instruments::list_instruments(&state.pool, &query.course_id).await?,
     ))

@@ -376,6 +376,43 @@ textarea {
   margin-top: 12px;
 }
 
+.measurement-fields {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.measurement-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.measurement-row legend {
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+.measure-values {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.replica {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.replica .measure-value {
+  flex: 1;
+}
+
+.add-replica {
+  margin-top: 8px;
+}
+
 .instrument-toolbar {
   align-items: center;
   flex-wrap: wrap;

@@ -15,6 +15,8 @@ import {
   allStudents,
   allGroups,
   analysisKindLabel,
+  compatibleInstruments,
+  measureText,
 } from "./lib.js";
 
 const state = {
@@ -45,6 +47,7 @@ const state = {
   practiceActionStatus: "",
   editingQuantityId: null,
   editingResultId: null,
+  practiceForm: null,
 };
 
 const loginScreen = document.querySelector("#login-screen");
@@ -67,6 +70,10 @@ const tableSelect = document.querySelector("#table-select");
 const submissionForm = document.querySelector("#submission-form");
 const submitStatus = document.querySelector("#submit-status");
 const latestResult = document.querySelector("#latest-result");
+const measurementFields = document.querySelector("#measurement-fields");
+const previewResult = document.querySelector("#preview-result");
+const previewButton = document.querySelector("#preview-button");
+const submitButton = document.querySelector("#submit-button");
 const submissionsTitle = document.querySelector("#submissions-title");
 const submissionsSubtitle = document.querySelector("#submissions-subtitle");
 const submissionsListTitle = document.querySelector("#submissions-list-title");
@@ -192,7 +199,10 @@ document.querySelectorAll(".tab").forEach((tab) => {
 document.querySelector("#refresh-submissions").addEventListener("click", loadSubmissions);
 courseSelect.addEventListener("change", updateStudentSelectors);
 groupSelect.addEventListener("change", updateTableSelector);
-practiceSelect.addEventListener("change", updateTableSelector);
+practiceSelect.addEventListener("change", () => {
+  updateTableSelector();
+  loadSubmissionForm();
+});
 gradebookCourseFilter.addEventListener("change", renderGradebookAdmin);
 instrumentCourseFilter.addEventListener("change", () => {
   state.instrumentCourseId = instrumentCourseFilter.value;
@@ -224,34 +234,13 @@ userForm.addEventListener("submit", async (event) => {
   });
 });
 
-submissionForm.addEventListener("submit", async (event) => {
+// "Calcular" (submit del form / Enter): previsualiza las incertidumbres sin entregar.
+submissionForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  submitStatus.textContent = "Subiendo...";
-
-  try {
-    const formData = new FormData(submissionForm);
-    await postJson(`/api/academic/groups/${formData.get("group_id")}/practice-table`, {
-      practice_id: formData.get("practice_id"),
-      table_number: Number(formData.get("table_number")),
-    });
-    const response = await fetch("/api/submissions", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) throw new Error(await errorText(response));
-
-    const submission = await response.json();
-    submitStatus.textContent = "Entrega guardada";
-    submissionForm.reset();
-    await loadAcademic();
-    renderAnalysis(latestResult, submission);
-    latestResult.classList.remove("hidden");
-    await loadSubmissions();
-  } catch (error) {
-    submitStatus.textContent = error.message;
-  }
+  previewSubmission();
 });
+// "Entregar": crea la entrega por formulario.
+submitButton.addEventListener("click", submitFormSubmission);
 
 async function init() {
   try {
@@ -537,6 +526,7 @@ function updateStudentSelectors() {
     ? course.practices.map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`).join("")
     : `<option value="">Sin practicas habilitadas</option>`;
   updateTableSelector();
+  loadSubmissionForm();
 }
 
 function updateTableSelector() {
@@ -1789,18 +1779,37 @@ async function loadSubmissionDetail(id) {
   renderAnalysis(submissionDetail, submission, canReview(state.user));
 }
 
-function renderAnalysis(target, submission, includeReview = false) {
-  const analysis = submission.analysis;
-  const regression = analysis.regression;
-  target.classList.remove("detail-empty");
-  target.innerHTML = `
+function submissionHeader(submission) {
+  return `
     <div>
       <h3>${escapeHtml(submission.practice_name)}</h3>
       <p class="submission-meta">
         ${escapeHtml(submission.student_name)} - Grupo ${escapeHtml(submission.group_name)} - ${escapeHtml(submission.course)}
       </p>
       <span class="status ${escapeHtml(submission.status)}">${escapeHtml(submission.status)}</span>
-    </div>
+    </div>`;
+}
+
+function renderAnalysis(target, submission, includeReview = false) {
+  target.classList.remove("detail-empty");
+
+  // Entregas por formulario: tabla de incertidumbres calculadas.
+  if (submission.entry_mode === "form") {
+    target.innerHTML = `
+      ${submissionHeader(submission)}
+      ${formAnalysisMarkup(submission.analysis)}
+      ${includeReview ? renderReviewForm(submission) : ""}
+    `;
+    const reviewForm = target.querySelector(".review-form");
+    if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
+    return;
+  }
+
+  // Entregas CSV (legacy): estadística por columna + regresión.
+  const analysis = submission.analysis;
+  const regression = analysis.regression;
+  target.innerHTML = `
+    ${submissionHeader(submission)}
 
     <div class="metrics">
       <div class="metric">
@@ -1922,6 +1931,255 @@ async function saveReview(event, id) {
   const updated = await response.json();
   renderAnalysis(submissionDetail, updated, true);
   await loadSubmissions();
+}
+
+// ── Entrega por formulario ────────────────────────────────────────────────────
+
+// Carga la definición de la práctica elegida + el catálogo de instrumentos del curso y
+// renderiza los campos de carga. Solo para estudiantes (el docente no entrega por formulario).
+async function loadSubmissionForm() {
+  if (!measurementFields) return;
+  if (canReview(state.user)) return;
+  const practiceId = practiceSelect.value;
+  const courseId = courseSelect.value;
+  if (!practiceId || !courseId) {
+    state.practiceForm = null;
+    measurementFields.innerHTML = "";
+    return;
+  }
+  try {
+    const [definition, instruments] = await Promise.all([
+      fetchJson(`/api/practices/${encodeURIComponent(practiceId)}/definition`),
+      fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`),
+    ]);
+    state.practiceForm = { definition, instruments };
+    renderMeasurementFields();
+  } catch (error) {
+    state.practiceForm = null;
+    measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+// Renderiza una fila por magnitud: selector de instrumento/escala compatible + lecturas
+// (réplicas dinámicas si la magnitud las admite, o un único valor si no).
+function renderMeasurementFields() {
+  if (!state.practiceForm) {
+    measurementFields.innerHTML = "";
+    return;
+  }
+  const { definition, instruments } = state.practiceForm;
+  if (definition.quantities.length === 0) {
+    measurementFields.innerHTML = `<p class="submission-meta">Esta practica todavia no tiene magnitudes definidas.</p>`;
+    return;
+  }
+
+  measurementFields.innerHTML = definition.quantities
+    .map((q) => {
+      const options = compatibleInstruments(instruments, q.quantity);
+      const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
+        .concat(options.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`))
+        .join("");
+      return `
+        <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
+          <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+          <div class="form-grid">
+            <label>Instrumento
+              <select class="measure-instrument">${instrumentOptions}</select>
+            </label>
+            <label>Escala
+              <select class="measure-scale"><option value="">— sin escala —</option></select>
+            </label>
+          </div>
+          <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
+            ${renderReplicaInput(q.unit)}
+          </div>
+          ${q.repeated ? `<button type="button" class="add-replica">＋ agregar replica</button>` : ""}
+        </fieldset>
+      `;
+    })
+    .join("");
+
+  measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
+    const instrumentSelect = row.querySelector(".measure-instrument");
+    instrumentSelect.addEventListener("change", () => populateScaleOptions(row));
+    row.querySelector(".add-replica")?.addEventListener("click", () => {
+      const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
+      row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+      wireRemoveReplica(row);
+    });
+    wireRemoveReplica(row);
+  });
+}
+
+// HTML de un input de lectura (una réplica) con botón de quitar.
+function renderReplicaInput(unit) {
+  return `
+    <div class="replica">
+      <input class="measure-value" type="number" step="any" placeholder="lectura (${escapeHtml(unit)})" data-unit="${escapeHtml(unit)}" />
+      <button type="button" class="remove-replica" title="Quitar">✕</button>
+    </div>
+  `;
+}
+
+// Conecta los botones de quitar réplica de una fila (deja al menos una).
+function wireRemoveReplica(row) {
+  const replicas = row.querySelectorAll(".replica");
+  row.querySelectorAll(".remove-replica").forEach((btn) => {
+    btn.onclick = () => {
+      if (row.querySelectorAll(".replica").length <= 1) return;
+      btn.closest(".replica").remove();
+    };
+  });
+  // Oculta el botón de quitar cuando hay una sola réplica.
+  if (replicas.length === 1) {
+    const only = replicas[0].querySelector(".remove-replica");
+    if (only) only.style.visibility = "hidden";
+  } else {
+    row.querySelectorAll(".remove-replica").forEach((b) => (b.style.visibility = "visible"));
+  }
+}
+
+// Repuebla el selector de escala de una fila según el instrumento elegido.
+function populateScaleOptions(row) {
+  const instrumentId = row.querySelector(".measure-instrument").value;
+  const scaleSelect = row.querySelector(".measure-scale");
+  const instrument = state.practiceForm?.instruments.find((i) => i.id === instrumentId);
+  const scales = instrument?.scales ?? [];
+  scaleSelect.innerHTML = [`<option value="">— sin escala —</option>`]
+    .concat(scales.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label)} (${escapeHtml(s.unit)})</option>`))
+    .join("");
+}
+
+// Lee el DOM y arma el array de mediciones para el backend (descarta lecturas vacías).
+function collectMeasurements() {
+  return [...measurementFields.querySelectorAll(".measurement-row")].map((row) => {
+    const values = [...row.querySelectorAll(".measure-value")]
+      .map((input) => input.value.trim())
+      .filter((value) => value !== "")
+      .map(Number)
+      .filter((n) => Number.isFinite(n));
+    return {
+      quantity_id: row.dataset.quantityId,
+      instrument_id: row.querySelector(".measure-instrument").value || null,
+      scale_id: row.querySelector(".measure-scale").value || null,
+      values,
+    };
+  });
+}
+
+// Deshabilita Calcular/Entregar mientras corre una operación, para evitar doble envío.
+function setSubmissionBusy(busy) {
+  if (previewButton) previewButton.disabled = busy;
+  if (submitButton) submitButton.disabled = busy;
+}
+
+// Botón "Calcular": previsualiza las incertidumbres sin persistir.
+async function previewSubmission() {
+  if (!practiceSelect.value) return;
+  setSubmissionBusy(true);
+  submitStatus.textContent = "Calculando...";
+  try {
+    const analysis = await postJson("/api/submissions/preview", {
+      practice_id: practiceSelect.value,
+      measurements: collectMeasurements(),
+    });
+    previewResult.innerHTML = `<h3>Previsualizacion</h3>${formAnalysisMarkup(analysis)}`;
+    previewResult.classList.remove("hidden");
+    submitStatus.textContent = "";
+  } catch (error) {
+    submitStatus.textContent = error.message;
+  } finally {
+    setSubmissionBusy(false);
+  }
+}
+
+// Botón "Entregar": asigna la mesa (si corresponde) y crea la entrega por formulario.
+async function submitFormSubmission() {
+  if (!practiceSelect.value) return;
+  setSubmissionBusy(true);
+  submitStatus.textContent = "Entregando...";
+  try {
+    const groupId = groupSelect.value;
+    if (tableSelect.value) {
+      await postJson(`/api/academic/groups/${groupId}/practice-table`, {
+        practice_id: practiceSelect.value,
+        table_number: Number(tableSelect.value),
+      });
+    }
+    const submission = await postJson("/api/submissions/form", {
+      course_id: courseSelect.value,
+      group_id: groupId,
+      practice_id: practiceSelect.value,
+      measurements: collectMeasurements(),
+    });
+    submitStatus.textContent = "Entrega guardada";
+    previewResult.classList.add("hidden");
+    renderAnalysis(latestResult, submission);
+    latestResult.classList.remove("hidden");
+    await loadSubmissions();
+  } catch (error) {
+    submitStatus.textContent = error.message;
+  } finally {
+    setSubmissionBusy(false);
+  }
+}
+
+// Markup del resultado de una entrega por formulario: tabla de magnitudes con sus
+// incertidumbres, mensurandos derivados (`valor ± U`) y advertencias.
+function formAnalysisMarkup(analysis) {
+  const quantities = analysis.quantities ?? [];
+  const derived = analysis.derived ?? [];
+  const quantitiesTable = quantities.length
+    ? `
+      <div class="directory-table-wrap">
+        <table class="grade-table directory-data-table">
+          <thead>
+            <tr><th>Magnitud</th><th>n</th><th>media</th><th>s</th><th>u_A</th><th>u_B</th><th>u_c</th><th>U</th></tr>
+          </thead>
+          <tbody>
+            ${quantities
+              .map(
+                (q) => `
+                <tr>
+                  <td class="directory-primary"><strong>${escapeHtml(q.symbol)}</strong> <span class="submission-meta">${escapeHtml(q.unit)}</span></td>
+                  <td>${q.result.n}</td>
+                  <td>${format(q.result.mean)}</td>
+                  <td>${format(q.result.s)}</td>
+                  <td>${format(q.result.u_a)}</td>
+                  <td>${format(q.result.u_b)}</td>
+                  <td>${format(q.result.u_c)}</td>
+                  <td>${format(q.result.u_expanded)}</td>
+                </tr>`,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>`
+    : `<p class="submission-meta">Sin magnitudes cargadas.</p>`;
+
+  const derivedBlock = derived.length
+    ? `
+      <h3>Mensurandos</h3>
+      <div class="metrics">
+        ${derived
+          .map(
+            (d) => `
+            <div class="metric">
+              <div class="metric-label">${escapeHtml(d.symbol)} (${escapeHtml(d.unit)})</div>
+              <div class="metric-value metric-text">${escapeHtml(measureText(d.value, d.u_expanded))}</div>
+              <div class="submission-meta">${escapeHtml(d.formula)}</div>
+            </div>`,
+          )
+          .join("")}
+      </div>`
+    : "";
+
+  return `
+    <h3>Incertidumbres por magnitud</h3>
+    ${quantitiesTable}
+    ${derivedBlock}
+    ${renderWarnings(analysis.warnings ?? [])}
+  `;
 }
 
 async function fetchJson(url) {
