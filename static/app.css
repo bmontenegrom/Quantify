@@ -837,3 +837,18 @@ textarea {
 .add-series-row {
   cursor: pointer;
 }
+
+/* Comparación alumno vs automático y formulario "Mis cálculos". */
+.compare-table td:nth-child(n + 4) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.student-results-form input {
+  width: 100%;
+  min-width: 80px;
+}
+
+.student-results-status {
+  color: var(--danger);
+}
