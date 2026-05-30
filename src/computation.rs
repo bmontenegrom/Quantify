@@ -102,8 +102,6 @@ pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
     })
 }
 
-/// Compila una fórmula y valida que todas sus variables sean símbolos declarados (los de
-/// `allowed`). Devuelve el árbol precompilado para evaluarlo muchas veces (propagación).
 /// Constantes disponibles en cualquier fórmula (además de las funciones `math::*` de evalexpr).
 const CONSTANTS: [(&str, f64); 2] = [("pi", std::f64::consts::PI), ("e", std::f64::consts::E)];
 
