@@ -205,6 +205,12 @@ pub fn compute(
             &means,
             &us,
         );
+        if !value.is_finite() || !u.is_finite() {
+            warnings.push(format!(
+                "El mensurando \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
+                result.name, result.symbol, result.formula
+            ));
+        }
         derived.push(DerivedComputation {
             symbol: result.symbol.clone(),
             name: result.name.clone(),
@@ -233,7 +239,35 @@ pub async fn analyze(
     let definition = crate::practices::definition(pool, practice_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("la practica no existe"))?;
+
+    // Toda medición debe corresponder a una magnitud de esta práctica (evita insertar filas
+    // colgadas y da un error claro en vez de una violación de clave foránea).
+    let valid_ids: std::collections::HashSet<&str> = definition
+        .quantities
+        .iter()
+        .map(|q| q.id.as_str())
+        .collect();
+    for measurement in measurements {
+        if !valid_ids.contains(measurement.quantity_id.as_str()) {
+            anyhow::bail!("una de las mediciones no corresponde a una magnitud de esta practica");
+        }
+    }
+
     let scales = load_scales(pool, measurements).await?;
+
+    // Si se eligió instrumento y escala, la escala debe pertenecer a ese instrumento.
+    for measurement in measurements {
+        if let (Some(instrument_id), Some(scale_id)) =
+            (&measurement.instrument_id, &measurement.scale_id)
+        {
+            if let Some(scale) = scales.get(scale_id) {
+                if scale.instrument_id != *instrument_id {
+                    anyhow::bail!("la escala elegida no pertenece al instrumento seleccionado");
+                }
+            }
+        }
+    }
+
     compute(
         &definition.quantities,
         &definition.results,
@@ -284,7 +318,7 @@ pub async fn create_form_submission(
 
     let mut tx = pool.begin().await?;
     // Inserta la entrega resolviendo nombres denormalizados (igual que la variante CSV).
-    sqlx::query(
+    let inserted = sqlx::query(
         r#"
         INSERT INTO submissions (
             id, student_name, group_name, course, practice_id, file_name, csv_path,
@@ -318,6 +352,11 @@ pub async fn create_form_submission(
     .bind(now)
     .execute(&mut *tx)
     .await?;
+
+    // El INSERT...SELECT no inserta nada si el curso/grupo (o usuario) no existe.
+    if inserted.rows_affected() == 0 {
+        anyhow::bail!("el curso o el grupo indicados no existen");
+    }
 
     for measurement in &input.measurements {
         for (index, value) in measurement.values.iter().enumerate() {
@@ -474,6 +513,34 @@ mod tests {
     }
 
     #[test]
+    fn compute_propagates_uncertainty_to_measurand() {
+        // l con réplicas [9, 11] -> media 10, s = √2, u_A = s/√2 = 1.0; a=2, b=3 (sin u).
+        // Q = l*a + l*b = 50; ∂Q/∂l = a+b = 5 -> u_Q = 5 * 1.0 = 5.0.
+        let quantities = vec![quantity("l"), quantity("a"), quantity("b")];
+        let results = vec![PracticeResult {
+            id: "r1".into(),
+            practice_id: "p1-estadistica".into(),
+            symbol: "Q".into(),
+            name: "Area".into(),
+            unit: "mm2".into(),
+            formula: "l*a + l*b".into(),
+            position: 0,
+        }];
+        let measurements = vec![
+            measurement("l", &[9.0, 11.0]),
+            measurement("a", &[2.0]),
+            measurement("b", &[3.0]),
+        ];
+        let analysis = compute(&quantities, &results, &HashMap::new(), &measurements).unwrap();
+        let q_l = &analysis.quantities[0];
+        assert!(close(q_l.result.u_a, 1.0, 1e-12));
+        let q = &analysis.derived[0];
+        assert!(close(q.value, 50.0, 1e-9));
+        assert!(close(q.u, 5.0, 1e-6));
+        assert!(close(q.u_expanded, 10.0, 1e-6));
+    }
+
+    #[test]
     fn compute_warns_on_missing_readings() {
         let quantities = vec![quantity("l")];
         let analysis = compute(&quantities, &[], &HashMap::new(), &[]).unwrap();
@@ -571,5 +638,59 @@ mod tests {
         assert_eq!(detail.entry_mode, "form");
         // El analysis es el FormAnalysis serializado (tiene "quantities").
         assert!(detail.analysis.get("quantities").is_some());
+    }
+
+    #[tokio::test]
+    async fn analyze_rejects_foreign_quantity_id() {
+        let (pool, _dir) = setup().await;
+        let measurements = vec![MeasurementInput {
+            quantity_id: "no-pertenece".into(),
+            instrument_id: None,
+            scale_id: None,
+            values: vec![1.0],
+        }];
+        assert!(analyze(&pool, "p1-estadistica", &measurements)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn create_form_submission_rejects_unknown_course_and_rolls_back() {
+        let (pool, _dir) = setup().await;
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let l_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "l")
+            .unwrap()
+            .id
+            .clone();
+        let input = FormSubmissionInput {
+            course_id: "curso-fantasma".into(),
+            group_id: "grupo-fantasma".into(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: l_id,
+                instrument_id: None,
+                scale_id: None,
+                values: vec![1.0],
+            }],
+        };
+        assert!(create_form_submission(&pool, &user, input).await.is_err());
+        // Rollback: no debe quedar ninguna entrega ni medición.
+        let subs: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(subs.0, 0);
     }
 }
