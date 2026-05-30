@@ -684,6 +684,23 @@ async fn set_student_results(
             "no podes modificar tus calculos una vez que el docente habilito los resultados",
         ));
     }
+    // Los símbolos deben corresponder a mensurandos de la práctica.
+    let definition = practices::definition(&state.pool, &submission.practice_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    let valid: std::collections::HashSet<&str> = definition
+        .results
+        .iter()
+        .map(|r| r.symbol.as_str())
+        .collect();
+    for result in &body.results {
+        if !valid.contains(result.symbol.trim()) {
+            return Err(AppError::bad_request(format!(
+                "el simbolo \"{}\" no es un mensurando de esta practica",
+                result.symbol.trim()
+            )));
+        }
+    }
     db::save_student_results(&state.pool, &id, &body.results).await?;
     let updated = db::submission_detail(&state.pool, &id)
         .await?

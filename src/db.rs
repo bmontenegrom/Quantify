@@ -2454,10 +2454,14 @@ pub async fn save_student_results(
             continue;
         }
         let u = input.u_expanded.filter(|u| u.is_finite());
+        // `ON CONFLICT` hace que, si el payload trae el mismo símbolo repetido, gane el último
+        // (en vez de violar el UNIQUE y abortar la transacción).
         sqlx::query(
             "INSERT INTO submission_student_results \
              (id, submission_id, symbol, value, u_expanded, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+             ON CONFLICT(submission_id, symbol) DO UPDATE SET \
+             value = excluded.value, u_expanded = excluded.u_expanded",
         )
         .bind(Uuid::new_v4().to_string())
         .bind(submission_id)
@@ -3480,6 +3484,30 @@ mod tests {
         assert_eq!(replaced.len(), 1);
         assert_eq!(replaced[0].symbol, "Q");
         assert!((replaced[0].value - 12.0).abs() < 1e-12);
+
+        // Símbolo repetido en el mismo payload: gana el último (sin violar el UNIQUE).
+        save_student_results(
+            &pool,
+            &id,
+            &[
+                StudentResultInput {
+                    symbol: "Q".into(),
+                    value: 1.0,
+                    u_expanded: None,
+                },
+                StudentResultInput {
+                    symbol: "Q".into(),
+                    value: 2.0,
+                    u_expanded: Some(0.1),
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        let deduped = student_results_for(&pool, &id).await.unwrap();
+        assert_eq!(deduped.len(), 1);
+        assert!((deduped[0].value - 2.0).abs() < 1e-12);
+        assert_eq!(deduped[0].u_expanded, Some(0.1));
     }
 
     #[tokio::test]
