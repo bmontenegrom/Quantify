@@ -22,6 +22,7 @@ import {
   regressionPlot,
   compareResults,
 } from "./lib.js";
+import { Chronometer } from "./chronometer.js";
 
 const state = {
   user: null,
@@ -52,6 +53,7 @@ const state = {
   editingQuantityId: null,
   editingResultId: null,
   practiceForm: null,
+  chronometers: new Map(),
 };
 
 const loginScreen = document.querySelector("#login-screen");
@@ -2042,6 +2044,32 @@ function renderMeasurementFields() {
           </fieldset>
         `;
       }
+      if (q.repeated && q.quantity === "tiempo") {
+        return `
+          <fieldset class="measurement-row measurement-row--chrono"
+                    data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1">
+            <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+            <div class="chrono-widget">
+              <div class="chrono-display">0.000 s</div>
+              <div class="chrono-info"><span class="chrono-count">0 marcas</span></div>
+              <div class="chrono-controls">
+                <button type="button" class="chrono-start">▶ Iniciar</button>
+                <button type="button" class="chrono-mark" disabled>● Marcar</button>
+                <button type="button" class="chrono-stop" disabled>■ Detener</button>
+                <button type="button" class="chrono-reset">↺ Reiniciar</button>
+              </div>
+              <label class="chrono-mode-label">Modo:
+                <select class="chrono-mode">
+                  <option value="pares">Pares (péndulo, T/2 por marca)</option>
+                  <option value="consecutivo">Consecutivo (una marca por período)</option>
+                  <option value="absoluto">Absoluto (tiempos desde inicio)</option>
+                </select>
+              </label>
+              <div class="chrono-readings-preview"></div>
+            </div>
+          </fieldset>
+        `;
+      }
       const options = compatibleInstruments(instruments, q.quantity);
       const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
         .concat(options.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`))
@@ -2067,6 +2095,10 @@ function renderMeasurementFields() {
     .join("");
 
   measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
+    if (row.dataset.isChrono === "1") {
+      wireChronometerWidget(row, row.dataset.quantityId);
+      return;
+    }
     const instrumentSelect = row.querySelector(".measure-instrument");
     instrumentSelect.addEventListener("change", () => populateScaleOptions(row));
     row.querySelector(".add-replica")?.addEventListener("click", () => {
@@ -2114,6 +2146,125 @@ function wireRemoveReplica(row) {
   } else {
     row.querySelectorAll(".remove-replica").forEach((b) => (b.style.visibility = "visible"));
   }
+}
+
+// Formatea segundos como "MM:SS.mmm" para el display del cronómetro.
+function formatElapsed(seconds) {
+  const total = Math.max(0, seconds);
+  const m = Math.floor(total / 60);
+  const s = Math.floor(total % 60);
+  const ms = Math.round((total % 1) * 1000);
+  return m > 0
+    ? `${m}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")} s`
+    : `${s}.${String(ms).padStart(3, "0")} s`;
+}
+
+// Conecta un widget de cronómetro a su instancia Chronometer en state.chronometers.
+// Preserva la instancia entre re-renders (clave = quantityId).
+function wireChronometerWidget(row, quantityId) {
+  if (!state.chronometers.has(quantityId)) {
+    state.chronometers.set(quantityId, new Chronometer());
+  }
+  const chrono = state.chronometers.get(quantityId);
+
+  const display = row.querySelector(".chrono-display");
+  const countEl = row.querySelector(".chrono-count");
+  const startBtn = row.querySelector(".chrono-start");
+  const markBtn = row.querySelector(".chrono-mark");
+  const stopBtn = row.querySelector(".chrono-stop");
+  const resetBtn = row.querySelector(".chrono-reset");
+  const modeSelect = row.querySelector(".chrono-mode");
+  const preview = row.querySelector(".chrono-readings-preview");
+
+  let rafId = null;
+
+  function updateButtons() {
+    const s = chrono.state;
+    startBtn.disabled = s !== "idle";
+    markBtn.disabled = s !== "running";
+    stopBtn.disabled = s !== "running";
+    resetBtn.disabled = s === "running";
+  }
+
+  function updatePreview() {
+    const mode = modeSelect.value;
+    const r = chrono.readings(mode);
+    countEl.textContent = `${chrono.count} marca${chrono.count !== 1 ? "s" : ""} → ${r.length} lectura${r.length !== 1 ? "s" : ""}`;
+    if (r.length === 0) {
+      preview.textContent = "";
+      return;
+    }
+    const shown = r.slice(0, 8).map((v) => v.toFixed(3)).join(", ");
+    preview.textContent = r.length > 8 ? `${shown} … (+${r.length - 8} más)` : shown;
+  }
+
+  function tick() {
+    display.textContent = formatElapsed(chrono.elapsed);
+    updatePreview();
+    if (chrono.state === "running") {
+      rafId = requestAnimationFrame(tick);
+    }
+  }
+
+  function stopRaf() {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  }
+
+  // Sync UI to current state (in case of re-render mid-session).
+  display.textContent = formatElapsed(chrono.elapsed);
+  updateButtons();
+  updatePreview();
+  if (chrono.state === "running") rafId = requestAnimationFrame(tick);
+
+  startBtn.addEventListener("click", () => {
+    chrono.start();
+    updateButtons();
+    rafId = requestAnimationFrame(tick);
+  });
+
+  markBtn.addEventListener("click", () => {
+    chrono.mark();
+    updatePreview();
+  });
+
+  stopBtn.addEventListener("click", () => {
+    chrono.stop();
+    stopRaf();
+    display.textContent = formatElapsed(chrono.elapsed);
+    updateButtons();
+    updatePreview();
+  });
+
+  resetBtn.addEventListener("click", () => {
+    chrono.reset();
+    stopRaf();
+    display.textContent = formatElapsed(0);
+    updateButtons();
+    updatePreview();
+  });
+
+  modeSelect.addEventListener("change", () => updatePreview());
+
+  // Spacebar marca cuando hay exactamente un cronómetro corriendo en el formulario.
+  row._chronoKeyHandler = (e) => {
+    if (e.code === "Space" && e.target.tagName !== "BUTTON" && e.target.tagName !== "SELECT") {
+      e.preventDefault();
+      chrono.mark();
+      updatePreview();
+    }
+  };
+  document.addEventListener("keydown", row._chronoKeyHandler);
+
+  // Limpia el listener de teclado si el row se saca del DOM.
+  new MutationObserver(() => {
+    if (!document.contains(row)) {
+      document.removeEventListener("keydown", row._chronoKeyHandler);
+      stopRaf();
+    }
+  }).observe(measurementFields, { childList: true, subtree: false });
 }
 
 // Tabla de serie para prácticas de regresión: una columna por magnitud y una fila por punto.
@@ -2221,6 +2372,19 @@ function collectMeasurements() {
       };
     }
 
+    if (row.dataset.isChrono === "1") {
+      const mode = row.querySelector(".chrono-mode")?.value ?? "consecutivo";
+      const chrono = state.chronometers.get(row.dataset.quantityId);
+      const values = chrono ? chrono.readings(mode) : [];
+      return {
+        quantity_id: row.dataset.quantityId,
+        instrument_id: null,
+        scale_id: null,
+        values,
+        given_u: null,
+      };
+    }
+
     const values = [...row.querySelectorAll(".replica")].reduce((acc, replica) => {
       const raw = replica.querySelector(".measure-value").value.trim();
       if (raw === "") return acc;
@@ -2261,6 +2425,10 @@ function validateMeasurements(measurements, analysisKind) {
     if (row?.dataset.isGiven === "1") {
       if (m.values.length === 0 || m.given_u == null) {
         return `El dato "${name}" requiere valor e incertidumbre U.`;
+      }
+    } else if (row?.dataset.isChrono === "1") {
+      if (m.values.length === 0) {
+        return `"${name}": registrá al menos una lectura con el cronómetro antes de entregar.`;
       }
     } else if (m.values.length === 0) {
       return `La magnitud "${name}" no tiene lecturas cargadas.`;

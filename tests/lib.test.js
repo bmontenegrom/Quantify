@@ -242,7 +242,7 @@ test("analysisKindLabel devuelve etiqueta legible o 'Sin definir'", () => {
   assert.equal(analysisKindLabel("desconocido"), "Sin definir");
 });
 
-test("compatibleInstruments filtra por magnitud, o devuelve todos si no hay match", () => {
+test("compatibleInstruments filtra estrictamente por magnitud (sin fallback)", () => {
   const instruments = [
     { id: "i1", quantity: "longitud" },
     { id: "i2", quantity: "longitud" },
@@ -252,8 +252,8 @@ test("compatibleInstruments filtra por magnitud, o devuelve todos si no hay matc
     compatibleInstruments(instruments, "longitud").map((i) => i.id),
     ["i1", "i2"],
   );
-  // Sin coincidencias -> devuelve todos (no bloquear la elección).
-  assert.equal(compatibleInstruments(instruments, "tiempo").length, 3);
+  // Sin coincidencias -> lista vacía (filtrado estricto, sin fallback).
+  assert.equal(compatibleInstruments(instruments, "tiempo").length, 0);
   // Sin magnitud -> todos.
   assert.equal(compatibleInstruments(instruments, null).length, 3);
   // Lista vacía/indefinida -> []
