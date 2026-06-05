@@ -598,6 +598,17 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
                 "s",
             )],
         ),
+        (
+            // Tester UA78A — hoja de especificaciones, tabla "Capacidad".
+            // U = pct%·|C| + 1·step (1 dg); unidades SI (F).
+            instrument("Tester UA78A (capacidad)", "digital", "capacitancia", "F"),
+            vec![
+                fab("2 nF",   1e-12, 4.0, 1.0, 0.0, None, None, Some(2e-9),   "F"),
+                fab("20 nF",  1e-11, 4.0, 1.0, 0.0, None, None, Some(20e-9),  "F"),
+                fab("200 nF", 1e-10, 4.0, 1.0, 0.0, None, None, Some(200e-9), "F"),
+                fab("100 uF", 1e-7,  5.0, 1.0, 0.0, None, None, Some(100e-6), "F"),
+            ],
+        ),
     ];
 
     for (inst, scales) in catalog {
@@ -889,5 +900,14 @@ mod tests {
             .unwrap();
         assert_eq!(osc_t.scales[0].spec_pct_reading, Some(1.0));
         assert_eq!(osc_t.scales[0].spec_step_coeff, Some(0.0));
+
+        // El tester UA78A tiene 4 escalas de capacitancia.
+        let ua78a = first
+            .iter()
+            .find(|i| i.instrument.name.contains("UA78A"))
+            .unwrap();
+        assert_eq!(ua78a.instrument.quantity, "capacitancia");
+        assert_eq!(ua78a.scales.len(), 4);
+        assert!(ua78a.scales.iter().all(|s| s.b_model == "fabricante"));
     }
 }

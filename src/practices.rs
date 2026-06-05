@@ -19,6 +19,9 @@ pub struct QuantityInput {
     pub repeated: bool,
     /// Magnitud física para sugerir instrumentos compatibles (opcional).
     pub quantity: Option<String>,
+    /// `true` si es un dato dado por la cátedra (valor ± U directo, sin instrumento ni réplicas).
+    #[serde(default)]
+    pub is_given: bool,
 }
 
 /// Datos para crear o actualizar un mensurando derivado de una práctica.
@@ -95,7 +98,7 @@ pub async fn update_quantity(
 ) -> anyhow::Result<Option<PracticeQuantity>> {
     let result = sqlx::query(
         "UPDATE practice_quantities \
-         SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6 \
+         SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7 \
          WHERE id = ?1",
     )
     .bind(quantity_id)
@@ -104,6 +107,7 @@ pub async fn update_quantity(
     .bind(input.unit.trim())
     .bind(input.repeated)
     .bind(input.quantity.as_deref())
+    .bind(input.is_given)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -260,6 +264,19 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
         unit: unit.into(),
         repeated,
         quantity: Some(quantity.into()),
+        is_given: false,
+    }
+}
+
+/// Construye un `QuantityInput` para un dato dado por la cátedra (valor ± U, sin réplicas).
+fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
+    QuantityInput {
+        symbol: symbol.into(),
+        name: name.into(),
+        unit: unit.into(),
+        repeated: false,
+        quantity: Some(quantity.into()),
+        is_given: true,
     }
 }
 
@@ -324,13 +341,8 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         "p3-relajacion",
         &[
             qty("R", "Resistencia", "ohm", false, "resistencia"),
-            qty(
-                "Rint",
-                "Resistencia interna de la fuente",
-                "ohm",
-                false,
-                "resistencia",
-            ),
+            // Rint es un dato entregado por la cátedra (valor ± U), no lo mide el alumno.
+            qty_given("Rint", "Resistencia interna de la fuente", "ohm", "resistencia"),
             qty("C", "Capacitancia", "F", false, "capacitancia"),
             qty(
                 "tmedio",
@@ -432,7 +444,7 @@ async fn quantities_for(
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeQuantity>> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
-        "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position \
+        "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given \
          FROM practice_quantities WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -454,7 +466,7 @@ async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec
 /// Lee una magnitud de entrada por su id.
 async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQuantity> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
-        "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position \
+        "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -483,8 +495,8 @@ async fn insert_quantity(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_quantities \
-         (id, practice_id, symbol, name, unit, repeated, quantity, position) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -494,6 +506,7 @@ async fn insert_quantity(
     .bind(input.repeated)
     .bind(input.quantity.as_deref())
     .bind(position)
+    .bind(input.is_given)
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -557,6 +570,7 @@ mod tests {
             unit: "mm".into(),
             repeated: true,
             quantity: Some("longitud".into()),
+            is_given: false,
         }
     }
 
@@ -605,6 +619,7 @@ mod tests {
                 unit: "cm".into(),
                 repeated: false,
                 quantity: None,
+                is_given: false,
             },
         )
         .await
@@ -792,7 +807,8 @@ mod tests {
                     quantity_id: q.id.clone(),
                     instrument_id: None,
                     scale_id: None,
-                    values: vec![v],
+                    values: if q.is_given { vec![v] } else { vec![v] },
+                    given_u: if q.is_given { Some(0.0) } else { None },
                 }
             })
             .collect();
@@ -826,6 +842,7 @@ mod tests {
                     instrument_id: None,
                     scale_id: None,
                     values: vec![v],
+                    given_u: None,
                 }
             })
             .collect();
@@ -897,18 +914,21 @@ mod tests {
                 instrument_id: None,
                 scale_id: None,
                 values: freqs.to_vec(),
+                given_u: None,
             },
             crate::computation::MeasurementInput {
                 quantity_id: id("a"),
                 instrument_id: None,
                 scale_id: None,
                 values: freqs.iter().map(|_| 1.0).collect(),
+                given_u: None,
             },
             crate::computation::MeasurementInput {
                 quantity_id: id("b"),
                 instrument_id: None,
                 scale_id: None,
                 values: b_vals,
+                given_u: None,
             },
         ];
         let analysis = crate::computation::compute_regresion(

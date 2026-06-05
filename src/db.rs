@@ -32,9 +32,11 @@ pub struct PracticeQuantity {
     pub unit: String,
     /// `true` si admite varias réplicas (tipo A); `false` para medida única.
     pub repeated: bool,
-    /// Magnitud física (para sugerir instrumentos compatibles en Fase 4).
+    /// Magnitud física (para sugerir instrumentos compatibles).
     pub quantity: Option<String>,
     pub position: i64,
+    /// `true` si es un dato dado (valor ± U entregado por la cátedra), no medido por el alumno.
+    pub is_given: bool,
 }
 
 /// Mensurando derivado de una práctica (determinación indirecta).
@@ -792,6 +794,17 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
+
+    // Magnitud dada por la cátedra (valor ± U directo, sin instrumento ni réplicas).
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "is_given",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+    // Incertidumbre expandida U del dato aportado por el alumno.
+    add_column_if_missing(pool, "submission_measurements", "value_u", "REAL").await?;
 
     sqlx::query(
         r#"

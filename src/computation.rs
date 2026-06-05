@@ -23,6 +23,8 @@ pub struct MeasurementInput {
     pub scale_id: Option<String>,
     /// Réplicas medidas (una o varias) de la magnitud.
     pub values: Vec<f64>,
+    /// Incertidumbre expandida U para magnitudes `is_given` (dato de la cátedra).
+    pub given_u: Option<f64>,
 }
 
 /// Cuerpo para crear una entrega por formulario.
@@ -189,21 +191,40 @@ pub fn compute(
 
     for quantity in quantities {
         let measurement = by_quantity.get(quantity.id.as_str());
-        let values: Vec<f64> = measurement.map(|m| m.values.clone()).unwrap_or_default();
-        if values.is_empty() {
-            warnings.push(format!(
-                "La magnitud \"{}\" ({}) no tiene lecturas cargadas.",
-                quantity.name, quantity.symbol
-            ));
-        }
-        let spec = match measurement.and_then(|m| m.scale_id.as_deref()) {
-            Some(scale_id) => match scales.get(scale_id) {
-                Some(scale) => Some(scale_spec(scale)?),
-                None => anyhow::bail!("la escala seleccionada no existe"),
-            },
-            None => None,
+
+        let result = if quantity.is_given {
+            let value = measurement
+                .and_then(|m| m.values.first().copied())
+                .unwrap_or(f64::NAN);
+            let u_exp = measurement
+                .and_then(|m| m.given_u)
+                .unwrap_or(0.0);
+            if value.is_nan() {
+                warnings.push(format!(
+                    "El dato \"{}\" ({}) no tiene valor cargado.",
+                    quantity.name, quantity.symbol
+                ));
+            }
+            uncertainty::measured_given(value, u_exp)
+        } else {
+            let values: Vec<f64> = measurement.map(|m| m.values.clone()).unwrap_or_default();
+            if values.is_empty() {
+                warnings.push(format!(
+                    "La magnitud \"{}\" ({}) no tiene lecturas cargadas.",
+                    quantity.name, quantity.symbol
+                ));
+            }
+            let spec = match measurement.and_then(|m| m.scale_id.as_deref()) {
+                Some(scale_id) => match scales.get(scale_id) {
+                    Some(scale) => Some(scale_spec(scale)?),
+                    None => anyhow::bail!("la escala seleccionada no existe"),
+                },
+                None => None,
+            };
+            uncertainty::measured_quantity(&values, spec.as_ref())
         };
-        let result = uncertainty::measured_quantity(&values, spec.as_ref());
+
+        let values: Vec<f64> = measurement.map(|m| m.values.clone()).unwrap_or_default();
         means_by_symbol.insert(quantity.symbol.clone(), result.mean);
         u_by_symbol.insert(quantity.symbol.clone(), result.u_c);
         computed.push(QuantityComputation {
@@ -535,21 +556,42 @@ pub async fn create_form_submission(
     }
 
     for measurement in &input.measurements {
-        for (index, value) in measurement.values.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO submission_measurements \
-                 (id, submission_id, quantity_id, instrument_id, scale_id, replicate_index, value) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )
-            .bind(Uuid::new_v4().to_string())
-            .bind(&id)
-            .bind(&measurement.quantity_id)
-            .bind(measurement.instrument_id.as_deref())
-            .bind(measurement.scale_id.as_deref())
-            .bind(index as i64)
-            .bind(*value)
-            .execute(&mut *tx)
-            .await?;
+        // Para magnitudes `is_given`, persiste el único valor con su U en value_u.
+        // Para medidas normales, persiste cada réplica con value_u = NULL.
+        if measurement.values.is_empty() && measurement.given_u.is_some() {
+            // Dato sin valor numérico (no debería llegar, pero evitamos insertar filas vacías).
+        } else {
+            let rows: Vec<(f64, Option<f64>)> = if measurement.given_u.is_some() {
+                measurement
+                    .values
+                    .first()
+                    .map(|&v| vec![(v, measurement.given_u)])
+                    .unwrap_or_default()
+            } else {
+                measurement
+                    .values
+                    .iter()
+                    .map(|&v| (v, None))
+                    .collect()
+            };
+            for (index, (value, value_u)) in rows.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO submission_measurements \
+                     (id, submission_id, quantity_id, instrument_id, scale_id, \
+                      replicate_index, value, value_u) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                )
+                .bind(Uuid::new_v4().to_string())
+                .bind(&id)
+                .bind(&measurement.quantity_id)
+                .bind(measurement.instrument_id.as_deref())
+                .bind(measurement.scale_id.as_deref())
+                .bind(index as i64)
+                .bind(*value)
+                .bind(*value_u)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
     }
     tx.commit().await?;
@@ -601,6 +643,7 @@ mod tests {
             repeated: true,
             quantity: None,
             position: 0,
+            is_given: false,
         }
     }
 
@@ -610,6 +653,7 @@ mod tests {
             instrument_id: None,
             scale_id: None,
             values: values.to_vec(),
+            given_u: None,
         }
     }
 
@@ -744,6 +788,7 @@ mod tests {
             instrument_id: None,
             scale_id: None,
             values: vec![10.0, 12.0, 11.0],
+            given_u: None,
         }];
         let analysis = analyze(&pool, "p1-estadistica", &measurements)
             .await
@@ -808,6 +853,7 @@ mod tests {
                 instrument_id: None,
                 scale_id: None,
                 values: vec![5.0, 5.2, 4.9],
+                given_u: None,
             }],
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
@@ -824,6 +870,7 @@ mod tests {
             instrument_id: None,
             scale_id: None,
             values: vec![1.0],
+            given_u: None,
         }];
         assert!(analyze(&pool, "p1-estadistica", &measurements)
             .await
@@ -859,6 +906,7 @@ mod tests {
                 instrument_id: None,
                 scale_id: None,
                 values: vec![1.0],
+                given_u: None,
             }],
         };
         assert!(create_form_submission(&pool, &user, input).await.is_err());

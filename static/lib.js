@@ -185,14 +185,46 @@ export function analysisKindLabel(kind) {
 
 /**
  * Instrumentos compatibles con una magnitud física (p. ej. "longitud"): filtra por el campo
- * `quantity` del instrumento. Si ninguno coincide (o no se da magnitud), devuelve todos, para
- * no bloquear la elección del estudiante.
+ * `quantity` del instrumento. Solo muestra los de la magnitud indicada; si no se da magnitud
+ * devuelve todos. Nunca hace fallback al catálogo completo.
  */
 export function compatibleInstruments(instruments, magnitude) {
   const list = instruments ?? [];
   if (!magnitude) return list;
-  const matches = list.filter((instrument) => instrument.quantity === magnitude);
-  return matches.length > 0 ? matches : list;
+  return list.filter((instrument) => instrument.quantity === magnitude);
+}
+
+/**
+ * Prefijos SI disponibles para seleccionar la escala de una lectura.
+ * `factor` es el multiplicador para convertir a la unidad base (SI).
+ */
+export const SI_PREFIXES = [
+  { label: "T",  factor: 1e12  },
+  { label: "G",  factor: 1e9   },
+  { label: "M",  factor: 1e6   },
+  { label: "k",  factor: 1e3   },
+  { label: "",   factor: 1     },
+  { label: "m",  factor: 1e-3  },
+  { label: "µ",  factor: 1e-6  },
+  { label: "n",  factor: 1e-9  },
+  { label: "p",  factor: 1e-12 },
+];
+
+/**
+ * Retorna el factor multiplicador para un prefijo SI dado.
+ * Si el prefijo no se reconoce retorna 1 (sin prefijo).
+ *
+ * @param {string} prefix - Etiqueta del prefijo (p. ej. "m", "k", "µ").
+ * @returns {number}
+ *
+ * @example
+ * console.assert(prefixFactor("k") === 1e3);
+ * console.assert(prefixFactor("µ") === 1e-6);
+ * console.assert(prefixFactor("") === 1);
+ * console.assert(prefixFactor("?") === 1);
+ */
+export function prefixFactor(prefix) {
+  return SI_PREFIXES.find((p) => p.label === prefix)?.factor ?? 1;
 }
 
 /**

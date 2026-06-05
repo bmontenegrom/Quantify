@@ -16,6 +16,8 @@ import {
   allGroups,
   analysisKindLabel,
   compatibleInstruments,
+  SI_PREFIXES,
+  prefixFactor,
   measureText,
   regressionPlot,
   compareResults,
@@ -2017,6 +2019,29 @@ function renderMeasurementFields() {
 
   measurementFields.innerHTML = definition.quantities
     .map((q) => {
+      if (q.is_given) {
+        return `
+          <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
+            <legend>${escapeHtml(q.name)} <span class="submission-meta">(dato — ${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+            <div class="form-grid">
+              <label>Valor
+                <div class="replica-input-wrap">
+                  ${prefixSelectHtml()}
+                  <input class="measure-given-value" type="number" step="any" placeholder="valor" />
+                  <span class="replica-unit">${escapeHtml(q.unit)}</span>
+                </div>
+              </label>
+              <label>Incertidumbre U (expandida)
+                <div class="replica-input-wrap">
+                  ${prefixSelectHtml()}
+                  <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
+                  <span class="replica-unit">${escapeHtml(q.unit)}</span>
+                </div>
+              </label>
+            </div>
+          </fieldset>
+        `;
+      }
       const options = compatibleInstruments(instruments, q.quantity);
       const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
         .concat(options.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`))
@@ -2053,11 +2078,21 @@ function renderMeasurementFields() {
   });
 }
 
-// HTML de un input de lectura (una réplica) con botón de quitar.
+// HTML del selector de prefijo SI.
+function prefixSelectHtml() {
+  const opts = SI_PREFIXES.map(
+    (p) => `<option value="${escapeHtml(p.label)}" ${p.label === "" ? "selected" : ""}>${p.label || "—"}</option>`
+  ).join("");
+  return `<select class="prefix-select" title="Prefijo SI">${opts}</select>`;
+}
+
+// HTML de un input de lectura (una réplica) con selector de prefijo y botón de quitar.
 function renderReplicaInput(unit) {
   return `
     <div class="replica">
-      <input class="measure-value" type="number" step="any" placeholder="lectura (${escapeHtml(unit)})" data-unit="${escapeHtml(unit)}" />
+      ${prefixSelectHtml()}
+      <input class="measure-value" type="number" step="any" placeholder="lectura" data-unit="${escapeHtml(unit)}" />
+      <span class="replica-unit">${escapeHtml(unit)}</span>
       <button type="button" class="remove-replica" title="Quitar">✕</button>
     </div>
   `;
@@ -2107,10 +2142,10 @@ function renderSeriesTable(definition) {
   wireSeriesRemove();
 }
 
-// HTML de una fila (un punto) de la tabla de serie: un input numérico por magnitud.
+// HTML de una fila (un punto) de la tabla de serie: selector de prefijo + input por magnitud.
 function seriesRowHtml(cols) {
   const cells = cols
-    .map((q) => `<td><input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`)
+    .map((q) => `<td class="series-cell">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`)
     .join("");
   return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
 }
@@ -2150,31 +2185,56 @@ function collectMeasurements() {
     const quantityIds = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
     const byQuantity = new Map(quantityIds.map((id) => [id, []]));
     seriesTable.querySelectorAll(".series-row").forEach((row) => {
-      const cells = [...row.querySelectorAll(".series-value")];
-      const nums = cells.map((cell) => Number(cell.value.trim()));
-      const complete = cells.every((cell) => cell.value.trim() !== "") && nums.every(Number.isFinite);
-      if (!complete) return;
-      cells.forEach((cell, i) => byQuantity.get(cell.dataset.quantityId).push(nums[i]));
+      const cells = [...row.querySelectorAll(".series-cell")];
+      const parsed = cells.map((cell) => {
+        const raw = cell.querySelector(".series-value").value.trim();
+        const factor = prefixFactor(cell.querySelector(".prefix-select").value);
+        return raw === "" ? NaN : Number(raw) * factor;
+      });
+      if (parsed.some((n) => !Number.isFinite(n))) return;
+      cells.forEach((cell, i) => byQuantity.get(cell.querySelector(".series-value").dataset.quantityId).push(parsed[i]));
     });
     return quantityIds.map((id) => ({
       quantity_id: id,
       instrument_id: null,
       scale_id: null,
       values: byQuantity.get(id),
+      given_u: null,
     }));
   }
 
   return [...measurementFields.querySelectorAll(".measurement-row")].map((row) => {
-    const values = [...row.querySelectorAll(".measure-value")]
-      .map((input) => input.value.trim())
-      .filter((value) => value !== "")
-      .map(Number)
-      .filter((n) => Number.isFinite(n));
+    if (row.dataset.isGiven === "1") {
+      const valInput = row.querySelector(".measure-given-value");
+      const uInput = row.querySelector(".measure-given-u");
+      const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
+      const rawVal = valInput.value.trim();
+      const rawU = uInput.value.trim();
+      const value = rawVal === "" ? null : Number(rawVal) * prefixFactor(valPrefix);
+      const given_u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
+      return {
+        quantity_id: row.dataset.quantityId,
+        instrument_id: null,
+        scale_id: null,
+        values: value != null && Number.isFinite(value) ? [value] : [],
+        given_u: given_u != null && Number.isFinite(given_u) ? given_u : null,
+      };
+    }
+
+    const values = [...row.querySelectorAll(".replica")].reduce((acc, replica) => {
+      const raw = replica.querySelector(".measure-value").value.trim();
+      if (raw === "") return acc;
+      const factor = prefixFactor(replica.querySelector(".prefix-select").value);
+      const n = Number(raw) * factor;
+      if (Number.isFinite(n)) acc.push(n);
+      return acc;
+    }, []);
     return {
       quantity_id: row.dataset.quantityId,
       instrument_id: row.querySelector(".measure-instrument").value || null,
       scale_id: row.querySelector(".measure-scale").value || null,
       values,
+      given_u: null,
     };
   });
 }
@@ -2184,10 +2244,44 @@ function setSubmissionBusy(busy) {
   if (submitButton) submitButton.disabled = busy;
 }
 
+// Valida que el formulario esté completo antes de enviar. Devuelve null si todo está bien,
+// o un mensaje de error en español si falta algo.
+function validateMeasurements(measurements, analysisKind) {
+  if (analysisKind === "regresion_lineal") {
+    const anyWithValues = measurements.some((m) => m.values.length > 0);
+    const minPoints = measurements[0]?.values.length ?? 0;
+    if (!anyWithValues || minPoints < 2) {
+      return "Cargá al menos 2 puntos completos para el ajuste lineal.";
+    }
+    return null;
+  }
+  for (const m of measurements) {
+    const row = measurementFields.querySelector(`[data-quantity-id="${CSS.escape(m.quantity_id)}"]`);
+    const name = row?.querySelector("legend")?.textContent?.trim() ?? m.quantity_id;
+    if (row?.dataset.isGiven === "1") {
+      if (m.values.length === 0 || m.given_u == null) {
+        return `El dato "${name}" requiere valor e incertidumbre U.`;
+      }
+    } else if (m.values.length === 0) {
+      return `La magnitud "${name}" no tiene lecturas cargadas.`;
+    }
+  }
+  return null;
+}
+
 // Botón "Entregar": asigna la mesa (si corresponde) y crea la entrega por formulario.
 // El cálculo automático queda oculto hasta que el docente lo habilite.
 async function submitFormSubmission() {
   if (!practiceSelect.value) return;
+
+  const measurements = collectMeasurements();
+  const analysisKind = state.practiceForm?.definition?.analysis_kind ?? "";
+  const validationError = validateMeasurements(measurements, analysisKind);
+  if (validationError) {
+    submitStatus.textContent = validationError;
+    return;
+  }
+
   setSubmissionBusy(true);
   submitStatus.textContent = "Entregando...";
   try {
@@ -2202,7 +2296,7 @@ async function submitFormSubmission() {
       course_id: courseSelect.value,
       group_id: groupId,
       practice_id: practiceSelect.value,
-      measurements: collectMeasurements(),
+      measurements,
     });
     submitStatus.textContent = "Entrega guardada";
     renderAnalysis(latestResult, submission);
