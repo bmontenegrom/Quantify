@@ -30,7 +30,8 @@ const state = {
   practices: [],
   submissions: [],
   gradebooks: [],
-  selectedId: null,
+  activeSubmissionId: null,
+  activeSubmission: null,
   activeStudentId: null,
   studentDetailSection: "overview",
   studentActionStatus: "",
@@ -82,7 +83,7 @@ const submissionsTitle = document.querySelector("#submissions-title");
 const submissionsSubtitle = document.querySelector("#submissions-subtitle");
 const submissionsListTitle = document.querySelector("#submissions-list-title");
 const submissionList = document.querySelector("#submission-list");
-const submissionDetail = document.querySelector("#submission-detail");
+const submissionWorkspace = document.querySelector("#submission-workspace");
 const userForm = document.querySelector("#user-form");
 const courseMemberForm = document.querySelector("#course-member-form");
 const memberForm = document.querySelector("#member-form");
@@ -107,6 +108,14 @@ const instrumentStatus = document.querySelector("#instrument-status");
 const practiceCatalog = document.querySelector("#practice-catalog");
 const practiceWorkspace = document.querySelector("#practice-workspace");
 const practiceStatus = document.querySelector("#practice-status");
+const practicePartTabs = document.querySelector("#practice-part-tabs");
+
+// Prácticas multi-parte: se muestran como pestañas dentro del mismo formulario de entrega.
+// `group` agrupa las partes; `label` es el texto de la pestaña; `order` define el orden.
+const PRACTICE_GROUPS = {
+  "p3-relajacion": { group: "p3", label: "Parte 1: Relajacion directa", order: 1 },
+  "p3-relajacion-desfasaje": { group: "p3", label: "Parte 2: Desfasaje", order: 2 },
+};
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -194,6 +203,11 @@ document.querySelectorAll(".tab").forEach((tab) => {
     if (tab.dataset.view === "practices" && state.activePracticeId) {
       closePracticeWorkspace();
       selectView("practices");
+      return;
+    }
+    if (tab.dataset.view === "submissions" && state.activeSubmissionId) {
+      closeSubmissionWorkspace();
+      selectView("submissions");
       return;
     }
     selectView(tab.dataset.view);
@@ -1697,27 +1711,42 @@ function selectedTableAssignment() {
 
 function renderSubmissionsPage() {
   const teacher = canReview(state.user);
+  const detailOpen = !!state.activeSubmissionId;
   submissionsTitle.textContent = teacher ? "Entregas" : "Mis entregas";
   submissionsSubtitle.textContent = teacher
     ? "Todas las entregas organizadas por curso y grupo."
     : "Tus entregas y el estado de correccion.";
   submissionsListTitle.textContent = teacher ? "Entregas por curso y grupo" : "Mis entregas";
-  submissionForm.classList.toggle("hidden", teacher);
-  latestResult.classList.toggle("hidden", teacher || latestResult.innerHTML.trim() === "");
+  // Con el detalle abierto ocultamos formulario y resultado para que la ficha ocupe la pantalla.
+  submissionForm.classList.toggle("hidden", teacher || detailOpen);
+  latestResult.classList.toggle("hidden", teacher || detailOpen || latestResult.innerHTML.trim() === "");
   renderSubmissionList();
 }
 
 function renderSubmissionList() {
-  if (state.submissions.length === 0) {
+  const hasList = state.submissions.length > 0;
+  const catalogPanel = submissionList.closest(".catalog-panel");
+
+  if (state.activeSubmissionId) {
+    // Mostrar workspace de detalle, ocultar la lista (el formulario/resultado los oculta
+    // renderSubmissionsPage). La ficha queda como única vista en pantalla.
+    catalogPanel?.classList.add("hidden");
+    submissionWorkspace.classList.remove("hidden");
+    return;
+  }
+
+  submissionWorkspace.classList.add("hidden");
+  catalogPanel?.classList.remove("hidden");
+
+  if (!hasList) {
     submissionList.innerHTML = `<p class="submission-meta">Todavia no hay entregas.</p>`;
-    submissionDetail.classList.add("hidden");
     return;
   }
 
   submissionList.innerHTML = canReview(state.user) ? renderTeacherSubmissionGroups() : renderStudentSubmissionRows();
 
   submissionList.querySelectorAll(".submission-item").forEach((item) => {
-    item.addEventListener("click", () => loadSubmissionDetail(item.dataset.id));
+    item.addEventListener("click", () => openSubmissionWorkspace(item.dataset.id));
   });
 }
 
@@ -1725,7 +1754,7 @@ function renderStudentSubmissionRows() {
   return state.submissions
     .map(
       (item) => `
-        <article class="submission-item ${item.id === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
+        <article class="submission-item ${item.id === state.activeSubmissionId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
           <strong>${escapeHtml(item.practice_name)}</strong>
           <div class="submission-meta">${escapeHtml(item.course)} - Grupo ${escapeHtml(item.group_name)}</div>
           <div class="submission-meta">${formatDate(item.submitted_at)}</div>
@@ -1755,7 +1784,7 @@ function renderTeacherSubmissionGroups() {
                   ${groupItems
                     .map(
                       (item) => `
-                        <article class="submission-item ${item.id === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
+                        <article class="submission-item ${item.id === state.activeSubmissionId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
                           <strong>${escapeHtml(item.student_name)}</strong>
                           <div class="submission-meta">${escapeHtml(item.practice_name)} - ${formatDate(item.submitted_at)}</div>
                           <span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
@@ -1773,12 +1802,15 @@ function renderTeacherSubmissionGroups() {
     .join("");
 }
 
-async function loadSubmissionDetail(id) {
-  state.selectedId = id;
-  renderSubmissionList();
+async function openSubmissionWorkspace(id) {
+  state.activeSubmissionId = id;
+  // renderSubmissionsPage (no solo la lista) para que oculte formulario + resultado además del catálogo.
+  renderSubmissionsPage();
+  submissionWorkspace.innerHTML = `<p class="submission-meta">Cargando...</p>`;
+
   const submission = await fetchJson(`/api/submissions/${id}`);
-  // Para que el alumno cargue sus cálculos necesitamos la lista de mensurandos de la práctica,
-  // que está disponible aunque el cálculo automático siga oculto.
+  state.activeSubmission = submission;
+
   let definition = null;
   if (submission.entry_mode === "form" && !canReview(state.user)) {
     try {
@@ -1787,8 +1819,21 @@ async function loadSubmissionDetail(id) {
       definition = null;
     }
   }
-  submissionDetail.classList.remove("hidden");
-  renderAnalysis(submissionDetail, submission, canReview(state.user), definition);
+
+  submissionWorkspace.innerHTML = `
+    <button type="button" class="back-link" id="submission-workspace-back">Volver al listado</button>
+    <div id="submission-detail-body"></div>
+  `;
+  submissionWorkspace.querySelector("#submission-workspace-back").addEventListener("click", closeSubmissionWorkspace);
+  const detailBody = submissionWorkspace.querySelector("#submission-detail-body");
+  renderAnalysis(detailBody, submission, canReview(state.user), definition);
+}
+
+function closeSubmissionWorkspace() {
+  state.activeSubmissionId = null;
+  state.activeSubmission = null;
+  // renderSubmissionsPage restaura formulario/resultado (según rol) y la lista.
+  renderSubmissionsPage();
 }
 
 function submissionHeader(submission) {
@@ -1799,6 +1844,18 @@ function submissionHeader(submission) {
         ${escapeHtml(submission.student_name)} - Grupo ${escapeHtml(submission.group_name)} - ${escapeHtml(submission.course)}
       </p>
       <span class="status ${escapeHtml(submission.status)}">${escapeHtml(submission.status)}</span>
+    </div>`;
+}
+
+// Bloque prominente con el comentario del docente (cuando existe). Visible para todos.
+function teacherCommentMarkup(submission) {
+  const comment = (submission.teacher_comment ?? "").trim();
+  if (!comment) return "";
+  const score = submission.score != null ? ` <span class="teacher-comment-score">Nota: ${escapeHtml(String(submission.score))}</span>` : "";
+  return `
+    <div class="teacher-comment">
+      <div class="teacher-comment-head">Comentario del docente${score}</div>
+      <p class="teacher-comment-body">${escapeHtml(comment)}</p>
     </div>`;
 }
 
@@ -1826,6 +1883,7 @@ function renderAnalysis(target, submission, includeReview = false, definition = 
     }
     target.innerHTML = `
       ${submissionHeader(submission)}
+      ${teacherCommentMarkup(submission)}
       ${body}
       ${includeReview ? renderReviewForm(submission) : ""}
     `;
@@ -1843,6 +1901,7 @@ function renderAnalysis(target, submission, includeReview = false, definition = 
   const regression = analysis.regression;
   target.innerHTML = `
     ${submissionHeader(submission)}
+    ${teacherCommentMarkup(submission)}
 
     <div class="metrics">
       <div class="metric">
@@ -1968,7 +2027,9 @@ async function saveReview(event, id) {
   }
 
   const updated = await response.json();
-  renderAnalysis(submissionDetail, updated, true);
+  state.activeSubmission = updated;
+  const detailBody = submissionWorkspace?.querySelector("#submission-detail-body");
+  if (detailBody) renderAnalysis(detailBody, updated, true);
   await loadSubmissions();
 }
 
@@ -1981,6 +2042,7 @@ async function loadSubmissionForm() {
   if (canReview(state.user)) return;
   const practiceId = practiceSelect.value;
   const courseId = courseSelect.value;
+  renderPartTabs(practiceId);
   if (!practiceId || !courseId) {
     state.practiceForm = null;
     measurementFields.innerHTML = "";
@@ -1997,6 +2059,40 @@ async function loadSubmissionForm() {
     state.practiceForm = null;
     measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
   }
+}
+
+// Muestra pestañas para las partes de una práctica multi-parte (p. ej. P3 relajación).
+// Solo aparecen si ≥2 partes del grupo están habilitadas en el curso del estudiante.
+function renderPartTabs(practiceId) {
+  if (!practicePartTabs) return;
+  const group = PRACTICE_GROUPS[practiceId]?.group;
+  const enabled = selectedCourse()?.practices ?? [];
+  // Partes del mismo grupo que estén habilitadas en el curso, ordenadas.
+  const parts = enabled
+    .filter((p) => PRACTICE_GROUPS[p.id]?.group === group && group)
+    .sort((a, b) => PRACTICE_GROUPS[a.id].order - PRACTICE_GROUPS[b.id].order);
+
+  if (parts.length < 2) {
+    practicePartTabs.classList.add("hidden");
+    practicePartTabs.innerHTML = "";
+    return;
+  }
+
+  practicePartTabs.classList.remove("hidden");
+  practicePartTabs.innerHTML = parts
+    .map(
+      (p) =>
+        `<button type="button" class="part-tab ${p.id === practiceId ? "active" : ""}" data-practice-id="${escapeHtml(p.id)}">${escapeHtml(PRACTICE_GROUPS[p.id].label)}</button>`
+    )
+    .join("");
+
+  practicePartTabs.querySelectorAll(".part-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      if (tab.dataset.practiceId === practiceSelect.value) return;
+      practiceSelect.value = tab.dataset.practiceId;
+      practiceSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  });
 }
 
 // Renderiza una fila por magnitud: selector de instrumento/escala compatible + lecturas
@@ -2045,10 +2141,29 @@ function renderMeasurementFields() {
         `;
       }
       if (q.repeated && q.quantity === "tiempo") {
+        // Instrumentos de tiempo (para el tipo B por resolución). Preselecciona el cronómetro.
+        const chronoOpts = compatibleInstruments(instruments, q.quantity);
+        const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
+        const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
+          .concat(
+            chronoOpts.map(
+              (i) =>
+                `<option value="${escapeHtml(i.id)}" ${defaultInst && i.id === defaultInst.id ? "selected" : ""}>${escapeHtml(i.name)}</option>`
+            )
+          )
+          .join("");
         return `
           <fieldset class="measurement-row measurement-row--chrono"
                     data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1">
             <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+            <div class="form-grid">
+              <label>Instrumento (tipo B por resolución)
+                <select class="measure-instrument">${chronoInstrumentOptions}</select>
+              </label>
+              <label>Escala
+                <select class="measure-scale"><option value="">— sin escala —</option></select>
+              </label>
+            </div>
             <div class="chrono-widget">
               <div class="chrono-display">0.000 s</div>
               <div class="chrono-info"><span class="chrono-count">0 marcas</span></div>
@@ -2060,8 +2175,9 @@ function renderMeasurementFields() {
               </div>
               <label class="chrono-mode-label">Modo:
                 <select class="chrono-mode">
-                  <option value="pares">Pares (péndulo, T/2 por marca)</option>
+                  <option value="periodo">Período (pares t₂-t₁, t₄-t₃… → técnica de Estadística)</option>
                   <option value="consecutivo">Consecutivo (una marca por período)</option>
+                  <option value="pares">Pares solapados (marca cada T/2)</option>
                   <option value="absoluto">Absoluto (tiempos desde inicio)</option>
                 </select>
               </label>
@@ -2096,9 +2212,17 @@ function renderMeasurementFields() {
 
   measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
     if (row.dataset.isChrono === "1") {
+      // El widget chrono también tiene instrumento/escala (para el tipo B por resolución).
+      const chronoInstrument = row.querySelector(".measure-instrument");
+      if (chronoInstrument) {
+        chronoInstrument.addEventListener("change", () => populateScaleOptions(row));
+        populateScaleOptions(row); // poblar escalas del instrumento preseleccionado
+      }
       wireChronometerWidget(row, row.dataset.quantityId);
       return;
     }
+    // Las filas de "dato" (is_given) no tienen selector de instrumento ni réplicas.
+    if (row.dataset.isGiven === "1") return;
     const instrumentSelect = row.querySelector(".measure-instrument");
     instrumentSelect.addEventListener("change", () => populateScaleOptions(row));
     row.querySelector(".add-replica")?.addEventListener("click", () => {
@@ -2324,6 +2448,8 @@ function populateScaleOptions(row) {
   scaleSelect.innerHTML = [`<option value="">— sin escala —</option>`]
     .concat(scales.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label)} (${escapeHtml(s.unit)})</option>`))
     .join("");
+  // Si el instrumento tiene una sola escala, la seleccionamos sola (p. ej. el cronómetro).
+  if (scales.length === 1) scaleSelect.value = scales[0].id;
 }
 
 // Lee el DOM y arma el array de mediciones para el backend (descarta lecturas vacías).
@@ -2378,8 +2504,8 @@ function collectMeasurements() {
       const values = chrono ? chrono.readings(mode) : [];
       return {
         quantity_id: row.dataset.quantityId,
-        instrument_id: null,
-        scale_id: null,
+        instrument_id: row.querySelector(".measure-instrument")?.value || null,
+        scale_id: row.querySelector(".measure-scale")?.value || null,
         values,
         given_u: null,
       };
@@ -2685,7 +2811,7 @@ async function saveStudentResults(event, submissionId) {
   });
   try {
     await postJson(`/api/submissions/${submissionId}/student-results`, { results });
-    await loadSubmissionDetail(submissionId);
+    await openSubmissionWorkspace(submissionId);
   } catch (error) {
     const note = form.querySelector(".student-results-status");
     if (note) note.textContent = error.message;

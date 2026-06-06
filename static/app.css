@@ -484,6 +484,58 @@ textarea {
   text-decoration: underline;
 }
 
+/* Pestañas de partes de una práctica multi-parte (p. ej. P3 relajación). */
+.practice-part-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.part-tab {
+  background: #eef2f7;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 600;
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.part-tab.active {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+/* Comentario del docente: callout prominente en la ficha de entrega. */
+.teacher-comment {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-left: 4px solid var(--accent);
+  background: #ecfdf5;
+  border-radius: 8px;
+}
+
+.teacher-comment-head {
+  font-weight: 600;
+  color: var(--accent-strong);
+  margin-bottom: 6px;
+}
+
+.teacher-comment-score {
+  margin-left: 8px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.teacher-comment-body {
+  margin: 0;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
 .directory-table-wrap {
   overflow-x: auto;
 }
