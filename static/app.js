@@ -109,6 +109,9 @@ const practiceCatalog = document.querySelector("#practice-catalog");
 const practiceWorkspace = document.querySelector("#practice-workspace");
 const practiceStatus = document.querySelector("#practice-status");
 const practicePartTabs = document.querySelector("#practice-part-tabs");
+const practiceNavChildren = document.querySelector("#practice-nav-children");
+const sidebar = document.querySelector("#sidebar");
+const navToggle = document.querySelector("#nav-toggle");
 
 // Prácticas multi-parte: se muestran como pestañas dentro del mismo formulario de entrega.
 // `group` agrupa las partes; `label` es el texto de la pestaña; `order` define el orden.
@@ -180,6 +183,7 @@ accountProfileForm.addEventListener("submit", async (event) => {
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
+    closeSidebarOnMobile();
     if (tab.dataset.view === "students" && state.activeStudentId) {
       closeStudentWorkspace();
       selectView("students");
@@ -213,6 +217,17 @@ document.querySelectorAll(".tab").forEach((tab) => {
     selectView(tab.dataset.view);
   });
 });
+
+// Botón hamburguesa: abre/cierra el sidebar como cajón en pantallas chicas.
+navToggle?.addEventListener("click", () => {
+  const open = sidebar?.classList.toggle("sidebar-open");
+  navToggle.setAttribute("aria-expanded", String(!!open));
+});
+
+function closeSidebarOnMobile() {
+  sidebar?.classList.remove("sidebar-open");
+  navToggle?.setAttribute("aria-expanded", "false");
+}
 
 document.querySelector("#refresh-submissions").addEventListener("click", loadSubmissions);
 courseSelect.addEventListener("change", updateStudentSelectors);
@@ -278,6 +293,9 @@ async function startApp() {
   document.querySelectorAll(".teacher-only").forEach((element) => {
     element.classList.toggle("hidden", !canReview(state.user));
   });
+  document.querySelectorAll(".student-only").forEach((element) => {
+    element.classList.toggle("hidden", canReview(state.user));
+  });
 
   selectView("submissions");
   await loadAcademic();
@@ -318,6 +336,7 @@ function selectView(view) {
   if (view === "practices") {
     renderPracticesPage();
   }
+  if (view === "practica") highlightPracticeNav();
   if (view === "account") renderAccount();
 }
 
@@ -330,6 +349,7 @@ async function loadAcademic() {
   state.academic = await fetchJson("/api/academic/context");
   state.practices = state.academic.practices;
   renderStudentSelectors();
+  renderPracticeNav();
   if (canReview(state.user)) {
     renderAdmin();
     renderStudentsPage();
@@ -543,6 +563,84 @@ function updateStudentSelectors() {
     : `<option value="">Sin practicas habilitadas</option>`;
   updateTableSelector();
   loadSubmissionForm();
+}
+
+// Construye el sub-menú lateral de prácticas del estudiante: un ítem por práctica
+// habilitada (unión de todos sus cursos, dedup por id). Las prácticas multi-parte
+// (PRACTICE_GROUPS) se colapsan a un único ítem (el de menor `order` presente).
+function renderPracticeNav() {
+  if (!practiceNavChildren) return;
+  if (canReview(state.user)) {
+    practiceNavChildren.innerHTML = "";
+    return;
+  }
+  const seen = new Map();
+  for (const course of state.academic?.courses ?? []) {
+    for (const practice of course.practices ?? []) {
+      if (!seen.has(practice.id)) seen.set(practice.id, practice);
+    }
+  }
+  const all = [...seen.values()];
+  const shownGroups = new Set();
+  const items = [];
+  for (const practice of all) {
+    const group = PRACTICE_GROUPS[practice.id]?.group;
+    if (group) {
+      if (shownGroups.has(group)) continue;
+      shownGroups.add(group);
+      const rep = all
+        .filter((p) => PRACTICE_GROUPS[p.id]?.group === group)
+        .sort((a, b) => PRACTICE_GROUPS[a.id].order - PRACTICE_GROUPS[b.id].order)[0];
+      items.push(rep);
+    } else {
+      items.push(practice);
+    }
+  }
+
+  practiceNavChildren.innerHTML = items.length
+    ? items
+        .map(
+          (p) =>
+            `<button class="tab nav-child" data-view="practica" data-practice-id="${escapeHtml(p.id)}">${escapeHtml(p.name)}</button>`
+        )
+        .join("")
+    : `<p class="nav-empty submission-meta">Sin practicas habilitadas</p>`;
+
+  practiceNavChildren.querySelectorAll(".nav-child").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      closeSidebarOnMobile();
+      selectPracticeFromNav(btn.dataset.practiceId);
+    });
+  });
+}
+
+// Click en un sub-ítem de práctica: deja el formulario fijo en esa práctica (eligiendo
+// un curso que la tenga habilitada) y abre la vista del formulario.
+function selectPracticeFromNav(practiceId) {
+  const course = state.academic?.courses.find((c) =>
+    (c.practices ?? []).some((p) => p.id === practiceId)
+  );
+  if (course && course.id !== courseSelect.value) {
+    courseSelect.value = course.id;
+    updateStudentSelectors(); // repuebla grupo/mesa y deja practiceSelect en la 1ra
+  }
+  practiceSelect.value = practiceId;
+  // change → updateTableSelector + loadSubmissionForm (reusa el wiring existente).
+  practiceSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  selectView("practica");
+}
+
+// Resalta el sub-ítem de práctica que corresponde a la práctica activa del formulario.
+// Para grupos multi-parte, resalta el ítem del grupo (no la parte puntual).
+function highlightPracticeNav() {
+  if (!practiceNavChildren) return;
+  const current = practiceSelect.value;
+  const currentGroup = PRACTICE_GROUPS[current]?.group;
+  practiceNavChildren.querySelectorAll(".nav-child").forEach((btn) => {
+    const id = btn.dataset.practiceId;
+    const match = currentGroup ? PRACTICE_GROUPS[id]?.group === currentGroup : id === current;
+    btn.classList.toggle("active", match);
+  });
 }
 
 function updateTableSelector() {
@@ -1711,15 +1809,13 @@ function selectedTableAssignment() {
 
 function renderSubmissionsPage() {
   const teacher = canReview(state.user);
-  const detailOpen = !!state.activeSubmissionId;
+  // El formulario y el resultado viven en la vista "practica"; esta vista es solo
+  // la lista de entregas + la ficha de detalle.
   submissionsTitle.textContent = teacher ? "Entregas" : "Mis entregas";
   submissionsSubtitle.textContent = teacher
     ? "Todas las entregas organizadas por curso y grupo."
     : "Tus entregas y el estado de correccion.";
   submissionsListTitle.textContent = teacher ? "Entregas por curso y grupo" : "Mis entregas";
-  // Con el detalle abierto ocultamos formulario y resultado para que la ficha ocupe la pantalla.
-  submissionForm.classList.toggle("hidden", teacher || detailOpen);
-  latestResult.classList.toggle("hidden", teacher || detailOpen || latestResult.innerHTML.trim() === "");
   renderSubmissionList();
 }
 
@@ -2040,6 +2136,9 @@ async function saveReview(event, id) {
 async function loadSubmissionForm() {
   if (!measurementFields) return;
   if (canReview(state.user)) return;
+  // Al cambiar de práctica/curso, descartamos el resultado de la entrega anterior.
+  latestResult.classList.add("hidden");
+  submitStatus.textContent = "";
   const practiceId = practiceSelect.value;
   const courseId = courseSelect.value;
   renderPartTabs(practiceId);
