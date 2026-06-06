@@ -62,6 +62,8 @@ const state = {
   seriesDebug: new Map(),
   // Si != null, el formulario está editando esta entrega (en vez de crear una nueva).
   editingSubmissionId: null,
+  // Lecturas crudas de la entrega en edición, para prefillear el formulario.
+  editPrefill: null,
 };
 
 const loginScreen = document.querySelector("#login-screen");
@@ -204,6 +206,7 @@ accountProfileForm.addEventListener("submit", async (event) => {
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     closeSidebarOnMobile();
+    exitEditMode();
     if (tab.dataset.view === "students" && state.activeStudentId) {
       closeStudentWorkspace();
       selectView("students");
@@ -629,6 +632,7 @@ function renderPracticeNav() {
   practiceNavChildren.querySelectorAll(".nav-child").forEach((btn) => {
     btn.addEventListener("click", () => {
       closeSidebarOnMobile();
+      exitEditMode();
       selectPracticeFromNav(btn.dataset.practiceId);
     });
   });
@@ -1549,6 +1553,10 @@ function renderCourseProfileForm(course) {
         Periodo
         <input name="term" value="${escapeHtml(course.term)}" required />
       </label>
+      <label>
+        Horas de edición de entregas
+        <input name="submission_edit_hours" type="number" min="0" max="72" step="0.5" value="${escapeHtml(String(course.submission_edit_hours ?? 4))}" required />
+      </label>
       <div class="detail-actions">
         <button type="submit">Guardar cambios</button>
         <span class="submission-meta">${escapeHtml(state.courseActionStatus)}</span>
@@ -1737,6 +1745,8 @@ async function saveCourseEdit(event) {
     await postJson(`/api/academic/courses/${payload.id}`, {
       name: payload.name,
       term: payload.term,
+      submission_edit_hours:
+        payload.submission_edit_hours === "" ? null : Number(payload.submission_edit_hours),
     });
     state.courseActionStatus = "Cambios guardados";
     await refreshAcademic("Curso actualizado");
@@ -1975,6 +1985,110 @@ function teacherCommentMarkup(submission) {
     </div>`;
 }
 
+// Banner con el plazo de edición restante + botón "Editar entrega". Sólo si la entrega es
+// editable (ventana abierta, pendiente, no visible). Se muestra al alumno dueño.
+function editBannerMarkup(submission) {
+  if (!submission.can_edit || !submission.editable_until) return "";
+  const until = new Date(submission.editable_until);
+  const remainingMs = until.getTime() - Date.now();
+  if (remainingMs <= 0) return "";
+  const mins = Math.floor(remainingMs / 60000);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const left = h > 0 ? `${h} h ${m} min` : `${m} min`;
+  return `<div class="edit-banner">
+    <div>Podés editar esta entrega hasta el ${escapeHtml(formatDate(submission.editable_until))} — te quedan ${left}.</div>
+    <button type="button" class="edit-submission-btn">Editar entrega</button>
+  </div>`;
+}
+
+// Entra en modo edición: guarda las lecturas de la entrega y abre el formulario de su práctica
+// prefilleado. El submit irá al endpoint de edición (no crea una entrega nueva).
+function startEditSubmission(submission) {
+  state.editingSubmissionId = submission.id;
+  state.editPrefill = submission.measurements ?? [];
+  selectPracticeFromNav(submission.practice_id); // carga el form de esa práctica
+}
+
+// Sale del modo edición (al navegar a otra práctica o entregar). Vuelve a "crear entrega".
+function exitEditMode() {
+  state.editingSubmissionId = null;
+  state.editPrefill = null;
+}
+
+// Agrupa las lecturas crudas de la entrega en edición por magnitud (valores ordenados por
+// réplica, más instrumento/escala/U comunes), para prefillear el formulario.
+function editPrefillByQuantity() {
+  const map = new Map();
+  for (const m of state.editPrefill ?? []) {
+    let e = map.get(m.quantity_id);
+    if (!e) {
+      e = { values: [], instrument_id: m.instrument_id, scale_id: m.scale_id, value_u: m.value_u };
+      map.set(m.quantity_id, e);
+    }
+    e.values.push(m.value);
+    if (m.value_u != null) e.value_u = m.value_u;
+  }
+  return map;
+}
+
+// Rellena el formulario (ya renderizado) con las lecturas de la entrega en edición. Los valores
+// guardados están en unidades base, así que se cargan con prefijo "" (factor 1).
+function applyPrefill() {
+  if (!state.editingSubmissionId) return;
+  const byQ = editPrefillByQuantity();
+
+  const seriesTable = measurementFields.querySelector(".series-table");
+  if (seriesTable) {
+    const qids = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
+    const nPoints = Math.max(...qids.map((id) => byQ.get(id)?.values.length ?? 0), 0);
+    const cols = state.practiceForm.definition.quantities;
+    const tbody = seriesTable.querySelector("tbody");
+    tbody.innerHTML = Array.from({ length: Math.max(nPoints, 1) }, () => seriesRowHtml(cols)).join("");
+    wireSeriesRemove();
+    [...tbody.querySelectorAll(".series-row")].forEach((row, i) => {
+      row.querySelectorAll(".series-value").forEach((input) => {
+        const v = byQ.get(input.dataset.quantityId)?.values[i];
+        if (v != null) input.value = v;
+      });
+    });
+    return;
+  }
+
+  measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
+    const e = byQ.get(row.dataset.quantityId);
+    if (!e) return;
+    if (row.dataset.isGiven === "1") {
+      const v = row.querySelector(".measure-given-value");
+      const u = row.querySelector(".measure-given-u");
+      if (v) v.value = e.values[0] ?? "";
+      if (u && e.value_u != null) u.value = e.value_u;
+      return;
+    }
+    const inst = row.querySelector(".measure-instrument");
+    if (inst && e.instrument_id) {
+      inst.value = e.instrument_id;
+      populateScaleOptions(row);
+    }
+    const scale = row.querySelector(".measure-scale");
+    if (scale && e.scale_id) scale.value = e.scale_id;
+    const container = row.querySelector(".measure-values");
+    if (!container) return;
+    const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
+    while (container.querySelectorAll(".replica").length < e.values.length) {
+      container.insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+    }
+    [...container.querySelectorAll(".replica")].forEach((rep, i) => {
+      if (i >= e.values.length) return;
+      const val = rep.querySelector(".measure-value");
+      const pre = rep.querySelector(".prefix-select");
+      if (pre) pre.value = "";
+      if (val) val.value = e.values[i];
+    });
+    wireRemoveReplica(row);
+  });
+}
+
 function renderAnalysis(target, submission, includeReview = false, definition = null) {
   target.classList.remove("detail-empty");
 
@@ -2002,9 +2116,13 @@ function renderAnalysis(target, submission, includeReview = false, definition = 
     target.innerHTML = `
       ${submissionHeader(submission)}
       ${teacherCommentMarkup(submission)}
+      ${!isTeacher ? editBannerMarkup(submission) : ""}
       ${body}
       ${includeReview ? renderReviewForm(submission) : ""}
     `;
+    target
+      .querySelector(".edit-submission-btn")
+      ?.addEventListener("click", () => startEditSubmission(submission));
     const reviewForm = target.querySelector(".review-form");
     if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
     const studentForm = target.querySelector(".student-results-form");
@@ -2167,8 +2285,9 @@ async function loadSubmissionForm() {
   if (practicaTitle) {
     const practiceName =
       selectedCourse()?.practices.find((p) => p.id === practiceId)?.name ?? "Nueva entrega";
-    practicaTitle.textContent = practiceName;
+    practicaTitle.textContent = state.editingSubmissionId ? `Editar — ${practiceName}` : practiceName;
   }
+  if (submitButton) submitButton.textContent = state.editingSubmissionId ? "Guardar cambios" : "Entregar";
   renderPartTabs(practiceId);
   if (!practiceId || !courseId) {
     state.practiceForm = null;
@@ -2182,6 +2301,7 @@ async function loadSubmissionForm() {
     ]);
     state.practiceForm = { definition, instruments };
     renderMeasurementFields();
+    applyPrefill(); // si estamos editando, rellena el form con las lecturas guardadas
   } catch (error) {
     state.practiceForm = null;
     measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
@@ -2216,6 +2336,7 @@ function renderPartTabs(practiceId) {
   practicePartTabs.querySelectorAll(".part-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       if (tab.dataset.practiceId === practiceSelect.value) return;
+      exitEditMode();
       practiceSelect.value = tab.dataset.practiceId;
       practiceSelect.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -2266,7 +2387,7 @@ function renderMeasurementFields() {
           </fieldset>
         `;
       }
-      if (q.repeated && q.quantity === "tiempo") {
+      if (q.repeated && q.quantity === "tiempo" && !state.editingSubmissionId) {
         // Instrumentos de tiempo (para el tipo B por resolución). Preselecciona el cronómetro.
         const chronoOpts = compatibleInstruments(instruments, q.quantity);
         const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
@@ -2907,8 +3028,21 @@ async function submitFormSubmission() {
   }
 
   setSubmissionBusy(true);
-  submitStatus.textContent = "Entregando...";
+  // En modo edición reemplazamos la entrega existente; si no, creamos una nueva.
+  const editingId = state.editingSubmissionId;
+  submitStatus.textContent = editingId ? "Guardando cambios..." : "Entregando...";
   try {
+    if (editingId) {
+      await postJson(`/api/submissions/${editingId}/edit`, {
+        measurements,
+        meta: collectMeta(),
+      });
+      submitStatus.textContent = "Cambios guardados";
+      exitEditMode();
+      await loadSubmissions();
+      openSubmissionWorkspace(editingId); // vuelve a la ficha actualizada
+      return;
+    }
     const groupId = groupSelect.value;
     if (tableSelect.value) {
       await postJson(`/api/academic/groups/${groupId}/practice-table`, {

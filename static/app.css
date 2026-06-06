@@ -1093,6 +1093,29 @@ textarea {
   border-radius: 6px;
 }
 
+/* Aviso de ventana de edición en la ficha de la entrega. */
+.edit-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: #ecfeff;
+}
+
+.edit-submission-btn {
+  background: var(--accent);
+  color: #ffffff;
+  border-radius: 8px;
+  min-height: 38px;
+  padding: 0 16px;
+  font-weight: 650;
+}
+
 /* Bloque de depuración persistida en la ficha de la entrega. */
 .meta-panel {
   margin-top: 16px;
