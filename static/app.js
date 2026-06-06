@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import { loginScreen, appShell } from "./dom.js";
 import { fetchJson } from "./api.js";
 import { canReview } from "./lib.js";
-import { renderSessionUser, renderAccount } from "./auth.js";
+import { renderSessionUser, renderAccount, setupAuth } from "./auth.js";
 import { selectView } from "./navigation.js";
 import { loadAcademic } from "./academic.js";
 import { loadSubmissions } from "./submissions.js";
@@ -47,4 +47,5 @@ async function startApp() {
   await loadSubmissions();
 }
 
+setupAuth(startApp);
 init();
