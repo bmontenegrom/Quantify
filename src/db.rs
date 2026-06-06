@@ -1137,11 +1137,11 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
-        // P2-serie: Vg, R1, RA en serie; I = Vg/(R1+RA). Medida unica, incertidumbre tipo B.
+        // P2-serie: R1, R2, R3 en serie con RA; I = Vg/(R1+R2+R3+RA) y V=I*R en cada resistencia.
         (
             "p2-serie",
             "CC - Circuito en Serie",
-            "Circuito en serie: Vg, R1 y RA (resistencia interna del amperimetro). I = Vg/(R1+RA).",
+            "Circuito en serie: R1, R2 y R3 en serie con RA (resistencia interna del amperimetro). I y caidas de tension por leyes de circuito.",
             "estadistico",
             None,
             None,
@@ -1285,6 +1285,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
 
     for practice in [
         "p1-estadistica",
+        "p2-serie",
         "p2-corriente-continua",
         "p3-relajacion",
         "p3-relajacion-desfasaje",
@@ -2700,7 +2701,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 4);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 5);
     }
 
     #[tokio::test]

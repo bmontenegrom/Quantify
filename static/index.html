@@ -77,14 +77,15 @@
               <select name="group_id" id="group-select" required></select>
             </label>
             <label>
-              Practica
-              <select name="practice_id" id="practice-select" required></select>
-            </label>
-            <label>
               Mesa
               <select name="table_number" id="table-select" required></select>
             </label>
           </div>
+          <!-- La práctica se infiere del nav lateral / las tabs; el select queda oculto
+               como fuente de verdad interna. -->
+          <label class="hidden">
+            <select name="practice_id" id="practice-select"></select>
+          </label>
 
           <div id="practice-part-tabs" class="practice-part-tabs hidden"></div>
 

@@ -110,12 +110,15 @@ const practiceWorkspace = document.querySelector("#practice-workspace");
 const practiceStatus = document.querySelector("#practice-status");
 const practicePartTabs = document.querySelector("#practice-part-tabs");
 const practiceNavChildren = document.querySelector("#practice-nav-children");
+const practicaTitle = document.querySelector("#practica-title");
 const sidebar = document.querySelector("#sidebar");
 const navToggle = document.querySelector("#nav-toggle");
 
 // Prácticas multi-parte: se muestran como pestañas dentro del mismo formulario de entrega.
 // `group` agrupa las partes; `label` es el texto de la pestaña; `order` define el orden.
 const PRACTICE_GROUPS = {
+  "p2-serie": { group: "cc", label: "Serie", order: 1 },
+  "p2-corriente-continua": { group: "cc", label: "Paralelo", order: 2 },
   "p3-relajacion": { group: "p3", label: "Parte 1: Relajacion directa", order: 1 },
   "p3-relajacion-desfasaje": { group: "p3", label: "Parte 2: Desfasaje", order: 2 },
 };
@@ -2141,6 +2144,12 @@ async function loadSubmissionForm() {
   submitStatus.textContent = "";
   const practiceId = practiceSelect.value;
   const courseId = courseSelect.value;
+  // La práctica se infiere del nav: mostramos su nombre como título de la vista.
+  if (practicaTitle) {
+    const practiceName =
+      selectedCourse()?.practices.find((p) => p.id === practiceId)?.name ?? "Nueva entrega";
+    practicaTitle.textContent = practiceName;
+  }
   renderPartTabs(practiceId);
   if (!practiceId || !courseId) {
     state.practiceForm = null;

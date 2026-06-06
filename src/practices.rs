@@ -347,6 +347,15 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             // Rint es un dato entregado por la cátedra (valor ± U), no lo mide el alumno.
             qty_given("Rint", "Resistencia interna de la fuente", "ohm", "resistencia"),
             qty("C", "Capacitancia", "F", false, "capacitancia"),
+            // Periodo de la onda cuadrada de trabajo (se registra; debe permitir ver ~5*tau
+            // en el semiperiodo de descarga). No entra en las formulas, queda como dato medido.
+            qty(
+                "T_oc",
+                "Periodo de la onda cuadrada",
+                "s",
+                false,
+                "tiempo",
+            ),
             qty(
                 "tmedio",
                 "Tiempo de semidescarga (t1/2)",
@@ -366,20 +375,23 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "tau_exp",
                 "Tiempo de relajacion experimental",
                 "s",
-                "tmedio / 0.6931471805599453",
+                "tmedio / math::ln(2)",
             ),
         ],
     )
     .await?;
 
-    // P2-serie — Circuito en serie: Vg, R1 y RA. I = Vg/(R1+RA).
-    // Medida unica (tipo A despreciable); incertidumbre tipo B (fabricante).
+    // P2-serie — Circuito en serie: R1, R2 y R3 en serie con RA (resistencia interna del
+    // amperimetro). I = Vg/(R1+R2+R3+RA) y la caida de tension en cada resistencia es V=I*R.
+    // Medida unica (tipo A despreciable); incertidumbre tipo B (fabricante del tester).
     seed_practice(
         pool,
         "p2-serie",
         &[
             qty("Vg", "Voltaje de la fuente", "V", false, "voltaje"),
             qty("R1", "Resistencia R1", "ohm", false, "resistencia"),
+            qty("R2", "Resistencia R2", "ohm", false, "resistencia"),
+            qty("R3", "Resistencia R3", "ohm", false, "resistencia"),
             qty(
                 "RA",
                 "Resistencia interna del amperimetro",
@@ -388,12 +400,12 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "resistencia",
             ),
         ],
-        &[res(
-            "I",
-            "Intensidad de corriente",
-            "A",
-            "Vg / (R1 + RA)",
-        )],
+        &[
+            res("I", "Intensidad de corriente", "A", "Vg / (R1 + R2 + R3 + RA)"),
+            res("VR1", "Tension en R1", "V", "Vg * R1 / (R1 + R2 + R3 + RA)"),
+            res("VR2", "Tension en R2", "V", "Vg * R2 / (R1 + R2 + R3 + RA)"),
+            res("VR3", "Tension en R3", "V", "Vg * R3 / (R1 + R2 + R3 + RA)"),
+        ],
     )
     .await?;
 
@@ -799,15 +811,16 @@ mod tests {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
         let def = definition(&pool, "p2-serie").await.unwrap().unwrap();
-        assert_eq!(def.quantities.len(), 3);
-        for symbol in ["Vg", "R1", "RA"] {
+        assert_eq!(def.quantities.len(), 5);
+        for symbol in ["Vg", "R1", "R2", "R3", "RA"] {
             assert!(
                 def.quantities.iter().any(|q| q.symbol == symbol),
                 "falta la magnitud {symbol}"
             );
         }
-        assert_eq!(def.results.len(), 1);
-        assert_eq!(def.results[0].formula, "Vg / (R1 + RA)");
+        let i = def.results.iter().find(|r| r.symbol == "I").unwrap();
+        assert_eq!(i.formula, "Vg / (R1 + R2 + R3 + RA)");
+        assert!(def.results.iter().any(|r| r.symbol == "VR1"));
     }
 
     #[tokio::test]
@@ -815,8 +828,8 @@ mod tests {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
         let def = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
-        assert_eq!(def.quantities.len(), 4);
-        for symbol in ["R", "Rint", "C", "tmedio"] {
+        assert_eq!(def.quantities.len(), 5);
+        for symbol in ["R", "Rint", "C", "T_oc", "tmedio"] {
             assert!(
                 def.quantities.iter().any(|q| q.symbol == symbol),
                 "falta la magnitud {symbol}"
