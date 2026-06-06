@@ -21,6 +21,9 @@ import {
   measureText,
   regressionPlot,
   compareResults,
+  seriesStats,
+  histogram,
+  normalCurve,
 } from "./lib.js";
 import { Chronometer } from "./chronometer.js";
 
@@ -55,6 +58,10 @@ const state = {
   editingResultId: null,
   practiceForm: null,
   chronometers: new Map(),
+  // Depuración de series repetidas (cronómetro): quantityId → { discarded:Set<int>, bins:int }.
+  seriesDebug: new Map(),
+  // Si != null, el formulario está editando esta entrega (en vez de crear una nueva).
+  editingSubmissionId: null,
 };
 
 const loginScreen = document.querySelector("#login-screen");
@@ -121,6 +128,16 @@ const PRACTICE_GROUPS = {
   "p2-corriente-continua": { group: "cc", label: "Paralelo", order: 2 },
   "p3-relajacion": { group: "p3", label: "Parte 1: Relajacion directa", order: 1 },
   "p3-relajacion-desfasaje": { group: "p3", label: "Parte 2: Desfasaje", order: 2 },
+};
+
+// Prácticas cuyas magnitudes se agrupan en secciones temáticas dentro del formulario.
+// Cada sección lista los símbolos (en orden) que la componen; los que no figuren van al final.
+const PRACTICE_SECTIONS = {
+  "p1-estadistica": [
+    { title: "1) Determinación de períodos", symbols: ["T"] },
+    { title: "2) Amortiguamiento (δ, Q)", symbols: ["t_med"] },
+    { title: "3) Determinación de g", symbols: ["L"] },
+  ],
 };
 
 loginForm.addEventListener("submit", async (event) => {
@@ -1976,6 +1993,8 @@ function renderAnalysis(target, submission, includeReview = false, definition = 
     } else {
       body += `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
     }
+    // Depuración de series (bins + puntos descartados): visible para alumno y docente.
+    body += measurementMetaMarkup(submission, definition);
     // Formulario "Mis cálculos" del alumno dueño (editable hasta que el docente habilite).
     if (!isTeacher) {
       body += studentResultsFormMarkup(submission, definition);
@@ -2223,8 +2242,7 @@ function renderMeasurementFields() {
     return;
   }
 
-  measurementFields.innerHTML = definition.quantities
-    .map((q) => {
+  const quantityRowHtml = (q) => {
       if (q.is_given) {
         return `
           <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
@@ -2291,6 +2309,7 @@ function renderMeasurementFields() {
               </label>
               <div class="chrono-readings-preview"></div>
             </div>
+            <div class="series-debug"></div>
           </fieldset>
         `;
       }
@@ -2315,8 +2334,28 @@ function renderMeasurementFields() {
           ${q.repeated ? `<button type="button" class="add-replica">＋ agregar replica</button>` : ""}
         </fieldset>
       `;
-    })
-    .join("");
+  };
+
+  // Algunas prácticas (p. ej. el péndulo) agrupan sus magnitudes en secciones temáticas.
+  const sections = PRACTICE_SECTIONS[practiceSelect.value];
+  if (sections) {
+    const used = new Set();
+    const blocks = sections.map((sec) => {
+      const rows = sec.symbols
+        .map((sym) => definition.quantities.find((q) => q.symbol === sym))
+        .filter(Boolean);
+      rows.forEach((q) => used.add(q.id));
+      if (rows.length === 0) return "";
+      return `<div class="measurement-section">
+          <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+          ${rows.map(quantityRowHtml).join("")}
+        </div>`;
+    });
+    const rest = definition.quantities.filter((q) => !used.has(q.id));
+    measurementFields.innerHTML = blocks.join("") + rest.map(quantityRowHtml).join("");
+  } else {
+    measurementFields.innerHTML = definition.quantities.map(quantityRowHtml).join("");
+  }
 
   measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
     if (row.dataset.isChrono === "1") {
@@ -2445,15 +2484,22 @@ function wireChronometerWidget(row, quantityId) {
     }
   }
 
+  const debugContainer = row.querySelector(".series-debug");
+  function refreshDebug() {
+    renderSeriesDebug(row, quantityId, chrono.readings(modeSelect.value));
+  }
+
   // Sync UI to current state (in case of re-render mid-session).
   display.textContent = formatElapsed(chrono.elapsed);
   updateButtons();
   updatePreview();
   if (chrono.state === "running") rafId = requestAnimationFrame(tick);
+  else refreshDebug();
 
   startBtn.addEventListener("click", () => {
     chrono.start();
     updateButtons();
+    if (debugContainer) debugContainer.innerHTML = ""; // se rehace al detener
     rafId = requestAnimationFrame(tick);
   });
 
@@ -2468,6 +2514,7 @@ function wireChronometerWidget(row, quantityId) {
     display.textContent = formatElapsed(chrono.elapsed);
     updateButtons();
     updatePreview();
+    refreshDebug();
   });
 
   resetBtn.addEventListener("click", () => {
@@ -2476,9 +2523,16 @@ function wireChronometerWidget(row, quantityId) {
     display.textContent = formatElapsed(0);
     updateButtons();
     updatePreview();
+    state.seriesDebug.delete(quantityId); // limpia descartes de la serie anterior
+    if (debugContainer) debugContainer.innerHTML = "";
   });
 
-  modeSelect.addEventListener("change", () => updatePreview());
+  // Cambiar de modo reconstruye la serie: descartamos los puntos marcados antes.
+  modeSelect.addEventListener("change", () => {
+    state.seriesDebug.delete(quantityId);
+    updatePreview();
+    if (chrono.state !== "running") refreshDebug();
+  });
 
   // Spacebar marca cuando hay exactamente un cronómetro corriendo en el formulario.
   row._chronoKeyHandler = (e) => {
@@ -2497,6 +2551,108 @@ function wireChronometerWidget(row, quantityId) {
       stopRaf();
     }
   }).observe(measurementFields, { childList: true, subtree: false });
+}
+
+// Panel de depuración de una serie repetida (cronómetro): lista ordenada con media/desv.
+// estándar en vivo, histograma ajustable con curva normal superpuesta, y descarte de puntos.
+// Las lecturas descartadas no se envían; se persisten como meta (bins + valores descartados).
+function renderSeriesDebug(row, quantityId, readings) {
+  const container = row.querySelector(".series-debug");
+  if (!container) return;
+  if (!readings || readings.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  let dbg = state.seriesDebug.get(quantityId);
+  if (!dbg) {
+    dbg = { discarded: new Set(), bins: 0 };
+    state.seriesDebug.set(quantityId, dbg);
+  }
+  // Descarta índices fuera de rango (por si la serie cambió de longitud).
+  dbg.discarded = new Set([...dbg.discarded].filter((i) => i < readings.length));
+
+  const kept = readings.filter((_, i) => !dbg.discarded.has(i));
+  const stats = seriesStats(kept);
+  const defaultBins = Math.max(1, Math.min(20, Math.round(Math.sqrt(kept.length || 1))));
+  const bins = dbg.bins && dbg.bins > 0 ? dbg.bins : defaultBins;
+  const hist = kept.length > 0 ? histogram(kept, bins) : null;
+
+  const ordered = readings
+    .map((v, i) => ({ v, i }))
+    .sort((a, b) => a.v - b.v);
+  const items = ordered
+    .map(({ v, i }) => {
+      const off = dbg.discarded.has(i);
+      return `<li class="series-point ${off ? "discarded" : ""}">
+        <span class="series-point-value">${v.toFixed(3)} s</span>
+        <button type="button" class="series-point-toggle" data-index="${i}">${off ? "restaurar" : "descartar"}</button>
+      </li>`;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <div class="series-debug-head">
+      <strong>Depuración de la serie</strong>
+      <span class="submission-meta">n=${stats.n} · x̄=${Number.isFinite(stats.mean) ? stats.mean.toFixed(4) : "—"} s · s=${Number.isFinite(stats.std) ? stats.std.toFixed(4) : "—"} s · s/√n=${Number.isFinite(stats.stdMean) ? stats.stdMean.toFixed(4) : "—"} s</span>
+    </div>
+    <div class="series-debug-grid">
+      <div class="series-hist">
+        <label class="hist-bins-label">Intervalos (bins):
+          <input type="number" class="hist-bins" min="1" max="40" value="${bins}" />
+        </label>
+        ${hist ? histogramSvg(hist, stats.mean, stats.std, kept.length) : `<p class="submission-meta">Sin datos conservados.</p>`}
+      </div>
+      <ol class="series-point-list">${items}</ol>
+    </div>
+  `;
+
+  // Cambiar nº de bins.
+  container.querySelector(".hist-bins")?.addEventListener("change", (e) => {
+    const n = Math.round(Number(e.target.value));
+    dbg.bins = Number.isFinite(n) && n >= 1 ? n : 0;
+    renderSeriesDebug(row, quantityId, readings);
+  });
+  // Descartar/restaurar un punto.
+  container.querySelectorAll(".series-point-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const i = Number(btn.dataset.index);
+      if (dbg.discarded.has(i)) dbg.discarded.delete(i);
+      else dbg.discarded.add(i);
+      renderSeriesDebug(row, quantityId, readings);
+    });
+  });
+}
+
+// SVG del histograma (barras) con la curva normal superpuesta (densidad escalada a conteos
+// esperados = pdf · n · ancho_bin), para comparar la distribución con la normal teórica.
+function histogramSvg(hist, mean, std, n) {
+  const W = 340;
+  const H = 180;
+  const pad = 28;
+  const innerW = W - 2 * pad;
+  const innerH = H - 2 * pad;
+  const { min, max, width, counts } = hist;
+  const curve = std > 0 ? normalCurve(mean, std, min, max, 80) : [];
+  const curveCounts = curve.map(([x, y]) => [x, y * n * width]);
+  const maxCount = Math.max(...counts, ...curveCounts.map((p) => p[1]), 1);
+  const spanX = max - min || 1;
+  const sx = (x) => pad + ((x - min) / spanX) * innerW;
+  const sy = (c) => H - pad - (c / maxCount) * innerH;
+  const bars = counts
+    .map((c, i) => {
+      const x0 = sx(min + i * width);
+      const x1 = sx(min + (i + 1) * width);
+      const y = sy(c);
+      const w = Math.max(0, x1 - x0 - 1);
+      return `<rect x="${x0.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${(H - pad - y).toFixed(1)}" class="hist-bar" />`;
+    })
+    .join("");
+  const poly = curveCounts.map(([x, c]) => `${sx(x).toFixed(1)},${sy(c).toFixed(1)}`).join(" ");
+  const curveEl = poly ? `<polyline points="${poly}" class="normal-curve" fill="none" />` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" class="histogram" role="img" aria-label="Histograma con curva normal">
+    ${bars}${curveEl}
+    <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" class="hist-axis" />
+  </svg>`;
 }
 
 // Tabla de serie para prácticas de regresión: una columna por magnitud y una fila por punto.
@@ -2609,7 +2765,10 @@ function collectMeasurements() {
     if (row.dataset.isChrono === "1") {
       const mode = row.querySelector(".chrono-mode")?.value ?? "consecutivo";
       const chrono = state.chronometers.get(row.dataset.quantityId);
-      const values = chrono ? chrono.readings(mode) : [];
+      const all = chrono ? chrono.readings(mode) : [];
+      // Sólo se envían las lecturas conservadas (las descartadas en la depuración se omiten).
+      const dbg = state.seriesDebug.get(row.dataset.quantityId);
+      const values = dbg ? all.filter((_, i) => !dbg.discarded.has(i)) : all;
       return {
         quantity_id: row.dataset.quantityId,
         instrument_id: row.querySelector(".measure-instrument")?.value || null,
@@ -2635,6 +2794,25 @@ function collectMeasurements() {
       given_u: null,
     };
   });
+}
+
+// Recolecta los metadatos de depuración por magnitud de cronómetro (bins + valores
+// descartados), para persistirlos junto con la entrega. Devuelve null si no hay nada.
+function collectMeta() {
+  const meta = {};
+  measurementFields.querySelectorAll('.measurement-row[data-is-chrono="1"]').forEach((row) => {
+    const qid = row.dataset.quantityId;
+    const dbg = state.seriesDebug.get(qid);
+    if (!dbg) return;
+    const mode = row.querySelector(".chrono-mode")?.value ?? "consecutivo";
+    const chrono = state.chronometers.get(qid);
+    const all = chrono ? chrono.readings(mode) : [];
+    const discarded = [...dbg.discarded].filter((i) => i < all.length).map((i) => all[i]);
+    if (discarded.length > 0 || (dbg.bins && dbg.bins > 0)) {
+      meta[qid] = { bins: dbg.bins || null, discarded };
+    }
+  });
+  return Object.keys(meta).length ? meta : null;
 }
 
 // Deshabilita Entregar mientras corre la operación, para evitar doble envío.
@@ -2699,6 +2877,7 @@ async function submitFormSubmission() {
       group_id: groupId,
       practice_id: practiceSelect.value,
       measurements,
+      meta: collectMeta(),
     });
     submitStatus.textContent = "Entrega guardada";
     renderAnalysis(latestResult, submission);
@@ -2713,6 +2892,38 @@ async function submitFormSubmission() {
 
 // Markup del resultado de una entrega por formulario: tabla de magnitudes con sus
 // incertidumbres, mensurandos derivados (`valor ± U`) y advertencias.
+// Bloque con la depuración de series persistida (bins + valores descartados), si la entrega
+// la trae. Mapea quantity_id → etiqueta usando el análisis o la definición de la práctica.
+function measurementMetaMarkup(submission, definition) {
+  const meta = submission.measurement_meta;
+  if (!meta || typeof meta !== "object") return "";
+  const labelFor = (qid) => {
+    const fromAnalysis = (submission.analysis?.quantities ?? []).find((q) => q.quantity_id === qid);
+    if (fromAnalysis) return `${fromAnalysis.name} (${fromAnalysis.symbol})`;
+    const fromDef = (definition?.quantities ?? []).find((q) => q.id === qid);
+    if (fromDef) return `${fromDef.name} (${fromDef.symbol})`;
+    return qid;
+  };
+  const blocks = Object.entries(meta)
+    .map(([qid, m]) => {
+      const discarded = m?.discarded ?? [];
+      const bins = m?.bins;
+      if (!discarded.length && !bins) return "";
+      return `<div class="meta-block">
+        <strong>${escapeHtml(labelFor(qid))}</strong>${bins ? ` <span class="submission-meta">· ${escapeHtml(String(bins))} intervalos</span>` : ""}
+        ${
+          discarded.length
+            ? `<div class="submission-meta">Puntos descartados (${discarded.length}): ${discarded.map((v) => Number(v).toFixed(3)).join(", ")}</div>`
+            : `<div class="submission-meta">Sin puntos descartados.</div>`
+        }
+      </div>`;
+    })
+    .filter(Boolean)
+    .join("");
+  if (!blocks) return "";
+  return `<section class="panel meta-panel"><h4>Depuración de series</h4>${blocks}</section>`;
+}
+
 function formAnalysisMarkup(analysis) {
   const quantities = analysis.quantities ?? [];
   const derived = analysis.derived ?? [];

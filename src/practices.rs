@@ -321,15 +321,28 @@ async fn seed_practice(
 pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     // P1 — Péndulo simple: T medido con cronómetro (réplicas), L dado por cátedra.
     // g = 4*pi^2*L/T^2 ; T y L en SI (s y m) para que g salga en m/s^2.
+    // Tres secciones que comparten datos: (1) Periodos -> T (cronometro, replicas);
+    // (2) Amortiguamiento -> t_med (t1/2) da delta=ln2/t1/2, gamma=2*delta y Q=w0/gamma;
+    // (3) Gravedad -> g = 4*pi^2*L/T^2 (usa T medio y L dado por catedra).
     seed_practice(
         pool,
         "p1-estadistica",
         &[
             qty("T", "Periodo", "s", true, "tiempo"),
             qty_given("L", "Longitud del pendulo", "m", "longitud"),
+            qty(
+                "t_med",
+                "Tiempo de semiamplitud (t1/2)",
+                "s",
+                false,
+                "tiempo",
+            ),
         ],
         &[
             res("Tmedio", "Periodo medio", "s", "T"),
+            res("delta", "Constante de amortiguamiento", "1/s", "math::ln(2)/t_med"),
+            res("gamma", "Coeficiente de amortiguamiento", "1/s", "2*math::ln(2)/t_med"),
+            res("Q", "Factor de calidad", "", "pi*t_med/(T*math::ln(2))"),
             res("g", "Aceleracion de gravedad", "m/s2", "4*pi^2*L/T^2"),
         ],
     )
@@ -741,21 +754,25 @@ mod tests {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
         let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-        // P1 péndulo: T (repeated) + L (is_given).
-        assert_eq!(def.quantities.len(), 2);
+        // P1 péndulo: T (repeated) + L (is_given) + t_med (t1/2).
+        assert_eq!(def.quantities.len(), 3);
         let t = def.quantities.iter().find(|q| q.symbol == "T").unwrap();
         assert!(t.repeated);
         let l = def.quantities.iter().find(|q| q.symbol == "L").unwrap();
         assert!(l.is_given);
-        assert_eq!(def.results.len(), 2);
-        assert!(def.results.iter().any(|r| r.symbol == "Tmedio"));
-        assert!(def.results.iter().any(|r| r.symbol == "g"));
+        assert_eq!(def.results.len(), 5);
+        for symbol in ["Tmedio", "delta", "gamma", "Q", "g"] {
+            assert!(
+                def.results.iter().any(|r| r.symbol == symbol),
+                "falta el resultado {symbol}"
+            );
+        }
 
         // Segunda pasada: no debe duplicar.
         seed_definitions(&pool).await.unwrap();
         let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-        assert_eq!(def2.quantities.len(), 2);
-        assert_eq!(def2.results.len(), 2);
+        assert_eq!(def2.quantities.len(), 3);
+        assert_eq!(def2.results.len(), 5);
     }
 
     #[tokio::test]

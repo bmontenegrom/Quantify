@@ -982,3 +982,133 @@ textarea {
 .student-results-status {
   color: var(--danger);
 }
+
+/* Secciones temáticas dentro del formulario de entrega (p. ej. el péndulo). */
+.measurement-section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: #fbfdff;
+}
+
+.measurement-section-title {
+  margin: 0 0 10px;
+  color: var(--accent-strong);
+  font-size: 0.95rem;
+}
+
+/* Depuración de una serie repetida: lista ordenada + histograma + curva normal. */
+.series-debug {
+  margin-top: 12px;
+}
+
+.series-debug:empty {
+  margin-top: 0;
+}
+
+.series-debug-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.series-debug-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 14px;
+  align-items: start;
+}
+
+.hist-bins-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hist-bins {
+  width: 80px;
+}
+
+.histogram {
+  width: 100%;
+  height: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.hist-bar {
+  fill: var(--accent);
+  opacity: 0.7;
+}
+
+.normal-curve {
+  stroke: var(--danger);
+  stroke-width: 2;
+}
+
+.hist-axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.series-point-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.series-point {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.series-point:last-child {
+  border-bottom: 0;
+}
+
+.series-point.discarded {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.series-point-toggle {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 0.78rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+/* Bloque de depuración persistida en la ficha de la entrega. */
+.meta-panel {
+  margin-top: 16px;
+}
+
+.meta-block {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.meta-block:last-child {
+  border-bottom: 0;
+}
+
+@media (max-width: 820px) {
+  .series-debug-grid {
+    grid-template-columns: 1fr;
+  }
+}

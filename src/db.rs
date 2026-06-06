@@ -387,6 +387,7 @@ pub struct SubmissionRecord {
     pub score: Option<f64>,
     pub submitted_at: DateTime<Utc>,
     pub reviewed_at: Option<DateTime<Utc>>,
+    pub measurement_meta_json: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -414,6 +415,8 @@ pub struct SubmissionDetail {
     pub score: Option<f64>,
     pub submitted_at: DateTime<Utc>,
     pub reviewed_at: Option<DateTime<Utc>>,
+    /// Metadatos de depuración por magnitud (bins + valores descartados), si la entrega los trae.
+    pub measurement_meta: Option<serde_json::Value>,
 }
 
 /// Un mensurando final calculado por el estudiante (valor ± U), por símbolo.
@@ -681,6 +684,9 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
+    // Metadatos de depuración por magnitud (JSON): nº de bins del histograma y valores
+    // descartados por el alumno. Visible para el docente. NULL en entregas sin depuración.
+    add_column_if_missing(pool, "submissions", "measurement_meta_json", "TEXT").await?;
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
     // Fórmulas de eje (x, y) por punto, solo para prácticas `regresion_lineal`.
@@ -2412,7 +2418,8 @@ pub async fn submission_detail(
             s.teacher_comment,
             s.score,
             s.submitted_at,
-            s.reviewed_at
+            s.reviewed_at,
+            s.measurement_meta_json
         FROM submissions s
         JOIN practices p ON p.id = s.practice_id
         WHERE s.id = ?1
@@ -2426,6 +2433,10 @@ pub async fn submission_detail(
         return Ok(None);
     };
     let analysis = serde_json::from_str(&row.analysis_json)?;
+    let measurement_meta = match &row.measurement_meta_json {
+        Some(json) => serde_json::from_str(json).ok(),
+        None => None,
+    };
     let student_results = student_results_for(pool, &row.id).await?;
     Ok(Some(SubmissionDetail {
         id: row.id,
@@ -2444,6 +2455,7 @@ pub async fn submission_detail(
         score: row.score,
         submitted_at: row.submitted_at,
         reviewed_at: row.reviewed_at,
+        measurement_meta,
     }))
 }
 

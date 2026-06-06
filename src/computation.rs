@@ -34,6 +34,10 @@ pub struct FormSubmissionInput {
     pub group_id: String,
     pub practice_id: String,
     pub measurements: Vec<MeasurementInput>,
+    /// Metadatos de depuración por magnitud (bins del histograma + valores descartados).
+    /// Se persiste tal cual para que el docente lo vea; opcional.
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
 }
 
 /// Incertidumbre calculada de una magnitud medida directamente.
@@ -509,6 +513,10 @@ pub async fn create_form_submission(
 ) -> anyhow::Result<db::SubmissionDetail> {
     let analysis = analyze(pool, &input.practice_id, &input.measurements).await?;
     let analysis_json = serde_json::to_string(&analysis)?;
+    let meta_json = match &input.meta {
+        Some(value) => Some(serde_json::to_string(value)?),
+        None => None,
+    };
 
     let id = Uuid::new_v4().to_string();
     let now = Utc::now();
@@ -519,7 +527,8 @@ pub async fn create_form_submission(
         r#"
         INSERT INTO submissions (
             id, student_name, group_name, course, practice_id, file_name, csv_path,
-            analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id, entry_mode
+            analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
+            entry_mode, measurement_meta_json
         )
         SELECT
             ?1,
@@ -535,7 +544,8 @@ pub async fn create_form_submission(
             u.id,
             c.id,
             g.id,
-            'form'
+            'form',
+            ?8
         FROM users u, lab_groups g, courses c
         WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
         "#,
@@ -547,6 +557,7 @@ pub async fn create_form_submission(
     .bind(&input.practice_id)
     .bind(&analysis_json)
     .bind(now)
+    .bind(&meta_json)
     .execute(&mut *tx)
     .await?;
 
@@ -855,11 +866,16 @@ mod tests {
                 values: vec![5.0, 5.2, 4.9],
                 given_u: None,
             }],
+            meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         assert_eq!(detail.entry_mode, "form");
         // El analysis es el FormAnalysis serializado (tiene "quantities").
         assert!(detail.analysis.get("quantities").is_some());
+        // La meta de depuración se persiste y se lee de vuelta intacta.
+        let meta = detail.measurement_meta.expect("meta persistida");
+        assert_eq!(meta["q1"]["bins"], 8);
+        assert_eq!(meta["q1"]["discarded"][0], 9.9);
     }
 
     #[tokio::test]
@@ -908,6 +924,7 @@ mod tests {
                 values: vec![1.0],
                 given_u: None,
             }],
+            meta: None,
         };
         assert!(create_form_submission(&pool, &user, input).await.is_err());
         // Rollback: no debe quedar ninguna entrega ni medición.
