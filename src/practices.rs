@@ -897,7 +897,7 @@ mod tests {
                     quantity_id: q.id.clone(),
                     instrument_id: None,
                     scale_id: None,
-                    values: if q.is_given { vec![v] } else { vec![v] },
+                    values: vec![v],
                     given_u: if q.is_given { Some(0.0) } else { None },
                 }
             })
