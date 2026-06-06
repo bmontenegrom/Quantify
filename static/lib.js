@@ -185,14 +185,46 @@ export function analysisKindLabel(kind) {
 
 /**
  * Instrumentos compatibles con una magnitud física (p. ej. "longitud"): filtra por el campo
- * `quantity` del instrumento. Si ninguno coincide (o no se da magnitud), devuelve todos, para
- * no bloquear la elección del estudiante.
+ * `quantity` del instrumento. Solo muestra los de la magnitud indicada; si no se da magnitud
+ * devuelve todos. Nunca hace fallback al catálogo completo.
  */
 export function compatibleInstruments(instruments, magnitude) {
   const list = instruments ?? [];
   if (!magnitude) return list;
-  const matches = list.filter((instrument) => instrument.quantity === magnitude);
-  return matches.length > 0 ? matches : list;
+  return list.filter((instrument) => instrument.quantity === magnitude);
+}
+
+/**
+ * Prefijos SI disponibles para seleccionar la escala de una lectura.
+ * `factor` es el multiplicador para convertir a la unidad base (SI).
+ */
+export const SI_PREFIXES = [
+  { label: "T",  factor: 1e12  },
+  { label: "G",  factor: 1e9   },
+  { label: "M",  factor: 1e6   },
+  { label: "k",  factor: 1e3   },
+  { label: "",   factor: 1     },
+  { label: "m",  factor: 1e-3  },
+  { label: "µ",  factor: 1e-6  },
+  { label: "n",  factor: 1e-9  },
+  { label: "p",  factor: 1e-12 },
+];
+
+/**
+ * Retorna el factor multiplicador para un prefijo SI dado.
+ * Si el prefijo no se reconoce retorna 1 (sin prefijo).
+ *
+ * @param {string} prefix - Etiqueta del prefijo (p. ej. "m", "k", "µ").
+ * @returns {number}
+ *
+ * @example
+ * console.assert(prefixFactor("k") === 1e3);
+ * console.assert(prefixFactor("µ") === 1e-6);
+ * console.assert(prefixFactor("") === 1);
+ * console.assert(prefixFactor("?") === 1);
+ */
+export function prefixFactor(prefix) {
+  return SI_PREFIXES.find((p) => p.label === prefix)?.factor ?? 1;
 }
 
 /**
@@ -240,6 +272,66 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
     line: { x1: sx(minX), y1: sy(lineYmin), x2: sx(maxX), y2: sy(lineYmax) },
     bounds: { minX, maxX, minY, maxY },
   };
+}
+
+/**
+ * Estadísticos de una serie de medidas: `n`, media (`mean`), desviación estándar muestral
+ * (`std`, con divisor n-1) y error estándar de la media (`stdMean = s/√n`). Ignora valores no
+ * finitos. Devuelve `NaN` en mean/std si no hay datos; `std=stdMean=0` si hay un solo dato.
+ * Función pura (sin DOM): la lista ordenada y el histograma del formulario se arman con esto.
+ */
+export function seriesStats(values) {
+  const xs = (values ?? []).filter((v) => Number.isFinite(v));
+  const n = xs.length;
+  if (n === 0) return { n: 0, mean: NaN, std: NaN, stdMean: NaN };
+  const mean = xs.reduce((a, b) => a + b, 0) / n;
+  if (n < 2) return { n, mean, std: 0, stdMean: 0 };
+  const variance = xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1);
+  const std = Math.sqrt(variance);
+  return { n, mean, std, stdMean: std / Math.sqrt(n) };
+}
+
+/**
+ * Histograma de `values` en `bins` intervalos iguales sobre `[min, max]` de los datos. Devuelve
+ * `{ min, max, bins, width, counts, edges }` (counts.length === bins, edges.length === bins+1).
+ * El valor máximo cae en el último bin. Si todos los valores son iguales devuelve un único bin.
+ * Devuelve `null` si no hay datos finitos o `bins < 1`. Función pura.
+ */
+export function histogram(values, bins) {
+  const xs = (values ?? []).filter((v) => Number.isFinite(v));
+  if (xs.length === 0 || bins < 1) return null;
+  const min = Math.min(...xs);
+  const max = Math.max(...xs);
+  if (min === max) {
+    return { min, max, bins: 1, width: 0, counts: [xs.length], edges: [min, max] };
+  }
+  const width = (max - min) / bins;
+  const counts = new Array(bins).fill(0);
+  for (const x of xs) {
+    let idx = Math.floor((x - min) / width);
+    if (idx >= bins) idx = bins - 1; // el máximo entra en el último bin
+    if (idx < 0) idx = 0;
+    counts[idx] += 1;
+  }
+  const edges = Array.from({ length: bins + 1 }, (_, i) => min + i * width);
+  return { min, max, bins, width, counts, edges };
+}
+
+/**
+ * Muestrea la densidad normal (pdf) de media `mean` y desviación `std` en `steps+1` puntos
+ * equiespaciados de `[min, max]`. Devuelve pares `[x, y]` (y = densidad). Lista vacía si
+ * `std <= 0` o `max <= min`. Función pura: se usa para superponer la curva al histograma.
+ */
+export function normalCurve(mean, std, min, max, steps = 60) {
+  if (!(std > 0) || !(max > min)) return [];
+  const coef = 1 / (std * Math.sqrt(2 * Math.PI));
+  const out = [];
+  for (let i = 0; i <= steps; i++) {
+    const x = min + ((max - min) * i) / steps;
+    const y = coef * Math.exp(-((x - mean) ** 2) / (2 * std * std));
+    out.push([x, y]);
+  }
+  return out;
 }
 
 /** Diferencia relativa porcentual `(b - a) / a * 100`, o `null` si no es calculable. */

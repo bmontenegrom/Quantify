@@ -25,35 +25,45 @@
     </section>
 
     <div id="app-shell" class="hidden">
-    <header class="topbar">
-      <div>
+    <button id="nav-toggle" class="nav-toggle" type="button" aria-label="Abrir menú" aria-controls="sidebar" aria-expanded="false">☰</button>
+
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-brand">
         <p class="eyebrow">Laboratorio de fisica</p>
         <h1>Quantify</h1>
       </div>
-      <div class="topbar-actions">
-        <nav class="tabs" aria-label="Vistas">
-          <button class="tab active" data-view="submissions">Entregas</button>
-          <button class="tab teacher-only" data-view="gradebook">Cargar notas</button>
-          <button class="tab teacher-only" data-view="students">Estudiantes</button>
-          <button class="tab teacher-only" data-view="groups">Grupos</button>
-          <button class="tab teacher-only" data-view="courses">Cursos</button>
-          <button class="tab teacher-only" data-view="users">Usuarios</button>
-          <button class="tab teacher-only" data-view="practices">Prácticas</button>
-          <button class="tab teacher-only" data-view="instruments">Instrumentos</button>
-          <button class="tab" data-view="account">Cuenta</button>
-        </nav>
-        <div class="session-box">
-          <span id="session-user"></span>
-          <button id="logout-button" type="button">Salir</button>
-        </div>
+
+      <nav class="nav" aria-label="Vistas">
+        <!-- Estudiante -->
+        <p class="nav-group-title student-only">Prácticas</p>
+        <div id="practice-nav-children" class="nav-children student-only"></div>
+        <button class="tab student-only" data-view="submissions">Mis entregas</button>
+
+        <!-- Docente (lista plana) -->
+        <button class="tab teacher-only" data-view="submissions">Entregas</button>
+        <button class="tab teacher-only" data-view="gradebook">Cargar notas</button>
+        <button class="tab teacher-only" data-view="students">Estudiantes</button>
+        <button class="tab teacher-only" data-view="groups">Grupos</button>
+        <button class="tab teacher-only" data-view="courses">Cursos</button>
+        <button class="tab teacher-only" data-view="users">Usuarios</button>
+        <button class="tab teacher-only" data-view="practices">Prácticas</button>
+        <button class="tab teacher-only" data-view="instruments">Instrumentos</button>
+
+        <!-- Compartido -->
+        <button class="tab" data-view="account">Datos</button>
+      </nav>
+
+      <div class="session-box">
+        <span id="session-user"></span>
+        <button id="logout-button" type="button">Salir</button>
       </div>
-    </header>
+    </aside>
 
     <main>
-      <section id="submissions-view" class="view active">
+      <section id="practica-view" class="view">
         <div class="section-head">
-          <h2 id="submissions-title">Entregas</h2>
-          <p id="submissions-subtitle">Carga tus medidas y obtene las incertidumbres.</p>
+          <h2 id="practica-title">Nueva entrega</h2>
+          <p>Carga tus medidas y obtene las incertidumbres.</p>
         </div>
 
         <form id="submission-form" class="panel">
@@ -67,14 +77,17 @@
               <select name="group_id" id="group-select" required></select>
             </label>
             <label>
-              Practica
-              <select name="practice_id" id="practice-select" required></select>
-            </label>
-            <label>
               Mesa
               <select name="table_number" id="table-select" required></select>
             </label>
           </div>
+          <!-- La práctica se infiere del nav lateral / las tabs; el select queda oculto
+               como fuente de verdad interna. -->
+          <label class="hidden">
+            <select name="practice_id" id="practice-select"></select>
+          </label>
+
+          <div id="practice-part-tabs" class="practice-part-tabs hidden"></div>
 
           <div id="measurement-fields" class="measurement-fields"></div>
 
@@ -85,6 +98,13 @@
         </form>
 
         <section id="latest-result" class="panel hidden" aria-live="polite"></section>
+      </section>
+
+      <section id="submissions-view" class="view active">
+        <div class="section-head">
+          <h2 id="submissions-title">Entregas</h2>
+          <p id="submissions-subtitle">Carga tus medidas y obtene las incertidumbres.</p>
+        </div>
 
         <section class="panel catalog-panel">
           <div class="list-head">
@@ -94,9 +114,7 @@
           <div id="submission-list" class="submission-list"></div>
         </section>
 
-        <section id="submission-detail" class="panel detail-empty hidden">
-          Selecciona una entrega para ver el detalle.
-        </section>
+        <section id="submission-workspace" class="panel hidden"></section>
       </section>
 
       <section id="gradebook-view" class="view">

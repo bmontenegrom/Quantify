@@ -168,6 +168,32 @@ pub fn measured_quantity(values: &[f64], spec: Option<&ScaleSpec>) -> QuantityRe
     }
 }
 
+/// Resultado de una magnitud dada por la cátedra como `valor ± U` (incertidumbre expandida).
+/// El alumno ingresa `U` directamente; internamente se guarda `u_c = U / k`.
+///
+/// # Ejemplos
+///
+/// ```
+/// use quantify::uncertainty::{measured_given, EXPANSION_K};
+/// let r = measured_given(10.0, 2.0);
+/// assert_eq!(r.mean, 10.0);
+/// assert_eq!(r.u_expanded, 2.0);
+/// assert!((r.u_c - 1.0).abs() < 1e-12); // u_c = U/k = 2/2
+/// assert_eq!(r.u_a, 0.0);
+/// ```
+pub fn measured_given(value: f64, u_expanded: f64) -> QuantityResult {
+    let u_c = u_expanded / EXPANSION_K;
+    QuantityResult {
+        n: 1,
+        mean: value,
+        s: 0.0,
+        u_a: 0.0,
+        u_b: u_c,
+        u_c,
+        u_expanded,
+    }
+}
+
 /// Propagacion de varianzas para `Q = f(x_1, ..., x_n)` por diferencias finitas
 /// centradas. `means` son los valores medios de las variables de entrada y `us`
 /// sus incertidumbres estandar. Devuelve `(valor, u_Q)`.

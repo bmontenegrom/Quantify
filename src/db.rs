@@ -32,9 +32,11 @@ pub struct PracticeQuantity {
     pub unit: String,
     /// `true` si admite varias réplicas (tipo A); `false` para medida única.
     pub repeated: bool,
-    /// Magnitud física (para sugerir instrumentos compatibles en Fase 4).
+    /// Magnitud física (para sugerir instrumentos compatibles).
     pub quantity: Option<String>,
     pub position: i64,
+    /// `true` si es un dato dado (valor ± U entregado por la cátedra), no medido por el alumno.
+    pub is_given: bool,
 }
 
 /// Mensurando derivado de una práctica (determinación indirecta).
@@ -158,6 +160,7 @@ pub struct Course {
     pub name: String,
     pub term: String,
     pub active: bool,
+    pub submission_edit_hours: f64,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -193,6 +196,7 @@ pub struct CourseSummary {
     pub name: String,
     pub term: String,
     pub active: bool,
+    pub submission_edit_hours: f64,
     pub members: Vec<AuthUser>,
     pub groups: Vec<GroupSummary>,
     pub practices: Vec<Practice>,
@@ -236,6 +240,9 @@ pub struct CreateCourse {
 pub struct UpdateCourse {
     pub name: String,
     pub term: String,
+    /// Horas de edición de entregas (opcional; si viene, se acota a 0..=72).
+    #[serde(default)]
+    pub submission_edit_hours: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -385,6 +392,9 @@ pub struct SubmissionRecord {
     pub score: Option<f64>,
     pub submitted_at: DateTime<Utc>,
     pub reviewed_at: Option<DateTime<Utc>>,
+    pub measurement_meta_json: Option<String>,
+    pub course_id: Option<String>,
+    pub submission_edit_hours: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -412,6 +422,15 @@ pub struct SubmissionDetail {
     pub score: Option<f64>,
     pub submitted_at: DateTime<Utc>,
     pub reviewed_at: Option<DateTime<Utc>>,
+    /// Metadatos de depuración por magnitud (bins + valores descartados), si la entrega los trae.
+    pub measurement_meta: Option<serde_json::Value>,
+    /// Instante hasta el que el alumno puede editar (submitted_at + horas del curso).
+    pub editable_until: Option<DateTime<Utc>>,
+    /// True si la ventana sigue abierta y la entrega es editable (estado pendiente, no visible).
+    /// El endpoint de edición igual valida la propiedad del alumno.
+    pub can_edit: bool,
+    /// Lecturas crudas (sólo entregas por formulario), para prefillear el form al editar.
+    pub measurements: Vec<SubmissionMeasurement>,
 }
 
 /// Un mensurando final calculado por el estudiante (valor ± U), por símbolo.
@@ -420,6 +439,17 @@ pub struct StudentResult {
     pub symbol: String,
     pub value: f64,
     pub u_expanded: Option<f64>,
+}
+
+/// Una lectura cruda persistida de una entrega por formulario (para prefill al editar).
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct SubmissionMeasurement {
+    pub quantity_id: String,
+    pub instrument_id: Option<String>,
+    pub scale_id: Option<String>,
+    pub replicate_index: i64,
+    pub value: f64,
+    pub value_u: Option<f64>,
 }
 
 /// Una fila del cuerpo para guardar los cálculos del estudiante.
@@ -679,6 +709,17 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
+    // Metadatos de depuración por magnitud (JSON): nº de bins del histograma y valores
+    // descartados por el alumno. Visible para el docente. NULL en entregas sin depuración.
+    add_column_if_missing(pool, "submissions", "measurement_meta_json", "TEXT").await?;
+    // Horas durante las que el alumno puede editar su entrega (desde submitted_at). Default 4h.
+    add_column_if_missing(
+        pool,
+        "courses",
+        "submission_edit_hours",
+        "REAL NOT NULL DEFAULT 4",
+    )
+    .await?;
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
     // Fórmulas de eje (x, y) por punto, solo para prácticas `regresion_lineal`.
@@ -792,6 +833,17 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
+
+    // Magnitud dada por la cátedra (valor ± U directo, sin instrumento ni réplicas).
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "is_given",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+    // Incertidumbre expandida U del dato aportado por el alumno.
+    add_column_if_missing(pool, "submission_measurements", "value_u", "REAL").await?;
 
     sqlx::query(
         r#"
@@ -1118,19 +1170,26 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     let practices = [
         (
             "p1-estadistica",
-            "Tratamiento Estadistico de Datos",
-            "Medidas directas con replicas e instrumentos, incertidumbres tipo A y B, y determinacion indirecta por propagacion de varianzas.",
+            "Tratamiento Estadistico - Pendulo Simple",
+            "Medicion del periodo T con replicas (cronometro), longitud L dada por catedra; incertidumbres tipo A y B, calculo indirecto de g = 4*pi^2*L/T^2.",
             "estadistico",
             None,
             None,
         ),
-        // P2 y P3-parte1 se modelan con el camino `estadistico` (medidas directas + propagacion),
-        // que es lo que sus definiciones sembradas calculan. La parte con ajuste de P2 (P(R))
-        // pasara a `regresion_lineal` mas adelante.
+        // P2-serie: R1, R2, R3 en serie con RA; I = Vg/(R1+R2+R3+RA) y V=I*R en cada resistencia.
+        (
+            "p2-serie",
+            "CC - Circuito en Serie",
+            "Circuito en serie: R1, R2 y R3 en serie con RA (resistencia interna del amperimetro). I y caidas de tension por leyes de circuito.",
+            "estadistico",
+            None,
+            None,
+        ),
+        // P2-paralelo: R2 y R3 en paralelo con el circuito serie. Req y I calculados.
         (
             "p2-corriente-continua",
-            "Circuitos de Corriente Continua",
-            "Medidas de voltaje y corriente con tester; intensidad teorica por leyes de circuito.",
+            "CC - Circuito en Paralelo",
+            "Circuito mixto: R2 y R3 en paralelo, en serie con R1 y RA. Req e I calculados por leyes de circuito.",
             "estadistico",
             None,
             None,
@@ -1265,6 +1324,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
 
     for practice in [
         "p1-estadistica",
+        "p2-serie",
         "p2-corriente-continua",
         "p3-relajacion",
         "p3-relajacion-desfasaje",
@@ -1350,7 +1410,7 @@ pub async fn create_course(pool: &SqlitePool, input: CreateCourse) -> anyhow::Re
     .await?;
 
     Ok(
-        sqlx::query_as::<_, Course>("SELECT id, name, term, active FROM courses WHERE id = ?1")
+        sqlx::query_as::<_, Course>("SELECT id, name, term, active, submission_edit_hours FROM courses WHERE id = ?1")
             .bind(id)
             .fetch_one(pool)
             .await?,
@@ -1363,17 +1423,20 @@ pub async fn update_course(
     course_id: &str,
     input: UpdateCourse,
 ) -> anyhow::Result<Option<Course>> {
+    let edit_hours = input.submission_edit_hours.map(|h| h.clamp(0.0, 72.0));
     let result = sqlx::query(
         r#"
         UPDATE courses
         SET name = ?2,
-            term = ?3
+            term = ?3,
+            submission_edit_hours = COALESCE(?4, submission_edit_hours)
         WHERE id = ?1
         "#,
     )
     .bind(course_id)
     .bind(input.name.trim())
     .bind(input.term.trim())
+    .bind(edit_hours)
     .execute(pool)
     .await?;
 
@@ -1382,7 +1445,7 @@ pub async fn update_course(
     }
 
     Ok(Some(
-        sqlx::query_as::<_, Course>("SELECT id, name, term, active FROM courses WHERE id = ?1")
+        sqlx::query_as::<_, Course>("SELECT id, name, term, active, submission_edit_hours FROM courses WHERE id = ?1")
             .bind(course_id)
             .fetch_one(pool)
             .await?,
@@ -1889,14 +1952,14 @@ pub async fn gradebook_for_user(
 ) -> anyhow::Result<Vec<CourseGradebook>> {
     let courses = if matches!(user.role.as_str(), "docente" | "admin") {
         sqlx::query_as::<_, Course>(
-            "SELECT id, name, term, active FROM courses ORDER BY term DESC, name",
+            "SELECT id, name, term, active, submission_edit_hours FROM courses ORDER BY term DESC, name",
         )
         .fetch_all(pool)
         .await?
     } else {
         sqlx::query_as::<_, Course>(
             r#"
-            SELECT DISTINCT c.id, c.name, c.term, c.active
+            SELECT DISTINCT c.id, c.name, c.term, c.active, c.submission_edit_hours
             FROM courses c
             JOIN lab_groups g ON g.course_id = c.id
             JOIN group_members gm ON gm.group_id = g.id
@@ -2044,7 +2107,7 @@ async fn student_grade_summary(
 /// Resúmenes de todos los cursos (vista docente/admin), ordenados por período y nombre.
 async fn all_course_summaries(pool: &SqlitePool) -> anyhow::Result<Vec<CourseSummary>> {
     let courses = sqlx::query_as::<_, Course>(
-        "SELECT id, name, term, active FROM courses ORDER BY term DESC, name",
+        "SELECT id, name, term, active, submission_edit_hours FROM courses ORDER BY term DESC, name",
     )
     .fetch_all(pool)
     .await?;
@@ -2058,7 +2121,7 @@ async fn student_course_summaries(
 ) -> anyhow::Result<Vec<CourseSummary>> {
     let courses = sqlx::query_as::<_, Course>(
         r#"
-        SELECT DISTINCT c.id, c.name, c.term, c.active
+        SELECT DISTINCT c.id, c.name, c.term, c.active, c.submission_edit_hours
         FROM courses c
         JOIN course_members cm ON cm.course_id = c.id
         WHERE cm.user_id = ?1 AND c.active = 1
@@ -2088,6 +2151,7 @@ async fn course_summaries(
             name: course.name,
             term: course.term,
             active: course.active,
+            submission_edit_hours: course.submission_edit_hours,
             members,
             groups,
             practices,
@@ -2391,9 +2455,13 @@ pub async fn submission_detail(
             s.teacher_comment,
             s.score,
             s.submitted_at,
-            s.reviewed_at
+            s.reviewed_at,
+            s.measurement_meta_json,
+            s.course_id,
+            COALESCE(c.submission_edit_hours, 4) AS submission_edit_hours
         FROM submissions s
         JOIN practices p ON p.id = s.practice_id
+        LEFT JOIN courses c ON c.id = s.course_id
         WHERE s.id = ?1
         "#,
     )
@@ -2405,7 +2473,20 @@ pub async fn submission_detail(
         return Ok(None);
     };
     let analysis = serde_json::from_str(&row.analysis_json)?;
+    let measurement_meta = match &row.measurement_meta_json {
+        Some(json) => serde_json::from_str(json).ok(),
+        None => None,
+    };
     let student_results = student_results_for(pool, &row.id).await?;
+    let measurements = measurements_for(pool, &row.id).await?;
+    // Ventana de edición: submitted_at + horas del curso. Editable si sigue abierta, la entrega
+    // está pendiente y el cálculo aún no es visible (la propiedad la valida el endpoint).
+    let editable_until = row.submitted_at
+        + chrono::Duration::milliseconds((row.submission_edit_hours * 3_600_000.0) as i64);
+    let can_edit = row.entry_mode == "form"
+        && row.status == "pendiente"
+        && !row.results_visible_to_student
+        && Utc::now() < editable_until;
     Ok(Some(SubmissionDetail {
         id: row.id,
         student_name: row.student_name,
@@ -2423,7 +2504,26 @@ pub async fn submission_detail(
         score: row.score,
         submitted_at: row.submitted_at,
         reviewed_at: row.reviewed_at,
+        measurement_meta,
+        editable_until: Some(editable_until),
+        can_edit,
+        measurements,
     }))
+}
+
+/// Lecturas crudas persistidas de una entrega (ordenadas por magnitud y réplica), para prefill.
+pub async fn measurements_for(
+    pool: &SqlitePool,
+    submission_id: &str,
+) -> anyhow::Result<Vec<SubmissionMeasurement>> {
+    Ok(sqlx::query_as::<_, SubmissionMeasurement>(
+        "SELECT quantity_id, instrument_id, scale_id, replicate_index, value, value_u \
+         FROM submission_measurements WHERE submission_id = ?1 \
+         ORDER BY quantity_id, replicate_index",
+    )
+    .bind(submission_id)
+    .fetch_all(pool)
+    .await?)
 }
 
 /// Devuelve los mensurandos calculados por el estudiante para una entrega (ordenados por símbolo).
@@ -2638,6 +2738,7 @@ mod tests {
             .map(|p| p.id)
             .collect();
         assert!(ids.contains(&"p1-estadistica".to_string()));
+        assert!(ids.contains(&"p2-serie".to_string()));
         assert!(ids.contains(&"p2-corriente-continua".to_string()));
         assert!(ids.contains(&"p3-relajacion".to_string()));
         assert!(ids.contains(&"p3-relajacion-desfasaje".to_string()));
@@ -2679,7 +2780,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 4);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 5);
     }
 
     #[tokio::test]
@@ -2923,6 +3024,7 @@ mod tests {
             UpdateCourse {
                 name: "Curso B".into(),
                 term: "2027".into(),
+                submission_edit_hours: Some(6.0),
             },
         )
         .await
@@ -2930,13 +3032,15 @@ mod tests {
         .unwrap();
         assert_eq!(updated.name, "Curso B");
         assert_eq!(updated.term, "2027");
+        assert_eq!(updated.submission_edit_hours, 6.0);
 
         assert!(update_course(
             &pool,
             "x",
             UpdateCourse {
                 name: "n".into(),
-                term: "t".into()
+                term: "t".into(),
+                submission_edit_hours: None,
             }
         )
         .await

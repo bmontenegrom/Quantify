@@ -19,6 +19,9 @@ pub struct QuantityInput {
     pub repeated: bool,
     /// Magnitud física para sugerir instrumentos compatibles (opcional).
     pub quantity: Option<String>,
+    /// `true` si es un dato dado por la cátedra (valor ± U directo, sin instrumento ni réplicas).
+    #[serde(default)]
+    pub is_given: bool,
 }
 
 /// Datos para crear o actualizar un mensurando derivado de una práctica.
@@ -95,7 +98,7 @@ pub async fn update_quantity(
 ) -> anyhow::Result<Option<PracticeQuantity>> {
     let result = sqlx::query(
         "UPDATE practice_quantities \
-         SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6 \
+         SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7 \
          WHERE id = ?1",
     )
     .bind(quantity_id)
@@ -104,6 +107,7 @@ pub async fn update_quantity(
     .bind(input.unit.trim())
     .bind(input.repeated)
     .bind(input.quantity.as_deref())
+    .bind(input.is_given)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -260,6 +264,19 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
         unit: unit.into(),
         repeated,
         quantity: Some(quantity.into()),
+        is_given: false,
+    }
+}
+
+/// Construye un `QuantityInput` para un dato dado por la cátedra (valor ± U, sin réplicas).
+fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
+    QuantityInput {
+        symbol: symbol.into(),
+        name: name.into(),
+        unit: unit.into(),
+        repeated: false,
+        quantity: Some(quantity.into()),
+        is_given: true,
     }
 }
 
@@ -302,16 +319,32 @@ async fn seed_practice(
 /// Siembra las definiciones iniciales de las prácticas (idempotente por práctica).
 /// Las magnitudes/fórmulas salen de las técnicas de trabajo de Física 103.
 pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
-    // P1 — Tratamiento estadístico: área del cordón Q = l*a + l*b (ejemplo de la cuaderneta).
+    // P1 — Péndulo simple: T medido con cronómetro (réplicas), L dado por cátedra.
+    // g = 4*pi^2*L/T^2 ; T y L en SI (s y m) para que g salga en m/s^2.
+    // Tres secciones que comparten datos: (1) Periodos -> T (cronometro, replicas);
+    // (2) Amortiguamiento -> t_med (t1/2) da delta=ln2/t1/2, gamma=2*delta y Q=w0/gamma;
+    // (3) Gravedad -> g = 4*pi^2*L/T^2 (usa T medio y L dado por catedra).
     seed_practice(
         pool,
         "p1-estadistica",
         &[
-            qty("l", "Longitud del cordon", "mm", true, "longitud"),
-            qty("a", "Ancho del cordon", "mm", true, "longitud"),
-            qty("b", "Espesor del cordon", "mm", true, "longitud"),
+            qty("T", "Periodo", "s", true, "tiempo"),
+            qty_given("L", "Longitud del pendulo", "m", "longitud"),
+            qty(
+                "t_med",
+                "Tiempo de semiamplitud (t1/2)",
+                "s",
+                false,
+                "tiempo",
+            ),
         ],
-        &[res("Q", "Area transversal del cordon", "mm2", "l*a + l*b")],
+        &[
+            res("Tmedio", "Periodo medio", "s", "T"),
+            res("delta", "Constante de amortiguamiento", "1/s", "math::ln(2)/t_med"),
+            res("gamma", "Coeficiente de amortiguamiento", "1/s", "2*math::ln(2)/t_med"),
+            res("Q", "Factor de calidad", "", "pi*t_med/(T*math::ln(2))"),
+            res("g", "Aceleracion de gravedad", "m/s2", "4*pi^2*L/T^2"),
+        ],
     )
     .await?;
 
@@ -324,14 +357,18 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         "p3-relajacion",
         &[
             qty("R", "Resistencia", "ohm", false, "resistencia"),
-            qty(
-                "Rint",
-                "Resistencia interna de la fuente",
-                "ohm",
-                false,
-                "resistencia",
-            ),
+            // Rint es un dato entregado por la cátedra (valor ± U), no lo mide el alumno.
+            qty_given("Rint", "Resistencia interna de la fuente", "ohm", "resistencia"),
             qty("C", "Capacitancia", "F", false, "capacitancia"),
+            // Periodo de la onda cuadrada de trabajo (se registra; debe permitir ver ~5*tau
+            // en el semiperiodo de descarga). No entra en las formulas, queda como dato medido.
+            qty(
+                "T_oc",
+                "Periodo de la onda cuadrada",
+                "s",
+                false,
+                "tiempo",
+            ),
             qty(
                 "tmedio",
                 "Tiempo de semidescarga (t1/2)",
@@ -351,15 +388,42 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "tau_exp",
                 "Tiempo de relajacion experimental",
                 "s",
-                "tmedio / 0.6931471805599453",
+                "tmedio / math::ln(2)",
             ),
         ],
     )
     .await?;
 
-    // P2 — Corriente continua. Circuito: R1 y RA (resistencia interna del amperimetro) en serie
-    // con el paralelo de R2 y R3. Req = R1 + RA + 1/(1/R2 + 1/R3); I = Vg/Req.
-    // Tipo A despreciable -> medida unica; incertidumbre tipo B (fabricante) del tester/amperimetro.
+    // P2-serie — Circuito en serie: R1, R2 y R3 en serie con RA (resistencia interna del
+    // amperimetro). I = Vg/(R1+R2+R3+RA) y la caida de tension en cada resistencia es V=I*R.
+    // Medida unica (tipo A despreciable); incertidumbre tipo B (fabricante del tester).
+    seed_practice(
+        pool,
+        "p2-serie",
+        &[
+            qty("Vg", "Voltaje de la fuente", "V", false, "voltaje"),
+            qty("R1", "Resistencia R1", "ohm", false, "resistencia"),
+            qty("R2", "Resistencia R2", "ohm", false, "resistencia"),
+            qty("R3", "Resistencia R3", "ohm", false, "resistencia"),
+            qty(
+                "RA",
+                "Resistencia interna del amperimetro",
+                "ohm",
+                false,
+                "resistencia",
+            ),
+        ],
+        &[
+            res("I", "Intensidad de corriente", "A", "Vg / (R1 + R2 + R3 + RA)"),
+            res("VR1", "Tension en R1", "V", "Vg * R1 / (R1 + R2 + R3 + RA)"),
+            res("VR2", "Tension en R2", "V", "Vg * R2 / (R1 + R2 + R3 + RA)"),
+            res("VR3", "Tension en R3", "V", "Vg * R3 / (R1 + R2 + R3 + RA)"),
+        ],
+    )
+    .await?;
+
+    // P2-paralelo — Circuito mixto: R2 y R3 en paralelo, en serie con R1 y RA.
+    // Req = R1 + RA + R2*R3/(R2+R3); I = Vg/Req.
     seed_practice(
         pool,
         "p2-corriente-continua",
@@ -381,13 +445,13 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "Req",
                 "Resistencia equivalente",
                 "ohm",
-                "R1 + RA + 1/(1/R2 + 1/R3)",
+                "R1 + RA + R2*R3/(R2+R3)",
             ),
             res(
                 "I",
                 "Intensidad de corriente teorica",
                 "A",
-                "Vg / (R1 + RA + 1/(1/R2 + 1/R3))",
+                "Vg / (R1 + RA + R2*R3/(R2+R3))",
             ),
         ],
     )
@@ -432,7 +496,7 @@ async fn quantities_for(
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeQuantity>> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
-        "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position \
+        "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given \
          FROM practice_quantities WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -454,7 +518,7 @@ async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec
 /// Lee una magnitud de entrada por su id.
 async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQuantity> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
-        "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position \
+        "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -483,8 +547,8 @@ async fn insert_quantity(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_quantities \
-         (id, practice_id, symbol, name, unit, repeated, quantity, position) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -494,6 +558,7 @@ async fn insert_quantity(
     .bind(input.repeated)
     .bind(input.quantity.as_deref())
     .bind(position)
+    .bind(input.is_given)
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -557,6 +622,7 @@ mod tests {
             unit: "mm".into(),
             repeated: true,
             quantity: Some("longitud".into()),
+            is_given: false,
         }
     }
 
@@ -605,6 +671,7 @@ mod tests {
                 unit: "cm".into(),
                 repeated: false,
                 quantity: None,
+                is_given: false,
             },
         )
         .await
@@ -687,18 +754,25 @@ mod tests {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
         let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        // P1 péndulo: T (repeated) + L (is_given) + t_med (t1/2).
         assert_eq!(def.quantities.len(), 3);
-        assert!(def.quantities.iter().any(|q| q.symbol == "l"));
-        assert!(def.quantities.iter().any(|q| q.symbol == "a"));
-        assert!(def.quantities.iter().any(|q| q.symbol == "b"));
-        assert_eq!(def.results.len(), 1);
-        assert_eq!(def.results[0].formula, "l*a + l*b");
+        let t = def.quantities.iter().find(|q| q.symbol == "T").unwrap();
+        assert!(t.repeated);
+        let l = def.quantities.iter().find(|q| q.symbol == "L").unwrap();
+        assert!(l.is_given);
+        assert_eq!(def.results.len(), 5);
+        for symbol in ["Tmedio", "delta", "gamma", "Q", "g"] {
+            assert!(
+                def.results.iter().any(|r| r.symbol == symbol),
+                "falta el resultado {symbol}"
+            );
+        }
 
         // Segunda pasada: no debe duplicar.
         seed_definitions(&pool).await.unwrap();
         let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
         assert_eq!(def2.quantities.len(), 3);
-        assert_eq!(def2.results.len(), 1);
+        assert_eq!(def2.results.len(), 5);
     }
 
     #[tokio::test]
@@ -750,12 +824,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn seed_definitions_populates_p2_serie() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "p2-serie").await.unwrap().unwrap();
+        assert_eq!(def.quantities.len(), 5);
+        for symbol in ["Vg", "R1", "R2", "R3", "RA"] {
+            assert!(
+                def.quantities.iter().any(|q| q.symbol == symbol),
+                "falta la magnitud {symbol}"
+            );
+        }
+        let i = def.results.iter().find(|r| r.symbol == "I").unwrap();
+        assert_eq!(i.formula, "Vg / (R1 + R2 + R3 + RA)");
+        assert!(def.results.iter().any(|r| r.symbol == "VR1"));
+    }
+
+    #[tokio::test]
     async fn seed_definitions_populates_p3_relajacion() {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
         let def = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
-        assert_eq!(def.quantities.len(), 4);
-        for symbol in ["R", "Rint", "C", "tmedio"] {
+        assert_eq!(def.quantities.len(), 5);
+        for symbol in ["R", "Rint", "C", "T_oc", "tmedio"] {
             assert!(
                 def.quantities.iter().any(|q| q.symbol == symbol),
                 "falta la magnitud {symbol}"
@@ -792,7 +883,8 @@ mod tests {
                     quantity_id: q.id.clone(),
                     instrument_id: None,
                     scale_id: None,
-                    values: vec![v],
+                    values: if q.is_given { vec![v] } else { vec![v] },
+                    given_u: if q.is_given { Some(0.0) } else { None },
                 }
             })
             .collect();
@@ -826,6 +918,7 @@ mod tests {
                     instrument_id: None,
                     scale_id: None,
                     values: vec![v],
+                    given_u: None,
                 }
             })
             .collect();
@@ -897,18 +990,21 @@ mod tests {
                 instrument_id: None,
                 scale_id: None,
                 values: freqs.to_vec(),
+                given_u: None,
             },
             crate::computation::MeasurementInput {
                 quantity_id: id("a"),
                 instrument_id: None,
                 scale_id: None,
                 values: freqs.iter().map(|_| 1.0).collect(),
+                given_u: None,
             },
             crate::computation::MeasurementInput {
                 quantity_id: id("b"),
                 instrument_id: None,
                 scale_id: None,
                 values: b_vals,
+                given_u: None,
             },
         ];
         let analysis = crate::computation::compute_regresion(

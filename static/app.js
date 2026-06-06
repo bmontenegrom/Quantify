@@ -16,10 +16,16 @@ import {
   allGroups,
   analysisKindLabel,
   compatibleInstruments,
+  SI_PREFIXES,
+  prefixFactor,
   measureText,
   regressionPlot,
   compareResults,
+  seriesStats,
+  histogram,
+  normalCurve,
 } from "./lib.js";
+import { Chronometer } from "./chronometer.js";
 
 const state = {
   user: null,
@@ -27,7 +33,8 @@ const state = {
   practices: [],
   submissions: [],
   gradebooks: [],
-  selectedId: null,
+  activeSubmissionId: null,
+  activeSubmission: null,
   activeStudentId: null,
   studentDetailSection: "overview",
   studentActionStatus: "",
@@ -50,6 +57,13 @@ const state = {
   editingQuantityId: null,
   editingResultId: null,
   practiceForm: null,
+  chronometers: new Map(),
+  // Depuración de series repetidas (cronómetro): quantityId → { discarded:Set<int>, bins:int }.
+  seriesDebug: new Map(),
+  // Si != null, el formulario está editando esta entrega (en vez de crear una nueva).
+  editingSubmissionId: null,
+  // Lecturas crudas de la entrega en edición, para prefillear el formulario.
+  editPrefill: null,
 };
 
 const loginScreen = document.querySelector("#login-screen");
@@ -78,7 +92,7 @@ const submissionsTitle = document.querySelector("#submissions-title");
 const submissionsSubtitle = document.querySelector("#submissions-subtitle");
 const submissionsListTitle = document.querySelector("#submissions-list-title");
 const submissionList = document.querySelector("#submission-list");
-const submissionDetail = document.querySelector("#submission-detail");
+const submissionWorkspace = document.querySelector("#submission-workspace");
 const userForm = document.querySelector("#user-form");
 const courseMemberForm = document.querySelector("#course-member-form");
 const memberForm = document.querySelector("#member-form");
@@ -103,6 +117,30 @@ const instrumentStatus = document.querySelector("#instrument-status");
 const practiceCatalog = document.querySelector("#practice-catalog");
 const practiceWorkspace = document.querySelector("#practice-workspace");
 const practiceStatus = document.querySelector("#practice-status");
+const practicePartTabs = document.querySelector("#practice-part-tabs");
+const practiceNavChildren = document.querySelector("#practice-nav-children");
+const practicaTitle = document.querySelector("#practica-title");
+const sidebar = document.querySelector("#sidebar");
+const navToggle = document.querySelector("#nav-toggle");
+
+// Prácticas multi-parte: se muestran como pestañas dentro del mismo formulario de entrega.
+// `group` agrupa las partes; `label` es el texto de la pestaña; `order` define el orden.
+const PRACTICE_GROUPS = {
+  "p2-serie": { group: "cc", label: "Serie", order: 1 },
+  "p2-corriente-continua": { group: "cc", label: "Paralelo", order: 2 },
+  "p3-relajacion": { group: "p3", label: "Parte 1: Relajacion directa", order: 1 },
+  "p3-relajacion-desfasaje": { group: "p3", label: "Parte 2: Desfasaje", order: 2 },
+};
+
+// Prácticas cuyas magnitudes se agrupan en secciones temáticas dentro del formulario.
+// Cada sección lista los símbolos (en orden) que la componen; los que no figuren van al final.
+const PRACTICE_SECTIONS = {
+  "p1-estadistica": [
+    { title: "1) Determinación de períodos", symbols: ["T"] },
+    { title: "2) Amortiguamiento (δ, Q)", symbols: ["t_med"] },
+    { title: "3) Determinación de g", symbols: ["L"] },
+  ],
+};
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -167,6 +205,8 @@ accountProfileForm.addEventListener("submit", async (event) => {
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
+    closeSidebarOnMobile();
+    exitEditMode();
     if (tab.dataset.view === "students" && state.activeStudentId) {
       closeStudentWorkspace();
       selectView("students");
@@ -192,9 +232,25 @@ document.querySelectorAll(".tab").forEach((tab) => {
       selectView("practices");
       return;
     }
+    if (tab.dataset.view === "submissions" && state.activeSubmissionId) {
+      closeSubmissionWorkspace();
+      selectView("submissions");
+      return;
+    }
     selectView(tab.dataset.view);
   });
 });
+
+// Botón hamburguesa: abre/cierra el sidebar como cajón en pantallas chicas.
+navToggle?.addEventListener("click", () => {
+  const open = sidebar?.classList.toggle("sidebar-open");
+  navToggle.setAttribute("aria-expanded", String(!!open));
+});
+
+function closeSidebarOnMobile() {
+  sidebar?.classList.remove("sidebar-open");
+  navToggle?.setAttribute("aria-expanded", "false");
+}
 
 document.querySelector("#refresh-submissions").addEventListener("click", loadSubmissions);
 courseSelect.addEventListener("change", updateStudentSelectors);
@@ -260,6 +316,9 @@ async function startApp() {
   document.querySelectorAll(".teacher-only").forEach((element) => {
     element.classList.toggle("hidden", !canReview(state.user));
   });
+  document.querySelectorAll(".student-only").forEach((element) => {
+    element.classList.toggle("hidden", canReview(state.user));
+  });
 
   selectView("submissions");
   await loadAcademic();
@@ -300,6 +359,7 @@ function selectView(view) {
   if (view === "practices") {
     renderPracticesPage();
   }
+  if (view === "practica") highlightPracticeNav();
   if (view === "account") renderAccount();
 }
 
@@ -312,6 +372,7 @@ async function loadAcademic() {
   state.academic = await fetchJson("/api/academic/context");
   state.practices = state.academic.practices;
   renderStudentSelectors();
+  renderPracticeNav();
   if (canReview(state.user)) {
     renderAdmin();
     renderStudentsPage();
@@ -525,6 +586,85 @@ function updateStudentSelectors() {
     : `<option value="">Sin practicas habilitadas</option>`;
   updateTableSelector();
   loadSubmissionForm();
+}
+
+// Construye el sub-menú lateral de prácticas del estudiante: un ítem por práctica
+// habilitada (unión de todos sus cursos, dedup por id). Las prácticas multi-parte
+// (PRACTICE_GROUPS) se colapsan a un único ítem (el de menor `order` presente).
+function renderPracticeNav() {
+  if (!practiceNavChildren) return;
+  if (canReview(state.user)) {
+    practiceNavChildren.innerHTML = "";
+    return;
+  }
+  const seen = new Map();
+  for (const course of state.academic?.courses ?? []) {
+    for (const practice of course.practices ?? []) {
+      if (!seen.has(practice.id)) seen.set(practice.id, practice);
+    }
+  }
+  const all = [...seen.values()];
+  const shownGroups = new Set();
+  const items = [];
+  for (const practice of all) {
+    const group = PRACTICE_GROUPS[practice.id]?.group;
+    if (group) {
+      if (shownGroups.has(group)) continue;
+      shownGroups.add(group);
+      const rep = all
+        .filter((p) => PRACTICE_GROUPS[p.id]?.group === group)
+        .sort((a, b) => PRACTICE_GROUPS[a.id].order - PRACTICE_GROUPS[b.id].order)[0];
+      items.push(rep);
+    } else {
+      items.push(practice);
+    }
+  }
+
+  practiceNavChildren.innerHTML = items.length
+    ? items
+        .map(
+          (p) =>
+            `<button class="tab nav-child" data-view="practica" data-practice-id="${escapeHtml(p.id)}">${escapeHtml(p.name)}</button>`
+        )
+        .join("")
+    : `<p class="nav-empty submission-meta">Sin practicas habilitadas</p>`;
+
+  practiceNavChildren.querySelectorAll(".nav-child").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      closeSidebarOnMobile();
+      exitEditMode();
+      selectPracticeFromNav(btn.dataset.practiceId);
+    });
+  });
+}
+
+// Click en un sub-ítem de práctica: deja el formulario fijo en esa práctica (eligiendo
+// un curso que la tenga habilitada) y abre la vista del formulario.
+function selectPracticeFromNav(practiceId) {
+  const course = state.academic?.courses.find((c) =>
+    (c.practices ?? []).some((p) => p.id === practiceId)
+  );
+  if (course && course.id !== courseSelect.value) {
+    courseSelect.value = course.id;
+    updateStudentSelectors(); // repuebla grupo/mesa y deja practiceSelect en la 1ra
+  }
+  practiceSelect.value = practiceId;
+  // change → updateTableSelector + loadSubmissionForm (reusa el wiring existente).
+  practiceSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  selectView("practica");
+}
+
+// Resalta el sub-ítem de práctica que corresponde a la práctica activa del formulario.
+// Para grupos multi-parte, resalta el ítem del grupo (no la parte puntual).
+function highlightPracticeNav() {
+  if (!practiceNavChildren) return;
+  const current = practiceSelect.value;
+  const currentGroup = PRACTICE_GROUPS[current]?.group;
+  practiceNavChildren.querySelectorAll(".nav-child").forEach((btn) => {
+    const id = btn.dataset.practiceId;
+    const match = currentGroup ? PRACTICE_GROUPS[id]?.group === currentGroup : id === current;
+    btn.classList.toggle("active", match);
+  });
 }
 
 function updateTableSelector() {
@@ -1413,6 +1553,10 @@ function renderCourseProfileForm(course) {
         Periodo
         <input name="term" value="${escapeHtml(course.term)}" required />
       </label>
+      <label>
+        Horas de edición de entregas
+        <input name="submission_edit_hours" type="number" min="0" max="72" step="0.5" value="${escapeHtml(String(course.submission_edit_hours ?? 4))}" required />
+      </label>
       <div class="detail-actions">
         <button type="submit">Guardar cambios</button>
         <span class="submission-meta">${escapeHtml(state.courseActionStatus)}</span>
@@ -1601,6 +1745,8 @@ async function saveCourseEdit(event) {
     await postJson(`/api/academic/courses/${payload.id}`, {
       name: payload.name,
       term: payload.term,
+      submission_edit_hours:
+        payload.submission_edit_hours === "" ? null : Number(payload.submission_edit_hours),
     });
     state.courseActionStatus = "Cambios guardados";
     await refreshAcademic("Curso actualizado");
@@ -1693,27 +1839,40 @@ function selectedTableAssignment() {
 
 function renderSubmissionsPage() {
   const teacher = canReview(state.user);
+  // El formulario y el resultado viven en la vista "practica"; esta vista es solo
+  // la lista de entregas + la ficha de detalle.
   submissionsTitle.textContent = teacher ? "Entregas" : "Mis entregas";
   submissionsSubtitle.textContent = teacher
     ? "Todas las entregas organizadas por curso y grupo."
     : "Tus entregas y el estado de correccion.";
   submissionsListTitle.textContent = teacher ? "Entregas por curso y grupo" : "Mis entregas";
-  submissionForm.classList.toggle("hidden", teacher);
-  latestResult.classList.toggle("hidden", teacher || latestResult.innerHTML.trim() === "");
   renderSubmissionList();
 }
 
 function renderSubmissionList() {
-  if (state.submissions.length === 0) {
+  const hasList = state.submissions.length > 0;
+  const catalogPanel = submissionList.closest(".catalog-panel");
+
+  if (state.activeSubmissionId) {
+    // Mostrar workspace de detalle, ocultar la lista (el formulario/resultado los oculta
+    // renderSubmissionsPage). La ficha queda como única vista en pantalla.
+    catalogPanel?.classList.add("hidden");
+    submissionWorkspace.classList.remove("hidden");
+    return;
+  }
+
+  submissionWorkspace.classList.add("hidden");
+  catalogPanel?.classList.remove("hidden");
+
+  if (!hasList) {
     submissionList.innerHTML = `<p class="submission-meta">Todavia no hay entregas.</p>`;
-    submissionDetail.classList.add("hidden");
     return;
   }
 
   submissionList.innerHTML = canReview(state.user) ? renderTeacherSubmissionGroups() : renderStudentSubmissionRows();
 
   submissionList.querySelectorAll(".submission-item").forEach((item) => {
-    item.addEventListener("click", () => loadSubmissionDetail(item.dataset.id));
+    item.addEventListener("click", () => openSubmissionWorkspace(item.dataset.id));
   });
 }
 
@@ -1721,7 +1880,7 @@ function renderStudentSubmissionRows() {
   return state.submissions
     .map(
       (item) => `
-        <article class="submission-item ${item.id === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
+        <article class="submission-item ${item.id === state.activeSubmissionId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
           <strong>${escapeHtml(item.practice_name)}</strong>
           <div class="submission-meta">${escapeHtml(item.course)} - Grupo ${escapeHtml(item.group_name)}</div>
           <div class="submission-meta">${formatDate(item.submitted_at)}</div>
@@ -1751,7 +1910,7 @@ function renderTeacherSubmissionGroups() {
                   ${groupItems
                     .map(
                       (item) => `
-                        <article class="submission-item ${item.id === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
+                        <article class="submission-item ${item.id === state.activeSubmissionId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
                           <strong>${escapeHtml(item.student_name)}</strong>
                           <div class="submission-meta">${escapeHtml(item.practice_name)} - ${formatDate(item.submitted_at)}</div>
                           <span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
@@ -1769,12 +1928,15 @@ function renderTeacherSubmissionGroups() {
     .join("");
 }
 
-async function loadSubmissionDetail(id) {
-  state.selectedId = id;
-  renderSubmissionList();
+async function openSubmissionWorkspace(id) {
+  state.activeSubmissionId = id;
+  // renderSubmissionsPage (no solo la lista) para que oculte formulario + resultado además del catálogo.
+  renderSubmissionsPage();
+  submissionWorkspace.innerHTML = `<p class="submission-meta">Cargando...</p>`;
+
   const submission = await fetchJson(`/api/submissions/${id}`);
-  // Para que el alumno cargue sus cálculos necesitamos la lista de mensurandos de la práctica,
-  // que está disponible aunque el cálculo automático siga oculto.
+  state.activeSubmission = submission;
+
   let definition = null;
   if (submission.entry_mode === "form" && !canReview(state.user)) {
     try {
@@ -1783,8 +1945,21 @@ async function loadSubmissionDetail(id) {
       definition = null;
     }
   }
-  submissionDetail.classList.remove("hidden");
-  renderAnalysis(submissionDetail, submission, canReview(state.user), definition);
+
+  submissionWorkspace.innerHTML = `
+    <button type="button" class="back-link" id="submission-workspace-back">Volver al listado</button>
+    <div id="submission-detail-body"></div>
+  `;
+  submissionWorkspace.querySelector("#submission-workspace-back").addEventListener("click", closeSubmissionWorkspace);
+  const detailBody = submissionWorkspace.querySelector("#submission-detail-body");
+  renderAnalysis(detailBody, submission, canReview(state.user), definition);
+}
+
+function closeSubmissionWorkspace() {
+  state.activeSubmissionId = null;
+  state.activeSubmission = null;
+  // renderSubmissionsPage restaura formulario/resultado (según rol) y la lista.
+  renderSubmissionsPage();
 }
 
 function submissionHeader(submission) {
@@ -1796,6 +1971,122 @@ function submissionHeader(submission) {
       </p>
       <span class="status ${escapeHtml(submission.status)}">${escapeHtml(submission.status)}</span>
     </div>`;
+}
+
+// Bloque prominente con el comentario del docente (cuando existe). Visible para todos.
+function teacherCommentMarkup(submission) {
+  const comment = (submission.teacher_comment ?? "").trim();
+  if (!comment) return "";
+  const score = submission.score != null ? ` <span class="teacher-comment-score">Nota: ${escapeHtml(String(submission.score))}</span>` : "";
+  return `
+    <div class="teacher-comment">
+      <div class="teacher-comment-head">Comentario del docente${score}</div>
+      <p class="teacher-comment-body">${escapeHtml(comment)}</p>
+    </div>`;
+}
+
+// Banner con el plazo de edición restante + botón "Editar entrega". Sólo si la entrega es
+// editable (ventana abierta, pendiente, no visible). Se muestra al alumno dueño.
+function editBannerMarkup(submission) {
+  if (!submission.can_edit || !submission.editable_until) return "";
+  const until = new Date(submission.editable_until);
+  const remainingMs = until.getTime() - Date.now();
+  if (remainingMs <= 0) return "";
+  const mins = Math.floor(remainingMs / 60000);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const left = h > 0 ? `${h} h ${m} min` : `${m} min`;
+  return `<div class="edit-banner">
+    <div>Podés editar esta entrega hasta el ${escapeHtml(formatDate(submission.editable_until))} — te quedan ${left}.</div>
+    <button type="button" class="edit-submission-btn">Editar entrega</button>
+  </div>`;
+}
+
+// Entra en modo edición: guarda las lecturas de la entrega y abre el formulario de su práctica
+// prefilleado. El submit irá al endpoint de edición (no crea una entrega nueva).
+function startEditSubmission(submission) {
+  state.editingSubmissionId = submission.id;
+  state.editPrefill = submission.measurements ?? [];
+  selectPracticeFromNav(submission.practice_id); // carga el form de esa práctica
+}
+
+// Sale del modo edición (al navegar a otra práctica o entregar). Vuelve a "crear entrega".
+function exitEditMode() {
+  state.editingSubmissionId = null;
+  state.editPrefill = null;
+}
+
+// Agrupa las lecturas crudas de la entrega en edición por magnitud (valores ordenados por
+// réplica, más instrumento/escala/U comunes), para prefillear el formulario.
+function editPrefillByQuantity() {
+  const map = new Map();
+  for (const m of state.editPrefill ?? []) {
+    let e = map.get(m.quantity_id);
+    if (!e) {
+      e = { values: [], instrument_id: m.instrument_id, scale_id: m.scale_id, value_u: m.value_u };
+      map.set(m.quantity_id, e);
+    }
+    e.values.push(m.value);
+    if (m.value_u != null) e.value_u = m.value_u;
+  }
+  return map;
+}
+
+// Rellena el formulario (ya renderizado) con las lecturas de la entrega en edición. Los valores
+// guardados están en unidades base, así que se cargan con prefijo "" (factor 1).
+function applyPrefill() {
+  if (!state.editingSubmissionId) return;
+  const byQ = editPrefillByQuantity();
+
+  const seriesTable = measurementFields.querySelector(".series-table");
+  if (seriesTable) {
+    const qids = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
+    const nPoints = Math.max(...qids.map((id) => byQ.get(id)?.values.length ?? 0), 0);
+    const cols = state.practiceForm.definition.quantities;
+    const tbody = seriesTable.querySelector("tbody");
+    tbody.innerHTML = Array.from({ length: Math.max(nPoints, 1) }, () => seriesRowHtml(cols)).join("");
+    wireSeriesRemove();
+    [...tbody.querySelectorAll(".series-row")].forEach((row, i) => {
+      row.querySelectorAll(".series-value").forEach((input) => {
+        const v = byQ.get(input.dataset.quantityId)?.values[i];
+        if (v != null) input.value = v;
+      });
+    });
+    return;
+  }
+
+  measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
+    const e = byQ.get(row.dataset.quantityId);
+    if (!e) return;
+    if (row.dataset.isGiven === "1") {
+      const v = row.querySelector(".measure-given-value");
+      const u = row.querySelector(".measure-given-u");
+      if (v) v.value = e.values[0] ?? "";
+      if (u && e.value_u != null) u.value = e.value_u;
+      return;
+    }
+    const inst = row.querySelector(".measure-instrument");
+    if (inst && e.instrument_id) {
+      inst.value = e.instrument_id;
+      populateScaleOptions(row);
+    }
+    const scale = row.querySelector(".measure-scale");
+    if (scale && e.scale_id) scale.value = e.scale_id;
+    const container = row.querySelector(".measure-values");
+    if (!container) return;
+    const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
+    while (container.querySelectorAll(".replica").length < e.values.length) {
+      container.insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+    }
+    [...container.querySelectorAll(".replica")].forEach((rep, i) => {
+      if (i >= e.values.length) return;
+      const val = rep.querySelector(".measure-value");
+      const pre = rep.querySelector(".prefix-select");
+      if (pre) pre.value = "";
+      if (val) val.value = e.values[i];
+    });
+    wireRemoveReplica(row);
+  });
 }
 
 function renderAnalysis(target, submission, includeReview = false, definition = null) {
@@ -1816,15 +2107,22 @@ function renderAnalysis(target, submission, includeReview = false, definition = 
     } else {
       body += `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
     }
+    // Depuración de series (bins + puntos descartados): visible para alumno y docente.
+    body += measurementMetaMarkup(submission, definition);
     // Formulario "Mis cálculos" del alumno dueño (editable hasta que el docente habilite).
     if (!isTeacher) {
       body += studentResultsFormMarkup(submission, definition);
     }
     target.innerHTML = `
       ${submissionHeader(submission)}
+      ${teacherCommentMarkup(submission)}
+      ${!isTeacher ? editBannerMarkup(submission) : ""}
       ${body}
       ${includeReview ? renderReviewForm(submission) : ""}
     `;
+    target
+      .querySelector(".edit-submission-btn")
+      ?.addEventListener("click", () => startEditSubmission(submission));
     const reviewForm = target.querySelector(".review-form");
     if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
     const studentForm = target.querySelector(".student-results-form");
@@ -1839,6 +2137,7 @@ function renderAnalysis(target, submission, includeReview = false, definition = 
   const regression = analysis.regression;
   target.innerHTML = `
     ${submissionHeader(submission)}
+    ${teacherCommentMarkup(submission)}
 
     <div class="metrics">
       <div class="metric">
@@ -1964,7 +2263,9 @@ async function saveReview(event, id) {
   }
 
   const updated = await response.json();
-  renderAnalysis(submissionDetail, updated, true);
+  state.activeSubmission = updated;
+  const detailBody = submissionWorkspace?.querySelector("#submission-detail-body");
+  if (detailBody) renderAnalysis(detailBody, updated, true);
   await loadSubmissions();
 }
 
@@ -1975,8 +2276,19 @@ async function saveReview(event, id) {
 async function loadSubmissionForm() {
   if (!measurementFields) return;
   if (canReview(state.user)) return;
+  // Al cambiar de práctica/curso, descartamos el resultado de la entrega anterior.
+  latestResult.classList.add("hidden");
+  submitStatus.textContent = "";
   const practiceId = practiceSelect.value;
   const courseId = courseSelect.value;
+  // La práctica se infiere del nav: mostramos su nombre como título de la vista.
+  if (practicaTitle) {
+    const practiceName =
+      selectedCourse()?.practices.find((p) => p.id === practiceId)?.name ?? "Nueva entrega";
+    practicaTitle.textContent = state.editingSubmissionId ? `Editar — ${practiceName}` : practiceName;
+  }
+  if (submitButton) submitButton.textContent = state.editingSubmissionId ? "Guardar cambios" : "Entregar";
+  renderPartTabs(practiceId);
   if (!practiceId || !courseId) {
     state.practiceForm = null;
     measurementFields.innerHTML = "";
@@ -1989,10 +2301,46 @@ async function loadSubmissionForm() {
     ]);
     state.practiceForm = { definition, instruments };
     renderMeasurementFields();
+    applyPrefill(); // si estamos editando, rellena el form con las lecturas guardadas
   } catch (error) {
     state.practiceForm = null;
     measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
   }
+}
+
+// Muestra pestañas para las partes de una práctica multi-parte (p. ej. P3 relajación).
+// Solo aparecen si ≥2 partes del grupo están habilitadas en el curso del estudiante.
+function renderPartTabs(practiceId) {
+  if (!practicePartTabs) return;
+  const group = PRACTICE_GROUPS[practiceId]?.group;
+  const enabled = selectedCourse()?.practices ?? [];
+  // Partes del mismo grupo que estén habilitadas en el curso, ordenadas.
+  const parts = enabled
+    .filter((p) => PRACTICE_GROUPS[p.id]?.group === group && group)
+    .sort((a, b) => PRACTICE_GROUPS[a.id].order - PRACTICE_GROUPS[b.id].order);
+
+  if (parts.length < 2) {
+    practicePartTabs.classList.add("hidden");
+    practicePartTabs.innerHTML = "";
+    return;
+  }
+
+  practicePartTabs.classList.remove("hidden");
+  practicePartTabs.innerHTML = parts
+    .map(
+      (p) =>
+        `<button type="button" class="part-tab ${p.id === practiceId ? "active" : ""}" data-practice-id="${escapeHtml(p.id)}">${escapeHtml(PRACTICE_GROUPS[p.id].label)}</button>`
+    )
+    .join("");
+
+  practicePartTabs.querySelectorAll(".part-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      if (tab.dataset.practiceId === practiceSelect.value) return;
+      exitEditMode();
+      practiceSelect.value = tab.dataset.practiceId;
+      practiceSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  });
 }
 
 // Renderiza una fila por magnitud: selector de instrumento/escala compatible + lecturas
@@ -2015,8 +2363,77 @@ function renderMeasurementFields() {
     return;
   }
 
-  measurementFields.innerHTML = definition.quantities
-    .map((q) => {
+  const quantityRowHtml = (q) => {
+      if (q.is_given) {
+        return `
+          <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
+            <legend>${escapeHtml(q.name)} <span class="submission-meta">(dato — ${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+            <div class="form-grid">
+              <label>Valor
+                <div class="replica-input-wrap">
+                  ${prefixSelectHtml()}
+                  <input class="measure-given-value" type="number" step="any" placeholder="valor" />
+                  <span class="replica-unit">${escapeHtml(q.unit)}</span>
+                </div>
+              </label>
+              <label>Incertidumbre U (expandida)
+                <div class="replica-input-wrap">
+                  ${prefixSelectHtml()}
+                  <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
+                  <span class="replica-unit">${escapeHtml(q.unit)}</span>
+                </div>
+              </label>
+            </div>
+          </fieldset>
+        `;
+      }
+      if (q.repeated && q.quantity === "tiempo" && !state.editingSubmissionId) {
+        // Instrumentos de tiempo (para el tipo B por resolución). Preselecciona el cronómetro.
+        const chronoOpts = compatibleInstruments(instruments, q.quantity);
+        const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
+        const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
+          .concat(
+            chronoOpts.map(
+              (i) =>
+                `<option value="${escapeHtml(i.id)}" ${defaultInst && i.id === defaultInst.id ? "selected" : ""}>${escapeHtml(i.name)}</option>`
+            )
+          )
+          .join("");
+        return `
+          <fieldset class="measurement-row measurement-row--chrono"
+                    data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1">
+            <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+            <div class="form-grid">
+              <label>Instrumento (tipo B por resolución)
+                <select class="measure-instrument">${chronoInstrumentOptions}</select>
+              </label>
+              <label>Escala
+                <select class="measure-scale"><option value="">— sin escala —</option></select>
+              </label>
+            </div>
+            <div class="chrono-widget">
+              <div class="chrono-display">0.000 s</div>
+              <div class="chrono-info"><span class="chrono-count">0 marcas</span></div>
+              <div class="chrono-controls">
+                <button type="button" class="chrono-start">▶ Iniciar</button>
+                <button type="button" class="chrono-mark" disabled>● Marcar</button>
+                <button type="button" class="chrono-stop" disabled>■ Detener</button>
+                <button type="button" class="chrono-reset">↺ Reiniciar</button>
+              </div>
+              <label class="chrono-mode-label">Modo:
+                <select class="chrono-mode">
+                  <option value="periodo">Período (pares t₂-t₁, t₄-t₃… → técnica de Estadística)</option>
+                  <option value="consecutivo">Consecutivo (una marca por período)</option>
+                  <option value="pares">Pares solapados (marca cada T/2)</option>
+                  <option value="absoluto">Absoluto (tiempos desde inicio)</option>
+                </select>
+              </label>
+              <div class="chrono-readings-preview"></div>
+            </div>
+            <div class="series-debug"></div>
+          </fieldset>
+        `;
+      }
       const options = compatibleInstruments(instruments, q.quantity);
       const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
         .concat(options.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`))
@@ -2038,10 +2455,42 @@ function renderMeasurementFields() {
           ${q.repeated ? `<button type="button" class="add-replica">＋ agregar replica</button>` : ""}
         </fieldset>
       `;
-    })
-    .join("");
+  };
+
+  // Algunas prácticas (p. ej. el péndulo) agrupan sus magnitudes en secciones temáticas.
+  const sections = PRACTICE_SECTIONS[practiceSelect.value];
+  if (sections) {
+    const used = new Set();
+    const blocks = sections.map((sec) => {
+      const rows = sec.symbols
+        .map((sym) => definition.quantities.find((q) => q.symbol === sym))
+        .filter(Boolean);
+      rows.forEach((q) => used.add(q.id));
+      if (rows.length === 0) return "";
+      return `<div class="measurement-section">
+          <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+          ${rows.map(quantityRowHtml).join("")}
+        </div>`;
+    });
+    const rest = definition.quantities.filter((q) => !used.has(q.id));
+    measurementFields.innerHTML = blocks.join("") + rest.map(quantityRowHtml).join("");
+  } else {
+    measurementFields.innerHTML = definition.quantities.map(quantityRowHtml).join("");
+  }
 
   measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
+    if (row.dataset.isChrono === "1") {
+      // El widget chrono también tiene instrumento/escala (para el tipo B por resolución).
+      const chronoInstrument = row.querySelector(".measure-instrument");
+      if (chronoInstrument) {
+        chronoInstrument.addEventListener("change", () => populateScaleOptions(row));
+        populateScaleOptions(row); // poblar escalas del instrumento preseleccionado
+      }
+      wireChronometerWidget(row, row.dataset.quantityId);
+      return;
+    }
+    // Las filas de "dato" (is_given) no tienen selector de instrumento ni réplicas.
+    if (row.dataset.isGiven === "1") return;
     const instrumentSelect = row.querySelector(".measure-instrument");
     instrumentSelect.addEventListener("change", () => populateScaleOptions(row));
     row.querySelector(".add-replica")?.addEventListener("click", () => {
@@ -2053,11 +2502,21 @@ function renderMeasurementFields() {
   });
 }
 
-// HTML de un input de lectura (una réplica) con botón de quitar.
+// HTML del selector de prefijo SI.
+function prefixSelectHtml() {
+  const opts = SI_PREFIXES.map(
+    (p) => `<option value="${escapeHtml(p.label)}" ${p.label === "" ? "selected" : ""}>${p.label || "—"}</option>`
+  ).join("");
+  return `<select class="prefix-select" title="Prefijo SI">${opts}</select>`;
+}
+
+// HTML de un input de lectura (una réplica) con selector de prefijo y botón de quitar.
 function renderReplicaInput(unit) {
   return `
     <div class="replica">
-      <input class="measure-value" type="number" step="any" placeholder="lectura (${escapeHtml(unit)})" data-unit="${escapeHtml(unit)}" />
+      ${prefixSelectHtml()}
+      <input class="measure-value" type="number" step="any" placeholder="lectura" data-unit="${escapeHtml(unit)}" />
+      <span class="replica-unit">${escapeHtml(unit)}</span>
       <button type="button" class="remove-replica" title="Quitar">✕</button>
     </div>
   `;
@@ -2081,6 +2540,242 @@ function wireRemoveReplica(row) {
   }
 }
 
+// Formatea segundos como "MM:SS.mmm" para el display del cronómetro.
+function formatElapsed(seconds) {
+  const total = Math.max(0, seconds);
+  const m = Math.floor(total / 60);
+  const s = Math.floor(total % 60);
+  const ms = Math.round((total % 1) * 1000);
+  return m > 0
+    ? `${m}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")} s`
+    : `${s}.${String(ms).padStart(3, "0")} s`;
+}
+
+// Conecta un widget de cronómetro a su instancia Chronometer en state.chronometers.
+// Preserva la instancia entre re-renders (clave = quantityId).
+function wireChronometerWidget(row, quantityId) {
+  if (!state.chronometers.has(quantityId)) {
+    state.chronometers.set(quantityId, new Chronometer());
+  }
+  const chrono = state.chronometers.get(quantityId);
+
+  const display = row.querySelector(".chrono-display");
+  const countEl = row.querySelector(".chrono-count");
+  const startBtn = row.querySelector(".chrono-start");
+  const markBtn = row.querySelector(".chrono-mark");
+  const stopBtn = row.querySelector(".chrono-stop");
+  const resetBtn = row.querySelector(".chrono-reset");
+  const modeSelect = row.querySelector(".chrono-mode");
+  const preview = row.querySelector(".chrono-readings-preview");
+
+  let rafId = null;
+
+  function updateButtons() {
+    const s = chrono.state;
+    startBtn.disabled = s !== "idle";
+    markBtn.disabled = s !== "running";
+    stopBtn.disabled = s !== "running";
+    resetBtn.disabled = s === "running";
+  }
+
+  function updatePreview() {
+    const mode = modeSelect.value;
+    const r = chrono.readings(mode);
+    countEl.textContent = `${chrono.count} marca${chrono.count !== 1 ? "s" : ""} → ${r.length} lectura${r.length !== 1 ? "s" : ""}`;
+    if (r.length === 0) {
+      preview.textContent = "";
+      return;
+    }
+    const shown = r.slice(0, 8).map((v) => v.toFixed(3)).join(", ");
+    preview.textContent = r.length > 8 ? `${shown} … (+${r.length - 8} más)` : shown;
+  }
+
+  function tick() {
+    display.textContent = formatElapsed(chrono.elapsed);
+    updatePreview();
+    if (chrono.state === "running") {
+      rafId = requestAnimationFrame(tick);
+    }
+  }
+
+  function stopRaf() {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  }
+
+  const debugContainer = row.querySelector(".series-debug");
+  function refreshDebug() {
+    renderSeriesDebug(row, quantityId, chrono.readings(modeSelect.value));
+  }
+
+  // Sync UI to current state (in case of re-render mid-session).
+  display.textContent = formatElapsed(chrono.elapsed);
+  updateButtons();
+  updatePreview();
+  if (chrono.state === "running") rafId = requestAnimationFrame(tick);
+  else refreshDebug();
+
+  startBtn.addEventListener("click", () => {
+    chrono.start();
+    updateButtons();
+    if (debugContainer) debugContainer.innerHTML = ""; // se rehace al detener
+    rafId = requestAnimationFrame(tick);
+  });
+
+  markBtn.addEventListener("click", () => {
+    chrono.mark();
+    updatePreview();
+  });
+
+  stopBtn.addEventListener("click", () => {
+    chrono.stop();
+    stopRaf();
+    display.textContent = formatElapsed(chrono.elapsed);
+    updateButtons();
+    updatePreview();
+    refreshDebug();
+  });
+
+  resetBtn.addEventListener("click", () => {
+    chrono.reset();
+    stopRaf();
+    display.textContent = formatElapsed(0);
+    updateButtons();
+    updatePreview();
+    state.seriesDebug.delete(quantityId); // limpia descartes de la serie anterior
+    if (debugContainer) debugContainer.innerHTML = "";
+  });
+
+  // Cambiar de modo reconstruye la serie: descartamos los puntos marcados antes.
+  modeSelect.addEventListener("change", () => {
+    state.seriesDebug.delete(quantityId);
+    updatePreview();
+    if (chrono.state !== "running") refreshDebug();
+  });
+
+  // Spacebar marca cuando hay exactamente un cronómetro corriendo en el formulario.
+  row._chronoKeyHandler = (e) => {
+    if (e.code === "Space" && e.target.tagName !== "BUTTON" && e.target.tagName !== "SELECT") {
+      e.preventDefault();
+      chrono.mark();
+      updatePreview();
+    }
+  };
+  document.addEventListener("keydown", row._chronoKeyHandler);
+
+  // Limpia el listener de teclado si el row se saca del DOM.
+  new MutationObserver(() => {
+    if (!document.contains(row)) {
+      document.removeEventListener("keydown", row._chronoKeyHandler);
+      stopRaf();
+    }
+  }).observe(measurementFields, { childList: true, subtree: false });
+}
+
+// Panel de depuración de una serie repetida (cronómetro): lista ordenada con media/desv.
+// estándar en vivo, histograma ajustable con curva normal superpuesta, y descarte de puntos.
+// Las lecturas descartadas no se envían; se persisten como meta (bins + valores descartados).
+function renderSeriesDebug(row, quantityId, readings) {
+  const container = row.querySelector(".series-debug");
+  if (!container) return;
+  if (!readings || readings.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  let dbg = state.seriesDebug.get(quantityId);
+  if (!dbg) {
+    dbg = { discarded: new Set(), bins: 0 };
+    state.seriesDebug.set(quantityId, dbg);
+  }
+  // Descarta índices fuera de rango (por si la serie cambió de longitud).
+  dbg.discarded = new Set([...dbg.discarded].filter((i) => i < readings.length));
+
+  const kept = readings.filter((_, i) => !dbg.discarded.has(i));
+  const stats = seriesStats(kept);
+  const defaultBins = Math.max(1, Math.min(20, Math.round(Math.sqrt(kept.length || 1))));
+  const bins = dbg.bins && dbg.bins > 0 ? dbg.bins : defaultBins;
+  const hist = kept.length > 0 ? histogram(kept, bins) : null;
+
+  const ordered = readings
+    .map((v, i) => ({ v, i }))
+    .sort((a, b) => a.v - b.v);
+  const items = ordered
+    .map(({ v, i }) => {
+      const off = dbg.discarded.has(i);
+      return `<li class="series-point ${off ? "discarded" : ""}">
+        <span class="series-point-value">${v.toFixed(3)} s</span>
+        <button type="button" class="series-point-toggle" data-index="${i}">${off ? "restaurar" : "descartar"}</button>
+      </li>`;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <div class="series-debug-head">
+      <strong>Depuración de la serie</strong>
+      <span class="submission-meta">n=${stats.n} · x̄=${Number.isFinite(stats.mean) ? stats.mean.toFixed(4) : "—"} s · s=${Number.isFinite(stats.std) ? stats.std.toFixed(4) : "—"} s · s/√n=${Number.isFinite(stats.stdMean) ? stats.stdMean.toFixed(4) : "—"} s</span>
+    </div>
+    <div class="series-debug-grid">
+      <div class="series-hist">
+        <label class="hist-bins-label">Intervalos (bins):
+          <input type="number" class="hist-bins" min="1" max="40" value="${bins}" />
+        </label>
+        ${hist ? histogramSvg(hist, stats.mean, stats.std, kept.length) : `<p class="submission-meta">Sin datos conservados.</p>`}
+      </div>
+      <ol class="series-point-list">${items}</ol>
+    </div>
+  `;
+
+  // Cambiar nº de bins.
+  container.querySelector(".hist-bins")?.addEventListener("change", (e) => {
+    const n = Math.round(Number(e.target.value));
+    dbg.bins = Number.isFinite(n) && n >= 1 ? n : 0;
+    renderSeriesDebug(row, quantityId, readings);
+  });
+  // Descartar/restaurar un punto.
+  container.querySelectorAll(".series-point-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const i = Number(btn.dataset.index);
+      if (dbg.discarded.has(i)) dbg.discarded.delete(i);
+      else dbg.discarded.add(i);
+      renderSeriesDebug(row, quantityId, readings);
+    });
+  });
+}
+
+// SVG del histograma (barras) con la curva normal superpuesta (densidad escalada a conteos
+// esperados = pdf · n · ancho_bin), para comparar la distribución con la normal teórica.
+function histogramSvg(hist, mean, std, n) {
+  const W = 340;
+  const H = 180;
+  const pad = 28;
+  const innerW = W - 2 * pad;
+  const innerH = H - 2 * pad;
+  const { min, max, width, counts } = hist;
+  const curve = std > 0 ? normalCurve(mean, std, min, max, 80) : [];
+  const curveCounts = curve.map(([x, y]) => [x, y * n * width]);
+  const maxCount = Math.max(...counts, ...curveCounts.map((p) => p[1]), 1);
+  const spanX = max - min || 1;
+  const sx = (x) => pad + ((x - min) / spanX) * innerW;
+  const sy = (c) => H - pad - (c / maxCount) * innerH;
+  const bars = counts
+    .map((c, i) => {
+      const x0 = sx(min + i * width);
+      const x1 = sx(min + (i + 1) * width);
+      const y = sy(c);
+      const w = Math.max(0, x1 - x0 - 1);
+      return `<rect x="${x0.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${(H - pad - y).toFixed(1)}" class="hist-bar" />`;
+    })
+    .join("");
+  const poly = curveCounts.map(([x, c]) => `${sx(x).toFixed(1)},${sy(c).toFixed(1)}`).join(" ");
+  const curveEl = poly ? `<polyline points="${poly}" class="normal-curve" fill="none" />` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" class="histogram" role="img" aria-label="Histograma con curva normal">
+    ${bars}${curveEl}
+    <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" class="hist-axis" />
+  </svg>`;
+}
+
 // Tabla de serie para prácticas de regresión: una columna por magnitud y una fila por punto.
 // El alumno carga magnitudes crudas (p. ej. f, a, b); las fórmulas de eje derivan (x, y).
 function renderSeriesTable(definition) {
@@ -2099,18 +2794,62 @@ function renderSeriesTable(definition) {
       </table>
     </div>
     <button type="button" class="add-series-row">＋ agregar punto</button>
+    <section class="series-preview panel" aria-live="polite"></section>
   `;
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
     wireSeriesRemove();
+    schedulePreview();
   });
   wireSeriesRemove();
+
+  // Vista previa en vivo del ajuste (debounced): a medida que se cargan puntos se consulta el
+  // endpoint de preview (sin persistir) y se dibuja el gráfico con sus parámetros.
+  let previewTimer = null;
+  const schedulePreview = () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(updateRegressionPreview, 350);
+  };
+  measurementFields.querySelector(".series-table").addEventListener("input", (e) => {
+    if (e.target.classList.contains("series-value") || e.target.classList.contains("prefix-select")) {
+      schedulePreview();
+    }
+  });
+  // `change` cubre los <select> de prefijo (no siempre emiten input).
+  measurementFields.querySelector(".series-table").addEventListener("change", schedulePreview);
 }
 
-// HTML de una fila (un punto) de la tabla de serie: un input numérico por magnitud.
+// Pide al backend el ajuste de los puntos cargados (sin persistir) y dibuja el gráfico + τ/R²
+// debajo de la tabla de serie. Silencioso ante errores (puntos incompletos, etc.).
+async function updateRegressionPreview() {
+  const container = measurementFields.querySelector(".series-preview");
+  if (!container) return;
+  const measurements = collectMeasurements();
+  const points = measurements[0]?.values.length ?? 0;
+  if (points < 2) {
+    container.innerHTML = `<p class="submission-meta">Cargá al menos 2 puntos completos para ver el ajuste.</p>`;
+    return;
+  }
+  try {
+    const analysis = await postJson(
+      `/api/practices/${encodeURIComponent(practiceSelect.value)}/analyze-preview`,
+      { measurements }
+    );
+    if (analysis.regression) {
+      container.innerHTML = `<h4>Vista previa del ajuste</h4>${regressionMarkup(analysis.regression)}`;
+    } else {
+      container.innerHTML = "";
+    }
+  } catch {
+    // Datos aún incompletos o inconsistentes: no mostramos error en el preview.
+    container.innerHTML = `<p class="submission-meta">No se pudo calcular la vista previa con los datos actuales.</p>`;
+  }
+}
+
+// HTML de una fila (un punto) de la tabla de serie: selector de prefijo + input por magnitud.
 function seriesRowHtml(cols) {
   const cells = cols
-    .map((q) => `<td><input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`)
+    .map((q) => `<td class="series-cell">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`)
     .join("");
   return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
 }
@@ -2138,6 +2877,8 @@ function populateScaleOptions(row) {
   scaleSelect.innerHTML = [`<option value="">— sin escala —</option>`]
     .concat(scales.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label)} (${escapeHtml(s.unit)})</option>`))
     .join("");
+  // Si el instrumento tiene una sola escala, la seleccionamos sola (p. ej. el cronómetro).
+  if (scales.length === 1) scaleSelect.value = scales[0].id;
 }
 
 // Lee el DOM y arma el array de mediciones para el backend (descarta lecturas vacías).
@@ -2150,33 +2891,93 @@ function collectMeasurements() {
     const quantityIds = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
     const byQuantity = new Map(quantityIds.map((id) => [id, []]));
     seriesTable.querySelectorAll(".series-row").forEach((row) => {
-      const cells = [...row.querySelectorAll(".series-value")];
-      const nums = cells.map((cell) => Number(cell.value.trim()));
-      const complete = cells.every((cell) => cell.value.trim() !== "") && nums.every(Number.isFinite);
-      if (!complete) return;
-      cells.forEach((cell, i) => byQuantity.get(cell.dataset.quantityId).push(nums[i]));
+      const cells = [...row.querySelectorAll(".series-cell")];
+      const parsed = cells.map((cell) => {
+        const raw = cell.querySelector(".series-value").value.trim();
+        const factor = prefixFactor(cell.querySelector(".prefix-select").value);
+        return raw === "" ? NaN : Number(raw) * factor;
+      });
+      if (parsed.some((n) => !Number.isFinite(n))) return;
+      cells.forEach((cell, i) => byQuantity.get(cell.querySelector(".series-value").dataset.quantityId).push(parsed[i]));
     });
     return quantityIds.map((id) => ({
       quantity_id: id,
       instrument_id: null,
       scale_id: null,
       values: byQuantity.get(id),
+      given_u: null,
     }));
   }
 
   return [...measurementFields.querySelectorAll(".measurement-row")].map((row) => {
-    const values = [...row.querySelectorAll(".measure-value")]
-      .map((input) => input.value.trim())
-      .filter((value) => value !== "")
-      .map(Number)
-      .filter((n) => Number.isFinite(n));
+    if (row.dataset.isGiven === "1") {
+      const valInput = row.querySelector(".measure-given-value");
+      const uInput = row.querySelector(".measure-given-u");
+      const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
+      const rawVal = valInput.value.trim();
+      const rawU = uInput.value.trim();
+      const value = rawVal === "" ? null : Number(rawVal) * prefixFactor(valPrefix);
+      const given_u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
+      return {
+        quantity_id: row.dataset.quantityId,
+        instrument_id: null,
+        scale_id: null,
+        values: value != null && Number.isFinite(value) ? [value] : [],
+        given_u: given_u != null && Number.isFinite(given_u) ? given_u : null,
+      };
+    }
+
+    if (row.dataset.isChrono === "1") {
+      const mode = row.querySelector(".chrono-mode")?.value ?? "consecutivo";
+      const chrono = state.chronometers.get(row.dataset.quantityId);
+      const all = chrono ? chrono.readings(mode) : [];
+      // Sólo se envían las lecturas conservadas (las descartadas en la depuración se omiten).
+      const dbg = state.seriesDebug.get(row.dataset.quantityId);
+      const values = dbg ? all.filter((_, i) => !dbg.discarded.has(i)) : all;
+      return {
+        quantity_id: row.dataset.quantityId,
+        instrument_id: row.querySelector(".measure-instrument")?.value || null,
+        scale_id: row.querySelector(".measure-scale")?.value || null,
+        values,
+        given_u: null,
+      };
+    }
+
+    const values = [...row.querySelectorAll(".replica")].reduce((acc, replica) => {
+      const raw = replica.querySelector(".measure-value").value.trim();
+      if (raw === "") return acc;
+      const factor = prefixFactor(replica.querySelector(".prefix-select").value);
+      const n = Number(raw) * factor;
+      if (Number.isFinite(n)) acc.push(n);
+      return acc;
+    }, []);
     return {
       quantity_id: row.dataset.quantityId,
       instrument_id: row.querySelector(".measure-instrument").value || null,
       scale_id: row.querySelector(".measure-scale").value || null,
       values,
+      given_u: null,
     };
   });
+}
+
+// Recolecta los metadatos de depuración por magnitud de cronómetro (bins + valores
+// descartados), para persistirlos junto con la entrega. Devuelve null si no hay nada.
+function collectMeta() {
+  const meta = {};
+  measurementFields.querySelectorAll('.measurement-row[data-is-chrono="1"]').forEach((row) => {
+    const qid = row.dataset.quantityId;
+    const dbg = state.seriesDebug.get(qid);
+    if (!dbg) return;
+    const mode = row.querySelector(".chrono-mode")?.value ?? "consecutivo";
+    const chrono = state.chronometers.get(qid);
+    const all = chrono ? chrono.readings(mode) : [];
+    const discarded = [...dbg.discarded].filter((i) => i < all.length).map((i) => all[i]);
+    if (discarded.length > 0 || (dbg.bins && dbg.bins > 0)) {
+      meta[qid] = { bins: dbg.bins || null, discarded };
+    }
+  });
+  return Object.keys(meta).length ? meta : null;
 }
 
 // Deshabilita Entregar mientras corre la operación, para evitar doble envío.
@@ -2184,13 +2985,64 @@ function setSubmissionBusy(busy) {
   if (submitButton) submitButton.disabled = busy;
 }
 
+// Valida que el formulario esté completo antes de enviar. Devuelve null si todo está bien,
+// o un mensaje de error en español si falta algo.
+function validateMeasurements(measurements, analysisKind) {
+  if (analysisKind === "regresion_lineal") {
+    const anyWithValues = measurements.some((m) => m.values.length > 0);
+    const minPoints = measurements[0]?.values.length ?? 0;
+    if (!anyWithValues || minPoints < 2) {
+      return "Cargá al menos 2 puntos completos para el ajuste lineal.";
+    }
+    return null;
+  }
+  for (const m of measurements) {
+    const row = measurementFields.querySelector(`[data-quantity-id="${CSS.escape(m.quantity_id)}"]`);
+    const name = row?.querySelector("legend")?.textContent?.trim() ?? m.quantity_id;
+    if (row?.dataset.isGiven === "1") {
+      if (m.values.length === 0 || m.given_u == null) {
+        return `El dato "${name}" requiere valor e incertidumbre U.`;
+      }
+    } else if (row?.dataset.isChrono === "1") {
+      if (m.values.length === 0) {
+        return `"${name}": registrá al menos una lectura con el cronómetro antes de entregar.`;
+      }
+    } else if (m.values.length === 0) {
+      return `La magnitud "${name}" no tiene lecturas cargadas.`;
+    }
+  }
+  return null;
+}
+
 // Botón "Entregar": asigna la mesa (si corresponde) y crea la entrega por formulario.
 // El cálculo automático queda oculto hasta que el docente lo habilite.
 async function submitFormSubmission() {
   if (!practiceSelect.value) return;
+
+  const measurements = collectMeasurements();
+  const analysisKind = state.practiceForm?.definition?.analysis_kind ?? "";
+  const validationError = validateMeasurements(measurements, analysisKind);
+  if (validationError) {
+    submitStatus.textContent = validationError;
+    return;
+  }
+
   setSubmissionBusy(true);
-  submitStatus.textContent = "Entregando...";
+  // En modo edición reemplazamos la entrega existente; si no, creamos una nueva.
+  const editingId = state.editingSubmissionId;
+  submitStatus.textContent = editingId ? "Guardando cambios..." : "Entregando...";
   try {
+    if (editingId) {
+      await postJson(`/api/submissions/${editingId}/edit`, {
+        measurements,
+        meta: collectMeta(),
+      });
+      submitStatus.textContent = "Cambios guardados";
+      exitEditMode();
+      await loadSubmissions();
+      openSubmissionWorkspace(editingId); // vuelve a la ficha actualizada
+      return;
+    }
     const groupId = groupSelect.value;
     if (tableSelect.value) {
       await postJson(`/api/academic/groups/${groupId}/practice-table`, {
@@ -2202,7 +3054,8 @@ async function submitFormSubmission() {
       course_id: courseSelect.value,
       group_id: groupId,
       practice_id: practiceSelect.value,
-      measurements: collectMeasurements(),
+      measurements,
+      meta: collectMeta(),
     });
     submitStatus.textContent = "Entrega guardada";
     renderAnalysis(latestResult, submission);
@@ -2217,6 +3070,38 @@ async function submitFormSubmission() {
 
 // Markup del resultado de una entrega por formulario: tabla de magnitudes con sus
 // incertidumbres, mensurandos derivados (`valor ± U`) y advertencias.
+// Bloque con la depuración de series persistida (bins + valores descartados), si la entrega
+// la trae. Mapea quantity_id → etiqueta usando el análisis o la definición de la práctica.
+function measurementMetaMarkup(submission, definition) {
+  const meta = submission.measurement_meta;
+  if (!meta || typeof meta !== "object") return "";
+  const labelFor = (qid) => {
+    const fromAnalysis = (submission.analysis?.quantities ?? []).find((q) => q.quantity_id === qid);
+    if (fromAnalysis) return `${fromAnalysis.name} (${fromAnalysis.symbol})`;
+    const fromDef = (definition?.quantities ?? []).find((q) => q.id === qid);
+    if (fromDef) return `${fromDef.name} (${fromDef.symbol})`;
+    return qid;
+  };
+  const blocks = Object.entries(meta)
+    .map(([qid, m]) => {
+      const discarded = m?.discarded ?? [];
+      const bins = m?.bins;
+      if (!discarded.length && !bins) return "";
+      return `<div class="meta-block">
+        <strong>${escapeHtml(labelFor(qid))}</strong>${bins ? ` <span class="submission-meta">· ${escapeHtml(String(bins))} intervalos</span>` : ""}
+        ${
+          discarded.length
+            ? `<div class="submission-meta">Puntos descartados (${discarded.length}): ${discarded.map((v) => Number(v).toFixed(3)).join(", ")}</div>`
+            : `<div class="submission-meta">Sin puntos descartados.</div>`
+        }
+      </div>`;
+    })
+    .filter(Boolean)
+    .join("");
+  if (!blocks) return "";
+  return `<section class="panel meta-panel"><h4>Depuración de series</h4>${blocks}</section>`;
+}
+
 function formAnalysisMarkup(analysis) {
   const quantities = analysis.quantities ?? [];
   const derived = analysis.derived ?? [];
@@ -2423,7 +3308,7 @@ async function saveStudentResults(event, submissionId) {
   });
   try {
     await postJson(`/api/submissions/${submissionId}/student-results`, { results });
-    await loadSubmissionDetail(submissionId);
+    await openSubmissionWorkspace(submissionId);
   } catch (error) {
     const note = form.querySelector(".student-results-status");
     if (note) note.textContent = error.message;

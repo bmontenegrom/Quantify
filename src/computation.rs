@@ -23,6 +23,8 @@ pub struct MeasurementInput {
     pub scale_id: Option<String>,
     /// Réplicas medidas (una o varias) de la magnitud.
     pub values: Vec<f64>,
+    /// Incertidumbre expandida U para magnitudes `is_given` (dato de la cátedra).
+    pub given_u: Option<f64>,
 }
 
 /// Cuerpo para crear una entrega por formulario.
@@ -32,6 +34,10 @@ pub struct FormSubmissionInput {
     pub group_id: String,
     pub practice_id: String,
     pub measurements: Vec<MeasurementInput>,
+    /// Metadatos de depuración por magnitud (bins del histograma + valores descartados).
+    /// Se persiste tal cual para que el docente lo vea; opcional.
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
 }
 
 /// Incertidumbre calculada de una magnitud medida directamente.
@@ -189,21 +195,40 @@ pub fn compute(
 
     for quantity in quantities {
         let measurement = by_quantity.get(quantity.id.as_str());
-        let values: Vec<f64> = measurement.map(|m| m.values.clone()).unwrap_or_default();
-        if values.is_empty() {
-            warnings.push(format!(
-                "La magnitud \"{}\" ({}) no tiene lecturas cargadas.",
-                quantity.name, quantity.symbol
-            ));
-        }
-        let spec = match measurement.and_then(|m| m.scale_id.as_deref()) {
-            Some(scale_id) => match scales.get(scale_id) {
-                Some(scale) => Some(scale_spec(scale)?),
-                None => anyhow::bail!("la escala seleccionada no existe"),
-            },
-            None => None,
+
+        let result = if quantity.is_given {
+            let value = measurement
+                .and_then(|m| m.values.first().copied())
+                .unwrap_or(f64::NAN);
+            let u_exp = measurement
+                .and_then(|m| m.given_u)
+                .unwrap_or(0.0);
+            if value.is_nan() {
+                warnings.push(format!(
+                    "El dato \"{}\" ({}) no tiene valor cargado.",
+                    quantity.name, quantity.symbol
+                ));
+            }
+            uncertainty::measured_given(value, u_exp)
+        } else {
+            let values: Vec<f64> = measurement.map(|m| m.values.clone()).unwrap_or_default();
+            if values.is_empty() {
+                warnings.push(format!(
+                    "La magnitud \"{}\" ({}) no tiene lecturas cargadas.",
+                    quantity.name, quantity.symbol
+                ));
+            }
+            let spec = match measurement.and_then(|m| m.scale_id.as_deref()) {
+                Some(scale_id) => match scales.get(scale_id) {
+                    Some(scale) => Some(scale_spec(scale)?),
+                    None => anyhow::bail!("la escala seleccionada no existe"),
+                },
+                None => None,
+            };
+            uncertainty::measured_quantity(&values, spec.as_ref())
         };
-        let result = uncertainty::measured_quantity(&values, spec.as_ref());
+
+        let values: Vec<f64> = measurement.map(|m| m.values.clone()).unwrap_or_default();
         means_by_symbol.insert(quantity.symbol.clone(), result.mean);
         u_by_symbol.insert(quantity.symbol.clone(), result.u_c);
         computed.push(QuantityComputation {
@@ -488,6 +513,10 @@ pub async fn create_form_submission(
 ) -> anyhow::Result<db::SubmissionDetail> {
     let analysis = analyze(pool, &input.practice_id, &input.measurements).await?;
     let analysis_json = serde_json::to_string(&analysis)?;
+    let meta_json = match &input.meta {
+        Some(value) => Some(serde_json::to_string(value)?),
+        None => None,
+    };
 
     let id = Uuid::new_v4().to_string();
     let now = Utc::now();
@@ -498,7 +527,8 @@ pub async fn create_form_submission(
         r#"
         INSERT INTO submissions (
             id, student_name, group_name, course, practice_id, file_name, csv_path,
-            analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id, entry_mode
+            analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
+            entry_mode, measurement_meta_json
         )
         SELECT
             ?1,
@@ -514,7 +544,8 @@ pub async fn create_form_submission(
             u.id,
             c.id,
             g.id,
-            'form'
+            'form',
+            ?8
         FROM users u, lab_groups g, courses c
         WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
         "#,
@@ -526,6 +557,7 @@ pub async fn create_form_submission(
     .bind(&input.practice_id)
     .bind(&analysis_json)
     .bind(now)
+    .bind(&meta_json)
     .execute(&mut *tx)
     .await?;
 
@@ -535,21 +567,42 @@ pub async fn create_form_submission(
     }
 
     for measurement in &input.measurements {
-        for (index, value) in measurement.values.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO submission_measurements \
-                 (id, submission_id, quantity_id, instrument_id, scale_id, replicate_index, value) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )
-            .bind(Uuid::new_v4().to_string())
-            .bind(&id)
-            .bind(&measurement.quantity_id)
-            .bind(measurement.instrument_id.as_deref())
-            .bind(measurement.scale_id.as_deref())
-            .bind(index as i64)
-            .bind(*value)
-            .execute(&mut *tx)
-            .await?;
+        // Para magnitudes `is_given`, persiste el único valor con su U en value_u.
+        // Para medidas normales, persiste cada réplica con value_u = NULL.
+        if measurement.values.is_empty() && measurement.given_u.is_some() {
+            // Dato sin valor numérico (no debería llegar, pero evitamos insertar filas vacías).
+        } else {
+            let rows: Vec<(f64, Option<f64>)> = if measurement.given_u.is_some() {
+                measurement
+                    .values
+                    .first()
+                    .map(|&v| vec![(v, measurement.given_u)])
+                    .unwrap_or_default()
+            } else {
+                measurement
+                    .values
+                    .iter()
+                    .map(|&v| (v, None))
+                    .collect()
+            };
+            for (index, (value, value_u)) in rows.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO submission_measurements \
+                     (id, submission_id, quantity_id, instrument_id, scale_id, \
+                      replicate_index, value, value_u) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                )
+                .bind(Uuid::new_v4().to_string())
+                .bind(&id)
+                .bind(&measurement.quantity_id)
+                .bind(measurement.instrument_id.as_deref())
+                .bind(measurement.scale_id.as_deref())
+                .bind(index as i64)
+                .bind(*value)
+                .bind(*value_u)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
     }
     tx.commit().await?;
@@ -557,6 +610,76 @@ pub async fn create_form_submission(
     db::submission_detail(pool, &id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
+}
+
+/// Reemplaza las lecturas y recalcula el análisis de una entrega por formulario existente
+/// (edición dentro de la ventana permitida). No cambia `submitted_at` ni la práctica: la
+/// validación de propiedad/ventana ocurre en la capa de rutas. Transaccional.
+pub async fn update_form_submission(
+    pool: &sqlx::SqlitePool,
+    submission_id: &str,
+    practice_id: &str,
+    measurements: &[MeasurementInput],
+    meta: Option<&serde_json::Value>,
+) -> anyhow::Result<db::SubmissionDetail> {
+    let analysis = analyze(pool, practice_id, measurements).await?;
+    let analysis_json = serde_json::to_string(&analysis)?;
+    let meta_json = match meta {
+        Some(value) => Some(serde_json::to_string(value)?),
+        None => None,
+    };
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "UPDATE submissions SET analysis_json = ?2, measurement_meta_json = ?3 WHERE id = ?1",
+    )
+    .bind(submission_id)
+    .bind(&analysis_json)
+    .bind(&meta_json)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM submission_measurements WHERE submission_id = ?1")
+        .bind(submission_id)
+        .execute(&mut *tx)
+        .await?;
+
+    for measurement in measurements {
+        if measurement.values.is_empty() && measurement.given_u.is_some() {
+            continue;
+        }
+        let rows: Vec<(f64, Option<f64>)> = if measurement.given_u.is_some() {
+            measurement
+                .values
+                .first()
+                .map(|&v| vec![(v, measurement.given_u)])
+                .unwrap_or_default()
+        } else {
+            measurement.values.iter().map(|&v| (v, None)).collect()
+        };
+        for (index, (value, value_u)) in rows.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO submission_measurements \
+                 (id, submission_id, quantity_id, instrument_id, scale_id, \
+                  replicate_index, value, value_u) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(submission_id)
+            .bind(&measurement.quantity_id)
+            .bind(measurement.instrument_id.as_deref())
+            .bind(measurement.scale_id.as_deref())
+            .bind(index as i64)
+            .bind(*value)
+            .bind(*value_u)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+
+    db::submission_detail(pool, submission_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega editada"))
 }
 
 #[cfg(test)]
@@ -601,6 +724,7 @@ mod tests {
             repeated: true,
             quantity: None,
             position: 0,
+            is_given: false,
         }
     }
 
@@ -610,6 +734,7 @@ mod tests {
             instrument_id: None,
             scale_id: None,
             values: values.to_vec(),
+            given_u: None,
         }
     }
 
@@ -727,35 +852,36 @@ mod tests {
     #[tokio::test]
     async fn analyze_uses_type_a_with_replicas() {
         let (pool, _dir) = setup().await;
-        // P1 sembrada: l/a/b. Cargo réplicas de l con dispersión conocida.
+        // P1 sembrada: T (periodo, repetido) + L (dado). Cargo réplicas de T con dispersión conocida.
         let def = crate::practices::definition(&pool, "p1-estadistica")
             .await
             .unwrap()
             .unwrap();
-        let l_id = def
+        let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "l")
+            .find(|q| q.symbol == "T")
             .unwrap()
             .id
             .clone();
         let measurements = vec![MeasurementInput {
-            quantity_id: l_id,
+            quantity_id: t_id,
             instrument_id: None,
             scale_id: None,
             values: vec![10.0, 12.0, 11.0],
+            given_u: None,
         }];
         let analysis = analyze(&pool, "p1-estadistica", &measurements)
             .await
             .unwrap();
-        let q_l = analysis
+        let q_t = analysis
             .quantities
             .iter()
-            .find(|q| q.symbol == "l")
+            .find(|q| q.symbol == "T")
             .unwrap();
-        assert_eq!(q_l.result.n, 3);
-        assert!(close(q_l.result.mean, 11.0, 1e-12));
-        assert!(q_l.result.u_a > 0.0);
+        assert_eq!(q_t.result.n, 3);
+        assert!(close(q_t.result.mean, 11.0, 1e-12));
+        assert!(q_t.result.u_a > 0.0);
     }
 
     #[tokio::test]
@@ -792,10 +918,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let l_id = def
+        let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "l")
+            .find(|q| q.symbol == "T")
             .unwrap()
             .id
             .clone();
@@ -804,16 +930,97 @@ mod tests {
             group_id: group.id.clone(),
             practice_id: "p1-estadistica".into(),
             measurements: vec![MeasurementInput {
-                quantity_id: l_id,
+                quantity_id: t_id,
                 instrument_id: None,
                 scale_id: None,
                 values: vec![5.0, 5.2, 4.9],
+                given_u: None,
             }],
+            meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         assert_eq!(detail.entry_mode, "form");
         // El analysis es el FormAnalysis serializado (tiene "quantities").
         assert!(detail.analysis.get("quantities").is_some());
+        // La meta de depuración se persiste y se lee de vuelta intacta.
+        let meta = detail.measurement_meta.expect("meta persistida");
+        assert_eq!(meta["q1"]["bins"], 8);
+        assert_eq!(meta["q1"]["discarded"][0], 9.9);
+    }
+
+    #[tokio::test]
+    async fn update_form_submission_replaces_measurements_and_is_editable() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def.quantities.iter().find(|q| q.symbol == "T").unwrap().id.clone();
+        let mk = |vals: Vec<f64>| FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: t_id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values: vals,
+                given_u: None,
+            }],
+            meta: None,
+        };
+        let created = create_form_submission(&pool, &user, mk(vec![5.0, 5.2, 4.9]))
+            .await
+            .unwrap();
+        // Recién creada: editable (ventana abierta, pendiente, no visible).
+        assert!(created.can_edit);
+        assert!(created.editable_until.is_some());
+
+        let edited = update_form_submission(
+            &pool,
+            &created.id,
+            "p1-estadistica",
+            &mk(vec![10.0, 12.0, 11.0]).measurements,
+            None,
+        )
+        .await
+        .unwrap();
+        // Las lecturas crudas reflejan los nuevos valores (3 réplicas: 10, 12, 11).
+        let vals: Vec<f64> = edited.measurements.iter().map(|m| m.value).collect();
+        assert_eq!(vals, vec![10.0, 12.0, 11.0]);
+        let q_t = edited.analysis["quantities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|q| q["symbol"] == "T")
+            .unwrap();
+        assert!((q_t["result"]["mean"].as_f64().unwrap() - 11.0).abs() < 1e-9);
     }
 
     #[tokio::test]
@@ -824,6 +1031,7 @@ mod tests {
             instrument_id: None,
             scale_id: None,
             values: vec![1.0],
+            given_u: None,
         }];
         assert!(analyze(&pool, "p1-estadistica", &measurements)
             .await
@@ -843,10 +1051,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let l_id = def
+        let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "l")
+            .find(|q| q.symbol == "T")
             .unwrap()
             .id
             .clone();
@@ -855,11 +1063,13 @@ mod tests {
             group_id: "grupo-fantasma".into(),
             practice_id: "p1-estadistica".into(),
             measurements: vec![MeasurementInput {
-                quantity_id: l_id,
+                quantity_id: t_id,
                 instrument_id: None,
                 scale_id: None,
                 values: vec![1.0],
+                given_u: None,
             }],
+            meta: None,
         };
         assert!(create_form_submission(&pool, &user, input).await.is_err());
         // Rollback: no debe quedar ninguna entrega ni medición.
