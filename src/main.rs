@@ -59,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
     db::seed_academic(&pool).await?;
     instruments::seed_instruments(&pool, "fisica-experimental-i-2026").await?;
     practices::seed_definitions(&pool).await?;
+    db::seed_submissions(&pool).await?;
 
     let state = Arc::new(AppState { pool, upload_dir });
     let app = Router::new()

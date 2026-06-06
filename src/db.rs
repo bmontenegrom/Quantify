@@ -1216,14 +1216,14 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
-        // `DO NOTHING`: solo siembra las prácticas faltantes y nunca pisa las existentes, para
-        // respetar ediciones del docente (p. ej. `analysis_kind`) entre reinicios. En dev, para
-        // re-sembrar valores nuevos se resetea la base.
+        // Actualiza nombre y descripción en conflicto para corregir errores de texto entre
+        // versiones, pero preserva los campos editables por el docente (analysis_kind,
+        // x_formula, y_formula) para no pisar cambios hechos desde la UI.
         sqlx::query(
             r#"
             INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(id) DO NOTHING
+            ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description
             "#,
         )
         .bind(id)
@@ -1339,6 +1339,113 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(course_id)
         .bind(practice)
         .bind(Utc::now())
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// Siembra entregas de prueba para el estudiante de seed, una por práctica habilitada.
+/// Idempotente: no inserta si el estudiante ya tiene entregas.
+pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
+        .fetch_one(pool)
+        .await?;
+    if count.0 > 0 {
+        return Ok(());
+    }
+
+    let student = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, display_name FROM users WHERE email = 'estudiante@quantify.local'",
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    let Some((student_id, _)) = student else {
+        return Ok(());
+    };
+
+    let course_id = "fisica-experimental-i-2026";
+    let group_row = sqlx::query_as::<_, (String,)>(
+        "SELECT id FROM lab_groups WHERE course_id = ?1 AND name = 'Grupo 1'",
+    )
+    .bind(course_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some((group_id,)) = group_row else {
+        return Ok(());
+    };
+
+    let now = Utc::now();
+
+    // Una entrega por práctica con datos realistas.
+    let submissions: &[(&str, &str, &str)] = &[
+        ("p1-estadistica", "pendiente", ""),
+        (
+            "p2-serie",
+            "aprobada",
+            "Buena medición. Todos los valores dentro del rango esperado.",
+        ),
+        (
+            "p2-corriente-continua",
+            "observada",
+            "Revisar la medición de R3: la caída de tensión parece alta.",
+        ),
+        ("p3-relajacion", "pendiente", ""),
+    ];
+
+    for (practice_id, status, teacher_comment) in submissions {
+        let analysis_json = serde_json::json!({
+            "quantities": [],
+            "derived": [],
+            "warnings": ["Entrega de prueba generada por seed — no contiene mediciones reales."]
+        })
+        .to_string();
+
+        let score: Option<f64> = if *status == "aprobada" {
+            Some(8.5)
+        } else {
+            None
+        };
+        let reviewed_at = if *status != "pendiente" {
+            Some(now)
+        } else {
+            None
+        };
+        let comment = if teacher_comment.is_empty() {
+            None
+        } else {
+            Some(*teacher_comment)
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO submissions (
+                id, student_name, group_name, course, practice_id, file_name, csv_path,
+                analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
+                entry_mode, score, teacher_comment, reviewed_at
+            )
+            SELECT
+                ?1, u.display_name, g.name, c.name, ?5,
+                '(formulario)', '', ?6, ?7, ?8, u.id, c.id, g.id,
+                'form', ?9, ?10, ?11
+            FROM users u, lab_groups g, courses c
+            WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&student_id)
+        .bind(&group_id)
+        .bind(course_id)
+        .bind(practice_id)
+        .bind(&analysis_json)
+        .bind(status)
+        .bind(now)
+        .bind(score)
+        .bind(comment)
+        .bind(reviewed_at)
         .execute(pool)
         .await?;
     }
