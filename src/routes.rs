@@ -59,6 +59,7 @@ pub fn api_router(state: SharedState) -> Router {
         )
         .route("/practices", get(list_practices))
         .route("/practices/{id}/definition", get(practice_definition))
+        .route("/practices/{id}/analyze-preview", post(analyze_preview))
         .route(
             "/practices/{id}/analysis-kind",
             post(set_practice_analysis_kind),
@@ -874,6 +875,27 @@ async fn practice_definition(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     Ok(Json(def))
+}
+
+/// Cuerpo del preview de análisis: sólo las lecturas crudas (sin curso/grupo).
+#[derive(serde::Deserialize)]
+struct AnalyzePreviewBody {
+    measurements: Vec<computation::MeasurementInput>,
+}
+
+/// `POST /api/practices/{id}/analyze-preview`: calcula el análisis (incl. regresión) sin
+/// persistir, para previsualizar el gráfico/parámetros mientras el alumno carga datos.
+async fn analyze_preview(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<AnalyzePreviewBody>,
+) -> Result<Json<computation::FormAnalysis>, AppError> {
+    current_user(&state, &headers).await?;
+    let analysis = computation::analyze(&state.pool, &id, &body.measurements)
+        .await
+        .map_err(analysis_error)?;
+    Ok(Json(analysis))
 }
 
 /// `POST /api/practices/{id}/analysis-kind`: actualiza el tipo de análisis (docente/admin).

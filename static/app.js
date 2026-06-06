@@ -2673,12 +2673,56 @@ function renderSeriesTable(definition) {
       </table>
     </div>
     <button type="button" class="add-series-row">＋ agregar punto</button>
+    <section class="series-preview panel" aria-live="polite"></section>
   `;
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
     wireSeriesRemove();
+    schedulePreview();
   });
   wireSeriesRemove();
+
+  // Vista previa en vivo del ajuste (debounced): a medida que se cargan puntos se consulta el
+  // endpoint de preview (sin persistir) y se dibuja el gráfico con sus parámetros.
+  let previewTimer = null;
+  const schedulePreview = () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(updateRegressionPreview, 350);
+  };
+  measurementFields.querySelector(".series-table").addEventListener("input", (e) => {
+    if (e.target.classList.contains("series-value") || e.target.classList.contains("prefix-select")) {
+      schedulePreview();
+    }
+  });
+  // `change` cubre los <select> de prefijo (no siempre emiten input).
+  measurementFields.querySelector(".series-table").addEventListener("change", schedulePreview);
+}
+
+// Pide al backend el ajuste de los puntos cargados (sin persistir) y dibuja el gráfico + τ/R²
+// debajo de la tabla de serie. Silencioso ante errores (puntos incompletos, etc.).
+async function updateRegressionPreview() {
+  const container = measurementFields.querySelector(".series-preview");
+  if (!container) return;
+  const measurements = collectMeasurements();
+  const points = measurements[0]?.values.length ?? 0;
+  if (points < 2) {
+    container.innerHTML = `<p class="submission-meta">Cargá al menos 2 puntos completos para ver el ajuste.</p>`;
+    return;
+  }
+  try {
+    const analysis = await postJson(
+      `/api/practices/${encodeURIComponent(practiceSelect.value)}/analyze-preview`,
+      { measurements }
+    );
+    if (analysis.regression) {
+      container.innerHTML = `<h4>Vista previa del ajuste</h4>${regressionMarkup(analysis.regression)}`;
+    } else {
+      container.innerHTML = "";
+    }
+  } catch {
+    // Datos aún incompletos o inconsistentes: no mostramos error en el preview.
+    container.innerHTML = `<p class="submission-meta">No se pudo calcular la vista previa con los datos actuales.</p>`;
+  }
 }
 
 // HTML de una fila (un punto) de la tabla de serie: selector de prefijo + input por magnitud.
