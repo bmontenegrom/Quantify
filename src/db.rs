@@ -1409,12 +1409,12 @@ pub async fn create_course(pool: &SqlitePool, input: CreateCourse) -> anyhow::Re
     .execute(pool)
     .await?;
 
-    Ok(
-        sqlx::query_as::<_, Course>("SELECT id, name, term, active, submission_edit_hours FROM courses WHERE id = ?1")
-            .bind(id)
-            .fetch_one(pool)
-            .await?,
+    Ok(sqlx::query_as::<_, Course>(
+        "SELECT id, name, term, active, submission_edit_hours FROM courses WHERE id = ?1",
     )
+    .bind(id)
+    .fetch_one(pool)
+    .await?)
 }
 
 /// Actualiza nombre y período de un curso. Devuelve `None` si el curso no existe.
@@ -1445,10 +1445,12 @@ pub async fn update_course(
     }
 
     Ok(Some(
-        sqlx::query_as::<_, Course>("SELECT id, name, term, active, submission_edit_hours FROM courses WHERE id = ?1")
-            .bind(course_id)
-            .fetch_one(pool)
-            .await?,
+        sqlx::query_as::<_, Course>(
+            "SELECT id, name, term, active, submission_edit_hours FROM courses WHERE id = ?1",
+        )
+        .bind(course_id)
+        .fetch_one(pool)
+        .await?,
     ))
 }
 
