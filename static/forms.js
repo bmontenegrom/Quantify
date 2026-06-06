@@ -186,11 +186,11 @@ export function renderMeasurementFields() {
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1">
           <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
-          <div class="form-grid">
-            <label>Instrumento (tipo B por resolución)
+          <div class="measure-selectors" style="flex-direction:row;gap:8px;width:auto;margin-bottom:8px;">
+            <label class="measure-label-sm">Instrumento
               <select class="measure-instrument">${chronoInstrumentOptions}</select>
             </label>
-            <label>Escala
+            <label class="measure-label-sm">Escala
               <select class="measure-scale"><option value="">— sin escala —</option></select>
             </label>
           </div>
@@ -224,18 +224,22 @@ export function renderMeasurementFields() {
     return `
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
         <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
-        <div class="form-grid">
-          <label>Instrumento
-            <select class="measure-instrument">${instrumentOptions}</select>
-          </label>
-          <label>Escala
-            <select class="measure-scale"><option value="">— sin escala —</option></select>
-          </label>
+        <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
+          <div class="measure-selectors">
+            <label class="measure-label-sm">Instrumento
+              <select class="measure-instrument">${instrumentOptions}</select>
+            </label>
+            <label class="measure-label-sm">Escala
+              <select class="measure-scale"><option value="">— sin escala —</option></select>
+            </label>
+          </div>
+          <div class="measure-right">
+            <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
+              ${renderReplicaInput(q.unit)}
+            </div>
+            ${q.repeated ? `<button type="button" class="add-replica">＋ agregar replica</button>` : ""}
+          </div>
         </div>
-        <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
-          ${renderReplicaInput(q.unit)}
-        </div>
-        ${q.repeated ? `<button type="button" class="add-replica">＋ agregar replica</button>` : ""}
       </fieldset>
     `;
   };

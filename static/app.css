@@ -453,25 +453,70 @@ textarea {
 
 .measurement-fields {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   margin: 12px 0;
 }
 
 .measurement-row {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 12px;
+  padding: 8px 12px 10px;
 }
 
 .measurement-row legend {
   font-weight: 600;
+  font-size: 0.9rem;
   padding: 0 6px;
+}
+
+/* Cuerpo: selectores compactos en fila, luego campo de valor prominente */
+.measure-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* Para magnitudes con réplicas el valor va debajo de los selectores */
+.measure-body--stacked {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.measure-selectors {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.measure-label-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.measure-label-sm select {
+  font-size: 0.82rem;
+  padding: 4px 6px;
+  min-width: 140px;
+  max-width: 180px;
+}
+
+.measure-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
 }
 
 .measure-values {
   display: grid;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 5px;
 }
 
 .replica {
@@ -482,10 +527,32 @@ textarea {
 
 .replica .measure-value {
   flex: 1;
+  font-size: 1.1rem;
+  font-weight: 500;
+  padding: 7px 12px;
+  min-width: 80px;
+  border: 1.5px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.replica .measure-value:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+.replica-unit {
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 28px;
 }
 
 .add-replica {
-  margin-top: 8px;
+  align-self: flex-start;
+  font-size: 0.82rem;
+  padding: 3px 10px;
 }
 
 .instrument-toolbar {
