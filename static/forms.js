@@ -186,13 +186,9 @@ export function renderMeasurementFields() {
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1">
           <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
-          <div class="measure-selectors" style="flex-direction:row;gap:8px;width:auto;margin-bottom:8px;">
-            <label class="measure-label-sm">Instrumento
-              <select class="measure-instrument">${chronoInstrumentOptions}</select>
-            </label>
-            <label class="measure-label-sm">Escala
-              <select class="measure-scale"><option value="">— sin escala —</option></select>
-            </label>
+          <div class="measure-selectors" style="margin-bottom:8px;">
+            <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${chronoInstrumentOptions}</select>
+            <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
           </div>
           <div class="chrono-widget">
             <div class="chrono-display">0.000 s</div>
@@ -226,18 +222,15 @@ export function renderMeasurementFields() {
         <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
           <div class="measure-selectors">
-            <label class="measure-label-sm">Instrumento
-              <select class="measure-instrument">${instrumentOptions}</select>
-            </label>
-            <label class="measure-label-sm">Escala
-              <select class="measure-scale"><option value="">— sin escala —</option></select>
-            </label>
+            <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
+            <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
           </div>
+          <div class="measure-sep"></div>
           <div class="measure-right">
             <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
               ${renderReplicaInput(q.unit)}
             </div>
-            ${q.repeated ? `<button type="button" class="add-replica">＋ agregar replica</button>` : ""}
+            ${q.repeated ? `<button type="button" class="add-replica">＋ agregar réplica</button>` : ""}
           </div>
         </div>
       </fieldset>

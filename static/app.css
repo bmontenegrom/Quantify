@@ -453,87 +453,106 @@ textarea {
 
 .measurement-fields {
   display: grid;
-  gap: 10px;
-  margin: 12px 0;
+  gap: 8px;
+  margin: 10px 0;
 }
 
 .measurement-row {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 8px 12px 10px;
+  padding: 6px 12px 8px;
 }
 
 .measurement-row legend {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   padding: 0 6px;
 }
 
-/* Cuerpo: selectores compactos en fila, luego campo de valor prominente */
+/* Una sola fila: [instrumento] [escala] | [prefijo] [valor] [unidad] */
 .measure-body {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 6px;
+  gap: 6px;
+  margin-top: 4px;
 }
 
-/* Para magnitudes con réplicas el valor va debajo de los selectores */
+/* Separador visual entre selectores y campo de valor */
+.measure-body .measure-sep {
+  width: 1px;
+  height: 24px;
+  background: var(--line);
+  flex: 0 0 auto;
+}
+
+/* Magnitudes con réplicas: selectores arriba, valores apilados abajo */
 .measure-body--stacked {
-  align-items: flex-start;
-  flex-direction: column;
+  flex-wrap: wrap;
+}
+
+.measure-body--stacked .measure-sep {
+  display: none;
+}
+
+.measure-body--stacked .measure-right {
+  flex-basis: 100%;
 }
 
 .measure-selectors {
   display: flex;
-  flex-direction: row;
-  gap: 6px;
+  gap: 4px;
   flex: 0 0 auto;
+  align-items: center;
 }
 
-.measure-label-sm {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 0.72rem;
-  color: var(--muted);
-}
-
-.measure-label-sm select {
-  font-size: 0.82rem;
-  padding: 4px 6px;
-  min-width: 140px;
-  max-width: 180px;
+/* Selects de instrumento/escala: sin label encima, compactos */
+.measure-selectors select {
+  font-size: 0.8rem;
+  padding: 5px 4px;
+  height: 32px;
+  min-width: 130px;
+  max-width: 170px;
 }
 
 .measure-right {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
 }
 
 .measure-values {
   display: grid;
-  gap: 5px;
+  gap: 4px;
 }
 
 .replica {
   align-items: center;
   display: flex;
-  gap: 6px;
+  gap: 4px;
+}
+
+/* Selector de prefijo SI: ancho fijo, justo para "µ" "k" "m" */
+.prefix-select {
+  flex: 0 0 52px;
+  width: 52px;
+  font-size: 0.82rem;
+  padding: 5px 2px;
+  height: 32px;
+  text-align: center;
 }
 
 .replica .measure-value {
   flex: 1;
-  font-size: 1.1rem;
-  font-weight: 500;
-  padding: 7px 12px;
+  font-size: 1rem;
+  padding: 5px 10px;
+  height: 32px;
   min-width: 80px;
   border: 1.5px solid var(--line);
   border-radius: 6px;
   background: #fff;
+  box-sizing: border-box;
 }
 
 .replica .measure-value:focus {
@@ -543,16 +562,24 @@ textarea {
 }
 
 .replica-unit {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   color: var(--muted);
   white-space: nowrap;
-  min-width: 28px;
+  min-width: 26px;
+  flex: 0 0 auto;
+}
+
+.remove-replica {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  line-height: 1;
 }
 
 .add-replica {
   align-self: flex-start;
-  font-size: 0.82rem;
-  padding: 3px 10px;
+  font-size: 0.8rem;
+  padding: 3px 8px;
 }
 
 .instrument-toolbar {
