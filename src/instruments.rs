@@ -360,9 +360,6 @@ pub async fn import_course(
 /// si el curso ya tiene instrumentos. Valores tomados de las hojas de testers y de la técnica
 /// de trabajo de Física 103 (a confirmar/afinar por el docente).
 pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Result<()> {
-    if !list_instruments(pool, course_id).await?.is_empty() {
-        return Ok(());
-    }
 
     // Escala analógica (apreciación).
     let apre = |label: &str, step: f64, appr: f64, full: Option<f64>, unit: &str| ScaleInput {
@@ -612,9 +609,19 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
     ];
 
     for (inst, scales) in catalog {
-        let created = create_instrument(pool, inst).await?;
-        for scale in scales {
-            create_scale(pool, &created.id, scale).await?;
+        // Aditivo: solo inserta si el instrumento aún no existe en el curso.
+        let existing: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM instruments WHERE course_id = ?1 AND name = ?2",
+        )
+        .bind(&inst.course_id)
+        .bind(inst.name.trim())
+        .fetch_optional(pool)
+        .await?;
+        if existing.is_none() {
+            let created = create_instrument(pool, inst).await?;
+            for scale in scales {
+                create_scale(pool, &created.id, scale).await?;
+            }
         }
     }
 
