@@ -95,6 +95,7 @@ pub fn api_router(state: SharedState) -> Router {
         )
         .route("/submissions", get(submissions).post(create_submission))
         .route("/submissions/form", post(create_form_submission))
+        .route("/submissions/{id}/edit", post(edit_form_submission))
         .route("/submissions/{id}", get(submission_detail))
         .route("/submissions/{id}/review", post(review_submission))
         .route(
@@ -632,6 +633,57 @@ async fn create_form_submission(
         .await
         .map_err(analysis_error)?;
     Ok(Json(gate_analysis(detail, &user)))
+}
+
+/// Cuerpo para editar una entrega por formulario (lecturas + meta de depuración).
+#[derive(serde::Deserialize)]
+struct EditFormBody {
+    measurements: Vec<computation::MeasurementInput>,
+    #[serde(default)]
+    meta: Option<serde_json::Value>,
+}
+
+/// `POST /api/submissions/{id}/edit`: el alumno dueño reemplaza sus lecturas dentro de la
+/// ventana de edición (submitted_at + horas del curso). Recalcula el análisis sin tocar
+/// `submitted_at`. Rechaza si no es el dueño, venció el plazo, o ya fue corregida/visible.
+async fn edit_form_submission(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<EditFormBody>,
+) -> Result<Json<db::SubmissionDetail>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    let detail = db::submission_detail(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
+
+    let owner = db::submission_owner_id(&state.pool, &id).await?;
+    if owner.as_deref() != Some(user.id.as_str()) {
+        return Err(AppError::forbidden("Solo podés editar tus propias entregas."));
+    }
+    if !detail.can_edit {
+        let expired = detail
+            .editable_until
+            .map(|until| chrono::Utc::now() >= until)
+            .unwrap_or(true);
+        let message = if expired {
+            "El plazo de edición venció: ya no podés modificar esta entrega."
+        } else {
+            "No podés editar una entrega que ya fue corregida."
+        };
+        return Err(AppError::bad_request(message));
+    }
+
+    let updated = computation::update_form_submission(
+        &state.pool,
+        &id,
+        &detail.practice_id,
+        &input.measurements,
+        input.meta.as_ref(),
+    )
+    .await
+    .map_err(analysis_error)?;
+    Ok(Json(gate_analysis(updated, &user)))
 }
 
 /// `POST /api/submissions/{id}/review`: registra la revisión docente (estado/comentario/nota).

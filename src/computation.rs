@@ -612,6 +612,76 @@ pub async fn create_form_submission(
         .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
 }
 
+/// Reemplaza las lecturas y recalcula el análisis de una entrega por formulario existente
+/// (edición dentro de la ventana permitida). No cambia `submitted_at` ni la práctica: la
+/// validación de propiedad/ventana ocurre en la capa de rutas. Transaccional.
+pub async fn update_form_submission(
+    pool: &sqlx::SqlitePool,
+    submission_id: &str,
+    practice_id: &str,
+    measurements: &[MeasurementInput],
+    meta: Option<&serde_json::Value>,
+) -> anyhow::Result<db::SubmissionDetail> {
+    let analysis = analyze(pool, practice_id, measurements).await?;
+    let analysis_json = serde_json::to_string(&analysis)?;
+    let meta_json = match meta {
+        Some(value) => Some(serde_json::to_string(value)?),
+        None => None,
+    };
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "UPDATE submissions SET analysis_json = ?2, measurement_meta_json = ?3 WHERE id = ?1",
+    )
+    .bind(submission_id)
+    .bind(&analysis_json)
+    .bind(&meta_json)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM submission_measurements WHERE submission_id = ?1")
+        .bind(submission_id)
+        .execute(&mut *tx)
+        .await?;
+
+    for measurement in measurements {
+        if measurement.values.is_empty() && measurement.given_u.is_some() {
+            continue;
+        }
+        let rows: Vec<(f64, Option<f64>)> = if measurement.given_u.is_some() {
+            measurement
+                .values
+                .first()
+                .map(|&v| vec![(v, measurement.given_u)])
+                .unwrap_or_default()
+        } else {
+            measurement.values.iter().map(|&v| (v, None)).collect()
+        };
+        for (index, (value, value_u)) in rows.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO submission_measurements \
+                 (id, submission_id, quantity_id, instrument_id, scale_id, \
+                  replicate_index, value, value_u) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(submission_id)
+            .bind(&measurement.quantity_id)
+            .bind(measurement.instrument_id.as_deref())
+            .bind(measurement.scale_id.as_deref())
+            .bind(index as i64)
+            .bind(*value)
+            .bind(*value_u)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+
+    db::submission_detail(pool, submission_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega editada"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -876,6 +946,81 @@ mod tests {
         let meta = detail.measurement_meta.expect("meta persistida");
         assert_eq!(meta["q1"]["bins"], 8);
         assert_eq!(meta["q1"]["discarded"][0], 9.9);
+    }
+
+    #[tokio::test]
+    async fn update_form_submission_replaces_measurements_and_is_editable() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def.quantities.iter().find(|q| q.symbol == "T").unwrap().id.clone();
+        let mk = |vals: Vec<f64>| FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: t_id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values: vals,
+                given_u: None,
+            }],
+            meta: None,
+        };
+        let created = create_form_submission(&pool, &user, mk(vec![5.0, 5.2, 4.9]))
+            .await
+            .unwrap();
+        // Recién creada: editable (ventana abierta, pendiente, no visible).
+        assert!(created.can_edit);
+        assert!(created.editable_until.is_some());
+
+        let edited = update_form_submission(
+            &pool,
+            &created.id,
+            "p1-estadistica",
+            &mk(vec![10.0, 12.0, 11.0]).measurements,
+            None,
+        )
+        .await
+        .unwrap();
+        // Las lecturas crudas reflejan los nuevos valores (3 réplicas: 10, 12, 11).
+        let vals: Vec<f64> = edited.measurements.iter().map(|m| m.value).collect();
+        assert_eq!(vals, vec![10.0, 12.0, 11.0]);
+        let q_t = edited.analysis["quantities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|q| q["symbol"] == "T")
+            .unwrap();
+        assert!((q_t["result"]["mean"].as_f64().unwrap() - 11.0).abs() < 1e-9);
     }
 
     #[tokio::test]
