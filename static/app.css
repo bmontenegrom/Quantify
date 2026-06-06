@@ -455,6 +455,7 @@ textarea {
   display: grid;
   gap: 8px;
   margin: 10px 0;
+  max-width: 700px;
 }
 
 .measurement-row {
