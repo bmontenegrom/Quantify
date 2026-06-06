@@ -74,8 +74,12 @@ export class Chronometer {
    * - `'pares'`:       diferencia entre marcas separadas por 2 (T[i] = m[i+2] - m[i]).
    *                    Útil para péndulo donde se marca en cada paso alternando dirección:
    *                    cada T[i] abarca un período completo aunque los marks son cada T/2.
+   * - `'periodo'`:     diferencia entre pares NO solapados (T[k] = m[2k+1] - m[2k]).
+   *                    Técnica de Estadística (Física 103): se registra el tiempo en cada
+   *                    paso por el equilibrio en el mismo sentido y cada par consecutivo de
+   *                    marcas es un período completo independiente. 200 marcas → 100 períodos.
    *
-   * @param {'absoluto'|'consecutivo'|'pares'} mode
+   * @param {'absoluto'|'consecutivo'|'pares'|'periodo'} mode
    * @returns {number[]} lecturas en segundos
    */
   readings(mode = "consecutivo") {
@@ -90,6 +94,14 @@ export class Chronometer {
         if (this.#marks.length < 3) return [];
         // T[i] = mark[i+2] - mark[i]; avanza de a 1 → n-2 lecturas solapadas.
         return this.#marks.slice(2).map((t, i) => (t - this.#marks[i]) / 1000);
+      case "periodo": {
+        // T[k] = mark[2k+1] - mark[2k]; avanza de a 2 → floor(n/2) lecturas independientes.
+        const out = [];
+        for (let i = 0; i + 1 < this.#marks.length; i += 2) {
+          out.push((this.#marks[i + 1] - this.#marks[i]) / 1000);
+        }
+        return out;
+      }
       default:
         return [];
     }
