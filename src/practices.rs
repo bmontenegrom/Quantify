@@ -319,16 +319,19 @@ async fn seed_practice(
 /// Siembra las definiciones iniciales de las prácticas (idempotente por práctica).
 /// Las magnitudes/fórmulas salen de las técnicas de trabajo de Física 103.
 pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
-    // P1 — Tratamiento estadístico: área del cordón Q = l*a + l*b (ejemplo de la cuaderneta).
+    // P1 — Péndulo simple: T medido con cronómetro (réplicas), L dado por cátedra.
+    // g = 4*pi^2*L/T^2 ; T y L en SI (s y m) para que g salga en m/s^2.
     seed_practice(
         pool,
         "p1-estadistica",
         &[
-            qty("l", "Longitud del cordon", "mm", true, "longitud"),
-            qty("a", "Ancho del cordon", "mm", true, "longitud"),
-            qty("b", "Espesor del cordon", "mm", true, "longitud"),
+            qty("T", "Periodo", "s", true, "tiempo"),
+            qty_given("L", "Longitud del pendulo", "m", "longitud"),
         ],
-        &[res("Q", "Area transversal del cordon", "mm2", "l*a + l*b")],
+        &[
+            res("Tmedio", "Periodo medio", "s", "T"),
+            res("g", "Aceleracion de gravedad", "m/s2", "4*pi^2*L/T^2"),
+        ],
     )
     .await?;
 
@@ -369,9 +372,33 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
-    // P2 — Corriente continua. Circuito: R1 y RA (resistencia interna del amperimetro) en serie
-    // con el paralelo de R2 y R3. Req = R1 + RA + 1/(1/R2 + 1/R3); I = Vg/Req.
-    // Tipo A despreciable -> medida unica; incertidumbre tipo B (fabricante) del tester/amperimetro.
+    // P2-serie — Circuito en serie: Vg, R1 y RA. I = Vg/(R1+RA).
+    // Medida unica (tipo A despreciable); incertidumbre tipo B (fabricante).
+    seed_practice(
+        pool,
+        "p2-serie",
+        &[
+            qty("Vg", "Voltaje de la fuente", "V", false, "voltaje"),
+            qty("R1", "Resistencia R1", "ohm", false, "resistencia"),
+            qty(
+                "RA",
+                "Resistencia interna del amperimetro",
+                "ohm",
+                false,
+                "resistencia",
+            ),
+        ],
+        &[res(
+            "I",
+            "Intensidad de corriente",
+            "A",
+            "Vg / (R1 + RA)",
+        )],
+    )
+    .await?;
+
+    // P2-paralelo — Circuito mixto: R2 y R3 en paralelo, en serie con R1 y RA.
+    // Req = R1 + RA + R2*R3/(R2+R3); I = Vg/Req.
     seed_practice(
         pool,
         "p2-corriente-continua",
@@ -393,13 +420,13 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "Req",
                 "Resistencia equivalente",
                 "ohm",
-                "R1 + RA + 1/(1/R2 + 1/R3)",
+                "R1 + RA + R2*R3/(R2+R3)",
             ),
             res(
                 "I",
                 "Intensidad de corriente teorica",
                 "A",
-                "Vg / (R1 + RA + 1/(1/R2 + 1/R3))",
+                "Vg / (R1 + RA + R2*R3/(R2+R3))",
             ),
         ],
     )
@@ -702,18 +729,21 @@ mod tests {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
         let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-        assert_eq!(def.quantities.len(), 3);
-        assert!(def.quantities.iter().any(|q| q.symbol == "l"));
-        assert!(def.quantities.iter().any(|q| q.symbol == "a"));
-        assert!(def.quantities.iter().any(|q| q.symbol == "b"));
-        assert_eq!(def.results.len(), 1);
-        assert_eq!(def.results[0].formula, "l*a + l*b");
+        // P1 péndulo: T (repeated) + L (is_given).
+        assert_eq!(def.quantities.len(), 2);
+        let t = def.quantities.iter().find(|q| q.symbol == "T").unwrap();
+        assert!(t.repeated);
+        let l = def.quantities.iter().find(|q| q.symbol == "L").unwrap();
+        assert!(l.is_given);
+        assert_eq!(def.results.len(), 2);
+        assert!(def.results.iter().any(|r| r.symbol == "Tmedio"));
+        assert!(def.results.iter().any(|r| r.symbol == "g"));
 
         // Segunda pasada: no debe duplicar.
         seed_definitions(&pool).await.unwrap();
         let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-        assert_eq!(def2.quantities.len(), 3);
-        assert_eq!(def2.results.len(), 1);
+        assert_eq!(def2.quantities.len(), 2);
+        assert_eq!(def2.results.len(), 2);
     }
 
     #[tokio::test]
@@ -762,6 +792,22 @@ mod tests {
             );
         }
         assert!(def.results.iter().any(|r| r.symbol == "I"));
+    }
+
+    #[tokio::test]
+    async fn seed_definitions_populates_p2_serie() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "p2-serie").await.unwrap().unwrap();
+        assert_eq!(def.quantities.len(), 3);
+        for symbol in ["Vg", "R1", "RA"] {
+            assert!(
+                def.quantities.iter().any(|q| q.symbol == symbol),
+                "falta la magnitud {symbol}"
+            );
+        }
+        assert_eq!(def.results.len(), 1);
+        assert_eq!(def.results[0].formula, "Vg / (R1 + RA)");
     }
 
     #[tokio::test]

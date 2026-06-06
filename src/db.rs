@@ -1131,19 +1131,26 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     let practices = [
         (
             "p1-estadistica",
-            "Tratamiento Estadistico de Datos",
-            "Medidas directas con replicas e instrumentos, incertidumbres tipo A y B, y determinacion indirecta por propagacion de varianzas.",
+            "Tratamiento Estadistico - Pendulo Simple",
+            "Medicion del periodo T con replicas (cronometro), longitud L dada por catedra; incertidumbres tipo A y B, calculo indirecto de g = 4*pi^2*L/T^2.",
             "estadistico",
             None,
             None,
         ),
-        // P2 y P3-parte1 se modelan con el camino `estadistico` (medidas directas + propagacion),
-        // que es lo que sus definiciones sembradas calculan. La parte con ajuste de P2 (P(R))
-        // pasara a `regresion_lineal` mas adelante.
+        // P2-serie: Vg, R1, RA en serie; I = Vg/(R1+RA). Medida unica, incertidumbre tipo B.
+        (
+            "p2-serie",
+            "CC - Circuito en Serie",
+            "Circuito en serie: Vg, R1 y RA (resistencia interna del amperimetro). I = Vg/(R1+RA).",
+            "estadistico",
+            None,
+            None,
+        ),
+        // P2-paralelo: R2 y R3 en paralelo con el circuito serie. Req y I calculados.
         (
             "p2-corriente-continua",
-            "Circuitos de Corriente Continua",
-            "Medidas de voltaje y corriente con tester; intensidad teorica por leyes de circuito.",
+            "CC - Circuito en Paralelo",
+            "Circuito mixto: R2 y R3 en paralelo, en serie con R1 y RA. Req e I calculados por leyes de circuito.",
             "estadistico",
             None,
             None,
@@ -2651,6 +2658,7 @@ mod tests {
             .map(|p| p.id)
             .collect();
         assert!(ids.contains(&"p1-estadistica".to_string()));
+        assert!(ids.contains(&"p2-serie".to_string()));
         assert!(ids.contains(&"p2-corriente-continua".to_string()));
         assert!(ids.contains(&"p3-relajacion".to_string()));
         assert!(ids.contains(&"p3-relajacion-desfasaje".to_string()));

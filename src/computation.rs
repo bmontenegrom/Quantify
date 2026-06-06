@@ -771,20 +771,20 @@ mod tests {
     #[tokio::test]
     async fn analyze_uses_type_a_with_replicas() {
         let (pool, _dir) = setup().await;
-        // P1 sembrada: l/a/b. Cargo réplicas de l con dispersión conocida.
+        // P1 sembrada: T (periodo, repetido) + L (dado). Cargo réplicas de T con dispersión conocida.
         let def = crate::practices::definition(&pool, "p1-estadistica")
             .await
             .unwrap()
             .unwrap();
-        let l_id = def
+        let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "l")
+            .find(|q| q.symbol == "T")
             .unwrap()
             .id
             .clone();
         let measurements = vec![MeasurementInput {
-            quantity_id: l_id,
+            quantity_id: t_id,
             instrument_id: None,
             scale_id: None,
             values: vec![10.0, 12.0, 11.0],
@@ -793,14 +793,14 @@ mod tests {
         let analysis = analyze(&pool, "p1-estadistica", &measurements)
             .await
             .unwrap();
-        let q_l = analysis
+        let q_t = analysis
             .quantities
             .iter()
-            .find(|q| q.symbol == "l")
+            .find(|q| q.symbol == "T")
             .unwrap();
-        assert_eq!(q_l.result.n, 3);
-        assert!(close(q_l.result.mean, 11.0, 1e-12));
-        assert!(q_l.result.u_a > 0.0);
+        assert_eq!(q_t.result.n, 3);
+        assert!(close(q_t.result.mean, 11.0, 1e-12));
+        assert!(q_t.result.u_a > 0.0);
     }
 
     #[tokio::test]
@@ -837,10 +837,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let l_id = def
+        let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "l")
+            .find(|q| q.symbol == "T")
             .unwrap()
             .id
             .clone();
@@ -849,7 +849,7 @@ mod tests {
             group_id: group.id.clone(),
             practice_id: "p1-estadistica".into(),
             measurements: vec![MeasurementInput {
-                quantity_id: l_id,
+                quantity_id: t_id,
                 instrument_id: None,
                 scale_id: None,
                 values: vec![5.0, 5.2, 4.9],
@@ -890,10 +890,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let l_id = def
+        let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "l")
+            .find(|q| q.symbol == "T")
             .unwrap()
             .id
             .clone();
@@ -902,7 +902,7 @@ mod tests {
             group_id: "grupo-fantasma".into(),
             practice_id: "p1-estadistica".into(),
             measurements: vec![MeasurementInput {
-                quantity_id: l_id,
+                quantity_id: t_id,
                 instrument_id: None,
                 scale_id: None,
                 values: vec![1.0],
