@@ -200,9 +200,7 @@ pub fn compute(
             let value = measurement
                 .and_then(|m| m.values.first().copied())
                 .unwrap_or(f64::NAN);
-            let u_exp = measurement
-                .and_then(|m| m.given_u)
-                .unwrap_or(0.0);
+            let u_exp = measurement.and_then(|m| m.given_u).unwrap_or(0.0);
             if value.is_nan() {
                 warnings.push(format!(
                     "El dato \"{}\" ({}) no tiene valor cargado.",
@@ -579,11 +577,7 @@ pub async fn create_form_submission(
                     .map(|&v| vec![(v, measurement.given_u)])
                     .unwrap_or_default()
             } else {
-                measurement
-                    .values
-                    .iter()
-                    .map(|&v| (v, None))
-                    .collect()
+                measurement.values.iter().map(|&v| (v, None)).collect()
             };
             for (index, (value, value_u)) in rows.iter().enumerate() {
                 sqlx::query(
@@ -981,7 +975,13 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let t_id = def.quantities.iter().find(|q| q.symbol == "T").unwrap().id.clone();
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
         let mk = |vals: Vec<f64>| FormSubmissionInput {
             course_id: course.id.clone(),
             group_id: group.id.clone(),

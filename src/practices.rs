@@ -340,8 +340,18 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         ],
         &[
             res("Tmedio", "Periodo medio", "s", "T"),
-            res("delta", "Constante de amortiguamiento", "1/s", "math::ln(2)/t_med"),
-            res("gamma", "Coeficiente de amortiguamiento", "1/s", "2*math::ln(2)/t_med"),
+            res(
+                "delta",
+                "Constante de amortiguamiento",
+                "1/s",
+                "math::ln(2)/t_med",
+            ),
+            res(
+                "gamma",
+                "Coeficiente de amortiguamiento",
+                "1/s",
+                "2*math::ln(2)/t_med",
+            ),
             res("Q", "Factor de calidad", "", "pi*t_med/(T*math::ln(2))"),
             res("g", "Aceleracion de gravedad", "m/s2", "4*pi^2*L/T^2"),
         ],
@@ -358,17 +368,16 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         &[
             qty("R", "Resistencia", "ohm", false, "resistencia"),
             // Rint es un dato entregado por la cátedra (valor ± U), no lo mide el alumno.
-            qty_given("Rint", "Resistencia interna de la fuente", "ohm", "resistencia"),
+            qty_given(
+                "Rint",
+                "Resistencia interna de la fuente",
+                "ohm",
+                "resistencia",
+            ),
             qty("C", "Capacitancia", "F", false, "capacitancia"),
             // Periodo de la onda cuadrada de trabajo (se registra; debe permitir ver ~5*tau
             // en el semiperiodo de descarga). No entra en las formulas, queda como dato medido.
-            qty(
-                "T_oc",
-                "Periodo de la onda cuadrada",
-                "s",
-                false,
-                "tiempo",
-            ),
+            qty("T_oc", "Periodo de la onda cuadrada", "s", false, "tiempo"),
             qty(
                 "tmedio",
                 "Tiempo de semidescarga (t1/2)",
@@ -414,7 +423,12 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             ),
         ],
         &[
-            res("I", "Intensidad de corriente", "A", "Vg / (R1 + R2 + R3 + RA)"),
+            res(
+                "I",
+                "Intensidad de corriente",
+                "A",
+                "Vg / (R1 + R2 + R3 + RA)",
+            ),
             res("VR1", "Tension en R1", "V", "Vg * R1 / (R1 + R2 + R3 + RA)"),
             res("VR2", "Tension en R2", "V", "Vg * R2 / (R1 + R2 + R3 + RA)"),
             res("VR3", "Tension en R3", "V", "Vg * R3 / (R1 + R2 + R3 + RA)"),

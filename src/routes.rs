@@ -659,7 +659,9 @@ async fn edit_form_submission(
 
     let owner = db::submission_owner_id(&state.pool, &id).await?;
     if owner.as_deref() != Some(user.id.as_str()) {
-        return Err(AppError::forbidden("Solo podés editar tus propias entregas."));
+        return Err(AppError::forbidden(
+            "Solo podés editar tus propias entregas.",
+        ));
     }
     if !detail.can_edit {
         let expired = detail
