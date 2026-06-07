@@ -6,6 +6,9 @@ import {
 import { fetchJson, errorText } from "./api.js";
 import { escapeHtml, canReview, formatDate, groupBy } from "./lib.js";
 
+const filterGroupEl = () => document.querySelector("#submission-filter-group");
+const filterTableEl = () => document.querySelector("#submission-filter-table");
+
 export async function loadSubmissions() {
   state.submissions = await fetchJson("/api/submissions");
   renderSubmissionsPage();
@@ -18,7 +21,58 @@ export function renderSubmissionsPage() {
     ? "Todas las entregas organizadas por curso y grupo."
     : "Tus entregas y el estado de correccion.";
   submissionsListTitle.textContent = teacher ? "Entregas por curso y grupo" : "Mis entregas";
+  if (teacher) renderSubmissionFilters();
   renderSubmissionList();
+}
+
+function renderSubmissionFilters() {
+  const groupEl = filterGroupEl();
+  const tableEl = filterTableEl();
+  if (!groupEl || !tableEl) return;
+
+  // Construye opciones de grupo desde state.academic (todos los cursos)
+  const groups = (state.academic?.courses ?? []).flatMap((c) =>
+    c.groups.map((g) => ({ id: g.id, label: `${g.name} (${c.name})` })),
+  );
+  const currentGroup = state.submissionFilters.groupId;
+  groupEl.innerHTML =
+    `<option value="">Todos</option>` +
+    groups
+      .map((g) => `<option value="${escapeHtml(g.id)}" ${g.id === currentGroup ? "selected" : ""}>${escapeHtml(g.label)}</option>`)
+      .join("");
+
+  // Mesas disponibles en las entregas del grupo seleccionado (o todas)
+  const tableNumbers = [
+    ...new Set(
+      state.submissions
+        .filter((s) => !currentGroup || s.group_id === currentGroup)
+        .map((s) => s.table_number)
+        .filter((n) => n != null),
+    ),
+  ].sort((a, b) => a - b);
+  const currentTable = state.submissionFilters.tableNumber;
+  tableEl.innerHTML =
+    `<option value="">Todas</option>` +
+    tableNumbers
+      .map((n) => `<option value="${n}" ${String(n) === String(currentTable) ? "selected" : ""}>Mesa ${n}</option>`)
+      .join("");
+
+  // Listeners (registrados solo una vez via dataset flag)
+  if (!groupEl.dataset.wired) {
+    groupEl.dataset.wired = "1";
+    groupEl.addEventListener("change", () => {
+      state.submissionFilters.groupId = groupEl.value;
+      state.submissionFilters.tableNumber = "";
+      renderSubmissionsPage();
+    });
+  }
+  if (!tableEl.dataset.wired) {
+    tableEl.dataset.wired = "1";
+    tableEl.addEventListener("change", () => {
+      state.submissionFilters.tableNumber = tableEl.value;
+      renderSubmissionList();
+    });
+  }
 }
 
 export function renderSubmissionList() {
@@ -48,13 +102,22 @@ export function renderSubmissionList() {
   });
 }
 
+function filteredSubmissions() {
+  const { groupId, tableNumber } = state.submissionFilters;
+  let items = state.submissions;
+  if (groupId) items = items.filter((s) => s.group_id === groupId);
+  if (tableNumber !== "") items = items.filter((s) => String(s.table_number) === String(tableNumber));
+  return items;
+}
+
 function renderStudentSubmissionRows() {
   return state.submissions
     .map(
       (item) => `
         <article class="submission-item ${item.id === state.activeSubmissionId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
           <strong>${escapeHtml(item.practice_name)}</strong>
-          <div class="submission-meta">${escapeHtml(item.course)} - Grupo ${escapeHtml(item.group_name)}</div>
+          <div class="submission-meta">${escapeHtml(item.course)} - Grupo ${escapeHtml(item.group_name)}${item.table_number != null ? ` · Mesa ${item.table_number}` : ""}</div>
+          ${item.member_count > 1 ? `<div class="submission-meta">${item.member_count} integrantes</div>` : ""}
           <div class="submission-meta">${formatDate(item.submitted_at)}</div>
           <span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
         </article>
@@ -64,7 +127,12 @@ function renderStudentSubmissionRows() {
 }
 
 function renderTeacherSubmissionGroups() {
-  const byCourse = groupBy(state.submissions, (item) => item.course);
+  const items = filteredSubmissions();
+  if (items.length === 0) {
+    return `<p class="submission-meta">No hay entregas para el filtro seleccionado.</p>`;
+  }
+
+  const byCourse = groupBy(items, (item) => item.course);
   return Object.entries(byCourse)
     .map(([course, courseItems]) => {
       const byGroup = groupBy(courseItems, (item) => item.group_name);
@@ -72,32 +140,62 @@ function renderTeacherSubmissionGroups() {
         <section class="submission-group">
           <h4>${escapeHtml(course)}</h4>
           ${Object.entries(byGroup)
-            .map(
-              ([group, groupItems]) => `
+            .map(([group, groupItems]) => {
+              // Si hay table_numbers, agrupa por mesa dentro del grupo
+              const hasTables = groupItems.some((s) => s.table_number != null);
+              const body = hasTables
+                ? renderTableGroups(groupItems)
+                : groupItems.map(submissionItemHtml).join("");
+              return `
                 <div class="submission-course-group">
                   <div class="list-head compact-list-head">
                     <strong>Grupo ${escapeHtml(group)}</strong>
                     <span class="submission-meta">${groupItems.length} entregas</span>
                   </div>
-                  ${groupItems
-                    .map(
-                      (item) => `
-                        <article class="submission-item ${item.id === state.activeSubmissionId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
-                          <strong>${escapeHtml(item.student_name)}</strong>
-                          <div class="submission-meta">${escapeHtml(item.practice_name)} - ${formatDate(item.submitted_at)}</div>
-                          <span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
-                        </article>
-                      `,
-                    )
-                    .join("")}
+                  ${body}
                 </div>
-              `,
-            )
+              `;
+            })
             .join("")}
         </section>
       `;
     })
     .join("");
+}
+
+function renderTableGroups(items) {
+  // Primero los que tienen mesa (agrupados), luego los legacy sin mesa
+  const withTable = items.filter((s) => s.table_number != null);
+  const withoutTable = items.filter((s) => s.table_number == null);
+  const byTable = groupBy(withTable, (s) => String(s.table_number));
+  const tableBlocks = Object.entries(byTable)
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([tableNum, tableItems]) => `
+      <div class="submission-table-group">
+        <div class="list-head compact-list-head">
+          <span class="submission-meta">Mesa ${escapeHtml(tableNum)} · ${tableItems[0]?.member_count ?? tableItems.length} integrante${(tableItems[0]?.member_count ?? tableItems.length) !== 1 ? "s" : ""}</span>
+        </div>
+        ${tableItems.map(submissionItemHtml).join("")}
+      </div>
+    `)
+    .join("");
+  return tableBlocks + withoutTable.map(submissionItemHtml).join("");
+}
+
+function submissionItemHtml(item) {
+  const label = item.table_number != null
+    ? escapeHtml(item.practice_name)
+    : `${escapeHtml(item.student_name)} — ${escapeHtml(item.practice_name)}`;
+  const meta = item.table_number != null
+    ? `Mesa ${item.table_number} · ${formatDate(item.submitted_at)}`
+    : formatDate(item.submitted_at);
+  return `
+    <article class="submission-item ${item.id === state.activeSubmissionId ? "active" : ""}" data-id="${escapeHtml(item.id)}">
+      <strong>${label}</strong>
+      <div class="submission-meta">${escapeHtml(meta)}</div>
+      <span class="status ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>
+    </article>
+  `;
 }
 
 export async function openSubmissionWorkspace(id) {
@@ -134,11 +232,21 @@ export function closeSubmissionWorkspace() {
 }
 
 export function submissionHeader(submission) {
+  const members = submission.members ?? [];
+  const tableLabel = submission.table_number != null ? ` · Mesa ${submission.table_number}` : "";
+  const memberList = members.length
+    ? members
+        .map(
+          (m) =>
+            `${escapeHtml(m.display_name)}${m.role === "owner" ? " ★" : ""}${m.status !== "accepted" ? ` <span class="submission-meta">(${escapeHtml(m.status)})</span>` : ""}`,
+        )
+        .join(", ")
+    : escapeHtml(submission.student_name);
   return `
     <div>
       <h3>${escapeHtml(submission.practice_name)}</h3>
       <p class="submission-meta">
-        ${escapeHtml(submission.student_name)} - Grupo ${escapeHtml(submission.group_name)} - ${escapeHtml(submission.course)}
+        ${memberList} — Grupo ${escapeHtml(submission.group_name)}${tableLabel} — ${escapeHtml(submission.course)}
       </p>
       <span class="status ${escapeHtml(submission.status)}">${escapeHtml(submission.status)}</span>
     </div>`;

@@ -1202,13 +1202,80 @@ textarea {
   background: #ecfeff;
 }
 
-.edit-submission-btn {
+.edit-submission-btn,
+.accept-invitation-btn,
+.accept-existing-btn,
+.view-existing-btn {
   background: var(--accent);
   color: #ffffff;
   border-radius: 8px;
   min-height: 38px;
   padding: 0 16px;
   font-weight: 650;
+}
+
+/* Banner de invitaciones a informes compartidos (arriba de todas las vistas). */
+.invitation-banner {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.invitation-banner-title {
+  font-weight: 650;
+  margin: 0 0 4px;
+}
+
+/* Filtros de entregas (docente). */
+.submission-filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.submission-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Sub-grupo de mesa dentro de un grupo (listado docente). */
+.submission-table-group {
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--line);
+  margin: 4px 0;
+}
+
+/* Editor de integrantes del informe (ficha, docente). */
+.members-editor {
+  margin-top: 16px;
+}
+
+.members-add-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.remove-member-btn {
+  background: transparent;
+  color: var(--danger, #dc2626);
+  border: 1px solid var(--danger, #dc2626);
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.remove-member-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Bloque de depuración persistida en la ficha de la entrega. */

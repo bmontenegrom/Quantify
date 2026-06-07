@@ -21,7 +21,21 @@ export function renderStudentSelectors() {
         .map((course) => `<option value="${escapeHtml(course.id)}">${escapeHtml(course.name)} (${escapeHtml(course.term)})</option>`)
         .join("")
     : `<option value="">Sin cursos asignados</option>`;
+
+  // Pre-seleccionar curso/grupo del perfil del alumno si hay default_group_id
+  const defaultGroupId = state.user?.default_group_id;
+  if (defaultGroupId) {
+    const defaultCourse = courses.find((c) => c.groups.some((g) => g.id === defaultGroupId));
+    if (defaultCourse) courseSelect.value = defaultCourse.id;
+  }
+
   updateStudentSelectors();
+
+  // Seleccionar el grupo por defecto después de actualizar los selects del curso
+  if (defaultGroupId && groupSelect.querySelector(`option[value="${CSS.escape(defaultGroupId)}"]`)) {
+    groupSelect.value = defaultGroupId;
+    updateTableSelector();
+  }
 }
 
 export function updateStudentSelectors() {
@@ -42,11 +56,17 @@ export function updateTableSelector() {
   if (!tableSelect) return;
   const group = selectedCourse()?.groups.find((item) => item.id === groupSelect.value);
   const assignment = selectedTableAssignment();
+  // Mesa por defecto del perfil, solo si es el grupo por defecto del alumno
+  const isDefaultGroup = groupSelect.value === (state.user?.default_group_id ?? "");
+  const profileTable = isDefaultGroup ? (state.user?.default_table_number ?? null) : null;
   const tableCount = group?.table_count ?? 0;
   tableSelect.innerHTML = tableCount
     ? Array.from({ length: tableCount }, (_, index) => {
         const tableNumber = index + 1;
-        return `<option value="${tableNumber}" ${assignment?.table_number === tableNumber ? "selected" : ""}>Mesa ${tableNumber}</option>`;
+        const selected =
+          assignment?.table_number === tableNumber ||
+          (!assignment && tableNumber === profileTable);
+        return `<option value="${tableNumber}" ${selected ? "selected" : ""}>Mesa ${tableNumber}</option>`;
       }).join("")
     : `<option value="">Sin mesas</option>`;
   tableSelect.disabled = !tableCount;
@@ -85,6 +105,13 @@ export async function loadSubmissionForm() {
     measurementFields.innerHTML = "";
     return;
   }
+
+  // Guard: si ya existe un informe para (práctica, grupo, mesa) mostrar aviso en lugar del form.
+  if (!state.editingSubmissionId) {
+    const blocked = await checkExistingReport(practiceId);
+    if (blocked) return;
+  }
+
   try {
     const [definition, instruments] = await Promise.all([
       fetchJson(`/api/practices/${encodeURIComponent(practiceId)}/definition`),
@@ -96,6 +123,58 @@ export async function loadSubmissionForm() {
   } catch (error) {
     state.practiceForm = null;
     measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+/** Verifica si ya existe un informe para la (práctica, grupo, mesa) seleccionada.
+ *  Muestra el aviso correspondiente y devuelve `true` si el form debe bloquearse. */
+async function checkExistingReport(practiceId) {
+  const groupId = groupSelect.value;
+  const tableNum = Number(tableSelect.value);
+  if (!groupId || !tableNum) return false;
+  try {
+    const existing = await fetchJson(
+      `/api/submissions/existing?practice_id=${encodeURIComponent(practiceId)}&group_id=${encodeURIComponent(groupId)}&table_number=${tableNum}`,
+    );
+    if (!existing) return false;
+    const { submission_id, is_member, can_accept } = existing;
+    if (is_member) {
+      state.practiceForm = null;
+      measurementFields.innerHTML = `
+        <div class="edit-banner">
+          <div>Ya sos miembro del informe de esta mesa.</div>
+          <button type="button" class="view-existing-btn" data-id="${escapeHtml(submission_id)}">Ver informe</button>
+        </div>`;
+      measurementFields.querySelector(".view-existing-btn")?.addEventListener("click", (e) => {
+        import("./submissions.js").then(({ openSubmissionWorkspace }) =>
+          openSubmissionWorkspace(e.currentTarget.dataset.id),
+        );
+      });
+      return true;
+    }
+    if (can_accept) {
+      state.practiceForm = null;
+      measurementFields.innerHTML = `
+        <div class="edit-banner">
+          <div>Hay un informe para esta mesa. Podés aceptar la invitación para ver las medidas.</div>
+          <button type="button" class="accept-existing-btn" data-id="${escapeHtml(submission_id)}">Aceptar invitación</button>
+        </div>`;
+      measurementFields.querySelector(".accept-existing-btn")?.addEventListener("click", async (e) => {
+        const { acceptInvitation } = await import("./invitations.js");
+        await acceptInvitation(e.currentTarget.dataset.id);
+        await loadSubmissionForm();
+      });
+      return true;
+    }
+    // Hay informe pero el alumno no está invitado ni es miembro
+    state.practiceForm = null;
+    measurementFields.innerHTML = `
+      <div class="edit-banner">
+        <div>Esta mesa ya tiene un informe. Si corresponde, pedile al docente que te agregue.</div>
+      </div>`;
+    return true;
+  } catch {
+    return false; // si falla el check, no bloquear
   }
 }
 

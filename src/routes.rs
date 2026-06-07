@@ -95,6 +95,8 @@ pub fn api_router(state: SharedState) -> Router {
         )
         .route("/submissions", get(submissions).post(create_submission))
         .route("/submissions/form", post(create_form_submission))
+        .route("/submissions/invitations", get(submission_invitations))
+        .route("/submissions/existing", get(existing_report))
         .route("/submissions/{id}/edit", post(edit_form_submission))
         .route("/submissions/{id}", get(submission_detail))
         .route("/submissions/{id}/review", post(review_submission))
@@ -102,6 +104,16 @@ pub fn api_router(state: SharedState) -> Router {
             "/submissions/{id}/student-results",
             post(set_student_results),
         )
+        .route("/submissions/{id}/accept", post(accept_invitation))
+        .route(
+            "/submissions/{id}/members",
+            get(submission_members).post(add_submission_member),
+        )
+        .route(
+            "/submissions/{id}/members/remove",
+            post(remove_submission_member),
+        )
+        .route("/submissions/{id}/report", post(update_report_meta))
         .with_state(state)
 }
 
@@ -120,9 +132,12 @@ async fn login(
     State(state): State<SharedState>,
     Json(request): Json<db::LoginRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let Some((token, user)) = db::login(&state.pool, request).await? else {
+    let Some((token, auth_user)) = db::login(&state.pool, request).await? else {
         return Err(AppError::unauthorized("email o contrasena invalidos"));
     };
+    let user = db::me_user(&state.pool, &auth_user.id)
+        .await?
+        .ok_or_else(|| AppError::not_found("usuario no encontrado"))?;
 
     let mut headers = HeaderMap::new();
     headers.insert(header::SET_COOKIE, session_cookie(&token, 12 * 60 * 60));
@@ -143,12 +158,15 @@ async fn logout(
     Ok((response_headers, Json(Health { status: "ok" })))
 }
 
-/// `GET /api/auth/me`: devuelve el usuario autenticado según la cookie de sesión.
+/// `GET /api/auth/me`: devuelve el usuario autenticado con sus defaults de perfil.
 async fn me(
     State(state): State<SharedState>,
     headers: HeaderMap,
 ) -> Result<Json<db::LoginResponse>, AppError> {
-    let user = current_user(&state, &headers).await?;
+    let auth_user = current_user(&state, &headers).await?;
+    let user = db::me_user(&state.pool, &auth_user.id)
+        .await?
+        .ok_or_else(|| AppError::not_found("usuario no encontrado"))?;
     Ok(Json(db::LoginResponse { user }))
 }
 
@@ -167,17 +185,17 @@ async fn change_password(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/auth/profile`: actualiza nombre y email del propio usuario (sin cambiar el rol).
+/// `POST /api/auth/profile`: actualiza nombre, email y opcionalmente grupo/mesa por defecto.
 async fn update_profile(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Json(input): Json<db::UpdateUser>,
-) -> Result<Json<db::AuthUser>, AppError> {
+    Json(input): Json<db::UpdateProfileInput>,
+) -> Result<Json<db::MeUser>, AppError> {
     let user = current_user(&state, &headers).await?;
     if !is_valid_email(&input.email) || input.display_name.trim().is_empty() {
         return Err(AppError::bad_request("datos de usuario invalidos"));
     }
-    let updated = db::update_user(
+    db::update_user(
         &state.pool,
         &user.id,
         db::UpdateUser {
@@ -188,7 +206,18 @@ async fn update_profile(
     )
     .await?
     .ok_or_else(|| AppError::not_found("usuario no encontrado"))?;
-    Ok(Json(updated))
+
+    if let Some(group_id) = input.default_group_id.as_deref().filter(|s| !s.is_empty()) {
+        db::set_user_default_group(&state.pool, &user.id, group_id).await?;
+        if let Some(table_number) = input.default_table_number {
+            db::set_user_default_table(&state.pool, &user.id, group_id, table_number).await?;
+        }
+    }
+
+    let me = db::me_user(&state.pool, &user.id)
+        .await?
+        .ok_or_else(|| AppError::not_found("usuario no encontrado"))?;
+    Ok(Json(me))
 }
 
 /// `GET /api/users`: lista de usuarios (solo docente/admin).
@@ -497,7 +526,8 @@ async fn submissions(
     ))
 }
 
-/// `GET /api/submissions/{id}`: detalle de una entrega; un estudiante solo puede ver las propias.
+/// `GET /api/submissions/{id}`: detalle de una entrega; un estudiante solo puede ver
+/// informes donde es miembro aceptado (o el owner original).
 async fn submission_detail(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -505,8 +535,8 @@ async fn submission_detail(
 ) -> Result<Json<db::SubmissionDetail>, AppError> {
     let user = current_user(&state, &headers).await?;
     if !matches!(user.role.as_str(), "docente" | "admin") {
-        let owner = db::submission_owner_id(&state.pool, &id).await?;
-        if owner.as_deref() != Some(user.id.as_str()) {
+        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
+        if !is_member {
             return Err(AppError::forbidden("no tenes acceso a esta entrega"));
         }
     }
@@ -657,11 +687,13 @@ async fn edit_form_submission(
         .await?
         .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
 
-    let owner = db::submission_owner_id(&state.pool, &id).await?;
-    if owner.as_deref() != Some(user.id.as_str()) {
-        return Err(AppError::forbidden(
-            "Solo podés editar tus propias entregas.",
-        ));
+    if !matches!(user.role.as_str(), "docente" | "admin") {
+        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
+        if !is_member {
+            return Err(AppError::forbidden(
+                "Solo podés editar entregas de las que sos miembro.",
+            ));
+        }
     }
     if !detail.can_edit {
         let expired = detail
@@ -727,9 +759,11 @@ async fn set_student_results(
     Json(body): Json<SaveStudentResults>,
 ) -> Result<Json<db::SubmissionDetail>, AppError> {
     let user = current_user(&state, &headers).await?;
-    let owner = db::submission_owner_id(&state.pool, &id).await?;
-    if owner.as_deref() != Some(user.id.as_str()) {
-        return Err(AppError::forbidden("no tenes acceso a esta entrega"));
+    if !matches!(user.role.as_str(), "docente" | "admin") {
+        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
+        if !is_member {
+            return Err(AppError::forbidden("no tenes acceso a esta entrega"));
+        }
     }
     let submission = db::submission_detail(&state.pool, &id)
         .await?
@@ -761,6 +795,168 @@ async fn set_student_results(
         .await?
         .ok_or_else(|| AppError::not_found("submission not found"))?;
     Ok(Json(gate_analysis(updated, &user)))
+}
+
+/// `GET /api/submissions/invitations`: invitaciones vigentes del alumno autenticado.
+async fn submission_invitations(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<db::PendingInvitation>>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    let invitations = db::pending_invitations_for(&state.pool, &user.id).await?;
+    Ok(Json(invitations))
+}
+
+/// Query params para `GET /api/submissions/existing`.
+#[derive(Debug, Deserialize)]
+struct ExistingReportQuery {
+    practice_id: String,
+    group_id: String,
+    table_number: i64,
+}
+
+/// `GET /api/submissions/existing`: busca si ya existe un informe para (práctica, grupo, mesa).
+/// Devuelve `null` o `{ submission_id, is_member, is_owner }`.
+async fn existing_report(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Query(q): Query<ExistingReportQuery>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    let submission_id =
+        db::find_existing_report(&state.pool, &q.practice_id, &q.group_id, q.table_number).await?;
+    match submission_id {
+        None => Ok(Json(serde_json::Value::Null)),
+        Some(sid) => {
+            let is_member = db::is_accepted_member(&state.pool, &sid, &user.id).await?;
+            let members = db::report_members_for(&state.pool, &sid).await?;
+            let is_owner = members
+                .iter()
+                .any(|m| m.user_id == user.id && m.role == "owner");
+            let can_accept = !is_member
+                && members
+                    .iter()
+                    .any(|m| m.user_id == user.id && m.status == "pending");
+            Ok(Json(serde_json::json!({
+                "submission_id": sid,
+                "is_member": is_member,
+                "is_owner": is_owner,
+                "can_accept": can_accept,
+            })))
+        }
+    }
+}
+
+/// `POST /api/submissions/{id}/accept`: el alumno acepta una invitación al informe compartido.
+async fn accept_invitation(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<db::SubmissionDetail>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    let outcome = db::accept_report_invitation(&state.pool, &id, &user.id).await?;
+    match outcome {
+        db::AcceptOutcome::Accepted => {}
+        db::AcceptOutcome::AlreadyAccepted => {}
+        db::AcceptOutcome::NotInvited => {
+            return Err(AppError::forbidden(
+                "No tenés una invitación para este informe.",
+            ));
+        }
+        db::AcceptOutcome::Expired => {
+            return Err(AppError::bad_request(
+                "La ventana de aceptación venció. Pedile al docente que te agregue manualmente.",
+            ));
+        }
+    }
+    let submission = db::submission_detail(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
+    Ok(Json(gate_analysis(submission, &user)))
+}
+
+/// `GET /api/submissions/{id}/members`: lista los miembros del informe (docente/admin).
+async fn submission_members(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<db::ReportMember>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let members = db::report_members_for(&state.pool, &id).await?;
+    Ok(Json(members))
+}
+
+/// Cuerpo para agregar un miembro a un informe (docente).
+#[derive(Debug, Deserialize)]
+struct AddMemberBody {
+    user_id: String,
+    #[serde(default)]
+    force_accept: bool,
+}
+
+/// `POST /api/submissions/{id}/members`: el docente agrega un miembro (accepted directamente si force_accept).
+async fn add_submission_member(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<AddMemberBody>,
+) -> Result<Json<Vec<db::ReportMember>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let added = db::add_report_member(&state.pool, &id, &body.user_id, body.force_accept).await?;
+    if !added {
+        return Err(AppError::not_found(
+            "usuario no encontrado o no es estudiante",
+        ));
+    }
+    Ok(Json(db::report_members_for(&state.pool, &id).await?))
+}
+
+/// Cuerpo para quitar un miembro de un informe (docente).
+#[derive(Debug, Deserialize)]
+struct RemoveMemberBody {
+    user_id: String,
+}
+
+/// `POST /api/submissions/{id}/members/remove`: el docente quita un miembro del informe.
+async fn remove_submission_member(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<RemoveMemberBody>,
+) -> Result<Json<Vec<db::ReportMember>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let removed = db::remove_report_member(&state.pool, &id, &body.user_id).await?;
+    if !removed {
+        return Err(AppError::not_found("miembro no encontrado en este informe"));
+    }
+    Ok(Json(db::report_members_for(&state.pool, &id).await?))
+}
+
+/// Cuerpo para actualizar grupo y/o mesa de un informe (docente).
+#[derive(Debug, Deserialize)]
+struct UpdateReportMeta {
+    group_id: Option<String>,
+    table_number: Option<i64>,
+}
+
+/// `POST /api/submissions/{id}/report`: el docente actualiza grupo y/o mesa del informe.
+async fn update_report_meta(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateReportMeta>,
+) -> Result<Json<db::SubmissionDetail>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let updated = db::update_report_meta(
+        &state.pool,
+        &id,
+        body.group_id.as_deref(),
+        body.table_number,
+    )
+    .await
+    .map_err(|e| AppError::bad_request(e.to_string()))?
+    .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
+    Ok(Json(updated))
 }
 
 /// Parámetro de query `?course_id=...` para las operaciones de catálogo por curso.

@@ -6,6 +6,7 @@ import { renderSessionUser, renderAccount, setupAuth } from "./auth.js";
 import { selectView } from "./navigation.js";
 import { loadAcademic } from "./academic.js";
 import { loadSubmissions } from "./submissions.js";
+import { loadInvitations } from "./invitations.js";
 
 // Side-effect imports: register top-level event listeners in each domain module.
 import "./gradebook.js";
@@ -44,7 +45,9 @@ async function startApp() {
 
   selectView("submissions");
   await loadAcademic();
+  renderAccount(); // re-renderiza con grupos disponibles
   await loadSubmissions();
+  await loadInvitations();
 }
 
 setupAuth(startApp);
