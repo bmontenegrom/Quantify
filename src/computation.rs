@@ -38,6 +38,10 @@ pub struct FormSubmissionInput {
     /// Se persiste tal cual para que el docente lo vea; opcional.
     #[serde(default)]
     pub meta: Option<serde_json::Value>,
+    /// Mesa del informe compartido. Si no se envía, se resuelve desde las asignaciones
+    /// del alumno. Para docentes/admin es opcional (puede entregar sin mesa asignada).
+    #[serde(default)]
+    pub table_number: Option<i64>,
 }
 
 /// Incertidumbre calculada de una magnitud medida directamente.
@@ -509,6 +513,51 @@ pub async fn create_form_submission(
     user: &AuthUser,
     input: FormSubmissionInput,
 ) -> anyhow::Result<db::SubmissionDetail> {
+    let is_teacher = matches!(user.role.as_str(), "docente" | "admin");
+
+    // Resolver mesa: prioridad input > practice_table_assignments > user_default_tables.
+    // Para docentes/admin la mesa es opcional (pueden entregar sin mesa asignada).
+    let table_number = if let Some(t) = input.table_number {
+        Some(t)
+    } else if !is_teacher {
+        db::resolve_user_table(pool, &user.id, &input.group_id, &input.practice_id).await?
+    } else {
+        None
+    };
+
+    // Para alumnos: la mesa es obligatoria.
+    if !is_teacher && table_number.is_none() {
+        anyhow::bail!(
+            "No tenés una mesa asignada para esta práctica. \
+             Pedile al docente que te asigne una mesa."
+        );
+    }
+
+    // Si hay mesa asignada, verificar que no exista ya un informe para (práctica, grupo, mesa).
+    if let Some(t) = table_number {
+        // Validar rango de la mesa.
+        let table_count: Option<(i64,)> =
+            sqlx::query_as("SELECT table_count FROM lab_groups WHERE id = ?1")
+                .bind(&input.group_id)
+                .fetch_optional(pool)
+                .await?;
+        if let Some((count,)) = table_count {
+            if t < 1 || t > count {
+                anyhow::bail!("El número de mesa {t} no es válido para este grupo (1..={count})");
+            }
+        }
+
+        if db::find_existing_report(pool, &input.practice_id, &input.group_id, t)
+            .await?
+            .is_some()
+        {
+            anyhow::bail!(
+                "Ya existe un informe para la mesa {t} en esta práctica. \
+                 Si sos parte de esa mesa, aceptá la invitación desde tus notificaciones."
+            );
+        }
+    }
+
     let analysis = analyze(pool, &input.practice_id, &input.measurements).await?;
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match &input.meta {
@@ -526,7 +575,7 @@ pub async fn create_form_submission(
         INSERT INTO submissions (
             id, student_name, group_name, course, practice_id, file_name, csv_path,
             analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
-            entry_mode, measurement_meta_json
+            entry_mode, measurement_meta_json, table_number
         )
         SELECT
             ?1,
@@ -543,7 +592,8 @@ pub async fn create_form_submission(
             c.id,
             g.id,
             'form',
-            ?8
+            ?8,
+            ?9
         FROM users u, lab_groups g, courses c
         WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
         "#,
@@ -556,13 +606,38 @@ pub async fn create_form_submission(
     .bind(&analysis_json)
     .bind(now)
     .bind(&meta_json)
+    .bind(table_number)
     .execute(&mut *tx)
-    .await?;
+    .await
+    .map_err(|e| {
+        // Captura la violación del índice único (carrera entre dos alumnos de la misma mesa).
+        if e.to_string().contains("UNIQUE constraint failed") {
+            anyhow::anyhow!(
+                "Otro integrante ya creó el informe de esta mesa. \
+                 Aceptá la invitación desde tus notificaciones."
+            )
+        } else {
+            anyhow::Error::from(e)
+        }
+    })?;
 
     // El INSERT...SELECT no inserta nada si el curso/grupo (o usuario) no existe.
     if inserted.rows_affected() == 0 {
         anyhow::bail!("el curso o el grupo indicados no existen");
     }
+
+    // Insertar al creador como owner del informe.
+    sqlx::query(
+        r#"
+        INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at)
+        VALUES (?1, ?2, 'owner', 'accepted', ?3, ?3)
+        "#,
+    )
+    .bind(&id)
+    .bind(&user.id)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
 
     for measurement in &input.measurements {
         // Para magnitudes `is_given`, persiste el único valor con su U en value_u.
@@ -600,6 +675,20 @@ pub async fn create_form_submission(
         }
     }
     tx.commit().await?;
+
+    // Invitar a los demás alumnos de la mesa (fuera de la tx para no bloquear).
+    if let Some(t) = table_number {
+        let _ = db::invite_table_members(
+            pool,
+            &id,
+            &input.group_id,
+            &input.practice_id,
+            t,
+            &user.id,
+            now,
+        )
+        .await;
+    }
 
     db::submission_detail(pool, &id)
         .await?
@@ -931,6 +1020,7 @@ mod tests {
                 given_u: None,
             }],
             meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
+            table_number: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         assert_eq!(detail.entry_mode, "form");
@@ -994,6 +1084,7 @@ mod tests {
                 given_u: None,
             }],
             meta: None,
+            table_number: None,
         };
         let created = create_form_submission(&pool, &user, mk(vec![5.0, 5.2, 4.9]))
             .await
@@ -1070,6 +1161,7 @@ mod tests {
                 given_u: None,
             }],
             meta: None,
+            table_number: None,
         };
         assert!(create_form_submission(&pool, &user, input).await.is_err());
         // Rollback: no debe quedar ninguna entrega ni medición.

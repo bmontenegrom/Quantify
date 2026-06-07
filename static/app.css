@@ -453,39 +453,134 @@ textarea {
 
 .measurement-fields {
   display: grid;
-  gap: 12px;
-  margin: 12px 0;
+  gap: 8px;
+  margin: 10px 0;
+  max-width: 700px;
 }
 
 .measurement-row {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 12px;
+  padding: 6px 12px 8px;
 }
 
 .measurement-row legend {
   font-weight: 600;
+  font-size: 0.88rem;
   padding: 0 6px;
+}
+
+/* Una sola fila: [instrumento] [escala] | [prefijo] [valor] [unidad] */
+.measure-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* Separador visual entre selectores y campo de valor */
+.measure-body .measure-sep {
+  width: 1px;
+  height: 24px;
+  background: var(--line);
+  flex: 0 0 auto;
+}
+
+/* Magnitudes con réplicas: selectores arriba, valores apilados abajo */
+.measure-body--stacked {
+  flex-wrap: wrap;
+}
+
+.measure-body--stacked .measure-sep {
+  display: none;
+}
+
+.measure-body--stacked .measure-right {
+  flex-basis: 100%;
+}
+
+.measure-selectors {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+/* Selects de instrumento/escala: sin label encima, compactos */
+.measure-selectors select {
+  font-size: 0.8rem;
+  padding: 5px 4px;
+  height: 32px;
+  min-width: 130px;
+  max-width: 170px;
+}
+
+.measure-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .measure-values {
   display: grid;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 4px;
 }
 
 .replica {
   align-items: center;
   display: flex;
-  gap: 6px;
+  gap: 4px;
+}
+
+/* Selector de prefijo SI: ancho fijo, justo para "µ" "k" "m" */
+.prefix-select {
+  flex: 0 0 52px;
+  width: 52px;
+  font-size: 0.82rem;
+  padding: 5px 2px;
+  height: 32px;
+  text-align: center;
 }
 
 .replica .measure-value {
   flex: 1;
+  font-size: 1rem;
+  padding: 5px 10px;
+  height: 32px;
+  min-width: 80px;
+  border: 1.5px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.replica .measure-value:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+.replica-unit {
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 26px;
+  flex: 0 0 auto;
+}
+
+.remove-replica {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  line-height: 1;
 }
 
 .add-replica {
-  margin-top: 8px;
+  align-self: flex-start;
+  font-size: 0.8rem;
+  padding: 3px 8px;
 }
 
 .instrument-toolbar {
@@ -1107,13 +1202,80 @@ textarea {
   background: #ecfeff;
 }
 
-.edit-submission-btn {
+.edit-submission-btn,
+.accept-invitation-btn,
+.accept-existing-btn,
+.view-existing-btn {
   background: var(--accent);
   color: #ffffff;
   border-radius: 8px;
   min-height: 38px;
   padding: 0 16px;
   font-weight: 650;
+}
+
+/* Banner de invitaciones a informes compartidos (arriba de todas las vistas). */
+.invitation-banner {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.invitation-banner-title {
+  font-weight: 650;
+  margin: 0 0 4px;
+}
+
+/* Filtros de entregas (docente). */
+.submission-filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.submission-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Sub-grupo de mesa dentro de un grupo (listado docente). */
+.submission-table-group {
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--line);
+  margin: 4px 0;
+}
+
+/* Editor de integrantes del informe (ficha, docente). */
+.members-editor {
+  margin-top: 16px;
+}
+
+.members-add-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.remove-member-btn {
+  background: transparent;
+  color: var(--danger, #dc2626);
+  border: 1px solid var(--danger, #dc2626);
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.remove-member-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Bloque de depuración persistida en la ficha de la entrega. */

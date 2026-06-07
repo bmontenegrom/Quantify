@@ -60,6 +60,8 @@
     </aside>
 
     <main>
+      <div id="invitation-banner" class="invitation-banner hidden"></div>
+
       <section id="practica-view" class="view">
         <div class="section-head">
           <h2 id="practica-title">Nueva entrega</h2>
@@ -109,6 +111,14 @@
         <section class="panel catalog-panel">
           <div class="list-head">
             <h3 id="submissions-list-title">Mis entregas</h3>
+            <div class="submission-filters teacher-only hidden">
+              <label>Grupo
+                <select id="submission-filter-group"><option value="">Todos</option></select>
+              </label>
+              <label>Mesa
+                <select id="submission-filter-table"><option value="">Todas</option></select>
+              </label>
+            </div>
             <button id="refresh-submissions" type="button">Actualizar</button>
           </div>
           <div id="submission-list" class="submission-list"></div>
@@ -317,6 +327,18 @@
               <label>
                 Rol
                 <input id="account-role" disabled />
+              </label>
+              <label class="student-only hidden">
+                Grupo por defecto
+                <select name="default_group_id" id="account-default-group">
+                  <option value="">— sin grupo —</option>
+                </select>
+              </label>
+              <label class="student-only hidden">
+                Mesa por defecto
+                <select name="default_table_number" id="account-default-table">
+                  <option value="">— sin mesa —</option>
+                </select>
               </label>
               <div class="detail-actions">
                 <button type="submit">Guardar cambios</button>

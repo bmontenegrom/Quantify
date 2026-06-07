@@ -123,9 +123,33 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+/// Usuario autenticado con defaults de perfil (grupo y mesa por defecto).
+/// Devuelto por `GET /api/auth/me` y `POST /api/auth/profile`.
+#[derive(Debug, Serialize, FromRow)]
+pub struct MeUser {
+    pub id: String,
+    pub username: String,
+    pub email: String,
+    pub display_name: String,
+    pub role: String,
+    pub default_group_id: Option<String>,
+    pub default_table_number: Option<i64>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
-    pub user: AuthUser,
+    pub user: MeUser,
+}
+
+/// Input para actualizar el perfil propio (nombre, email, y opcionalmente grupo/mesa por defecto).
+#[derive(Debug, Deserialize)]
+pub struct UpdateProfileInput {
+    pub display_name: String,
+    pub email: String,
+    #[serde(default)]
+    pub default_group_id: Option<String>,
+    #[serde(default)]
+    pub default_table_number: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +185,7 @@ pub struct Course {
     pub term: String,
     pub active: bool,
     pub submission_edit_hours: f64,
+    pub acceptance_window_hours: f64,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -197,6 +222,7 @@ pub struct CourseSummary {
     pub term: String,
     pub active: bool,
     pub submission_edit_hours: f64,
+    pub acceptance_window_hours: f64,
     pub members: Vec<AuthUser>,
     pub groups: Vec<GroupSummary>,
     pub practices: Vec<Practice>,
@@ -358,6 +384,40 @@ pub struct UpsertGradeScore {
     pub comment: Option<String>,
 }
 
+/// Miembro de un informe compartido por mesa (owner o miembro aceptado/pendiente).
+#[derive(Debug, Serialize)]
+pub struct ReportMember {
+    pub user_id: String,
+    pub display_name: String,
+    /// `owner` o `member`.
+    pub role: String,
+    /// `pending`, `accepted` o `expired`.
+    pub status: String,
+    pub accepted_at: Option<DateTime<Utc>>,
+}
+
+/// Invitación pendiente de aceptar para un alumno (informe creado por otro de la misma mesa).
+#[derive(Debug, Serialize)]
+pub struct PendingInvitation {
+    pub submission_id: String,
+    pub practice_name: String,
+    pub course: String,
+    pub group_name: String,
+    pub table_number: Option<i64>,
+    pub owner_name: String,
+    pub invited_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Resultado de intentar aceptar una invitación.
+#[derive(Debug)]
+pub enum AcceptOutcome {
+    Accepted,
+    NotInvited,
+    Expired,
+    AlreadyAccepted,
+}
+
 #[derive(Debug, Serialize, FromRow)]
 pub struct SubmissionListItem {
     pub id: String,
@@ -372,6 +432,8 @@ pub struct SubmissionListItem {
     pub score: Option<f64>,
     pub submitted_at: DateTime<Utc>,
     pub entry_mode: String,
+    pub table_number: Option<i64>,
+    pub member_count: i64,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -395,6 +457,7 @@ pub struct SubmissionRecord {
     pub measurement_meta_json: Option<String>,
     pub course_id: Option<String>,
     pub submission_edit_hours: f64,
+    pub table_number: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -431,6 +494,10 @@ pub struct SubmissionDetail {
     pub can_edit: bool,
     /// Lecturas crudas (sólo entregas por formulario), para prefillear el form al editar.
     pub measurements: Vec<SubmissionMeasurement>,
+    /// Número de mesa del informe compartido (NULL en entregas legacy/CSV sin mesa asignada).
+    pub table_number: Option<i64>,
+    /// Miembros del informe (owner + miembros aceptados/pendientes).
+    pub members: Vec<ReportMember>,
 }
 
 /// Un mensurando final calculado por el estudiante (valor ± U), por símbolo.
@@ -721,6 +788,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
+    add_column_if_missing(pool, "users", "default_group_id", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
     // Fórmulas de eje (x, y) por punto, solo para prácticas `regresion_lineal`.
     add_column_if_missing(pool, "practices", "x_formula", "TEXT").await?;
@@ -844,6 +912,84 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .await?;
     // Incertidumbre expandida U del dato aportado por el alumno.
     add_column_if_missing(pool, "submission_measurements", "value_u", "REAL").await?;
+
+    // Número de mesa del informe compartido (NULL en entregas legacy/CSV).
+    add_column_if_missing(pool, "submissions", "table_number", "INTEGER").await?;
+    // Ventana de aceptación de invitaciones (horas). Default 4. Acotada a 0..=72.
+    add_column_if_missing(
+        pool,
+        "courses",
+        "acceptance_window_hours",
+        "REAL NOT NULL DEFAULT 4",
+    )
+    .await?;
+
+    // Membresía de un informe compartido por mesa. Owner: role='owner', status='accepted'.
+    // Los demás miembros de la mesa reciben una invitación (status='pending') al crear el informe.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS report_members (
+            submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+            user_id       TEXT NOT NULL REFERENCES users(id)       ON DELETE CASCADE,
+            role          TEXT NOT NULL CHECK(role   IN ('owner', 'member')),
+            status        TEXT NOT NULL CHECK(status IN ('pending', 'accepted', 'expired')),
+            invited_at    TEXT NOT NULL,
+            accepted_at   TEXT,
+            PRIMARY KEY(submission_id, user_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_report_members_user ON report_members(user_id, status)",
+    )
+    .execute(pool)
+    .await?;
+
+    // Mesa por defecto del alumno por grupo (pre-rellena el formulario; puede variar por práctica).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS user_default_tables (
+            user_id      TEXT    NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
+            group_id     TEXT    NOT NULL REFERENCES lab_groups(id) ON DELETE CASCADE,
+            table_number INTEGER NOT NULL,
+            updated_at   TEXT    NOT NULL,
+            PRIMARY KEY(user_id, group_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    // Candado: un único informe por (práctica, grupo, mesa). Solo para entregas con mesa asignada.
+    sqlx::query(
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_report_unique
+        ON submissions(practice_id, group_id, table_number)
+        WHERE table_number IS NOT NULL
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    // Backfill: cada entrega existente pasa a ser un informe de 1 miembro (owner accepted).
+    // Idempotente: solo inserta si no existe ya la fila en report_members.
+    sqlx::query(
+        r#"
+        INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at)
+        SELECT s.id, s.submitted_by_user_id, 'owner', 'accepted', s.submitted_at, s.submitted_at
+        FROM submissions s
+        WHERE s.submitted_by_user_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM report_members rm
+              WHERE rm.submission_id = s.id AND rm.user_id = s.submitted_by_user_id
+          )
+        "#,
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         r#"
@@ -1216,14 +1362,14 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
-        // `DO NOTHING`: solo siembra las prácticas faltantes y nunca pisa las existentes, para
-        // respetar ediciones del docente (p. ej. `analysis_kind`) entre reinicios. En dev, para
-        // re-sembrar valores nuevos se resetea la base.
+        // Actualiza nombre y descripción en conflicto para corregir errores de texto entre
+        // versiones, pero preserva los campos editables por el docente (analysis_kind,
+        // x_formula, y_formula) para no pisar cambios hechos desde la UI.
         sqlx::query(
             r#"
             INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(id) DO NOTHING
+            ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description
             "#,
         )
         .bind(id)
@@ -1346,6 +1492,128 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Siembra entregas de prueba para el estudiante de seed, una por práctica habilitada.
+/// Idempotente: no inserta si el estudiante ya tiene entregas.
+pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
+        .fetch_one(pool)
+        .await?;
+    if count.0 > 0 {
+        return Ok(());
+    }
+
+    let student = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, display_name FROM users WHERE email = 'estudiante@quantify.local'",
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    let Some((student_id, _)) = student else {
+        return Ok(());
+    };
+
+    let course_id = "fisica-experimental-i-2026";
+    let group_row = sqlx::query_as::<_, (String,)>(
+        "SELECT id FROM lab_groups WHERE course_id = ?1 AND name = 'Grupo 1'",
+    )
+    .bind(course_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some((group_id,)) = group_row else {
+        return Ok(());
+    };
+
+    let now = Utc::now();
+
+    // Una entrega por práctica con datos realistas.
+    let submissions: &[(&str, &str, &str)] = &[
+        ("p1-estadistica", "pendiente", ""),
+        (
+            "p2-serie",
+            "aprobada",
+            "Buena medición. Todos los valores dentro del rango esperado.",
+        ),
+        (
+            "p2-corriente-continua",
+            "observada",
+            "Revisar la medición de R3: la caída de tensión parece alta.",
+        ),
+        ("p3-relajacion", "pendiente", ""),
+    ];
+
+    for (practice_id, status, teacher_comment) in submissions {
+        let analysis_json = serde_json::json!({
+            "quantities": [],
+            "derived": [],
+            "warnings": ["Entrega de prueba generada por seed — no contiene mediciones reales."]
+        })
+        .to_string();
+
+        let score: Option<f64> = if *status == "aprobada" {
+            Some(8.5)
+        } else {
+            None
+        };
+        let reviewed_at = if *status != "pendiente" {
+            Some(now)
+        } else {
+            None
+        };
+        let comment = if teacher_comment.is_empty() {
+            None
+        } else {
+            Some(*teacher_comment)
+        };
+
+        let submission_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            r#"
+            INSERT INTO submissions (
+                id, student_name, group_name, course, practice_id, file_name, csv_path,
+                analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
+                entry_mode, score, teacher_comment, reviewed_at
+            )
+            SELECT
+                ?1, u.display_name, g.name, c.name, ?5,
+                '(formulario)', '', ?6, ?7, ?8, u.id, c.id, g.id,
+                'form', ?9, ?10, ?11
+            FROM users u, lab_groups g, courses c
+            WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
+            "#,
+        )
+        .bind(&submission_id)
+        .bind(&student_id)
+        .bind(&group_id)
+        .bind(course_id)
+        .bind(practice_id)
+        .bind(&analysis_json)
+        .bind(status)
+        .bind(now)
+        .bind(score)
+        .bind(comment)
+        .bind(reviewed_at)
+        .execute(pool)
+        .await?;
+
+        // Insertar al alumno como owner del informe sembrado.
+        sqlx::query(
+            r#"
+            INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at)
+            VALUES (?1, ?2, 'owner', 'accepted', ?3, ?3)
+            ON CONFLICT(submission_id, user_id) DO NOTHING
+            "#,
+        )
+        .bind(&submission_id)
+        .bind(&student_id)
+        .bind(now)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
 /// Lista el catálogo completo de prácticas ordenado por nombre.
 pub async fn practices(pool: &SqlitePool) -> anyhow::Result<Vec<Practice>> {
     let rows = sqlx::query_as::<_, Practice>(
@@ -1410,7 +1678,7 @@ pub async fn create_course(pool: &SqlitePool, input: CreateCourse) -> anyhow::Re
     .await?;
 
     Ok(sqlx::query_as::<_, Course>(
-        "SELECT id, name, term, active, submission_edit_hours FROM courses WHERE id = ?1",
+        "SELECT id, name, term, active, submission_edit_hours, acceptance_window_hours FROM courses WHERE id = ?1",
     )
     .bind(id)
     .fetch_one(pool)
@@ -1446,7 +1714,7 @@ pub async fn update_course(
 
     Ok(Some(
         sqlx::query_as::<_, Course>(
-            "SELECT id, name, term, active, submission_edit_hours FROM courses WHERE id = ?1",
+            "SELECT id, name, term, active, submission_edit_hours, acceptance_window_hours FROM courses WHERE id = ?1",
         )
         .bind(course_id)
         .fetch_one(pool)
@@ -1954,14 +2222,14 @@ pub async fn gradebook_for_user(
 ) -> anyhow::Result<Vec<CourseGradebook>> {
     let courses = if matches!(user.role.as_str(), "docente" | "admin") {
         sqlx::query_as::<_, Course>(
-            "SELECT id, name, term, active, submission_edit_hours FROM courses ORDER BY term DESC, name",
+            "SELECT id, name, term, active, submission_edit_hours, acceptance_window_hours FROM courses ORDER BY term DESC, name",
         )
         .fetch_all(pool)
         .await?
     } else {
         sqlx::query_as::<_, Course>(
             r#"
-            SELECT DISTINCT c.id, c.name, c.term, c.active, c.submission_edit_hours
+            SELECT DISTINCT c.id, c.name, c.term, c.active, c.submission_edit_hours, c.acceptance_window_hours
             FROM courses c
             JOIN lab_groups g ON g.course_id = c.id
             JOIN group_members gm ON gm.group_id = g.id
@@ -2109,7 +2377,7 @@ async fn student_grade_summary(
 /// Resúmenes de todos los cursos (vista docente/admin), ordenados por período y nombre.
 async fn all_course_summaries(pool: &SqlitePool) -> anyhow::Result<Vec<CourseSummary>> {
     let courses = sqlx::query_as::<_, Course>(
-        "SELECT id, name, term, active, submission_edit_hours FROM courses ORDER BY term DESC, name",
+        "SELECT id, name, term, active, submission_edit_hours, acceptance_window_hours FROM courses ORDER BY term DESC, name",
     )
     .fetch_all(pool)
     .await?;
@@ -2123,7 +2391,7 @@ async fn student_course_summaries(
 ) -> anyhow::Result<Vec<CourseSummary>> {
     let courses = sqlx::query_as::<_, Course>(
         r#"
-        SELECT DISTINCT c.id, c.name, c.term, c.active, c.submission_edit_hours
+        SELECT DISTINCT c.id, c.name, c.term, c.active, c.submission_edit_hours, c.acceptance_window_hours
         FROM courses c
         JOIN course_members cm ON cm.course_id = c.id
         WHERE cm.user_id = ?1 AND c.active = 1
@@ -2154,6 +2422,7 @@ async fn course_summaries(
             term: course.term,
             active: course.active,
             submission_edit_hours: course.submission_edit_hours,
+            acceptance_window_hours: course.acceptance_window_hours,
             members,
             groups,
             practices,
@@ -2374,43 +2643,69 @@ pub async fn create_submission(
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        "INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at) \
+         VALUES (?1, ?2, 'owner', 'accepted', ?3, ?3)",
+    )
+    .bind(&id)
+    .bind(&submission.submitted_by_user_id)
+    .bind(submitted_at)
+    .execute(pool)
+    .await?;
+
     submission_detail(pool, &id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("created submission not found"))
 }
 
-/// Lista entregas: docentes/admin ven todas; un estudiante ve solo las propias.
+/// Lista entregas: docentes/admin ven todas; un estudiante ve solo los informes donde es miembro aceptado.
 pub async fn submission_list_for_user(
     pool: &SqlitePool,
     user: &AuthUser,
 ) -> anyhow::Result<Vec<SubmissionListItem>> {
-    let mut query = String::from(
-        r#"
-        SELECT
-            s.id,
-            s.submitted_by_user_id,
-            s.group_id,
-            s.student_name,
-            s.group_name,
-            s.course,
-            s.practice_id,
-            p.name AS practice_name,
-            s.status,
-            s.score,
-            s.submitted_at,
-            COALESCE(s.entry_mode, 'csv') AS entry_mode
-        FROM submissions s
-        JOIN practices p ON p.id = s.practice_id
-        "#,
-    );
+    // Subquery que cuenta miembros aceptados por informe.
+    let member_count_sq = "(SELECT COUNT(*) FROM report_members rm \
+                            WHERE rm.submission_id = s.id AND rm.status = 'accepted')";
 
-    if !matches!(user.role.as_str(), "docente" | "admin") {
-        query.push_str(" WHERE s.submitted_by_user_id = ?1");
-    }
+    let is_teacher = matches!(user.role.as_str(), "docente" | "admin");
 
-    query.push_str(" ORDER BY s.course, s.group_name, s.submitted_at DESC");
+    let query = if is_teacher {
+        format!(
+            r#"
+            SELECT
+                s.id, s.submitted_by_user_id, s.group_id,
+                s.student_name, s.group_name, s.course,
+                s.practice_id, p.name AS practice_name,
+                s.status, s.score, s.submitted_at,
+                COALESCE(s.entry_mode, 'csv') AS entry_mode,
+                s.table_number,
+                MAX({member_count_sq}, 1) AS member_count
+            FROM submissions s
+            JOIN practices p ON p.id = s.practice_id
+            ORDER BY s.course, s.group_name, s.submitted_at DESC
+            "#
+        )
+    } else {
+        format!(
+            r#"
+            SELECT
+                s.id, s.submitted_by_user_id, s.group_id,
+                s.student_name, s.group_name, s.course,
+                s.practice_id, p.name AS practice_name,
+                s.status, s.score, s.submitted_at,
+                COALESCE(s.entry_mode, 'csv') AS entry_mode,
+                s.table_number,
+                MAX({member_count_sq}, 1) AS member_count
+            FROM submissions s
+            JOIN practices p ON p.id = s.practice_id
+            JOIN report_members rm_me ON rm_me.submission_id = s.id
+                AND rm_me.user_id = ?1 AND rm_me.status = 'accepted'
+            ORDER BY s.course, s.group_name, s.submitted_at DESC
+            "#
+        )
+    };
 
-    let rows = if matches!(user.role.as_str(), "docente" | "admin") {
+    let rows = if is_teacher {
         sqlx::query_as::<_, SubmissionListItem>(&query)
             .fetch_all(pool)
             .await?
@@ -2431,6 +2726,512 @@ pub async fn submission_owner_id(pool: &SqlitePool, id: &str) -> anyhow::Result<
             .fetch_optional(pool)
             .await?;
     Ok(owner.and_then(|(user_id,)| user_id))
+}
+
+/// Devuelve `true` si el usuario es miembro aceptado (o owner) del informe dado.
+/// Docentes/admin siempre acceden desde la capa de rutas; esta fn es para alumnos.
+pub async fn is_accepted_member(
+    pool: &SqlitePool,
+    submission_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM report_members WHERE submission_id = ?1 AND user_id = ?2 AND status = 'accepted'",
+    )
+    .bind(submission_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.is_some())
+}
+
+/// Resuelve la mesa del alumno para una práctica y grupo: prioridad `practice_table_assignments`
+/// → `user_default_tables`. Devuelve `None` si no tiene mesa asignada en ninguna fuente.
+pub async fn resolve_user_table(
+    pool: &SqlitePool,
+    user_id: &str,
+    group_id: &str,
+    practice_id: &str,
+) -> anyhow::Result<Option<i64>> {
+    let row: Option<(Option<i64>,)> = sqlx::query_as(
+        r#"
+        SELECT COALESCE(pta.table_number, udt.table_number)
+        FROM group_members gm
+        LEFT JOIN practice_table_assignments pta
+            ON pta.group_id = gm.group_id AND pta.user_id = gm.user_id
+            AND pta.practice_id = ?3
+        LEFT JOIN user_default_tables udt
+            ON udt.user_id = gm.user_id AND udt.group_id = gm.group_id
+        WHERE gm.group_id = ?2 AND gm.user_id = ?1
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .bind(group_id)
+    .bind(practice_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|(t,)| t))
+}
+
+/// Busca un informe existente para (práctica, grupo, mesa). Devuelve el `submission_id` o `None`.
+pub async fn find_existing_report(
+    pool: &SqlitePool,
+    practice_id: &str,
+    group_id: &str,
+    table_number: i64,
+) -> anyhow::Result<Option<String>> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT id FROM submissions WHERE practice_id = ?1 AND group_id = ?2 AND table_number = ?3",
+    )
+    .bind(practice_id)
+    .bind(group_id)
+    .bind(table_number)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(id,)| id))
+}
+
+/// Lista los miembros de un informe ordenados por role (owner primero) y nombre.
+pub async fn report_members_for(
+    pool: &SqlitePool,
+    submission_id: &str,
+) -> anyhow::Result<Vec<ReportMember>> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        user_id: String,
+        display_name: String,
+        role: String,
+        status: String,
+        accepted_at: Option<DateTime<Utc>>,
+    }
+    let rows = sqlx::query_as::<_, Row>(
+        r#"
+        SELECT rm.user_id, u.display_name, rm.role, rm.status, rm.accepted_at
+        FROM report_members rm
+        JOIN users u ON u.id = rm.user_id
+        WHERE rm.submission_id = ?1
+        ORDER BY CASE rm.role WHEN 'owner' THEN 0 ELSE 1 END, u.display_name
+        "#,
+    )
+    .bind(submission_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| ReportMember {
+            user_id: r.user_id,
+            display_name: r.display_name,
+            role: r.role,
+            status: r.status,
+            accepted_at: r.accepted_at,
+        })
+        .collect())
+}
+
+/// Inserta entradas `pending` en `report_members` para los alumnos del mismo grupo
+/// que tienen la misma mesa resuelta para la práctica (excluyendo al owner).
+/// No falla si algún alumno ya tiene entrada (idempotente por `INSERT OR IGNORE`).
+pub async fn invite_table_members(
+    pool: &SqlitePool,
+    submission_id: &str,
+    group_id: &str,
+    practice_id: &str,
+    table_number: i64,
+    owner_user_id: &str,
+    invited_at: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    // Alumnos del mismo grupo con la misma mesa resuelta (pta primero, udt como fallback).
+    let candidates: Vec<(String,)> = sqlx::query_as(
+        r#"
+        SELECT gm.user_id
+        FROM group_members gm
+        JOIN users u ON u.id = gm.user_id AND u.role = 'estudiante'
+        LEFT JOIN practice_table_assignments pta
+            ON pta.group_id = gm.group_id AND pta.user_id = gm.user_id
+            AND pta.practice_id = ?2
+        LEFT JOIN user_default_tables udt
+            ON udt.user_id = gm.user_id AND udt.group_id = gm.group_id
+        WHERE gm.group_id = ?1
+          AND gm.user_id != ?3
+          AND COALESCE(pta.table_number, udt.table_number) = ?4
+        "#,
+    )
+    .bind(group_id)
+    .bind(practice_id)
+    .bind(owner_user_id)
+    .bind(table_number)
+    .fetch_all(pool)
+    .await?;
+
+    for (user_id,) in candidates {
+        sqlx::query(
+            r#"
+            INSERT INTO report_members (submission_id, user_id, role, status, invited_at)
+            VALUES (?1, ?2, 'member', 'pending', ?3)
+            ON CONFLICT(submission_id, user_id) DO NOTHING
+            "#,
+        )
+        .bind(submission_id)
+        .bind(user_id)
+        .bind(invited_at)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}
+
+/// Devuelve las invitaciones vigentes (pendientes y aún dentro de la ventana) de un alumno.
+pub async fn pending_invitations_for(
+    pool: &SqlitePool,
+    user_id: &str,
+) -> anyhow::Result<Vec<PendingInvitation>> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        submission_id: String,
+        practice_name: String,
+        course: String,
+        group_name: String,
+        table_number: Option<i64>,
+        owner_name: String,
+        invited_at: DateTime<Utc>,
+        submitted_at: DateTime<Utc>,
+        acceptance_window_hours: f64,
+    }
+    let rows = sqlx::query_as::<_, Row>(
+        r#"
+        SELECT
+            s.id AS submission_id,
+            p.name AS practice_name,
+            s.course,
+            s.group_name,
+            s.table_number,
+            owner_u.display_name AS owner_name,
+            rm.invited_at,
+            s.submitted_at,
+            COALESCE(c.acceptance_window_hours, 4.0) AS acceptance_window_hours
+        FROM report_members rm
+        JOIN submissions s ON s.id = rm.submission_id
+        JOIN practices p ON p.id = s.practice_id
+        LEFT JOIN courses c ON c.id = s.course_id
+        JOIN report_members rm_owner ON rm_owner.submission_id = s.id AND rm_owner.role = 'owner'
+        JOIN users owner_u ON owner_u.id = rm_owner.user_id
+        WHERE rm.user_id = ?1 AND rm.status = 'pending'
+        ORDER BY rm.invited_at DESC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let now = Utc::now();
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| {
+            let expires_at = r.submitted_at
+                + chrono::Duration::milliseconds((r.acceptance_window_hours * 3_600_000.0) as i64);
+            if now >= expires_at {
+                return None; // expirada — no mostrar
+            }
+            Some(PendingInvitation {
+                submission_id: r.submission_id,
+                practice_name: r.practice_name,
+                course: r.course,
+                group_name: r.group_name,
+                table_number: r.table_number,
+                owner_name: r.owner_name,
+                invited_at: r.invited_at,
+                expires_at,
+            })
+        })
+        .collect())
+}
+
+/// Acepta una invitación pendiente dentro de la ventana del curso. Devuelve el resultado.
+pub async fn accept_report_invitation(
+    pool: &SqlitePool,
+    submission_id: &str,
+    user_id: &str,
+) -> anyhow::Result<AcceptOutcome> {
+    // Leer la entrada del alumno y la ventana de aceptación.
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        status: String,
+        submitted_at: DateTime<Utc>,
+        acceptance_window_hours: f64,
+    }
+    let row: Option<Row> = sqlx::query_as(
+        r#"
+        SELECT rm.status, s.submitted_at,
+               COALESCE(c.acceptance_window_hours, 4.0) AS acceptance_window_hours
+        FROM report_members rm
+        JOIN submissions s ON s.id = rm.submission_id
+        LEFT JOIN courses c ON c.id = s.course_id
+        WHERE rm.submission_id = ?1 AND rm.user_id = ?2
+        "#,
+    )
+    .bind(submission_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(AcceptOutcome::NotInvited);
+    };
+
+    if row.status == "accepted" {
+        return Ok(AcceptOutcome::AlreadyAccepted);
+    }
+
+    let expires_at = row.submitted_at
+        + chrono::Duration::milliseconds((row.acceptance_window_hours * 3_600_000.0) as i64);
+    if Utc::now() >= expires_at {
+        return Ok(AcceptOutcome::Expired);
+    }
+
+    let now = Utc::now();
+    sqlx::query(
+        r#"
+        UPDATE report_members
+        SET status = 'accepted', accepted_at = ?3
+        WHERE submission_id = ?1 AND user_id = ?2 AND status = 'pending'
+        "#,
+    )
+    .bind(submission_id)
+    .bind(user_id)
+    .bind(now)
+    .execute(pool)
+    .await?;
+
+    Ok(AcceptOutcome::Accepted)
+}
+
+/// Agrega un miembro a un informe (uso docente). Si `force_accept` es `true`, el miembro
+/// entra directamente como `accepted` sin pasar por la ventana de invitación.
+pub async fn add_report_member(
+    pool: &SqlitePool,
+    submission_id: &str,
+    user_id: &str,
+    force_accept: bool,
+) -> anyhow::Result<bool> {
+    // Verificar que el usuario existe y es estudiante.
+    let exists: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM users WHERE id = ?1 AND role = 'estudiante'")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?;
+    if exists.is_none() {
+        return Ok(false);
+    }
+
+    let now = Utc::now();
+    let status = if force_accept { "accepted" } else { "pending" };
+    let accepted_at: Option<DateTime<Utc>> = if force_accept { Some(now) } else { None };
+
+    sqlx::query(
+        r#"
+        INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at)
+        VALUES (?1, ?2, 'member', ?3, ?4, ?5)
+        ON CONFLICT(submission_id, user_id) DO UPDATE SET
+            status = excluded.status,
+            accepted_at = excluded.accepted_at
+        "#,
+    )
+    .bind(submission_id)
+    .bind(user_id)
+    .bind(status)
+    .bind(now)
+    .bind(accepted_at)
+    .execute(pool)
+    .await?;
+
+    Ok(true)
+}
+
+/// Quita un miembro de un informe (uso docente). Si se quita al owner, el primer miembro
+/// aceptado restante pasa a ser el nuevo owner. Devuelve `false` si el usuario no era miembro.
+pub async fn remove_report_member(
+    pool: &SqlitePool,
+    submission_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let result =
+        sqlx::query("DELETE FROM report_members WHERE submission_id = ?1 AND user_id = ?2")
+            .bind(submission_id)
+            .bind(user_id)
+            .execute(pool)
+            .await?;
+
+    if result.rows_affected() == 0 {
+        return Ok(false);
+    }
+
+    // Si ya no queda ningún owner, promover al primer miembro aceptado.
+    let has_owner: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM report_members WHERE submission_id = ?1 AND role = 'owner'")
+            .bind(submission_id)
+            .fetch_optional(pool)
+            .await?;
+
+    if has_owner.is_none() {
+        // Promover al primero aceptado (orden por accepted_at).
+        sqlx::query(
+            r#"
+            UPDATE report_members
+            SET role = 'owner'
+            WHERE submission_id = ?1 AND status = 'accepted'
+              AND rowid = (
+                  SELECT rowid FROM report_members
+                  WHERE submission_id = ?1 AND status = 'accepted'
+                  ORDER BY accepted_at ASC LIMIT 1
+              )
+            "#,
+        )
+        .bind(submission_id)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(true)
+}
+
+/// Guarda o actualiza la mesa por defecto del alumno para un grupo. Valida que el alumno
+/// Devuelve el usuario con sus defaults de perfil (grupo y mesa por defecto).
+pub async fn me_user(pool: &SqlitePool, user_id: &str) -> anyhow::Result<Option<MeUser>> {
+    Ok(sqlx::query_as::<_, MeUser>(
+        r#"
+        SELECT u.id, u.username, u.email, u.display_name, u.role,
+               u.default_group_id,
+               udt.table_number AS default_table_number
+        FROM users u
+        LEFT JOIN user_default_tables udt
+            ON udt.user_id = u.id AND udt.group_id = u.default_group_id
+        WHERE u.id = ?1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+/// Actualiza el grupo por defecto del usuario en su perfil.
+pub async fn set_user_default_group(
+    pool: &SqlitePool,
+    user_id: &str,
+    group_id: &str,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE users SET default_group_id = ?1 WHERE id = ?2")
+        .bind(group_id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// pertenezca al grupo y que la mesa esté en rango (1..=table_count).
+/// Devuelve `None` si el grupo no existe o el alumno no pertenece a él.
+pub async fn set_user_default_table(
+    pool: &SqlitePool,
+    user_id: &str,
+    group_id: &str,
+    table_number: i64,
+) -> anyhow::Result<Option<()>> {
+    let group: Option<(i64,)> = sqlx::query_as("SELECT table_count FROM lab_groups WHERE id = ?1")
+        .bind(group_id)
+        .fetch_optional(pool)
+        .await?;
+
+    let Some((table_count,)) = group else {
+        return Ok(None);
+    };
+
+    if table_number < 1 || table_number > table_count {
+        return Ok(None);
+    }
+
+    let is_member: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM group_members WHERE group_id = ?1 AND user_id = ?2")
+            .bind(group_id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?;
+
+    if is_member.is_none() {
+        return Ok(None);
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_default_tables (user_id, group_id, table_number, updated_at)
+        VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(user_id, group_id) DO UPDATE SET
+            table_number = excluded.table_number,
+            updated_at   = excluded.updated_at
+        "#,
+    )
+    .bind(user_id)
+    .bind(group_id)
+    .bind(table_number)
+    .bind(Utc::now())
+    .execute(pool)
+    .await?;
+
+    Ok(Some(()))
+}
+
+/// Actualiza el grupo y/o mesa de un informe (uso docente). Valida que la nueva combinación
+/// no colisione con otro informe existente. Devuelve `None` si la entrega no existe.
+pub async fn update_report_meta(
+    pool: &SqlitePool,
+    submission_id: &str,
+    group_id: Option<&str>,
+    table_number: Option<i64>,
+) -> anyhow::Result<Option<SubmissionDetail>> {
+    let current: Option<(String, Option<String>, Option<i64>)> =
+        sqlx::query_as("SELECT practice_id, group_id, table_number FROM submissions WHERE id = ?1")
+            .bind(submission_id)
+            .fetch_optional(pool)
+            .await?;
+
+    let Some((practice_id, current_group, current_table)) = current else {
+        return Ok(None);
+    };
+
+    let new_group = group_id.unwrap_or(current_group.as_deref().unwrap_or(""));
+    let new_table = table_number.or(current_table);
+
+    // Verificar que no colisione con otro informe existente en el nuevo (práctica, grupo, mesa).
+    if let Some(t) = new_table {
+        let collision: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM submissions WHERE practice_id = ?1 AND group_id = ?2 AND table_number = ?3 AND id != ?4",
+        )
+        .bind(&practice_id)
+        .bind(new_group)
+        .bind(t)
+        .bind(submission_id)
+        .fetch_optional(pool)
+        .await?;
+
+        if collision.is_some() {
+            anyhow::bail!("Ya existe un informe para esa combinación de grupo y mesa");
+        }
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE submissions
+        SET group_id = COALESCE(?2, group_id),
+            table_number = ?3
+        WHERE id = ?1
+        "#,
+    )
+    .bind(submission_id)
+    .bind(group_id)
+    .bind(new_table)
+    .execute(pool)
+    .await?;
+
+    submission_detail(pool, submission_id).await
 }
 
 /// Recupera el detalle completo de una entrega (incluye el análisis deserializado).
@@ -2460,7 +3261,8 @@ pub async fn submission_detail(
             s.reviewed_at,
             s.measurement_meta_json,
             s.course_id,
-            COALESCE(c.submission_edit_hours, 4) AS submission_edit_hours
+            COALESCE(c.submission_edit_hours, 4) AS submission_edit_hours,
+            s.table_number
         FROM submissions s
         JOIN practices p ON p.id = s.practice_id
         LEFT JOIN courses c ON c.id = s.course_id
@@ -2481,6 +3283,7 @@ pub async fn submission_detail(
     };
     let student_results = student_results_for(pool, &row.id).await?;
     let measurements = measurements_for(pool, &row.id).await?;
+    let members = report_members_for(pool, &row.id).await?;
     // Ventana de edición: submitted_at + horas del curso. Editable si sigue abierta, la entrega
     // está pendiente y el cálculo aún no es visible (la propiedad la valida el endpoint).
     let editable_until = row.submitted_at
@@ -2510,6 +3313,8 @@ pub async fn submission_detail(
         editable_until: Some(editable_until),
         can_edit,
         measurements,
+        table_number: row.table_number,
+        members,
     }))
 }
 
