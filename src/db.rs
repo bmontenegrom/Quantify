@@ -3689,6 +3689,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn login_migrates_legacy_sha256_hash_to_argon2() {
+        let (pool, _dir) = pool().await;
+        // Inserta un usuario con hash legacy SHA-256 directamente en la base.
+        let salt = "test-salt-uuid";
+        let legacy_hash = format!("{salt}:{}", digest_password(salt, "clave1234"));
+        sqlx::query(
+            "INSERT INTO users (id, username, email, display_name, role, password_hash, created_at)
+             VALUES ('u1', 'legacy', 'legacy@test.local', 'Legacy', 'estudiante', ?1, '2024-01-01')",
+        )
+        .bind(&legacy_hash)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // El login debe tener éxito con el hash legacy.
+        let result = login(
+            &pool,
+            LoginRequest {
+                email: Some("legacy@test.local".into()),
+                username: None,
+                password: "clave1234".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(result.is_some(), "login con hash legacy debe tener éxito");
+
+        // El hash debe haberse migrado a Argon2id.
+        let updated: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = 'u1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(
+            updated.starts_with("$argon2"),
+            "el hash debe actualizarse a Argon2id tras el login"
+        );
+
+        // Con el nuevo hash Argon2id, el login debe seguir funcionando.
+        let result2 = login(
+            &pool,
+            LoginRequest {
+                email: Some("legacy@test.local".into()),
+                username: None,
+                password: "clave1234".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            result2.is_some(),
+            "login con hash Argon2id debe tener éxito"
+        );
+    }
+
+    #[tokio::test]
     async fn session_lookup_and_logout() {
         let (pool, _dir) = seeded().await;
         let (token, user) = login(
