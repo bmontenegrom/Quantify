@@ -9,6 +9,13 @@ Las fases 1–3 son backend puro (bajo riesgo, muy testeable); 4–6 agregan API
 > agrega tests JS de su lógica (extrayéndola a `lib.js` cuando haga falta), y el CI
 > (`.github/workflows/ci.yml`) corre ambas suites en cada push/PR.
 
+**Estado al 11-06-2026:** Fases 0–5 **hechas** + motor `regresion_lineal` + comparación
+alumno-vs-automático. Además, ya en `main`: las 3 prácticas de Física 103 completas (P1 péndulo,
+P2 serie/paralelo con tabs, P3 directa/desfasaje con tabs), modularización del frontend en 18
+módulos ES, navegación lateral (sidebar), ficha de entrega full-page con ventana de edición
+configurable, e informes compartidos por mesa (PR #21). El plan de continuación está en las
+**Fases 7–12** al final de este documento.
+
 **Estado al 30-05-2026:** Fases 0–5 **hechas** + motor `regresion_lineal` + comparación
 alumno-vs-automático. Resumen: prácticas reales; `uncertainty.rs`; catálogo de instrumentos
 (API + UI); base de tests JS + CI; definición de prácticas (editor teacher-only) con **P1/P2/P3
@@ -268,41 +275,109 @@ de la **Fase 4**. Hecho hasta **Comparación** inclusive; queda la **Fase 6** y 
 
 ---
 
-## Mejoras y próximos pasos (al 30-05-2026)
+## Plan de continuación — Fases 7–12 (al 11-06-2026)
 
-Detectadas con el código ya construido. Ordenadas por valor/riesgo; ninguna bloquea lo hecho.
+Surge de una auditoría del código en `main` (seguridad, deuda técnica, cobertura de tests,
+higiene del repo) más las mejoras que venían registradas del 30-05. Orden recomendado:
+**7 → 8 → 9 → 10 → 11 → 6 → 12**. Las fases 7–8 son chicas y de mayor impacto; la 9 va
+antes que la 10 para que el refactor grande quede protegido por E2E.
 
-### Correctitud / robustez
-1. **Unicidad de símbolos cruzada por práctica** (deuda de Fase 3/4, ahora más relevante con
-   regresión y comparación). Hoy `practice_quantities` y `practice_results` validan
-   `UNIQUE(practice_id, symbol)` por separado: una magnitud `l` y un mensurando `l` pueden
-   coexistir y la fórmula/`compareResults` quedan ambiguos. **Acción**: validar unicidad global
-   de símbolos por práctica (al crear/editar magnitud o mensurando) + que el símbolo sea un
-   identificador válido (sin espacios/operadores). Reservar `slope`/`intercept` en regresión.
-2. **`relajacion_exponencial` es un `analysis_kind` sin motor** (solo etiqueta). O bien se
-   implementa (linealizar `V(t)=V0·e^{-t/τ}` → `ln V` vs `t`, que ya cubre `regresion_lineal`
-   con `y_formula = math::ln(V)`), o se **elimina el kind** y se modela esa parte como
-   `regresion_lineal`. Decisión a tomar con el docente.
-3. **Mensajes de error internos en inglés** ("submission not found", "submission not found")
-   en `routes.rs`: normalizar a español por la convención de errores amigables (son casos
-   "no debería pasar", de bajo impacto).
+### Fase 7 — Seguridad e higiene (P0, ~medio día)
 
-### Calidad / infra
-4. **E2E de navegador en CI (Playwright)**. Ya validamos el flujo de comparación/regresión con un
-   script Playwright a mano; conviene versionarlo y correrlo en CI (job aparte, con el server
-   levantado) para fijar el comportamiento de la UI. Hoy el CI solo corre `cargo test` + `node --test`.
-5. **Ergonomía de dev DB**. Las pruebas manuales dejan entregas y ediciones en `data/quantify.db`
-   (p. ej. el símbolo de P1 quedó como `Area`). Documentar/automatizar un reset (`rm data/quantify.db`
-   + re-seed) o un script `dev-reset`.
+- **Migrar hash de contraseñas a Argon2.** Hoy es SHA-256 + salt UUID
+  (`db.rs::hash_password`/`digest_password`, ~línea 3420): inadecuado para contraseñas
+  (fuerza bruta barata). Usar el crate `argon2` con **re-hash transparente en el login**:
+  `verify_password` detecta el formato viejo (`salt:hex`), valida, y re-hashea con Argon2
+  al pasar. Sin migración de datos ni corte de servicio.
+- **Cookie de sesión con `SameSite=Lax`** (hoy no se setea; mitiga CSRF básico). CSRF
+  tokens completos quedan para la Fase 12 (solo si la app se expone públicamente).
+- **`.gitignore` + limpieza del working tree**: agregar `screenshot-*.png`, `ss-*.png`,
+  `*.bak*`, `/data/data/`, `/deploy/data/`; borrar los ~20 archivos sueltos (screenshots
+  de sesiones de trabajo y backups de DB).
 
-### Funcionalidad (con el docente)
-6. **P2-parte2 como `regresion_lineal`**: la parte de ajuste `P(R)`/recta de P2 puede sembrarse
-   como práctica de regresión (el motor ya existe), igual que P3-parte2.
-7. **Comparación — veredicto opcional**: hoy solo se muestran las diferencias. Evaluar un umbral
-   de tolerancia configurable por el docente (✓/✗) si lo piden; se dejó fuera a propósito.
-8. **Entrega/corrección por mesa de trabajo** (postergado): las hojas se califican por mesa;
-   modelar la entrega por mesa cuando se encare la iteración de evaluación.
+**Aceptación**: login funciona con usuarios pre-existentes (re-hash verificado con test);
+`git status` limpio tras una sesión de smoke test con screenshots.
 
-### Fase 6 (pulido, sin cambios)
-- Completar P2/P3 con definiciones reales confirmadas; documentar formato y fórmulas en el README;
-  revisar seeds y eventual migración de datos del curso.
+### Fase 8 — Correctitud: unicidad cruzada de símbolos (P1, ~medio día)
+
+Deuda de Fase 3/4, hoy más relevante con regresión y comparación. `practice_quantities` y
+`practice_results` validan `UNIQUE(practice_id, symbol)` por separado: una magnitud `l` y un
+mensurando `l` pueden coexistir y la fórmula/`compareResults` quedan ambiguos.
+
+- Validar **unicidad global** de símbolos por práctica al crear/editar magnitud o mensurando.
+- Validar que el símbolo sea **identificador válido** (sin espacios/operadores).
+- **Reservar `slope`/`intercept`** como símbolos en prácticas `regresion_lineal`.
+- ⚠️ Antes de escribir la validación en `routes.rs`, revisar cómo consume los símbolos el
+  motor (`computation.rs`/`uncertainty.rs`) — no validar por analogía.
+
+**Aceptación**: crear un mensurando con el símbolo de una magnitud existente (o viceversa)
+devuelve 400 con mensaje en español; tests de ambos sentidos + símbolos reservados.
+
+### Fase 9 — E2E Playwright versionado en CI (P1, ~1 día)
+
+El smoke test pre-PR ya se corre a mano en cada PR; fijarlo como script versionado.
+
+- Script Playwright en `tests/e2e/` (fuera de `static/`): login (alumno y docente),
+  formulario de medición (péndulo con cronómetro), entrega, revisión docente con
+  visibilidad, ficha de detalle, comparación.
+- Job de CI aparte que compila, levanta el server sobre una DB temporal sembrada y corre
+  el script (server en puerto dedicado; `DATABASE_URL` y `APP_BIND_ADDR` por env).
+- Falla del job = falla del PR, igual que `rust` y `js`.
+
+**Aceptación**: el job corre en verde en CI sobre un push de prueba; un cambio que rompa
+el login lo pone en rojo.
+
+### Fase 10 — Refactor `db.rs` (P1, ~1–2 días, después de la 9)
+
+`db.rs` tiene ~4200 líneas y centraliza esquema, seeds, sesiones y CRUD de todos los
+dominios. Refactor **mecánico, sin cambio de comportamiento**, en commits chicos:
+
+- Extraer módulos por dominio: `sessions.rs`, `users.rs`, `courses.rs`, `submissions.rs`
+  (siguiendo el patrón ya usado con `instruments.rs`/`practices.rs`).
+- `db.rs` queda con: pool, migraciones (`add_column_if_missing` y compañía) y seeds.
+- Cada commit compila con tests verdes; el E2E de la Fase 9 respalda el conjunto.
+
+**Aceptación**: `cargo test` + `node --test` + E2E verdes; ningún diff de comportamiento.
+
+### Fase 11 — Pulido menor (P2, agrupable en un PR)
+
+- **Errores en inglés** que quedaron en `routes.rs` ("submission not found", "is required"
+  en multipart): normalizar a español por la convención de errores amigables.
+- **Script `dev-reset`**: borrar `data/quantify.db` + re-seed en un comando (hoy es manual
+  cada vez que cambia un seed; convención dev documentada).
+- **Decidir `relajacion_exponencial`** (con el docente): es un `analysis_kind` sin motor.
+  O se implementa linealizando (`ln V` vs `t`, que ya cubre `regresion_lineal` con
+  `y_formula = math::ln(V)`), o se elimina el kind y esa parte se modela como
+  `regresion_lineal`.
+
+### Fase 6 — Pulido y P2/P3 completas (con el docente, sin cambios)
+
+- Completar P2/P3 con definiciones reales confirmadas; documentar formato de carga y
+  fórmulas en el README; revisar seeds y eventual migración de datos reales del curso.
+- **P2-parte2 como `regresion_lineal`**: la parte de ajuste `P(R)`/recta de P2 puede
+  sembrarse como práctica de regresión (el motor ya existe), igual que P3-parte2.
+- **Comparación — veredicto opcional**: hoy solo se muestran diferencias. Evaluar umbral
+  de tolerancia configurable por el docente (✓/✗) si lo piden; se dejó fuera a propósito.
+
+### Fase 12 — Otras oportunidades (registro; tomar de forma oportunista)
+
+Detectadas en la auditoría del 11-06. Ninguna es urgente; se registran para no perderlas
+y tomarlas cuando se toque el área correspondiente.
+
+1. **`forms.js` (~900 líneas, sin tests)**: el módulo JS más grande, con 4 ramas de
+   renderizado por tipo de medición (`is_given`/`is_chrono`/`repeated`/simple) de ~50+
+   líneas cada una. Extraer la lógica pura de validación/armado de payload a `lib.js`
+   (testeable con `node --test`) cuando se lo toque por otra razón.
+2. **Cobertura JS**: 18 de 21 módulos en `static/` no tienen tests unitarios. Los puros
+   (`lib`, `chronometer`, `stats`) sí. Criterio: el E2E (Fase 9) cubre los módulos DOM
+   mejor que unit tests de DOM; solo extraer-y-testear lógica que sea pura.
+3. **CSRF tokens / validación de origen**: hoy no hay; riesgo bajo en app interna.
+   Encarar solo si la app se expone públicamente (la cookie `SameSite=Lax` de Fase 7
+   cubre el caso básico).
+4. **Validación de email/rol duplicada en `routes.rs`** (~5 endpoints repiten
+   `is_valid_email` + `matches!(role, ...)`): unificar en un helper si se vuelve a tocar.
+5. **Entrega/corrección por mesa de trabajo** (postergado de Fase 5): las hojas se
+   califican por mesa; modelar la entrega por mesa cuando se encare la iteración de
+   evaluación. Los informes compartidos por mesa (PR #21) son el primer paso.
+6. **Gráfico de `relajacion_exponencial` como kind propio** (pendiente menor de Fase 5;
+   depende de la decisión de Fase 11).
