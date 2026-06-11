@@ -3449,7 +3449,8 @@ fn hash_password(password: &str) -> String {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
-        .expect("argon2 hash")
+        // inalcanzable: params default + SaltString válido nunca fallan
+        .expect("argon2 hash con params default y salt OsRng nunca falla")
         .to_string()
 }
 
@@ -3702,6 +3703,31 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+
+        // Contraseña incorrecta contra hash legacy debe fallar (sin migrar).
+        let wrong = login(
+            &pool,
+            LoginRequest {
+                email: Some("legacy@test.local".into()),
+                username: None,
+                password: "incorrecta".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            wrong.is_none(),
+            "login con contraseña incorrecta y hash legacy debe fallar"
+        );
+        let not_migrated: String =
+            sqlx::query_scalar("SELECT password_hash FROM users WHERE id = 'u1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            not_migrated, legacy_hash,
+            "el hash NO debe modificarse tras un intento fallido"
+        );
 
         // El login debe tener éxito con el hash legacy.
         let result = login(
