@@ -1,5 +1,10 @@
 use crate::analysis::AnalysisResult;
+use argon2::{
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use chrono::{DateTime, Duration, Utc};
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Row, SqlitePool};
@@ -1113,8 +1118,18 @@ pub async fn login(
         return Ok(None);
     };
 
-    if !verify_password(&request.password, &user.password_hash) {
-        return Ok(None);
+    let new_hash = match verify_password(&request.password, &user.password_hash) {
+        VerifyResult::Invalid => return Ok(None),
+        VerifyResult::Valid => None,
+        VerifyResult::ValidNeedsRehash(h) => Some(h),
+    };
+
+    if let Some(h) = new_hash {
+        sqlx::query("UPDATE users SET password_hash = ?2 WHERE id = ?1")
+            .bind(&user.id)
+            .bind(h)
+            .execute(pool)
+            .await?;
     }
 
     let token = Uuid::new_v4().to_string();
@@ -1289,7 +1304,10 @@ pub async fn change_password(
         return Ok(false);
     };
 
-    if !verify_password(&input.current_password, &user.password_hash) {
+    if matches!(
+        verify_password(&input.current_password, &user.password_hash),
+        VerifyResult::Invalid
+    ) {
         return Ok(false);
     }
 
@@ -3416,21 +3434,57 @@ pub async fn update_review(
     submission_detail(pool, id).await
 }
 
-/// Genera el hash almacenable de una contraseña con un salt aleatorio, en formato `salt:digest`.
+/// Resultado de verificar una contraseña contra su hash almacenado.
+enum VerifyResult {
+    /// Contraseña incorrecta.
+    Invalid,
+    /// Contraseña correcta; el hash ya está en formato Argon2.
+    Valid,
+    /// Contraseña correcta; el hash estaba en el formato SHA-256 legacy y debe actualizarse.
+    ValidNeedsRehash(String),
+}
+
+/// Genera un hash Argon2id de la contraseña con salt aleatorio.
 fn hash_password(password: &str) -> String {
-    let salt = Uuid::new_v4().to_string();
-    format!("{salt}:{}", digest_password(&salt, password))
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .expect("argon2 hash")
+        .to_string()
 }
 
-/// Verifica una contraseña contra un hash `salt:digest` recalculando el digest con el salt.
-fn verify_password(password: &str, password_hash: &str) -> bool {
-    let Some((salt, expected)) = password_hash.split_once(':') else {
-        return false;
-    };
-    digest_password(salt, password) == expected
+/// Verifica una contraseña contra su hash almacenado.
+///
+/// Soporta el formato legacy SHA-256 (`salt:hex`) y el nuevo formato Argon2id (`$argon2id$…`).
+/// Si el hash es legacy y la contraseña es correcta, devuelve `ValidNeedsRehash` con el nuevo
+/// hash para que el llamador pueda migrar el registro transparentemente.
+fn verify_password(password: &str, stored_hash: &str) -> VerifyResult {
+    if stored_hash.starts_with("$argon2") {
+        let Ok(parsed) = PasswordHash::new(stored_hash) else {
+            return VerifyResult::Invalid;
+        };
+        if Argon2::default()
+            .verify_password(password.as_bytes(), &parsed)
+            .is_ok()
+        {
+            VerifyResult::Valid
+        } else {
+            VerifyResult::Invalid
+        }
+    } else {
+        // Formato legacy SHA-256: `salt:hex`
+        let Some((salt, expected)) = stored_hash.split_once(':') else {
+            return VerifyResult::Invalid;
+        };
+        if digest_password(salt, password) == expected {
+            VerifyResult::ValidNeedsRehash(hash_password(password))
+        } else {
+            VerifyResult::Invalid
+        }
+    }
 }
 
-/// Calcula el digest SHA-256 hexadecimal de `salt:password`.
+/// Calcula el digest SHA-256 hexadecimal de `salt:password` (solo para verificar hashes legacy).
 fn digest_password(salt: &str, password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(salt.as_bytes());

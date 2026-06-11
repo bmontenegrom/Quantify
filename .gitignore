@@ -1,9 +1,14 @@
 /target
 /data/*.db
 /data/*.db-*
+/data/*.bak*
 /data/uploads
 /data/*.out
 /data/*.err
+/data/data/
+/deploy/data/
 .env
 dist
 node_modules
+screenshot-*.png
+ss-*.png
