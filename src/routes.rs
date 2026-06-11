@@ -1203,7 +1203,7 @@ async fn create_quantity(
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
     validate_symbol_format(&input.symbol)?;
-    validate_symbol_not_reserved(&state, &id, &input.symbol).await?;
+    validate_symbol_not_reserved(&input.symbol)?;
     if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1222,7 +1222,7 @@ async fn update_quantity(
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
     validate_symbol_format(&input.symbol)?;
-    validate_symbol_not_reserved(&state, &practice_id, &input.symbol).await?;
+    validate_symbol_not_reserved(&input.symbol)?;
     if practices::symbol_taken_in_practice(
         &state.pool,
         &practice_id,
@@ -1263,7 +1263,7 @@ async fn create_result(
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
     validate_symbol_format(&input.symbol)?;
-    validate_symbol_not_reserved(&state, &id, &input.symbol).await?;
+    validate_symbol_not_reserved(&input.symbol)?;
     if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1282,7 +1282,7 @@ async fn update_result(
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
     validate_symbol_format(&input.symbol)?;
-    validate_symbol_not_reserved(&state, &practice_id, &input.symbol).await?;
+    validate_symbol_not_reserved(&input.symbol)?;
     if practices::symbol_taken_in_practice(
         &state.pool,
         &practice_id,
@@ -1314,6 +1314,7 @@ async fn delete_result(
 }
 
 /// Verifica que el símbolo sea un identificador válido: `[a-zA-Z_][a-zA-Z0-9_]*`.
+/// Solo ASCII por compatibilidad con el parser de evalexpr.
 fn validate_symbol_format(symbol: &str) -> Result<(), AppError> {
     let s = symbol.trim();
     let valid = !s.is_empty()
@@ -1331,30 +1332,16 @@ fn validate_symbol_format(symbol: &str) -> Result<(), AppError> {
 
 /// Verifica que el símbolo no sea una constante o variable reservada del motor de fórmulas.
 ///
-/// `pi` y `e` están reservadas siempre. `slope` e `intercept` lo están solo en prácticas
-/// de tipo `regresion_lineal`, donde el motor los inyecta con el resultado del ajuste.
-async fn validate_symbol_not_reserved(
-    state: &AppState,
-    practice_id: &str,
-    symbol: &str,
-) -> Result<(), AppError> {
+/// `pi` y `e` son constantes matemáticas siempre presentes en evalexpr. `slope` e `intercept`
+/// son variables inyectadas por el motor en prácticas de regresión. Los cuatro están reservados
+/// globalmente para evitar colisiones independientemente del tipo de análisis de la práctica.
+fn validate_symbol_not_reserved(symbol: &str) -> Result<(), AppError> {
     let s = symbol.trim();
-    if matches!(s, "pi" | "e") {
+    if matches!(s, "pi" | "e" | "slope" | "intercept") {
         return Err(AppError::bad_request(format!(
-            "El simbolo \"{}\" es una constante matematica reservada. Elegi otro simbolo.",
+            "El simbolo \"{}\" es una constante o variable reservada del motor. Elegi otro simbolo.",
             s
         )));
-    }
-    if matches!(s, "slope" | "intercept") {
-        let def = practices::definition(&state.pool, practice_id).await?;
-        let is_regression =
-            def.as_ref().and_then(|d| d.analysis_kind.as_deref()) == Some("regresion_lineal");
-        if is_regression {
-            return Err(AppError::bad_request(format!(
-                "El simbolo \"{}\" es reservado en practicas de regresion lineal. Elegi otro simbolo.",
-                s
-            )));
-        }
     }
     Ok(())
 }
@@ -1612,12 +1599,16 @@ mod tests {
     }
 
     #[test]
-    fn validate_symbol_format_rejects_reserved_math_constants() {
-        // pi y e son constantes del motor; deben rechazarse sin importar la práctica
-        assert!(matches!(
-            validate_symbol_format("pi"),
-            Ok(()) // validate_symbol_format solo valida formato; las reservadas las maneja validate_symbol_not_reserved
-        ));
-        // La validación de reservados es async y se testa en practices::tests
+    fn validate_symbol_not_reserved_rejects_reserved_symbols() {
+        // Constantes matematicas siempre presentes en evalexpr.
+        assert!(validate_symbol_not_reserved("pi").is_err());
+        assert!(validate_symbol_not_reserved("e").is_err());
+        // Variables inyectadas por el motor de regresion; reservadas globalmente.
+        assert!(validate_symbol_not_reserved("slope").is_err());
+        assert!(validate_symbol_not_reserved("intercept").is_err());
+        // Identificadores comunes validos.
+        assert!(validate_symbol_not_reserved("T").is_ok());
+        assert!(validate_symbol_not_reserved("tau").is_ok());
+        assert!(validate_symbol_not_reserved("V_g").is_ok());
     }
 }
