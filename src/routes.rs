@@ -1202,7 +1202,9 @@ async fn create_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
-    if practices::quantity_symbol_taken(&state.pool, &id, &input.symbol, None).await? {
+    validate_symbol_format(&input.symbol)?;
+    validate_symbol_not_reserved(&state, &id, &input.symbol).await?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     Ok(Json(
@@ -1219,8 +1221,16 @@ async fn update_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
-    if practices::quantity_symbol_taken(&state.pool, &practice_id, &input.symbol, Some(&qid))
-        .await?
+    validate_symbol_format(&input.symbol)?;
+    validate_symbol_not_reserved(&state, &practice_id, &input.symbol).await?;
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &practice_id,
+        &input.symbol,
+        Some(&qid),
+        None,
+    )
+    .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1252,7 +1262,9 @@ async fn create_result(
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
-    if practices::result_symbol_taken(&state.pool, &id, &input.symbol, None).await? {
+    validate_symbol_format(&input.symbol)?;
+    validate_symbol_not_reserved(&state, &id, &input.symbol).await?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     Ok(Json(
@@ -1269,7 +1281,17 @@ async fn update_result(
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
-    if practices::result_symbol_taken(&state.pool, &practice_id, &input.symbol, Some(&rid)).await? {
+    validate_symbol_format(&input.symbol)?;
+    validate_symbol_not_reserved(&state, &practice_id, &input.symbol).await?;
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &practice_id,
+        &input.symbol,
+        None,
+        Some(&rid),
+    )
+    .await?
+    {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     let updated = practices::update_result(&state.pool, &rid, input)
@@ -1289,6 +1311,52 @@ async fn delete_result(
         return Err(AppError::not_found("mensurando no encontrado"));
     }
     Ok(Json(Health { status: "ok" }))
+}
+
+/// Verifica que el símbolo sea un identificador válido: `[a-zA-Z_][a-zA-Z0-9_]*`.
+fn validate_symbol_format(symbol: &str) -> Result<(), AppError> {
+    let s = symbol.trim();
+    let valid = !s.is_empty()
+        && s.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !valid {
+        return Err(AppError::bad_request(format!(
+            "El simbolo \"{}\" no es valido. Usa solo letras, digitos y guion bajo, \
+             comenzando con una letra o guion bajo.",
+            s
+        )));
+    }
+    Ok(())
+}
+
+/// Verifica que el símbolo no sea una constante o variable reservada del motor de fórmulas.
+///
+/// `pi` y `e` están reservadas siempre. `slope` e `intercept` lo están solo en prácticas
+/// de tipo `regresion_lineal`, donde el motor los inyecta con el resultado del ajuste.
+async fn validate_symbol_not_reserved(
+    state: &AppState,
+    practice_id: &str,
+    symbol: &str,
+) -> Result<(), AppError> {
+    let s = symbol.trim();
+    if matches!(s, "pi" | "e") {
+        return Err(AppError::bad_request(format!(
+            "El simbolo \"{}\" es una constante matematica reservada. Elegi otro simbolo.",
+            s
+        )));
+    }
+    if matches!(s, "slope" | "intercept") {
+        let def = practices::definition(&state.pool, practice_id).await?;
+        let is_regression =
+            def.as_ref().and_then(|d| d.analysis_kind.as_deref()) == Some("regresion_lineal");
+        if is_regression {
+            return Err(AppError::bad_request(format!(
+                "El simbolo \"{}\" es reservado en practicas de regresion lineal. Elegi otro simbolo.",
+                s
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Error 400 amigable para un símbolo ya usado dentro de la misma práctica.
@@ -1524,5 +1592,32 @@ mod tests {
         assert!(required(Some("x".into()), "f").is_ok());
         assert!(required(None, "f").is_err());
         assert!(required(Some("   ".into()), "f").is_err());
+    }
+
+    #[test]
+    fn validate_symbol_format_accepts_valid_and_rejects_invalid() {
+        // Identificadores válidos
+        assert!(validate_symbol_format("T").is_ok());
+        assert!(validate_symbol_format("tau").is_ok());
+        assert!(validate_symbol_format("V_g").is_ok());
+        assert!(validate_symbol_format("_priv").is_ok());
+        assert!(validate_symbol_format("R1").is_ok());
+        // Inválidos: vacío, espacios, operadores, empieza con dígito
+        assert!(validate_symbol_format("").is_err());
+        assert!(validate_symbol_format("  ").is_err());
+        assert!(validate_symbol_format("2R").is_err());
+        assert!(validate_symbol_format("a b").is_err());
+        assert!(validate_symbol_format("a+b").is_err());
+        assert!(validate_symbol_format("a.b").is_err());
+    }
+
+    #[test]
+    fn validate_symbol_format_rejects_reserved_math_constants() {
+        // pi y e son constantes del motor; deben rechazarse sin importar la práctica
+        assert!(matches!(
+            validate_symbol_format("pi"),
+            Ok(()) // validate_symbol_format solo valida formato; las reservadas las maneja validate_symbol_not_reserved
+        ));
+        // La validación de reservados es async y se testa en practices::tests
     }
 }

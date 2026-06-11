@@ -177,44 +177,40 @@ pub async fn delete_result(pool: &SqlitePool, result_id: &str) -> anyhow::Result
     Ok(result.rows_affected() > 0)
 }
 
-/// `true` si ya existe otra magnitud con ese `symbol` en la práctica. `exclude_id` permite
-/// ignorar la fila que se está editando (para que renombrar a su propio símbolo no falle).
-pub async fn quantity_symbol_taken(
+/// `true` si `symbol` ya está tomado por alguna magnitud o mensurando de la práctica.
+///
+/// `exclude_quantity_id` / `exclude_result_id` permiten ignorar la fila que se está editando
+/// (para que renombrar a su propio símbolo no falle).
+pub async fn symbol_taken_in_practice(
     pool: &SqlitePool,
     practice_id: &str,
     symbol: &str,
-    exclude_id: Option<&str>,
+    exclude_quantity_id: Option<&str>,
+    exclude_result_id: Option<&str>,
 ) -> anyhow::Result<bool> {
-    let count: (i64,) = sqlx::query_as(
+    let sym = symbol.trim();
+    let in_quantities: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM practice_quantities \
          WHERE practice_id = ?1 AND symbol = ?2 AND id <> ?3",
     )
     .bind(practice_id)
-    .bind(symbol.trim())
-    .bind(exclude_id.unwrap_or(""))
+    .bind(sym)
+    .bind(exclude_quantity_id.unwrap_or(""))
     .fetch_one(pool)
     .await?;
-    Ok(count.0 > 0)
-}
-
-/// `true` si ya existe otro mensurando con ese `symbol` en la práctica. `exclude_id` permite
-/// ignorar la fila que se está editando.
-pub async fn result_symbol_taken(
-    pool: &SqlitePool,
-    practice_id: &str,
-    symbol: &str,
-    exclude_id: Option<&str>,
-) -> anyhow::Result<bool> {
-    let count: (i64,) = sqlx::query_as(
+    if in_quantities.0 > 0 {
+        return Ok(true);
+    }
+    let in_results: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM practice_results \
          WHERE practice_id = ?1 AND symbol = ?2 AND id <> ?3",
     )
     .bind(practice_id)
-    .bind(symbol.trim())
-    .bind(exclude_id.unwrap_or(""))
+    .bind(sym)
+    .bind(exclude_result_id.unwrap_or(""))
     .fetch_one(pool)
     .await?;
-    Ok(count.0 > 0)
+    Ok(in_results.0 > 0)
 }
 
 /// Actualiza el tipo de análisis de una práctica. Devuelve `true` si existía.
@@ -720,6 +716,52 @@ mod tests {
         // Mismo símbolo en la misma práctica debe fallar (UNIQUE constraint).
         let err = create_quantity(&pool, "p1-estadistica", sample_quantity()).await;
         assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn symbol_taken_detects_cross_table_collision() {
+        let (pool, _dir) = setup().await;
+        // Crea una magnitud con símbolo "l".
+        let q = create_quantity(&pool, "p1-estadistica", sample_quantity())
+            .await
+            .unwrap();
+
+        // symbol_taken_in_practice lo detecta buscando en quantities.
+        assert!(
+            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, None)
+                .await
+                .unwrap()
+        );
+        // Excluir la misma magnitud (al renombrar) no debe reportar colisión.
+        assert!(
+            !symbol_taken_in_practice(&pool, "p1-estadistica", "l", Some(&q.id), None)
+                .await
+                .unwrap()
+        );
+
+        // Crea un mensurando con símbolo "Q".
+        let r = create_result(&pool, "p1-estadistica", sample_result())
+            .await
+            .unwrap();
+
+        // Un mensurando nuevo con símbolo "l" (ya en quantities) es colisión cruzada.
+        assert!(
+            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, Some(&r.id))
+                .await
+                .unwrap()
+        );
+        // Una magnitud nueva con símbolo "Q" (ya en results) es colisión cruzada.
+        assert!(
+            symbol_taken_in_practice(&pool, "p1-estadistica", "Q", Some(&q.id), None)
+                .await
+                .unwrap()
+        );
+        // Símbolo inexistente no colisiona.
+        assert!(
+            !symbol_taken_in_practice(&pool, "p1-estadistica", "nuevo", None, None)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
