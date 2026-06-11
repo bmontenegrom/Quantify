@@ -1202,7 +1202,9 @@ async fn create_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
-    if practices::quantity_symbol_taken(&state.pool, &id, &input.symbol, None).await? {
+    validate_symbol_format(&input.symbol)?;
+    validate_symbol_not_reserved(&input.symbol)?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     Ok(Json(
@@ -1219,8 +1221,16 @@ async fn update_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
-    if practices::quantity_symbol_taken(&state.pool, &practice_id, &input.symbol, Some(&qid))
-        .await?
+    validate_symbol_format(&input.symbol)?;
+    validate_symbol_not_reserved(&input.symbol)?;
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &practice_id,
+        &input.symbol,
+        Some(&qid),
+        None,
+    )
+    .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1252,7 +1262,9 @@ async fn create_result(
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
-    if practices::result_symbol_taken(&state.pool, &id, &input.symbol, None).await? {
+    validate_symbol_format(&input.symbol)?;
+    validate_symbol_not_reserved(&input.symbol)?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     Ok(Json(
@@ -1269,7 +1281,17 @@ async fn update_result(
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
-    if practices::result_symbol_taken(&state.pool, &practice_id, &input.symbol, Some(&rid)).await? {
+    validate_symbol_format(&input.symbol)?;
+    validate_symbol_not_reserved(&input.symbol)?;
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &practice_id,
+        &input.symbol,
+        None,
+        Some(&rid),
+    )
+    .await?
+    {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     let updated = practices::update_result(&state.pool, &rid, input)
@@ -1289,6 +1311,39 @@ async fn delete_result(
         return Err(AppError::not_found("mensurando no encontrado"));
     }
     Ok(Json(Health { status: "ok" }))
+}
+
+/// Verifica que el símbolo sea un identificador válido: `[a-zA-Z_][a-zA-Z0-9_]*`.
+/// Solo ASCII por compatibilidad con el parser de evalexpr.
+fn validate_symbol_format(symbol: &str) -> Result<(), AppError> {
+    let s = symbol.trim();
+    let valid = !s.is_empty()
+        && s.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !valid {
+        return Err(AppError::bad_request(format!(
+            "El simbolo \"{}\" no es valido. Usa solo letras, digitos y guion bajo, \
+             comenzando con una letra o guion bajo.",
+            s
+        )));
+    }
+    Ok(())
+}
+
+/// Verifica que el símbolo no sea una constante o variable reservada del motor de fórmulas.
+///
+/// `pi` y `e` son constantes matemáticas siempre presentes en evalexpr. `slope` e `intercept`
+/// son variables inyectadas por el motor en prácticas de regresión. Los cuatro están reservados
+/// globalmente para evitar colisiones independientemente del tipo de análisis de la práctica.
+fn validate_symbol_not_reserved(symbol: &str) -> Result<(), AppError> {
+    let s = symbol.trim();
+    if matches!(s, "pi" | "e" | "slope" | "intercept") {
+        return Err(AppError::bad_request(format!(
+            "El simbolo \"{}\" es una constante o variable reservada del motor. Elegi otro simbolo.",
+            s
+        )));
+    }
+    Ok(())
 }
 
 /// Error 400 amigable para un símbolo ya usado dentro de la misma práctica.
@@ -1524,5 +1579,36 @@ mod tests {
         assert!(required(Some("x".into()), "f").is_ok());
         assert!(required(None, "f").is_err());
         assert!(required(Some("   ".into()), "f").is_err());
+    }
+
+    #[test]
+    fn validate_symbol_format_accepts_valid_and_rejects_invalid() {
+        // Identificadores válidos
+        assert!(validate_symbol_format("T").is_ok());
+        assert!(validate_symbol_format("tau").is_ok());
+        assert!(validate_symbol_format("V_g").is_ok());
+        assert!(validate_symbol_format("_priv").is_ok());
+        assert!(validate_symbol_format("R1").is_ok());
+        // Inválidos: vacío, espacios, operadores, empieza con dígito
+        assert!(validate_symbol_format("").is_err());
+        assert!(validate_symbol_format("  ").is_err());
+        assert!(validate_symbol_format("2R").is_err());
+        assert!(validate_symbol_format("a b").is_err());
+        assert!(validate_symbol_format("a+b").is_err());
+        assert!(validate_symbol_format("a.b").is_err());
+    }
+
+    #[test]
+    fn validate_symbol_not_reserved_rejects_reserved_symbols() {
+        // Constantes matematicas siempre presentes en evalexpr.
+        assert!(validate_symbol_not_reserved("pi").is_err());
+        assert!(validate_symbol_not_reserved("e").is_err());
+        // Variables inyectadas por el motor de regresion; reservadas globalmente.
+        assert!(validate_symbol_not_reserved("slope").is_err());
+        assert!(validate_symbol_not_reserved("intercept").is_err());
+        // Identificadores comunes validos.
+        assert!(validate_symbol_not_reserved("T").is_ok());
+        assert!(validate_symbol_not_reserved("tau").is_ok());
+        assert!(validate_symbol_not_reserved("V_g").is_ok());
     }
 }
