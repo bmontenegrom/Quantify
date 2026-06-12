@@ -377,6 +377,20 @@ mod tests {
         .await
         .unwrap();
         assert!(session.is_some());
+
+        let missing = reset_password(
+            &pool,
+            "id-inexistente",
+            ResetPassword {
+                password: "x12345678".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            !missing,
+            "reset sobre un usuario inexistente debe devolver false"
+        );
     }
 
     #[tokio::test]

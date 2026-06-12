@@ -304,6 +304,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Mensurandos finales calculados por el estudiante (a mano), para comparar con el cálculo
+    // automático. Uno por símbolo de mensurando; `u_expanded` opcional (puede no calcular U).
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS submission_student_results (
@@ -323,7 +325,9 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "submissions", "submitted_by_user_id", "TEXT").await?;
     add_column_if_missing(pool, "submissions", "course_id", "TEXT").await?;
     add_column_if_missing(pool, "submissions", "group_id", "TEXT").await?;
+    // Modo de carga de la entrega: 'csv' (legacy) o 'form' (lecturas crudas). NULL = csv.
     add_column_if_missing(pool, "submissions", "entry_mode", "TEXT").await?;
+    // Visibilidad del calculo automatico para el estudiante (la habilita el docente). 0 = oculto.
     add_column_if_missing(
         pool,
         "submissions",
@@ -331,7 +335,10 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
+    // Metadatos de depuración por magnitud (JSON): nº de bins del histograma y valores
+    // descartados por el alumno. Visible para el docente. NULL en entregas sin depuración.
     add_column_if_missing(pool, "submissions", "measurement_meta_json", "TEXT").await?;
+    // Horas durante las que el alumno puede editar su entrega (desde submitted_at). Default 4h.
     add_column_if_missing(
         pool,
         "courses",
@@ -342,6 +349,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
     add_column_if_missing(pool, "users", "default_group_id", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
+    // Fórmulas de eje (x, y) por punto, solo para prácticas `regresion_lineal`.
     add_column_if_missing(pool, "practices", "x_formula", "TEXT").await?;
     add_column_if_missing(pool, "practices", "y_formula", "TEXT").await?;
 
@@ -453,6 +461,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Magnitud dada por la cátedra (valor ± U directo, sin instrumento ni réplicas).
     add_column_if_missing(
         pool,
         "practice_quantities",
@@ -460,9 +469,12 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
+    // Incertidumbre expandida U del dato aportado por el alumno.
     add_column_if_missing(pool, "submission_measurements", "value_u", "REAL").await?;
 
+    // Número de mesa del informe compartido (NULL en entregas legacy/CSV).
     add_column_if_missing(pool, "submissions", "table_number", "INTEGER").await?;
+    // Ventana de aceptación de invitaciones (horas). Default 4. Acotada a 0..=72.
     add_column_if_missing(
         pool,
         "courses",
@@ -471,6 +483,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
+    // Membresía de un informe compartido por mesa. Owner: role='owner', status='accepted'.
+    // Los demás miembros de la mesa reciben una invitación (status='pending') al crear el informe.
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS report_members (
@@ -493,6 +507,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Mesa por defecto del alumno por grupo (pre-rellena el formulario; puede variar por práctica).
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS user_default_tables (
@@ -507,6 +522,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Candado: un único informe por (práctica, grupo, mesa). Solo para entregas con mesa asignada.
     sqlx::query(
         r#"
         CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_report_unique
@@ -517,6 +533,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Backfill: cada entrega existente pasa a ser un informe de 1 miembro (owner accepted).
+    // Idempotente: solo inserta si no existe ya la fila en report_members.
     sqlx::query(
         r#"
         INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at)
@@ -630,6 +648,8 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
 /// descripción, tipo de análisis y, en regresión, las fórmulas de eje). Idempotente: usa
 /// `ON CONFLICT(id) DO NOTHING`, así que no pisa ediciones del docente entre reinicios.
 pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
+    // Practicas reales del primer bloque de Fisica 103. Las columnas `x_formula`/`y_formula`
+    // solo se usan en el camino `regresion_lineal`; en las estadisticas van en `None`.
     let practices = [
         (
             "p1-estadistica",
@@ -639,6 +659,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
+        // P2-serie: R1, R2, R3 en serie con RA; I = Vg/(R1+R2+R3+RA) y V=I*R en cada resistencia.
         (
             "p2-serie",
             "CC - Circuito en Serie",
@@ -647,6 +668,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
+        // P2-paralelo: R2 y R3 en paralelo con el circuito serie. Req y I calculados.
         (
             "p2-corriente-continua",
             "CC - Circuito en Paralelo",
@@ -663,6 +685,9 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
+        // P3-parte2 — desfasaje por figura de Lissajous: se ajusta tg(phi) vs omega y la
+        // pendiente del ajuste es RC = tau. El alumno carga f, a y b por punto; las formulas
+        // de eje derivan x = 2*pi*f y y = b/sqrt(a^2 - b^2).
         (
             "p3-relajacion-desfasaje",
             "Relajacion Exponencial - Desfasaje",
@@ -674,6 +699,9 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
+        // Actualiza nombre y descripción en conflicto para corregir errores de texto entre
+        // versiones, pero preserva los campos editables por el docente (analysis_kind,
+        // x_formula, y_formula) para no pisar cambios hechos desde la UI.
         sqlx::query(
             r#"
             INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula)
@@ -835,6 +863,7 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
 
     let now = Utc::now();
 
+    // Una entrega por práctica con datos realistas.
     let submissions: &[(&str, &str, &str)] = &[
         ("p1-estadistica", "pendiente", ""),
         (
@@ -904,6 +933,7 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
+        // Insertar al alumno como owner del informe sembrado.
         sqlx::query(
             r#"
             INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at)
@@ -946,6 +976,7 @@ pub(crate) fn hash_password(password: &str) -> String {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
+        // inalcanzable: params default + SaltString válido nunca fallan
         .expect("argon2 hash con params default y salt OsRng nunca falla")
         .to_string()
 }
@@ -969,6 +1000,7 @@ pub(crate) fn verify_password(password: &str, stored_hash: &str) -> VerifyResult
             VerifyResult::Invalid
         }
     } else {
+        // Formato legacy SHA-256: `salt:hex`
         let Some((salt, expected)) = stored_hash.split_once(':') else {
             return VerifyResult::Invalid;
         };
@@ -1050,6 +1082,7 @@ mod tests {
     #[tokio::test]
     async fn migrate_is_idempotent() {
         let (pool, _dir) = pool().await;
+        // Volver a migrar no debe fallar (cubre add_column_if_missing y ensure_lab_group_columns).
         migrate(&pool).await.unwrap();
     }
 
@@ -1082,12 +1115,14 @@ mod tests {
     async fn seed_practices_does_not_clobber_edits() {
         let (pool, _dir) = pool().await;
         seed_practices(&pool).await.unwrap();
+        // El docente edita el tipo de análisis de una práctica.
         sqlx::query(
             "UPDATE practices SET analysis_kind = 'regresion_lineal' WHERE id = 'p1-estadistica'",
         )
         .execute(&pool)
         .await
         .unwrap();
+        // Un reinicio re-corre el seed: NO debe pisar la edición.
         seed_practices(&pool).await.unwrap();
         let p = practices(&pool)
             .await
@@ -1150,15 +1185,15 @@ mod tests {
         .bind("scale-1")
         .bind("inst-1")
         .bind("0-150 mm")
-        .bind(Option::<f64>::None)
-        .bind(0.05_f64)
-        .bind(Some(0.05_f64))
-        .bind(Option::<f64>::None)
-        .bind(Option::<f64>::None)
+        .bind(Option::<f64>::None) // full_scale
+        .bind(0.05_f64) // step
+        .bind(Some(0.05_f64)) // appreciation
+        .bind(Option::<f64>::None) // internal_res
+        .bind(Option::<f64>::None) // internal_res_u
         .bind("apreciacion")
-        .bind(Option::<f64>::None)
-        .bind(Option::<f64>::None)
-        .bind(Option::<f64>::None)
+        .bind(Option::<f64>::None) // spec_pct_reading
+        .bind(Option::<f64>::None) // spec_step_coeff
+        .bind(Option::<f64>::None) // spec_fixed
         .bind("mm")
         .bind(0_i64)
         .bind(now)
@@ -1212,6 +1247,7 @@ mod tests {
         .await
         .unwrap();
 
+        // El CHECK de b_model debe rechazar un valor fuera del conjunto permitido.
         let result = sqlx::query(
             "INSERT INTO instrument_scales (id, instrument_id, label, step, b_model, unit, position, created_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",

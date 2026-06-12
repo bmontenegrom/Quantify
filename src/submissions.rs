@@ -545,6 +545,7 @@ pub async fn submission_list_for_user(
     pool: &SqlitePool,
     user: &AuthUser,
 ) -> anyhow::Result<Vec<SubmissionListItem>> {
+    // Subquery que cuenta miembros aceptados por informe.
     let member_count_sq = "(SELECT COUNT(*) FROM report_members rm \
                             WHERE rm.submission_id = s.id AND rm.status = 'accepted')";
 
@@ -722,6 +723,7 @@ pub async fn invite_table_members(
     owner_user_id: &str,
     invited_at: DateTime<Utc>,
 ) -> anyhow::Result<()> {
+    // Alumnos del mismo grupo con la misma mesa resuelta (pta primero, udt como fallback).
     let candidates: Vec<(String,)> = sqlx::query_as(
         r#"
         SELECT gm.user_id
@@ -833,6 +835,7 @@ pub async fn accept_report_invitation(
     submission_id: &str,
     user_id: &str,
 ) -> anyhow::Result<AcceptOutcome> {
+    // Leer la entrada del alumno y la ventana de aceptación.
     #[derive(sqlx::FromRow)]
     struct Row {
         status: String,
@@ -893,6 +896,7 @@ pub async fn add_report_member(
     user_id: &str,
     force_accept: bool,
 ) -> anyhow::Result<bool> {
+    // Verificar que el usuario existe y es estudiante.
     let exists: Option<(i64,)> =
         sqlx::query_as("SELECT 1 FROM users WHERE id = ?1 AND role = 'estudiante'")
             .bind(user_id)
@@ -944,6 +948,7 @@ pub async fn remove_report_member(
         return Ok(false);
     }
 
+    // Si ya no queda ningún owner, promover al primer miembro aceptado.
     let has_owner: Option<(i64,)> =
         sqlx::query_as("SELECT 1 FROM report_members WHERE submission_id = ?1 AND role = 'owner'")
             .bind(submission_id)
@@ -951,6 +956,7 @@ pub async fn remove_report_member(
             .await?;
 
     if has_owner.is_none() {
+        // Promover al primero aceptado (orden por accepted_at).
         sqlx::query(
             r#"
             UPDATE report_members
@@ -992,6 +998,7 @@ pub async fn update_report_meta(
     let new_group = group_id.unwrap_or(current_group.as_deref().unwrap_or(""));
     let new_table = table_number.or(current_table);
 
+    // Verificar que no colisione con otro informe existente en el nuevo (práctica, grupo, mesa).
     if let Some(t) = new_table {
         let collision: Option<(String,)> = sqlx::query_as(
             "SELECT id FROM submissions WHERE practice_id = ?1 AND group_id = ?2 AND table_number = ?3 AND id != ?4",
@@ -1075,6 +1082,8 @@ pub async fn submission_detail(
     let student_results = student_results_for(pool, &row.id).await?;
     let measurements = measurements_for(pool, &row.id).await?;
     let members = report_members_for(pool, &row.id).await?;
+    // Ventana de edición: submitted_at + horas del curso. Editable si sigue abierta, la entrega
+    // está pendiente y el cálculo aún no es visible (la propiedad la valida el endpoint).
     let editable_until = row.submitted_at
         + chrono::Duration::milliseconds((row.submission_edit_hours * 3_600_000.0) as i64);
     let can_edit = row.entry_mode == "form"
@@ -1153,6 +1162,8 @@ pub async fn save_student_results(
             continue;
         }
         let u = input.u_expanded.filter(|u| u.is_finite());
+        // `ON CONFLICT` hace que, si el payload trae el mismo símbolo repetido, gane el último
+        // (en vez de violar el UNIQUE y abortar la transacción).
         sqlx::query(
             "INSERT INTO submission_student_results \
              (id, submission_id, symbol, value, u_expanded, created_at) \
@@ -1251,6 +1262,7 @@ mod tests {
         .unwrap()
     }
 
+    /// Crea una entrega de prueba (vía CSV) del estudiante dado y devuelve su id.
     async fn make_submission(pool: &SqlitePool, dir: &std::path::Path, student_id: &str) -> String {
         let analysis = crate::analysis::analyze_csv("x,y\n1,2\n2,4\n3,6\n").unwrap();
         create_submission(
