@@ -1158,10 +1158,10 @@ async fn set_practice_analysis_kind(
     require_teacher(&state, &headers).await?;
     if !matches!(
         body.analysis_kind.trim(),
-        "estadistico" | "regresion_lineal" | "relajacion_exponencial"
+        "estadistico" | "regresion_lineal"
     ) {
         return Err(AppError::bad_request(
-            "analysis_kind debe ser estadistico, regresion_lineal o relajacion_exponencial",
+            "analysis_kind debe ser estadistico o regresion_lineal",
         ));
     }
     if !practices::set_analysis_kind(&state.pool, &id, body.analysis_kind.trim()).await? {

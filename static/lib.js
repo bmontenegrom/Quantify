@@ -167,7 +167,7 @@ export function allStudents(academic) {
 
 /**
  * Devuelve la etiqueta legible del tipo de análisis de una práctica.
- * Valores reconocidos: `estadistico`, `regresion_lineal`, `relajacion_exponencial`.
+ * Valores reconocidos: `estadistico`, `regresion_lineal`.
  * Cualquier otro valor (incluido `null`/`undefined`) devuelve `"Sin definir"`.
  */
 export function analysisKindLabel(kind) {
@@ -176,8 +176,6 @@ export function analysisKindLabel(kind) {
       return "Estadístico";
     case "regresion_lineal":
       return "Regresión lineal";
-    case "relajacion_exponencial":
-      return "Relajación exponencial";
     default:
       return "Sin definir";
   }

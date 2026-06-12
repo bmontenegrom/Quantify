@@ -159,7 +159,7 @@ function renderAnalysisKindForm(practice, def) {
       <label>Tipo de análisis
         <select name="analysis_kind" required>
           ${placeholder}
-          ${["estadistico", "regresion_lineal", "relajacion_exponencial"].map((k) =>
+          ${["estadistico", "regresion_lineal"].map((k) =>
             `<option value="${k}" ${k === current ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
           ).join("")}
         </select>
