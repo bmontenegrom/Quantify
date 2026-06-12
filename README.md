@@ -62,11 +62,14 @@ $env:SEED_STUDENT_PASSWORD="cambiar-esto"
 cargo run
 ```
 
-Para **empezar de cero** (regenerar los datos sembrados), detené el server y borrá la base:
+Para **empezar de cero** (regenerar los datos sembrados), detené el server y corré:
 
 ```powershell
-Remove-Item data\quantify.db* -Force
+.\scripts\dev-reset.ps1    # en Linux/macOS: ./scripts/dev-reset.sh
 ```
+
+El script borra la base (`data\quantify.db*`) y los uploads (`data\uploads`), respetando
+`DATABASE_URL`/`UPLOAD_DIR` si están definidas; el próximo `cargo run` vuelve a sembrar todo.
 
 ## Cómo se carga una entrega
 

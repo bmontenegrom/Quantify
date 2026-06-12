@@ -282,7 +282,10 @@ Detectadas con el código ya construido. Ordenadas por valor/riesgo; ninguna blo
 2. **`relajacion_exponencial` es un `analysis_kind` sin motor** (solo etiqueta). O bien se
    implementa (linealizar `V(t)=V0·e^{-t/τ}` → `ln V` vs `t`, que ya cubre `regresion_lineal`
    con `y_formula = math::ln(V)`), o se **elimina el kind** y se modela esa parte como
-   `regresion_lineal`. Decisión a tomar con el docente.
+   `regresion_lineal`. **Resuelto (2026-06-12, con el docente): se elimina** — en el curso τ se
+   obtiene solo por medida directa (P3-parte1, estadístico) y por desfasaje (P3-parte2,
+   regresión); no hay ajuste exponencial directo. Si algún día hace falta, se modela como
+   `regresion_lineal` con `y_formula = math::ln(V)`.
 3. **Mensajes de error internos en inglés** ("submission not found", "submission not found")
    en `routes.rs`: normalizar a español por la convención de errores amigables (son casos
    "no debería pasar", de bajo impacto).

@@ -350,7 +350,7 @@ async fn create_course(
 ) -> Result<Json<db::Course>, AppError> {
     require_teacher(&state, &headers).await?;
     if input.name.trim().is_empty() || input.term.trim().is_empty() {
-        return Err(AppError::bad_request("name and term are required"));
+        return Err(AppError::bad_request("nombre y periodo son requeridos"));
     }
     Ok(Json(db::create_course(&state.pool, input).await?))
 }
@@ -364,7 +364,7 @@ async fn update_course(
 ) -> Result<Json<db::Course>, AppError> {
     require_teacher(&state, &headers).await?;
     if input.name.trim().is_empty() || input.term.trim().is_empty() {
-        return Err(AppError::bad_request("name and term are required"));
+        return Err(AppError::bad_request("nombre y periodo son requeridos"));
     }
     let updated = db::update_course(&state.pool, &course_id, input)
         .await?
@@ -542,7 +542,7 @@ async fn submission_detail(
     }
     let submission = db::submission_detail(&state.pool, &id)
         .await?
-        .ok_or_else(|| AppError::not_found("submission not found"))?;
+        .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
     Ok(Json(gate_analysis(submission, &user)))
 }
 
@@ -580,7 +580,7 @@ async fn create_submission(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|_| AppError::bad_request("invalid multipart payload"))?
+        .map_err(|_| AppError::bad_request("el formulario enviado no es valido"))?
     {
         let name = field.name().unwrap_or_default().to_string();
         match name.as_str() {
@@ -733,13 +733,13 @@ async fn review_submission(
         "pendiente" | "observada" | "aprobada"
     ) {
         return Err(AppError::bad_request(
-            "status must be pendiente, observada or aprobada",
+            "el estado debe ser pendiente, observada o aprobada",
         ));
     }
 
     let updated = db::update_review(&state.pool, &id, review)
         .await?
-        .ok_or_else(|| AppError::not_found("submission not found"))?;
+        .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
     Ok(Json(updated))
 }
 
@@ -767,7 +767,7 @@ async fn set_student_results(
     }
     let submission = db::submission_detail(&state.pool, &id)
         .await?
-        .ok_or_else(|| AppError::not_found("submission not found"))?;
+        .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
     if submission.results_visible_to_student {
         return Err(AppError::bad_request(
             "no podes modificar tus calculos una vez que el docente habilito los resultados",
@@ -793,7 +793,7 @@ async fn set_student_results(
     db::save_student_results(&state.pool, &id, &body.results).await?;
     let updated = db::submission_detail(&state.pool, &id)
         .await?
-        .ok_or_else(|| AppError::not_found("submission not found"))?;
+        .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
     Ok(Json(gate_analysis(updated, &user)))
 }
 
@@ -1158,10 +1158,10 @@ async fn set_practice_analysis_kind(
     require_teacher(&state, &headers).await?;
     if !matches!(
         body.analysis_kind.trim(),
-        "estadistico" | "regresion_lineal" | "relajacion_exponencial"
+        "estadistico" | "regresion_lineal"
     ) {
         return Err(AppError::bad_request(
-            "analysis_kind debe ser estadistico, regresion_lineal o relajacion_exponencial",
+            "analysis_kind debe ser estadistico o regresion_lineal",
         ));
     }
     if !practices::set_analysis_kind(&state.pool, &id, body.analysis_kind.trim()).await? {
@@ -1425,14 +1425,14 @@ async fn read_text(field: axum::extract::multipart::Field<'_>) -> Result<String,
     field
         .text()
         .await
-        .map_err(|_| AppError::bad_request("invalid text field"))
+        .map_err(|_| AppError::bad_request("campo de texto invalido"))
 }
 
 /// Exige que un campo opcional esté presente y no vacío; si falta, devuelve 400 con su nombre.
 fn required(value: Option<String>, name: &str) -> Result<String, AppError> {
-    let value = value.ok_or_else(|| AppError::bad_request(format!("{name} is required")))?;
+    let value = value.ok_or_else(|| AppError::bad_request(format!("falta el campo {name}")))?;
     if value.trim().is_empty() {
-        return Err(AppError::bad_request(format!("{name} is required")));
+        return Err(AppError::bad_request(format!("falta el campo {name}")));
     }
     Ok(value)
 }

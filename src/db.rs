@@ -26,7 +26,8 @@ pub struct Practice {
     pub id: String,
     pub name: String,
     pub description: String,
-    /// Tipo de análisis: `estadistico`, `regresion_lineal` o `relajacion_exponencial`.
+    /// Tipo de análisis: `estadistico` o `regresion_lineal`. (El kind `relajacion_exponencial`
+    /// se eliminó: τ se obtiene por medida directa y por desfasaje, ambas cubiertas.)
     pub analysis_kind: Option<String>,
 }
 

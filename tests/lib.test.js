@@ -236,7 +236,8 @@ test("allGroups aplana todos los grupos anotando el curso", () => {
 test("analysisKindLabel devuelve etiqueta legible o 'Sin definir'", () => {
   assert.equal(analysisKindLabel("estadistico"), "Estadístico");
   assert.equal(analysisKindLabel("regresion_lineal"), "Regresión lineal");
-  assert.equal(analysisKindLabel("relajacion_exponencial"), "Relajación exponencial");
+  // Kind eliminado (decisión docente 2026-06: τ se obtiene por medida directa y desfasaje).
+  assert.equal(analysisKindLabel("relajacion_exponencial"), "Sin definir");
   assert.equal(analysisKindLabel(null), "Sin definir");
   assert.equal(analysisKindLabel(undefined), "Sin definir");
   assert.equal(analysisKindLabel("desconocido"), "Sin definir");

@@ -56,10 +56,13 @@ pub fn analyze_csv(input: &str) -> anyhow::Result<AnalysisResult> {
     let mut reader = csv::ReaderBuilder::new()
         .trim(csv::Trim::All)
         .from_reader(input.as_bytes());
-    let headers = reader.headers().context("CSV without headers")?.clone();
+    let headers = reader
+        .headers()
+        .context("el CSV no tiene encabezados")?
+        .clone();
 
     if headers.is_empty() {
-        return Err(anyhow!("CSV must contain at least one column"));
+        return Err(anyhow!("el CSV debe tener al menos una columna"));
     }
 
     let mut columns: Vec<Vec<f64>> = headers.iter().map(|_| Vec::new()).collect();
@@ -67,13 +70,13 @@ pub fn analyze_csv(input: &str) -> anyhow::Result<AnalysisResult> {
     let mut row_count = 0usize;
 
     for result in reader.records() {
-        let record = result.context("invalid CSV row")?;
+        let record = result.context("fila de CSV invalida")?;
         row_count += 1;
         parse_record(&headers, &record, row_count, &mut columns, &mut warnings);
     }
 
     if row_count == 0 {
-        return Err(anyhow!("CSV must contain at least one data row"));
+        return Err(anyhow!("el CSV debe tener al menos una fila de datos"));
     }
 
     let numeric_columns: Vec<ColumnStats> = headers
