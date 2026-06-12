@@ -12,3 +12,4 @@ dist
 node_modules
 screenshot-*.png
 ss-*.png
+tests/e2e/artifacts/

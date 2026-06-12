@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import {
   courseSelect, groupSelect, practiceSelect, tableSelect,
   measurementFields, latestResult, submitStatus, submitButton,
-  practicaTitle, practicePartTabs,
+  practicaTitle, practicePartTabs, submissionForm,
 } from "./dom.js";
 import { fetchJson, postJson } from "./api.js";
 import {
@@ -955,6 +955,11 @@ function histogramSvg(hist, mean, std, n) {
 
 // ── Listeners top-level ────────────────────────────────────────────────────────
 
+// "Entregar" (submit del form / Enter): crea la entrega por formulario.
+submissionForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitFormSubmission();
+});
 courseSelect.addEventListener("change", updateStudentSelectors);
 groupSelect.addEventListener("change", updateTableSelector);
 practiceSelect.addEventListener("change", () => {
