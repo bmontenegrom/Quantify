@@ -10,7 +10,8 @@ disponibles para revisión docente.
 - **Backend**: Rust + Axum 0.8, SQLite vía `sqlx` 0.8, Tokio.
 - **Frontend**: HTML/CSS/JS estático (`static/`) servido por el backend con `ServeDir`. La lógica
   pura y los selectores se extraen a `static/lib.js` (ES module) para poder testearlos.
-- **Auth**: sesiones por cookie `quantify_session` (12 h); hash de contraseña SHA-256 con salt.
+- **Auth**: sesiones por cookie `quantify_session` (12 h); hash de contraseña Argon2id (re-hash
+  transparente de hashes SHA-256 legacy en el primer login).
 - **Motor de cálculo**: `src/uncertainty.rs` (tipo A/B/combinada/expandida + propagación numérica)
   y `src/computation.rs` (entrega por formulario: cablea la definición de la práctica, el catálogo
   de instrumentos y las lecturas crudas, y evalúa las fórmulas con `evalexpr`).
@@ -76,18 +77,32 @@ El script borra la base (`data\quantify.db*`) y los uploads (`data\uploads`), re
 La carga es **por formulario**, no por archivo. En la pestaña **Entregas** el estudiante:
 
 1. Elige **Curso → Grupo → Práctica → Mesa**.
-2. Según la práctica, aparecen los campos de cada **magnitud** a medir. Carga las **lecturas
-   crudas** a mano (una o varias réplicas) y, cuando corresponde, elige **instrumento** y **escala**
-   del catálogo.
-3. Al enviar (`POST /api/submissions/form`), el sistema calcula:
-   - por cada magnitud: media, incertidumbre tipo A (réplicas) y tipo B (resolución / apreciación /
-     especificación de fabricante, según la escala), combinada y expandida;
-   - los **mensurandos derivados** por propagación de varianzas evaluando la fórmula de la práctica;
-   - en prácticas de **regresión lineal**, el ajuste `y = m·x + b` (pendiente, intercepto, sus
-     incertidumbres y R²) sobre los puntos cargados.
+2. Aparecen los campos de la práctica según su tipo de análisis:
 
-El docente puede luego habilitar que el estudiante vea el cálculo automático, y el estudiante puede
-guardar sus propios resultados finales (`valor ± U`) para **compararlos** con el cálculo automático.
+   **Prácticas estadísticas** — un bloque por magnitud. Cada bloque tiene una o más filas de
+   réplica (el alumno agrega las que midió) y un selector de instrumento y escala del catálogo.
+   Los campos `is_given` (dato aportado por la cátedra como `valor ± U`) se muestran pre-cargados
+   y no requieren instrumento.
+
+   **Prácticas de regresión lineal** — una tabla de puntos: el alumno agrega una fila por
+   medición (p. ej. una frecuencia), cargando los valores crudos de ese punto. Las fórmulas de
+   eje `x_formula` / `y_formula` (definidas en la práctica) derivan las coordenadas `(x, y)` de
+   cada punto; el ajuste lineal `y = m·x + b` se calcula sobre esa serie.
+
+3. Al enviar (`POST /api/submissions/form`), el sistema calcula automáticamente:
+   - por cada magnitud: media, **incertidumbre tipo A** (`s/√n`, solo si hay réplicas) y **tipo B**
+     (según el modelo de la escala elegida: `resolución` → `paso/(2√3)`, `apreciación` →
+     `apreciación/√6`, `fabricante` → `(pct·|v| + coef·paso + fijo) / 2`), combinada `u_c` y
+     expandida `U = 2·u_c`;
+   - los **mensurandos derivados** evaluando la fórmula de la práctica con propagación numérica de
+     varianzas (diferencias finitas centradas);
+   - en regresión: **pendiente**, **intercepto**, sus incertidumbres (`u_slope`, `u_intercept`),
+     **R²**, y los mensurandos que dependan de `slope` o `intercept`; más un **gráfico SVG**
+     con la nube de puntos y la recta ajustada.
+
+El docente puede habilitar que el estudiante vea el cálculo automático desde la revisión.
+Una vez habilitado, el estudiante puede guardar sus propios resultados (`valor ± U`)
+para **compararlos** con el cálculo automático (tabla de diferencias absolutas y relativas).
 
 > Existe además un endpoint heredado de carga por CSV (`POST /api/submissions`, multipart) que
 > calcula estadística básica por columna y una regresión entre las dos primeras columnas numéricas.
@@ -97,21 +112,102 @@ guardar sus propios resultados finales (`valor ± U`) para **compararlos** con e
 
 | id | Nombre | Tipo de análisis |
 |----|--------|------------------|
-| `p1-estadistica` | Tratamiento Estadístico de Datos | estadístico |
-| `p2-corriente-continua` | Circuitos de Corriente Continua | estadístico |
-| `p3-relajacion` | Relajación Exponencial (parte 1: medida directa de τ) | estadístico |
-| `p3-relajacion-desfasaje` | Relajación Exponencial — Desfasaje (parte 2) | regresión lineal |
+| `p1-estadistica` | Tratamiento Estadístico — Péndulo Simple | estadístico |
+| `p2-serie` | CC — Circuito en Serie | estadístico |
+| `p2-corriente-continua` | CC — Circuito en Paralelo | estadístico |
+| `p3-relajacion` | Relajación Exponencial (parte 1 — medida directa de τ) | estadístico |
+| `p3-relajacion-desfasaje` | Relajación Exponencial (parte 2 — desfasaje) | regresión lineal |
 
-- **P1** mide `l`, `a`, `b` (con réplicas) y deriva el área del cordón `Q = l*a + l*b`.
-- **P2** mide `Vg`, `R1`, `R2`, `R3`, `RA` y deriva `Req = R1 + RA + 1/(1/R2 + 1/R3)` e `I = Vg/Req`.
-- **P3 parte 1** mide `R`, `Rint`, `C`, `tmedio` y deriva `τ_teórico = (R + Rint)·C` y
-  `τ_exp = tmedio / ln2`.
-- **P3 parte 2** carga series de `f`, `a`, `b` por punto; ajusta `tg(φ) = b/√(a²−b²)` contra
-  `ω = 2·π·f`, y la pendiente del ajuste es `τ = RC`.
+### P1 — Tratamiento estadístico
 
-Las definiciones de magnitudes y mensurandos de cada práctica son **editables** por el docente desde
-la pestaña **Prácticas** (símbolos, unidades, fórmulas, tipo de análisis y fórmulas de eje para
-regresión).
+Magnitudes medidas (con réplicas):
+
+| símbolo | nombre | unidad |
+|---------|--------|--------|
+| `l` | Longitud del cordón | m |
+| `a` | Ancho del cordón | m |
+| `b` | Espesor del cordón | m |
+
+Mensurando derivado: `Q = l·a + l·b` (área de la sección transversal, m²).
+
+### P2 — Corriente continua (serie y paralelo)
+
+Ambas variantes usan las mismas magnitudes de entrada (todas medida única):
+
+| símbolo | nombre | unidad |
+|---------|--------|--------|
+| `Vg` | Tensión de la fuente | V |
+| `R1` | Resistencia R1 | Ω |
+| `R2` | Resistencia R2 | Ω |
+| `R3` | Resistencia R3 | Ω |
+| `RA` | Resistencia interna del amperímetro | Ω |
+
+El amperímetro está en serie con el circuito completo; sus bornes se miden con el tester en
+función ohmímetro antes del ensayo.
+
+**p2-serie** (R1, R2, R3 y RA en serie):
+
+```
+I    = Vg / (R1 + R2 + R3 + RA)
+VR1  = Vg · R1 / (R1 + R2 + R3 + RA)
+VR2  = Vg · R2 / (R1 + R2 + R3 + RA)
+VR3  = Vg · R3 / (R1 + R2 + R3 + RA)
+```
+
+**p2-corriente-continua** (R2 ‖ R3 en paralelo, en serie con R1 y RA):
+
+```
+Req  = R1 + RA + R2·R3 / (R2 + R3)
+I    = Vg / Req
+```
+
+### P3 — Relajación exponencial
+
+#### Parte 1 — Medida directa de τ (estadístico)
+
+| símbolo | nombre | unidad | nota |
+|---------|--------|--------|------|
+| `R` | Resistencia | Ω | medida por el alumno |
+| `Rint` | Resistencia interna de la fuente | Ω | dato dado por la cátedra |
+| `C` | Capacitancia | F | medida por el alumno |
+| `T_oc` | Período de la onda cuadrada | s | referencia: debe ser ≈ 10·τ_exp |
+| `tmedio` | Tiempo de semidescarga t₁/₂ | s | medido sobre la curva exponencial |
+
+Mensurandos derivados:
+
+```
+tau_teorico = (R + Rint) · C
+tau_exp     = tmedio / ln(2)
+```
+
+`T_oc` no entra en las fórmulas; se carga como verificación de la condición experimental
+(el capacitor debe descargarse completamente antes del siguiente semiciclo).
+
+#### Parte 2 — Desfasaje por figura de Lissajous (regresión lineal)
+
+El alumno carga **una fila por frecuencia**, con los valores leídos del osciloscopio:
+
+| símbolo | nombre | unidad |
+|---------|--------|--------|
+| `f` | Frecuencia | Hz |
+| `a` | Amplitud de la elipse (semieje vertical) | div |
+| `b` | Intersección de la elipse con el eje vertical | div |
+
+Fórmulas de eje (calculadas por punto antes del ajuste):
+
+```
+x = 2·π·f              (ω, rad/s)
+y = b / √(a² − b²)    (tg φ)
+```
+
+El ajuste `tg φ = ω·RC` es lineal en ω con `b_intercept = 0`; la **pendiente es τ = RC**.
+
+Mensurando derivado: `tau = slope` (s).
+
+---
+
+Las definiciones de magnitudes y mensurandos son **editables** por el docente desde la pestaña
+**Prácticas** (símbolos, unidades, fórmulas, tipo de análisis y fórmulas de eje para regresión).
 
 ## Modelo académico
 
