@@ -42,3 +42,39 @@ jobs:
       # Sin dependencias: node:test es nativo, no hace falta npm install.
       - name: node --test
         run: npm test
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Instalar toolchain estable
+        run: rustup update stable && rustup default stable
+      - name: Cache de cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - name: Compilar el server
+        run: cargo build --locked
+      - name: Instalar dependencias JS
+        run: npm ci
+      - name: Instalar Chromium de Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Correr E2E
+        run: npm run test:e2e
+        env:
+          E2E_SKIP_BUILD: "1"
+      - name: Subir captura del fallo
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: tests/e2e/artifacts/
+          if-no-files-found: ignore
