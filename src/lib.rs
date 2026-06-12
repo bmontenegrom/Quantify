@@ -14,9 +14,13 @@
 
 pub mod analysis;
 pub mod computation;
+pub mod courses;
 pub mod db;
 pub mod error;
 pub mod instruments;
 pub mod practices;
 pub mod routes;
+pub mod sessions;
+pub mod submissions;
 pub mod uncertainty;
+pub mod users;
