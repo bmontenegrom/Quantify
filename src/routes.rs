@@ -79,6 +79,10 @@ pub fn api_router(state: SharedState) -> Router {
             post(update_result).delete(delete_result),
         )
         .route(
+            "/practices/{id}/results/{rid}/tolerance",
+            post(set_result_tolerance),
+        )
+        .route(
             "/instruments",
             get(list_instruments).post(create_instrument),
         )
@@ -105,6 +109,7 @@ pub fn api_router(state: SharedState) -> Router {
             post(set_student_results),
         )
         .route("/submissions/{id}/accept", post(accept_invitation))
+        .route("/submissions/{id}/decline", post(decline_invitation))
         .route(
             "/submissions/{id}/members",
             get(submission_members).post(add_submission_member),
@@ -349,9 +354,8 @@ async fn create_course(
     Json(input): Json<db::CreateCourse>,
 ) -> Result<Json<db::Course>, AppError> {
     require_teacher(&state, &headers).await?;
-    if input.name.trim().is_empty() || input.term.trim().is_empty() {
-        return Err(AppError::bad_request("nombre y periodo son requeridos"));
-    }
+    not_blank(&input.name, "nombre es requerido")?;
+    not_blank(&input.term, "periodo es requerido")?;
     Ok(Json(db::create_course(&state.pool, input).await?))
 }
 
@@ -363,9 +367,8 @@ async fn update_course(
     Json(input): Json<db::UpdateCourse>,
 ) -> Result<Json<db::Course>, AppError> {
     require_teacher(&state, &headers).await?;
-    if input.name.trim().is_empty() || input.term.trim().is_empty() {
-        return Err(AppError::bad_request("nombre y periodo son requeridos"));
-    }
+    not_blank(&input.name, "nombre es requerido")?;
+    not_blank(&input.term, "periodo es requerido")?;
     let updated = db::update_course(&state.pool, &course_id, input)
         .await?
         .ok_or_else(|| AppError::not_found("curso no encontrado"))?;
@@ -380,8 +383,9 @@ async fn create_group(
     Json(input): Json<db::CreateGroup>,
 ) -> Result<Json<db::LabGroup>, AppError> {
     require_teacher(&state, &headers).await?;
-    if input.name.trim().is_empty() || !valid_group_table_count(input.table_count.unwrap_or(4)) {
-        return Err(AppError::bad_request("datos de grupo invalidos"));
+    not_blank(&input.name, "nombre de grupo es requerido")?;
+    if !valid_group_table_count(input.table_count.unwrap_or(4)) {
+        return Err(AppError::bad_request("cantidad de mesas invalida"));
     }
     Ok(Json(
         db::create_group(&state.pool, &course_id, input).await?,
@@ -396,8 +400,9 @@ async fn update_group(
     Json(input): Json<db::UpdateGroup>,
 ) -> Result<Json<db::LabGroup>, AppError> {
     require_teacher(&state, &headers).await?;
-    if input.name.trim().is_empty() || !valid_group_table_count(input.table_count) {
-        return Err(AppError::bad_request("datos de grupo invalidos"));
+    not_blank(&input.name, "nombre de grupo es requerido")?;
+    if !valid_group_table_count(input.table_count) {
+        return Err(AppError::bad_request("cantidad de mesas invalida"));
     }
     let updated = db::update_group(&state.pool, &group_id, input)
         .await?
@@ -418,12 +423,9 @@ async fn create_subgroup(
     Json(input): Json<db::CreateSubgroup>,
 ) -> Result<Json<db::PracticeSubgroup>, AppError> {
     require_teacher(&state, &headers).await?;
-    if input.name.trim().is_empty()
-        || input.practice_id.trim().is_empty()
-        || input.group_id.trim().is_empty()
-    {
-        return Err(AppError::bad_request("datos de subgrupo invalidos"));
-    }
+    not_blank(&input.name, "nombre de subgrupo es requerido")?;
+    not_blank(&input.practice_id, "practica es requerida")?;
+    not_blank(&input.group_id, "grupo es requerido")?;
     Ok(Json(
         db::create_subgroup(&state.pool, &course_id, input).await?,
     ))
@@ -875,6 +877,24 @@ async fn accept_invitation(
     Ok(Json(gate_analysis(submission, &user)))
 }
 
+/// `POST /api/submissions/{id}/decline`: el alumno declina la invitación al informe.
+/// Elimina la fila pending del alumno en `report_members`. Idempotente: 200 si ya no existía.
+async fn decline_invitation(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Health>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    sqlx::query(
+        "DELETE FROM report_members WHERE submission_id = ?1 AND user_id = ?2 AND status = 'pending'",
+    )
+    .bind(&id)
+    .bind(&user.id)
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(Health { status: "ok" }))
+}
+
 /// `GET /api/submissions/{id}/members`: lista los miembros del informe (docente/admin).
 async fn submission_members(
     State(state): State<SharedState>,
@@ -1313,6 +1333,38 @@ async fn delete_result(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `POST /api/practices/{id}/results/{rid}/tolerance`: fija la tolerancia % del veredicto.
+/// Body: `{ "tolerance": 5.0 }` para activar, `{ "tolerance": null }` para desactivar.
+async fn set_result_tolerance(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((_id, rid)): Path<(String, String)>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let tolerance = match body.get("tolerance") {
+        Some(serde_json::Value::Null) | None => None,
+        Some(serde_json::Value::Number(n)) => {
+            let v = n
+                .as_f64()
+                .ok_or_else(|| AppError::bad_request("tolerancia debe ser un numero"))?;
+            if v < 0.0 {
+                return Err(AppError::bad_request("tolerancia no puede ser negativa"));
+            }
+            Some(v)
+        }
+        _ => {
+            return Err(AppError::bad_request(
+                "tolerancia debe ser un numero o null",
+            ))
+        }
+    };
+    if !practices::set_result_tolerance(&state.pool, &rid, tolerance).await? {
+        return Err(AppError::not_found("mensurando no encontrado"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
 /// Verifica que el símbolo sea un identificador válido: `[a-zA-Z_][a-zA-Z0-9_]*`.
 /// Solo ASCII por compatibilidad con el parser de evalexpr.
 fn validate_symbol_format(symbol: &str) -> Result<(), AppError> {
@@ -1435,6 +1487,15 @@ fn required(value: Option<String>, name: &str) -> Result<String, AppError> {
         return Err(AppError::bad_request(format!("falta el campo {name}")));
     }
     Ok(value)
+}
+
+/// Exige que un campo `String` no sea vacío o solo espacios.
+fn not_blank(value: &str, msg: &str) -> Result<(), AppError> {
+    if value.trim().is_empty() {
+        Err(AppError::bad_request(msg))
+    } else {
+        Ok(())
+    }
 }
 
 /// Valida la longitud mínima de una contraseña (8 caracteres); devuelve 400 si no cumple.

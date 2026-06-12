@@ -498,6 +498,21 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Fija (o borra) la tolerancia porcentual de un mensurando derivado.
+/// `None` elimina el veredicto para ese mensurando. Devuelve `true` si existía.
+pub async fn set_result_tolerance(
+    pool: &SqlitePool,
+    result_id: &str,
+    tolerance: Option<f64>,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query("UPDATE practice_results SET tolerance = ?2 WHERE id = ?1")
+        .bind(result_id)
+        .bind(tolerance)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 // ── Helpers internos ─────────────────────────────────────────────────────────
 
 /// Lee las magnitudes de entrada de una práctica, ordenadas por posición y símbolo.
@@ -517,7 +532,7 @@ async fn quantities_for(
 /// Lee los mensurandos derivados de una práctica, ordenados por posición y símbolo.
 async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticeResult>> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position \
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance \
          FROM practice_results WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -539,7 +554,7 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
 /// Lee un mensurando derivado por su id.
 async fn fetch_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeResult> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position \
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance \
          FROM practice_results WHERE id = ?1",
     )
     .bind(id)

@@ -23,6 +23,12 @@ import {
   measureText,
   regressionPlot,
   compareResults,
+  SI_PREFIXES,
+  prefixFactor,
+  seriesStats,
+  histogram,
+  normalCurve,
+  validateMeasurements,
 } from "../static/lib.js";
 
 // Fixture chico de contexto académico: 2 cursos, el estudiante s1 está en c1 (grupo g1)
@@ -340,4 +346,123 @@ test("compareResults: % null si el automático es 0; Δ U null si falta una U", 
   assert.ok(Math.abs(rows[1].dValue - 2) < 1e-9);
   assert.equal(rows[1].dU, null);
   assert.equal(rows[1].dUPct, null);
+});
+
+test("compareResults: verdict pass/fail según tolerancia", () => {
+  const auto = [{ symbol: "Q", name: "Area", unit: "mm2", value: 100, u_expanded: 2 }];
+  const student = [{ symbol: "Q", value: 104, u_expanded: 2 }];
+  // Sin tolerancia -> verdict null.
+  const [noTol] = compareResults(auto, student);
+  assert.equal(noTol.verdict, null);
+  // |Δ%| = 4 ≤ 5 -> pass.
+  const [pass] = compareResults(auto, student, { Q: 5 });
+  assert.equal(pass.verdict, "pass");
+  // |Δ%| = 4 > 3 -> fail.
+  const [fail] = compareResults(auto, student, { Q: 3 });
+  assert.equal(fail.verdict, "fail");
+});
+
+test("SI_PREFIXES es un array con entradas para 'm', 'k' y ''", () => {
+  assert.ok(Array.isArray(SI_PREFIXES));
+  assert.ok(SI_PREFIXES.some((p) => p.label === "m" && Math.abs(p.factor - 1e-3) < 1e-15));
+  assert.ok(SI_PREFIXES.some((p) => p.label === "k" && Math.abs(p.factor - 1e3) < 1e-9));
+  assert.ok(SI_PREFIXES.some((p) => p.label === "" && p.factor === 1));
+});
+
+test("prefixFactor devuelve el factor correcto o 1 para desconocidos", () => {
+  assert.equal(prefixFactor("m"), 1e-3);
+  assert.equal(prefixFactor("k"), 1e3);
+  assert.equal(prefixFactor(""), 1);
+  assert.equal(prefixFactor("?"), 1);
+  assert.equal(prefixFactor(undefined), 1);
+});
+
+test("seriesStats: n=0 devuelve NaN; n=1 std=0; n>1 calcula bien", () => {
+  const empty = seriesStats([]);
+  assert.equal(empty.n, 0);
+  assert.ok(Number.isNaN(empty.mean));
+  assert.ok(Number.isNaN(empty.std));
+
+  const one = seriesStats([7]);
+  assert.equal(one.n, 1);
+  assert.equal(one.mean, 7);
+  assert.equal(one.std, 0);
+  assert.equal(one.stdMean, 0);
+
+  // [2, 4]: media=3, varianza=(1+1)/1=2, std=√2.
+  const two = seriesStats([2, 4]);
+  assert.equal(two.n, 2);
+  assert.equal(two.mean, 3);
+  assert.ok(Math.abs(two.std - Math.SQRT2) < 1e-12);
+  assert.ok(Math.abs(two.stdMean - Math.SQRT2 / Math.sqrt(2)) < 1e-12);
+});
+
+test("seriesStats ignora valores no finitos", () => {
+  const s = seriesStats([1, NaN, Infinity, 3]);
+  assert.equal(s.n, 2);
+  assert.equal(s.mean, 2);
+});
+
+test("histogram: null con vacío o bins<1; un valor -> bins=1; distribución uniforme", () => {
+  assert.equal(histogram([], 5), null);
+  assert.equal(histogram([1, 2], 0), null);
+
+  // Un solo valor -> bins=1 con width=0.
+  const one = histogram([5], 3);
+  assert.equal(one.bins, 1);
+  assert.equal(one.counts[0], 1);
+  assert.equal(one.width, 0);
+
+  // [0,1,2,3] en 2 bins: bin0=[0,1] -> 2, bin1=[2,3] -> 2.
+  const h = histogram([0, 1, 2, 3], 2);
+  assert.equal(h.bins, 2);
+  assert.equal(h.counts[0] + h.counts[1], 4);
+  assert.equal(h.edges.length, 3);
+  // El máximo (3) debe caer en el último bin.
+  assert.equal(h.counts[1] >= 1, true);
+});
+
+test("normalCurve: vacía con std<=0 o rango nulo; steps+1 puntos si válida", () => {
+  assert.deepEqual(normalCurve(0, 0, -1, 1), []);
+  assert.deepEqual(normalCurve(0, 1, 5, 5), []);
+  assert.deepEqual(normalCurve(0, -1, -1, 1), []);
+
+  const pts = normalCurve(0, 1, -3, 3, 10);
+  assert.equal(pts.length, 11); // steps+1
+  // La densidad en la media debe ser el máximo.
+  const ys = pts.map((p) => p[1]);
+  const maxY = Math.max(...ys);
+  const midPt = pts[5]; // x=0 con steps=10
+  assert.ok(Math.abs(midPt[1] - maxY) < 1e-12);
+});
+
+test("validateMeasurements: regresion_lineal necesita ≥2 puntos completos", () => {
+  const empty = validateMeasurements([], "regresion_lineal");
+  assert.ok(typeof empty === "string");
+  const onePoint = validateMeasurements([{ quantity_id: "x", values: [1], given_u: null }], "regresion_lineal");
+  assert.ok(typeof onePoint === "string");
+  const valid = validateMeasurements(
+    [{ quantity_id: "x", values: [1, 2, 3], given_u: null }, { quantity_id: "y", values: [4, 5, 6], given_u: null }],
+    "regresion_lineal",
+  );
+  assert.equal(valid, null);
+});
+
+test("validateMeasurements: estadistico reporta mensurando sin lecturas", () => {
+  const meta = { q1: { name: "Longitud", isGiven: false, isChrono: false } };
+  const err = validateMeasurements([{ quantity_id: "q1", values: [], given_u: null }], "estadistico", meta);
+  assert.ok(typeof err === "string");
+  assert.ok(err.includes("Longitud"));
+  const ok = validateMeasurements([{ quantity_id: "q1", values: [5], given_u: null }], "estadistico", meta);
+  assert.equal(ok, null);
+});
+
+test("validateMeasurements: isGiven exige valor e incertidumbre", () => {
+  const meta = { g1: { name: "Dato", isGiven: true, isChrono: false } };
+  // Sin valor -> error.
+  assert.ok(typeof validateMeasurements([{ quantity_id: "g1", values: [], given_u: 0.1 }], "estadistico", meta) === "string");
+  // Sin u -> error.
+  assert.ok(typeof validateMeasurements([{ quantity_id: "g1", values: [3], given_u: null }], "estadistico", meta) === "string");
+  // Ambos -> ok.
+  assert.equal(validateMeasurements([{ quantity_id: "g1", values: [3], given_u: 0.1 }], "estadistico", meta), null);
 });
