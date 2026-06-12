@@ -1202,3 +1202,378 @@ pub async fn update_review(
 
     submission_detail(pool, id).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{migrate, seed_academic, seed_practices, seed_users};
+    use crate::users::AuthUser;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+    use tempfile::TempDir;
+
+    const TEACHER: &str = "docente@quantify.local";
+    const STUDENT: &str = "estudiante@quantify.local";
+    const COURSE: &str = "fisica-experimental-i-2026";
+    const GROUP: &str = "fisica-exp-i-grupo-1";
+
+    async fn pool() -> (SqlitePool, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let url = format!("sqlite:{}", db_path.to_string_lossy());
+        let opts = SqliteConnectOptions::from_str(&url)
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        migrate(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    async fn seeded() -> (SqlitePool, TempDir) {
+        let (pool, dir) = pool().await;
+        seed_practices(&pool).await.unwrap();
+        seed_users(&pool).await.unwrap();
+        seed_academic(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    async fn find_user(pool: &SqlitePool, email: &str) -> AuthUser {
+        sqlx::query_as::<_, AuthUser>(
+            "SELECT id, username, email, display_name, role FROM users WHERE email = ?1",
+        )
+        .bind(email)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn make_submission(pool: &SqlitePool, dir: &std::path::Path, student_id: &str) -> String {
+        let analysis = crate::analysis::analyze_csv("x,y\n1,2\n2,4\n3,6\n").unwrap();
+        create_submission(
+            pool,
+            dir,
+            NewSubmission {
+                submitted_by_user_id: student_id.to_string(),
+                course_id: COURSE.into(),
+                group_id: GROUP.into(),
+                practice_id: "p1-estadistica".into(),
+                file_name: "medidas.csv".into(),
+                csv_content: "x,y\n1,2\n2,4\n3,6\n".into(),
+                analysis,
+            },
+        )
+        .await
+        .unwrap()
+        .id
+    }
+
+    #[tokio::test]
+    async fn grade_component_position_increments() {
+        let (pool, _dir) = seeded().await;
+        let c1 = create_grade_component(
+            &pool,
+            CreateGradeComponent {
+                course_id: COURSE.into(),
+                kind: "pregunta".into(),
+                name: "P1".into(),
+                max_points: 10.0,
+                weight_points: 5.0,
+            },
+        )
+        .await
+        .unwrap();
+        let c2 = create_grade_component(
+            &pool,
+            CreateGradeComponent {
+                course_id: COURSE.into(),
+                kind: "informe".into(),
+                name: "I1".into(),
+                max_points: 20.0,
+                weight_points: 10.0,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(c1.position, 1);
+        assert_eq!(c2.position, 2);
+    }
+
+    #[tokio::test]
+    async fn upsert_grade_score_normalizes_and_rejects_over_max() {
+        let (pool, _dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+        let component = create_grade_component(
+            &pool,
+            CreateGradeComponent {
+                course_id: COURSE.into(),
+                kind: "pregunta".into(),
+                name: "P1".into(),
+                max_points: 10.0,
+                weight_points: 5.0,
+            },
+        )
+        .await
+        .unwrap();
+
+        upsert_grade_score(
+            &pool,
+            UpsertGradeScore {
+                component_id: component.id.clone(),
+                student_id: student.id.clone(),
+                raw_points: 8.0,
+                comment: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Supera el máximo -> error.
+        assert!(upsert_grade_score(
+            &pool,
+            UpsertGradeScore {
+                component_id: component.id.clone(),
+                student_id: student.id.clone(),
+                raw_points: 11.0,
+                comment: None
+            },
+        )
+        .await
+        .is_err());
+
+        // Componente inexistente -> error.
+        assert!(upsert_grade_score(
+            &pool,
+            UpsertGradeScore {
+                component_id: "no-existe".into(),
+                student_id: student.id.clone(),
+                raw_points: 1.0,
+                comment: None
+            },
+        )
+        .await
+        .is_err());
+
+        let teacher = find_user(&pool, TEACHER).await;
+        let books = gradebook_for_user(&pool, &teacher).await.unwrap();
+        let course_book = books.into_iter().find(|b| b.course.id == COURSE).unwrap();
+        let summary = course_book
+            .students
+            .into_iter()
+            .find(|s| s.student.id == student.id)
+            .unwrap();
+        // 8/10 * 5 = 4.0 normalizado.
+        assert!((summary.total_points - 4.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn submission_lifecycle() {
+        let (pool, dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+        let analysis = crate::analysis::analyze_csv("x,y\n1,2\n2,4\n3,6\n").unwrap();
+
+        let created = create_submission(
+            &pool,
+            dir.path(),
+            NewSubmission {
+                submitted_by_user_id: student.id.clone(),
+                course_id: COURSE.into(),
+                group_id: GROUP.into(),
+                practice_id: "p1-estadistica".into(),
+                file_name: "medidas.csv".into(),
+                csv_content: "x,y\n1,2\n2,4\n3,6\n".into(),
+                analysis,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.status, "pendiente");
+
+        // El docente ve la entrega; el estudiante también la suya.
+        let teacher = find_user(&pool, TEACHER).await;
+        assert_eq!(
+            submission_list_for_user(&pool, &teacher)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            submission_list_for_user(&pool, &student)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        assert_eq!(
+            submission_owner_id(&pool, &created.id)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(student.id.as_str())
+        );
+        let detail = submission_detail(&pool, &created.id)
+            .await
+            .unwrap()
+            .unwrap();
+        // Por defecto el calculo no es visible para el estudiante.
+        assert!(!detail.results_visible_to_student);
+
+        let reviewed = update_review(
+            &pool,
+            &created.id,
+            ReviewSubmission {
+                status: "aprobada".into(),
+                teacher_comment: Some("ok".into()),
+                score: Some(10.0),
+                results_visible: Some(true),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(reviewed.status, "aprobada");
+        assert_eq!(reviewed.score, Some(10.0));
+        // El docente habilitó la visibilidad.
+        assert!(reviewed.results_visible_to_student);
+
+        // Una revisión sin `results_visible` (None) no cambia la visibilidad ya habilitada.
+        let again = update_review(
+            &pool,
+            &created.id,
+            ReviewSubmission {
+                status: "observada".into(),
+                teacher_comment: None,
+                score: None,
+                results_visible: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(again.results_visible_to_student);
+    }
+
+    #[tokio::test]
+    async fn student_results_save_read_and_replace() {
+        let (pool, dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+        let id = make_submission(&pool, dir.path(), &student.id).await;
+
+        // Sin cálculos al inicio.
+        assert!(student_results_for(&pool, &id).await.unwrap().is_empty());
+
+        // Guarda dos mensurandos (uno con U, otro sin); la fila con valor NaN se ignora.
+        save_student_results(
+            &pool,
+            &id,
+            &[
+                StudentResultInput {
+                    symbol: "Q".into(),
+                    value: 11.0,
+                    u_expanded: Some(0.5),
+                },
+                StudentResultInput {
+                    symbol: "R".into(),
+                    value: 3.0,
+                    u_expanded: None,
+                },
+                StudentResultInput {
+                    symbol: "bad".into(),
+                    value: f64::NAN,
+                    u_expanded: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+        let saved = student_results_for(&pool, &id).await.unwrap();
+        assert_eq!(saved.len(), 2); // NaN ignorado
+        assert_eq!(saved[0].symbol, "Q"); // ordenado por símbolo
+        assert!((saved[0].value - 11.0).abs() < 1e-12);
+        assert_eq!(saved[0].u_expanded, Some(0.5));
+        assert_eq!(saved[1].symbol, "R");
+        assert_eq!(saved[1].u_expanded, None);
+
+        // Aparecen en el detalle de la entrega.
+        let detail = submission_detail(&pool, &id).await.unwrap().unwrap();
+        assert_eq!(detail.student_results.len(), 2);
+
+        // Replace-all: un nuevo set reemplaza por completo al anterior.
+        save_student_results(
+            &pool,
+            &id,
+            &[StudentResultInput {
+                symbol: "Q".into(),
+                value: 12.0,
+                u_expanded: Some(0.7),
+            }],
+        )
+        .await
+        .unwrap();
+        let replaced = student_results_for(&pool, &id).await.unwrap();
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(replaced[0].symbol, "Q");
+        assert!((replaced[0].value - 12.0).abs() < 1e-12);
+
+        // Símbolo repetido en el mismo payload: gana el último (sin violar el UNIQUE).
+        save_student_results(
+            &pool,
+            &id,
+            &[
+                StudentResultInput {
+                    symbol: "Q".into(),
+                    value: 1.0,
+                    u_expanded: None,
+                },
+                StudentResultInput {
+                    symbol: "Q".into(),
+                    value: 2.0,
+                    u_expanded: Some(0.1),
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        let deduped = student_results_for(&pool, &id).await.unwrap();
+        assert_eq!(deduped.len(), 1);
+        assert!((deduped[0].value - 2.0).abs() < 1e-12);
+        assert_eq!(deduped[0].u_expanded, Some(0.1));
+    }
+
+    #[tokio::test]
+    async fn student_results_cascade_on_submission_delete() {
+        let (pool, dir) = seeded().await;
+        // El pool de test no fuerza FKs por defecto; las activamos para ver el ON DELETE CASCADE.
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let student = find_user(&pool, STUDENT).await;
+        let id = make_submission(&pool, dir.path(), &student.id).await;
+        save_student_results(
+            &pool,
+            &id,
+            &[StudentResultInput {
+                symbol: "Q".into(),
+                value: 1.0,
+                u_expanded: None,
+            }],
+        )
+        .await
+        .unwrap();
+        assert_eq!(student_results_for(&pool, &id).await.unwrap().len(), 1);
+
+        sqlx::query("DELETE FROM submissions WHERE id = ?1")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(student_results_for(&pool, &id).await.unwrap().is_empty());
+    }
+}

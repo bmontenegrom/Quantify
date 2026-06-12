@@ -871,3 +871,407 @@ pub async fn practices_for_course(
     .fetch_all(pool)
     .await?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{migrate, seed_academic, seed_practices, seed_users};
+    use crate::users::{create_user, AuthUser, CreateUser};
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+    use tempfile::TempDir;
+
+    const TEACHER: &str = "docente@quantify.local";
+    const STUDENT: &str = "estudiante@quantify.local";
+    const COURSE: &str = "fisica-experimental-i-2026";
+    const GROUP: &str = "fisica-exp-i-grupo-1";
+
+    async fn pool() -> (SqlitePool, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let url = format!("sqlite:{}", db_path.to_string_lossy());
+        let opts = SqliteConnectOptions::from_str(&url)
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        migrate(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    async fn seeded() -> (SqlitePool, TempDir) {
+        let (pool, dir) = pool().await;
+        seed_practices(&pool).await.unwrap();
+        seed_users(&pool).await.unwrap();
+        seed_academic(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    async fn find_user(pool: &SqlitePool, email: &str) -> AuthUser {
+        sqlx::query_as::<_, AuthUser>(
+            "SELECT id, username, email, display_name, role FROM users WHERE email = ?1",
+        )
+        .bind(email)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn academic_context_differs_by_role() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        let student = find_user(&pool, STUDENT).await;
+
+        let teacher_ctx = academic_context(&pool, &teacher).await.unwrap();
+        assert!(!teacher_ctx.courses.is_empty());
+        assert!(!teacher_ctx.students.is_empty());
+        assert_eq!(teacher_ctx.users.len(), 3);
+
+        let student_ctx = academic_context(&pool, &student).await.unwrap();
+        assert!(!student_ctx.courses.is_empty());
+        assert!(student_ctx.students.is_empty());
+        assert!(student_ctx.users.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_and_update_course() {
+        let (pool, _dir) = pool().await;
+        let course = create_course(
+            &pool,
+            CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(course.name, "Curso");
+
+        let updated = update_course(
+            &pool,
+            &course.id,
+            UpdateCourse {
+                name: "Curso B".into(),
+                term: "2027".into(),
+                submission_edit_hours: Some(6.0),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(updated.name, "Curso B");
+        assert_eq!(updated.term, "2027");
+        assert_eq!(updated.submission_edit_hours, 6.0);
+
+        assert!(update_course(
+            &pool,
+            "x",
+            UpdateCourse {
+                name: "n".into(),
+                term: "t".into(),
+                submission_edit_hours: None,
+            }
+        )
+        .await
+        .unwrap()
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn create_group_clamps_and_normalizes() {
+        let (pool, _dir) = pool().await;
+        let course = create_course(
+            &pool,
+            CreateCourse {
+                name: "C".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        // table_count fuera de rango se acota a 24; tipo inválido -> regular.
+        let group = create_group(
+            &pool,
+            &course.id,
+            CreateGroup {
+                name: "G".into(),
+                table_count: Some(999),
+                group_type: Some("raro".into()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(group.table_count, 24);
+        assert_eq!(group.group_type, "regular");
+
+        let recup = create_group(
+            &pool,
+            &course.id,
+            CreateGroup {
+                name: "GR".into(),
+                table_count: None,
+                group_type: Some("recuperacion".into()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(recup.table_count, 4);
+        assert_eq!(recup.group_type, "recuperacion");
+    }
+
+    #[tokio::test]
+    async fn update_group_changes_and_handles_missing() {
+        let (pool, _dir) = seeded().await;
+        let updated = update_group(
+            &pool,
+            GROUP,
+            UpdateGroup {
+                name: "Grupo Uno".into(),
+                table_count: 6,
+                group_type: "regular".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(updated.name, "Grupo Uno");
+        assert_eq!(updated.table_count, 6);
+
+        assert!(update_group(
+            &pool,
+            "x",
+            UpdateGroup {
+                name: "n".into(),
+                table_count: 2,
+                group_type: "regular".into()
+            }
+        )
+        .await
+        .unwrap()
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn create_subgroup_persists() {
+        let (pool, _dir) = seeded().await;
+        let subgroup = create_subgroup(
+            &pool,
+            COURSE,
+            CreateSubgroup {
+                practice_id: "p1-estadistica".into(),
+                group_id: GROUP.into(),
+                name: "Sub A".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(subgroup.name, "Sub A");
+        assert_eq!(subgroup.practice_id, "p1-estadistica");
+    }
+
+    #[tokio::test]
+    async fn enroll_course_member_is_idempotent_and_creates_general_group() {
+        let (pool, _dir) = seeded().await;
+        let new_student = create_user(
+            &pool,
+            CreateUser {
+                email: "otro@fq.edu".into(),
+                display_name: "Otro".into(),
+                role: "estudiante".into(),
+                password: "clave1234".into(),
+            },
+        )
+        .await
+        .unwrap();
+        enroll_course_member(&pool, COURSE, &new_student.id)
+            .await
+            .unwrap();
+        enroll_course_member(&pool, COURSE, &new_student.id)
+            .await
+            .unwrap();
+
+        // Debe existir el grupo "General" creado por ensure_default_group.
+        let groups = groups_for_course(&pool, COURSE).await.unwrap();
+        assert!(groups.iter().any(|g| g.name == "General"));
+    }
+
+    #[tokio::test]
+    async fn add_and_remove_group_member() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        let student = find_user(&pool, STUDENT).await;
+
+        // Un docente no es estudiante: add_group_member devuelve None.
+        assert!(add_group_member(
+            &pool,
+            GROUP,
+            AddGroupMember {
+                user_id: teacher.id.clone()
+            }
+        )
+        .await
+        .unwrap()
+        .is_none());
+
+        // El estudiante ya es miembro; agregarlo de nuevo es idempotente y devuelve Some.
+        assert!(add_group_member(
+            &pool,
+            GROUP,
+            AddGroupMember {
+                user_id: student.id.clone()
+            }
+        )
+        .await
+        .unwrap()
+        .is_some());
+
+        assert!(remove_group_member(&pool, GROUP, &student.id)
+            .await
+            .unwrap());
+        assert!(!remove_group_member(&pool, GROUP, &student.id)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn set_practice_table_validates_membership_and_range() {
+        let (pool, _dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+
+        let ok = set_practice_table_assignment(
+            &pool,
+            GROUP,
+            &student.id,
+            SetPracticeTable {
+                practice_id: "p1-estadistica".into(),
+                table_number: 2,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(ok.table_number, 2);
+
+        // Mesa fuera de rango (table_count = 4).
+        assert!(set_practice_table_assignment(
+            &pool,
+            GROUP,
+            &student.id,
+            SetPracticeTable {
+                practice_id: "p1-estadistica".into(),
+                table_number: 99
+            },
+        )
+        .await
+        .unwrap()
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn add_course_member_requires_student() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        let new_student = create_user(
+            &pool,
+            CreateUser {
+                email: "tercero@fq.edu".into(),
+                display_name: "Tercero".into(),
+                role: "estudiante".into(),
+                password: "clave1234".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(add_course_member(
+            &pool,
+            COURSE,
+            EnrollCourseMember {
+                user_id: new_student.id
+            }
+        )
+        .await
+        .unwrap()
+        .is_some());
+        assert!(add_course_member(
+            &pool,
+            COURSE,
+            EnrollCourseMember {
+                user_id: teacher.id
+            }
+        )
+        .await
+        .unwrap()
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn enable_course_practice_is_idempotent() {
+        let (pool, _dir) = seeded().await;
+        let course = create_course(
+            &pool,
+            CreateCourse {
+                name: "Vacio".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            practices_for_course(&pool, &course.id).await.unwrap().len(),
+            0
+        );
+        enable_course_practice(
+            &pool,
+            &course.id,
+            SetCoursePractice {
+                practice_id: "p1-estadistica".into(),
+            },
+        )
+        .await
+        .unwrap();
+        enable_course_practice(
+            &pool,
+            &course.id,
+            SetCoursePractice {
+                practice_id: "p1-estadistica".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            practices_for_course(&pool, &course.id).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn user_can_submit_rules() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        let student = find_user(&pool, STUDENT).await;
+
+        // Docente siempre puede.
+        assert!(
+            user_can_submit(&pool, &teacher, COURSE, GROUP, "p1-estadistica")
+                .await
+                .unwrap()
+        );
+        // Estudiante con curso/grupo/práctica válidos.
+        assert!(
+            user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
+                .await
+                .unwrap()
+        );
+        // Práctica no habilitada / inexistente -> false.
+        assert!(
+            !user_can_submit(&pool, &student, COURSE, GROUP, "p9-inexistente")
+                .await
+                .unwrap()
+        );
+    }
+}

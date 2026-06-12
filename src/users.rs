@@ -287,3 +287,203 @@ pub async fn set_user_default_table(
 
     Ok(Some(()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{migrate, seed_academic, seed_practices, seed_users};
+    use crate::sessions::{login, user_by_session, LoginRequest};
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+    use tempfile::TempDir;
+
+    const TEACHER: &str = "docente@quantify.local";
+    const STUDENT: &str = "estudiante@quantify.local";
+
+    async fn pool() -> (SqlitePool, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let url = format!("sqlite:{}", db_path.to_string_lossy());
+        let opts = SqliteConnectOptions::from_str(&url)
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        migrate(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    async fn seeded() -> (SqlitePool, TempDir) {
+        let (pool, dir) = pool().await;
+        seed_practices(&pool).await.unwrap();
+        seed_users(&pool).await.unwrap();
+        seed_academic(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    async fn find_user(pool: &SqlitePool, email: &str) -> AuthUser {
+        sqlx::query_as::<_, AuthUser>(
+            "SELECT id, username, email, display_name, role FROM users WHERE email = ?1",
+        )
+        .bind(email)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn create_user_lowercases_email() {
+        let (pool, _dir) = pool().await;
+        let u = create_user(
+            &pool,
+            CreateUser {
+                email: "  UPPER@TEST.LOCAL  ".into(),
+                display_name: "Upper Test".into(),
+                role: "estudiante".into(),
+                password: "pw".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(u.email, "upper@test.local");
+        assert_eq!(u.username, "upper@test.local");
+    }
+
+    #[tokio::test]
+    async fn reset_password_changes_login() {
+        let (pool, _dir) = seeded().await;
+        let user = find_user(&pool, TEACHER).await;
+        let ok = reset_password(
+            &pool,
+            &user.id,
+            ResetPassword {
+                password: "nuevaclave".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(ok);
+        let session = login(
+            &pool,
+            LoginRequest {
+                email: Some(TEACHER.into()),
+                username: None,
+                password: "nuevaclave".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(session.is_some());
+    }
+
+    #[tokio::test]
+    async fn update_user_changes_fields_and_handles_missing() {
+        let (pool, _dir) = seeded().await;
+        let user = find_user(&pool, TEACHER).await;
+        let updated = update_user(
+            &pool,
+            &user.id,
+            UpdateUser {
+                email: "nuevo@test.local".into(),
+                display_name: "Nuevo Nombre".into(),
+                role: "estudiante".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(updated.email, "nuevo@test.local");
+        assert_eq!(updated.display_name, "Nuevo Nombre");
+        assert_eq!(updated.role, "estudiante");
+
+        let not_found = update_user(
+            &pool,
+            "id-inexistente",
+            UpdateUser {
+                email: "x@x.com".into(),
+                display_name: "X".into(),
+                role: "estudiante".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(not_found.is_none());
+    }
+
+    #[tokio::test]
+    async fn change_password_validates_current_and_clears_sessions() {
+        let (pool, _dir) = seeded().await;
+        let user = find_user(&pool, TEACHER).await;
+
+        let (token, _) = login(
+            &pool,
+            LoginRequest {
+                email: Some(TEACHER.into()),
+                username: None,
+                password: "docente123".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let wrong = change_password(
+            &pool,
+            &user.id,
+            ChangePassword {
+                current_password: "incorrecta".into(),
+                new_password: "nueva".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!wrong);
+        assert!(
+            user_by_session(&pool, &token).await.unwrap().is_some(),
+            "sesión debe seguir activa tras intento fallido"
+        );
+
+        let ok = change_password(
+            &pool,
+            &user.id,
+            ChangePassword {
+                current_password: "docente123".into(),
+                new_password: "clave_nueva".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(ok);
+        assert!(
+            user_by_session(&pool, &token).await.unwrap().is_none(),
+            "sesión debe invalidarse tras cambio de contraseña"
+        );
+    }
+
+    #[tokio::test]
+    async fn students_lists_only_estudiantes() {
+        let (pool, _dir) = seeded().await;
+        let all = users(&pool).await.unwrap();
+        let studs = students(&pool).await.unwrap();
+        let expected: Vec<_> = all
+            .iter()
+            .filter(|u| u.role == "estudiante")
+            .map(|u| u.id.clone())
+            .collect();
+        let got: Vec<_> = studs.iter().map(|u| u.id.clone()).collect();
+        assert_eq!(
+            got, expected,
+            "students() debe devolver exactamente los usuarios con rol 'estudiante'"
+        );
+        assert!(studs.iter().all(|u| u.role == "estudiante"));
+        assert!(
+            all.len() > studs.len(),
+            "debe haber al menos un usuario no-estudiante en el seed"
+        );
+        assert_eq!(studs.len(), 1);
+        assert_eq!(studs[0].email, STUDENT);
+    }
+}
