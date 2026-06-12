@@ -298,10 +298,12 @@ pub async fn upsert_grade_score(pool: &SqlitePool, input: UpsertGradeScore) -> a
             .await?;
 
     let Some((max_points,)) = component else {
-        return Err(anyhow::anyhow!("grade component not found"));
+        return Err(anyhow::anyhow!("el componente de nota no existe"));
     };
     if input.raw_points > max_points {
-        return Err(anyhow::anyhow!("raw points exceed component maximum"));
+        return Err(anyhow::anyhow!(
+            "el puntaje supera el maximo del componente"
+        ));
     }
 
     sqlx::query(
@@ -537,7 +539,7 @@ pub async fn create_submission(
 
     submission_detail(pool, &id)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("created submission not found"))
+        .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
 }
 
 /// Lista entregas: docentes/admin ven todas; un estudiante ve solo los informes donde es miembro aceptado.
