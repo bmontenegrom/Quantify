@@ -402,6 +402,11 @@ exigían decisiones de modelado o extensiones. Decisiones:
 - **Filtros — dos curvas (motor B):** una práctica `curva` admite una **lista de curvas**, cada
   una con su `x_formula`/`y_formula`/`x_log`. Filtros define dos (VR/Vg vs logω y φ vs logω)
   sobre el mismo barrido. (No se modela como "partes".)
+- **Operadores en estadística (motor D):** una práctica estadística puede declarar **N operadores**
+  (P1 = 3). Cada operador carga su **propia serie de las magnitudes repetidas** (cada uno mide T);
+  las **dadas por cátedra y de medida única se comparten** (L se carga una vez). Salida: los
+  mensurandos derivados **por operador** (g por operador), **sin agregado/promedio automático** —
+  el alumno/docente compara las determinaciones. Default sin operadores = comportamiento actual.
 - **Teórico vs experimental (RLC, Continua) — solo visual, sin motor nuevo:** el valor
   **experimental** es una **magnitud medida** (su incertidumbre sale del instrumento, tipo B);
   el **teórico** es un **mensurando derivado** por fórmula sobre otras magnitudes medidas (su
@@ -415,8 +420,8 @@ Pendiente de confirmar con el docente al sembrar: Hidrostática deriva E/ρ_goma
 luego promedia** (3 determinaciones independientes, no réplicas) — evaluar si el promedio de
 derivados por medida es aceptable vs derivar del promedio de entradas.
 
-Orden de ejecución de Fase 15: motor A (réplicas/punto) → motor B (lista de curvas) → siembra
-de las 6 prácticas + P2-parte2.
+Orden de ejecución de Fase 15: motor A (réplicas/punto) → motor B (lista de curvas) → motor D
+(operadores en estadística) → siembra de las 6 prácticas + P2-parte2.
 
 ## Orden propuesto
 
