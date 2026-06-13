@@ -8,6 +8,7 @@
 
 use crate::analysis;
 use crate::db::{self, AuthUser, InstrumentScale, PracticeQuantity, PracticeResult};
+use crate::practices::PracticeIntermediate;
 use crate::uncertainty::{self, BModel, QuantityResult, ScaleSpec};
 use chrono::Utc;
 use evalexpr::{build_operator_tree, ContextWithMutableVariables, HashMapContext, Node, Value};
@@ -56,6 +57,16 @@ impl MeasurementInput {
                 })
                 .collect(),
             None => self.values.clone(),
+        }
+    }
+
+    /// Matriz punto × réplica (Motor C): las réplicas de cada punto si hay `point_replicas`; si no,
+    /// cada valor de `values` como un punto de una sola réplica. Permite evaluar una magnitud
+    /// intermedia por réplica antes de promediar.
+    fn point_replica_matrix(&self) -> Vec<Vec<f64>> {
+        match &self.point_replicas {
+            Some(groups) => groups.clone(),
+            None => self.values.iter().map(|&v| vec![v]).collect(),
         }
     }
 }
@@ -227,6 +238,13 @@ fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
         }
     }
     Ok(tree)
+}
+
+/// Valida que `formula` sea sintácticamente correcta y solo use símbolos de `allowed` (o las
+/// constantes `pi`/`e`). Para validar fórmulas en el alta (p. ej. una magnitud intermedia) sin
+/// esperar a que falle en el cálculo. Devuelve el error amigable de [`compile_formula`].
+pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
+    compile_formula(formula, allowed).map(|_| ())
 }
 
 /// Evalúa una fórmula precompilada con los valores dados por símbolo (más las constantes
@@ -426,38 +444,97 @@ type PointSeries = Vec<(f64, f64)>;
 /// un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
 fn build_points(
     quantities: &[PracticeQuantity],
+    intermediates: &[PracticeIntermediate],
     x_formula: &str,
     y_formula: &str,
     measurements: &[MeasurementInput],
     too_few_msg: &str,
 ) -> anyhow::Result<(PointSeries, Vec<String>)> {
     let mut warnings = Vec::new();
-    let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    // Valor representativo por punto de cada magnitud (media de réplicas por punto si las hay).
+    let magnitude_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
+    // Valor por punto (media de réplicas) y matriz punto×réplica (para las intermedias) por magnitud.
     let point_values: HashMap<&str, Vec<f64>> = measurements
         .iter()
         .map(|m| (m.quantity_id.as_str(), m.point_values()))
         .collect();
+    let point_matrix: HashMap<&str, Vec<Vec<f64>>> = measurements
+        .iter()
+        .map(|m| (m.quantity_id.as_str(), m.point_replica_matrix()))
+        .collect();
+    // Magnitudes de un solo valor por punto (sin `point_replicas`): se difunden a todas las
+    // réplicas al evaluar una intermedia. Las replicadas NO se difunden (un conteo distinto entre
+    // ellas es dato incompleto → produce un punto no finito que se rechaza).
+    let broadcastable: std::collections::HashSet<&str> = measurements
+        .iter()
+        .filter(|m| m.point_replicas.is_none())
+        .map(|m| m.quantity_id.as_str())
+        .collect();
+    let symbol_to_id: HashMap<&str, &str> = quantities
+        .iter()
+        .map(|q| (q.symbol.as_str(), q.id.as_str()))
+        .collect();
 
-    let x_tree = compile_formula(x_formula, &symbols)?;
-    let y_tree = compile_formula(y_formula, &symbols)?;
+    // Las intermedias (Motor C) se compilan **en orden**: cada una puede usar las magnitudes y las
+    // intermedias **anteriores** (a estas las ve como su valor por punto, ya promediado). Sus
+    // símbolos quedan disponibles para los ejes.
+    let mut allowed = magnitude_symbols.clone();
+    let mut compiled_intermediates: Vec<(&PracticeIntermediate, Node)> = Vec::new();
+    for it in intermediates {
+        let tree = compile_formula(&it.formula, &allowed)?;
+        allowed.push(it.symbol.clone());
+        compiled_intermediates.push((it, tree));
+    }
+    let axis_symbols = allowed; // magnitudes + todas las intermedias
+    let x_tree = compile_formula(x_formula, &axis_symbols)?;
+    let y_tree = compile_formula(y_formula, &axis_symbols)?;
+    let intermediate_symbols: std::collections::HashSet<&str> = compiled_intermediates
+        .iter()
+        .map(|(it, _)| it.symbol.as_str())
+        .collect();
 
-    // Solo las magnitudes que aparecen en las fórmulas de eje condicionan los puntos. Las
-    // auxiliares (p. ej. un dato de cátedra usado en otra parte de la práctica, o una magnitud
-    // que no se grafica) se ignoran: no exigen mediciones ni arrastran el conteo de puntos.
-    let referenced: std::collections::HashSet<&str> = x_tree
+    // Intermedias necesarias = las que usan los ejes, más (cierre) las que esas referencian. Como
+    // una intermedia solo referencia anteriores, un recorrido inverso basta.
+    let axis_refs: std::collections::HashSet<&str> = x_tree
         .iter_variable_identifiers()
         .chain(y_tree.iter_variable_identifiers())
         .collect();
-    let axis_quantities: Vec<&PracticeQuantity> = quantities
+    let mut needed: std::collections::HashSet<&str> = compiled_intermediates
         .iter()
-        .filter(|q| referenced.contains(q.symbol.as_str()))
+        .filter(|(it, _)| axis_refs.contains(it.symbol.as_str()))
+        .map(|(it, _)| it.symbol.as_str())
         .collect();
+    for (it, tree) in compiled_intermediates.iter().rev() {
+        if needed.contains(it.symbol.as_str()) {
+            for v in tree.iter_variable_identifiers() {
+                if intermediate_symbols.contains(v) {
+                    needed.insert(v);
+                }
+            }
+        }
+    }
 
-    // Cantidad de puntos = mínimo de puntos entre las magnitudes de eje (deben venir parejas).
-    let lengths: Vec<usize> = axis_quantities
+    // Magnitudes que condicionan los puntos: las referenciadas por los ejes, más las referenciadas
+    // por las intermedias necesarias (p. ej. x=1/Q, Q=V/t → V y t condicionan los puntos).
+    let mut conditioning: std::collections::HashSet<&str> = quantities
         .iter()
-        .map(|q| point_values.get(q.id.as_str()).map_or(0, |v| v.len()))
+        .filter(|q| axis_refs.contains(q.symbol.as_str()))
+        .map(|q| q.symbol.as_str())
+        .collect();
+    for (it, tree) in &compiled_intermediates {
+        if needed.contains(it.symbol.as_str()) {
+            for v in tree.iter_variable_identifiers() {
+                if symbol_to_id.contains_key(v) {
+                    conditioning.insert(v);
+                }
+            }
+        }
+    }
+
+    // Cantidad de puntos = mínimo de puntos entre las magnitudes que condicionan (deben venir parejas).
+    let lengths: Vec<usize> = conditioning
+        .iter()
+        .filter_map(|sym| symbol_to_id.get(sym))
+        .map(|id| point_values.get(id).map_or(0, |v| v.len()))
         .collect();
     let n_points = lengths.iter().copied().min().unwrap_or(0);
     if lengths.iter().any(|&l| l != n_points) {
@@ -472,14 +549,34 @@ fn build_points(
 
     let mut points = Vec::with_capacity(n_points);
     for i in 0..n_points {
-        let bound: HashMap<&str, f64> = axis_quantities
+        // Intermedias necesarias en orden: cada una se evalúa por réplica (las magnitudes de un
+        // solo valor y las intermedias anteriores se difunden) y se promedia.
+        let mut intermediate_values: HashMap<&str, f64> = HashMap::new();
+        for (it, tree) in &compiled_intermediates {
+            if !needed.contains(it.symbol.as_str()) {
+                continue;
+            }
+            let value = point_intermediate(
+                tree,
+                &point_matrix,
+                &symbol_to_id,
+                &broadcastable,
+                &intermediate_values,
+                i,
+            );
+            intermediate_values.insert(it.symbol.as_str(), value);
+        }
+        // Binding de ejes: media por punto de las magnitudes + valores por punto de las intermedias.
+        let mut bound: HashMap<&str, f64> = quantities
             .iter()
+            .filter(|q| axis_refs.contains(q.symbol.as_str()))
             .filter_map(|q| {
                 point_values
                     .get(q.id.as_str())
                     .map(|v| (q.symbol.as_str(), v[i]))
             })
             .collect();
+        bound.extend(&intermediate_values);
         let x = eval_compiled(&x_tree, &bound);
         let y = eval_compiled(&y_tree, &bound);
         if !x.is_finite() || !y.is_finite() {
@@ -492,11 +589,72 @@ fn build_points(
     Ok((points, warnings))
 }
 
+/// Valor de una magnitud intermedia en el punto `i`: evalúa su fórmula para cada réplica del punto
+/// y promedia. Las magnitudes de **un solo valor por punto** (`broadcastable`) —y las intermedias
+/// anteriores (`earlier`, ya promediadas por punto)— se difunden a todas las réplicas. Las
+/// magnitudes **replicadas** NO se difunden: si una tiene menos réplicas que el punto (dato
+/// incompleto/desparejo), la réplica faltante produce `NaN` y el punto se rechaza aguas arriba. Una
+/// fórmula sin magnitudes replicadas (solo magnitudes de un valor, intermedias o constantes) se
+/// evalúa una vez.
+fn point_intermediate(
+    tree: &Node,
+    point_matrix: &HashMap<&str, Vec<Vec<f64>>>,
+    symbol_to_id: &HashMap<&str, &str>,
+    broadcastable: &std::collections::HashSet<&str>,
+    earlier: &HashMap<&str, f64>,
+    i: usize,
+) -> f64 {
+    let id_of = |sym: &str| symbol_to_id.get(sym).copied();
+    let reps_at = |sym: &str| -> &[f64] {
+        id_of(sym)
+            .and_then(|id| point_matrix.get(id))
+            .and_then(|m| m.get(i))
+            .map_or(&[][..], |v| v.as_slice())
+    };
+    let is_broadcastable = |sym: &str| id_of(sym).is_some_and(|id| broadcastable.contains(id));
+    // Réplicas del punto: el máximo entre las magnitudes **replicadas** de la fórmula; al menos 1.
+    let n_reps = tree
+        .iter_variable_identifiers()
+        .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
+        .map(|v| reps_at(v).len())
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let mut sum = 0.0;
+    for r in 0..n_reps {
+        let bound: HashMap<&str, f64> = tree
+            .iter_variable_identifiers()
+            // Las constantes (`pi`, `e`) las precarga `eval_compiled`: no bindear acá (si no, las
+            // pisaríamos con NaN al tratarlas como intermedia anterior).
+            .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
+            .map(|v| {
+                if symbol_to_id.contains_key(v) {
+                    let reps = reps_at(v);
+                    let value = if is_broadcastable(v) {
+                        // Magnitud de un solo valor por punto: se difunde a todas las réplicas.
+                        reps.first().copied().unwrap_or(f64::NAN)
+                    } else {
+                        // Magnitud replicada: réplica r exacta (sin difundir → NaN si falta).
+                        reps.get(r).copied().unwrap_or(f64::NAN)
+                    };
+                    (v, value)
+                } else {
+                    // Intermedia anterior: escalar por punto, difundido a todas las réplicas.
+                    (v, earlier.get(v).copied().unwrap_or(f64::NAN))
+                }
+            })
+            .collect();
+        sum += eval_compiled(tree, &bound);
+    }
+    sum / n_reps as f64
+}
+
 /// Calcula el [`FormAnalysis`] de una práctica `regresion_lineal`: empareja las mediciones por
 /// punto, evalúa las fórmulas de eje `x_formula`/`y_formula` en cada punto, ajusta una recta
 /// (`analysis::linear_regression`) y deriva los mensurandos desde `slope`/`intercept`.
 pub fn compute_regresion(
     quantities: &[PracticeQuantity],
+    intermediates: &[PracticeIntermediate],
     results: &[PracticeResult],
     x_formula: &str,
     y_formula: &str,
@@ -504,6 +662,7 @@ pub fn compute_regresion(
 ) -> anyhow::Result<FormAnalysis> {
     let (points, mut warnings) = build_points(
         quantities,
+        intermediates,
         x_formula,
         y_formula,
         measurements,
@@ -552,6 +711,7 @@ pub fn compute_regresion(
 /// barrido de mediciones; una `x_log` marca eje x logarítmico en esa curva.
 pub fn compute_curva(
     quantities: &[PracticeQuantity],
+    intermediates: &[PracticeIntermediate],
     curves: &[CurveSpec],
     measurements: &[MeasurementInput],
 ) -> anyhow::Result<FormAnalysis> {
@@ -560,6 +720,7 @@ pub fn compute_curva(
     for curve in curves {
         let (points, mut curve_warnings) = build_points(
             quantities,
+            intermediates,
             curve.x_formula,
             curve.y_formula,
             measurements,
@@ -707,6 +868,7 @@ pub async fn analyze(
         };
         return compute_regresion(
             &definition.quantities,
+            &definition.intermediates,
             &definition.results,
             x_formula,
             y_formula,
@@ -728,7 +890,12 @@ pub async fn analyze(
                 x_log: c.x_log,
             })
             .collect();
-        return compute_curva(&definition.quantities, &curves, measurements);
+        return compute_curva(
+            &definition.quantities,
+            &definition.intermediates,
+            &curves,
+            measurements,
+        );
     }
 
     compute(
@@ -1896,7 +2063,7 @@ mod tests {
             measurement("px", &[0.0, 1.0, 2.0, 3.0]),
             measurement("py", &[1.0, 3.0, 5.0, 7.0]),
         ];
-        let a = compute_regresion(&quantities, &results, "px", "py", &measurements).unwrap();
+        let a = compute_regresion(&quantities, &[], &results, "px", "py", &measurements).unwrap();
         let reg = a.regression.unwrap();
         assert!(close(reg.slope, 2.0, 1e-9));
         assert!(close(reg.intercept, 1.0, 1e-9));
@@ -1916,6 +2083,170 @@ mod tests {
     }
 
     #[test]
+    fn compute_regresion_uses_per_point_intermediate_averaged_over_replicas() {
+        // Motor C: la intermedia Q = V/t se evalúa por réplica y se promedia por punto, NO como
+        // media(V)/media(t). Punto 0: V=[10,10], t=[1,2] → Q=(10+5)/2=7.5 (media(V)/media(t) daría
+        // 10/1.5≈6.67). Punto 1: V=[20,20], t=[1,2] → Q=(20+10)/2=15.
+        let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p1-estadistica".into(),
+            position: 0,
+            symbol: "Q".into(),
+            name: "Caudal".into(),
+            unit: "u".into(),
+            formula: "V/t".into(),
+        }];
+        let rep = |groups: Vec<Vec<f64>>, id: &str| MeasurementInput {
+            quantity_id: id.into(),
+            instrument_id: None,
+            scale_id: None,
+            values: vec![],
+            given_u: None,
+            point_replicas: Some(groups),
+            operator_replicas: None,
+        };
+        let measurements = vec![
+            rep(vec![vec![10.0, 10.0], vec![20.0, 20.0]], "q-V"),
+            rep(vec![vec![1.0, 2.0], vec![1.0, 2.0]], "q-t"),
+            measurement("py", &[100.0, 200.0]),
+        ];
+        let a =
+            compute_regresion(&quantities, &intermediates, &[], "Q", "py", &measurements).unwrap();
+        let reg = a.regression.unwrap();
+        assert_eq!(reg.points, vec![(7.5, 100.0), (15.0, 200.0)]);
+    }
+
+    /// Helper de test: una magnitud con réplicas por punto.
+    fn point_rep(id: &str, groups: Vec<Vec<f64>>) -> MeasurementInput {
+        MeasurementInput {
+            quantity_id: id.into(),
+            instrument_id: None,
+            scale_id: None,
+            values: vec![],
+            given_u: None,
+            point_replicas: Some(groups),
+            operator_replicas: None,
+        }
+    }
+
+    #[test]
+    fn intermediate_broadcasts_single_value_magnitudes_over_replicas() {
+        // Difusión: D = h*V/t, con h de un solo valor por punto y V,t con 2 réplicas. h se difunde.
+        // Punto 0: h=2, V=[10,10], t=[1,2] → D=(2*10/1 + 2*10/2)/2 = (20+10)/2 = 15.
+        // Punto 1: h=3, V=[20,20], t=[1,2] → D=(60+30)/2 = 45.
+        let quantities = vec![quantity("h"), quantity("V"), quantity("t"), quantity("py")];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p1-estadistica".into(),
+            position: 0,
+            symbol: "D".into(),
+            name: "D".into(),
+            unit: "u".into(),
+            formula: "h*V/t".into(),
+        }];
+        let measurements = vec![
+            measurement("h", &[2.0, 3.0]),
+            point_rep("q-V", vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
+            point_rep("q-t", vec![vec![1.0, 2.0], vec![1.0, 2.0]]),
+            measurement("py", &[100.0, 200.0]),
+        ];
+        let a =
+            compute_regresion(&quantities, &intermediates, &[], "D", "py", &measurements).unwrap();
+        assert_eq!(
+            a.regression.unwrap().points,
+            vec![(15.0, 100.0), (45.0, 200.0)]
+        );
+    }
+
+    #[test]
+    fn intermediate_formula_can_use_constants() {
+        // Una intermedia con una constante (pi): A = pi*r*r, r de un solo valor por punto.
+        // pi lo precarga el evaluador; no debe quedar bindeado a NaN. r=[2,3] → A=pi*4, pi*9.
+        let quantities = vec![quantity("r"), quantity("py")];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p1-estadistica".into(),
+            position: 0,
+            symbol: "A".into(),
+            name: "Area".into(),
+            unit: "u".into(),
+            formula: "pi*r*r".into(),
+        }];
+        let measurements = vec![
+            measurement("r", &[2.0, 3.0]),
+            measurement("py", &[10.0, 20.0]),
+        ];
+        let a =
+            compute_regresion(&quantities, &intermediates, &[], "A", "py", &measurements).unwrap();
+        let points = a.regression.unwrap().points;
+        assert!(close(points[0].0, std::f64::consts::PI * 4.0, 1e-9));
+        assert!(close(points[1].0, std::f64::consts::PI * 9.0, 1e-9));
+    }
+
+    #[test]
+    fn intermediate_rejects_mismatched_replica_counts() {
+        // Dos magnitudes replicadas con distinto conteo (V con 2, t con 1) en una intermedia son
+        // dato incompleto: NO se difunde la réplica faltante → el punto da NaN → se rechaza.
+        let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p1-estadistica".into(),
+            position: 0,
+            symbol: "Q".into(),
+            name: "Q".into(),
+            unit: "u".into(),
+            formula: "V/t".into(),
+        }];
+        let measurements = vec![
+            point_rep("q-V", vec![vec![10.0, 20.0], vec![10.0, 20.0]]),
+            point_rep("q-t", vec![vec![1.0], vec![1.0]]), // replicada pero con 1 sola réplica
+            measurement("py", &[100.0, 200.0]),
+        ];
+        assert!(
+            compute_regresion(&quantities, &intermediates, &[], "Q", "py", &measurements).is_err()
+        );
+    }
+
+    #[test]
+    fn intermediate_can_reference_an_earlier_intermediate() {
+        // Encadenado: Q = V/t (promedio por réplica), R = Q*2 (ve a Q como su valor por punto).
+        // Punto 0: Q=(10/1+10/2)/2=7.5 → R=15 ; punto 1: Q=(20/1+20/2)/2=15 → R=30.
+        let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
+        let intermediates = vec![
+            PracticeIntermediate {
+                id: "i1".into(),
+                practice_id: "p1-estadistica".into(),
+                position: 0,
+                symbol: "Q".into(),
+                name: "Q".into(),
+                unit: "u".into(),
+                formula: "V/t".into(),
+            },
+            PracticeIntermediate {
+                id: "i2".into(),
+                practice_id: "p1-estadistica".into(),
+                position: 1,
+                symbol: "R".into(),
+                name: "R".into(),
+                unit: "u".into(),
+                formula: "Q*2".into(),
+            },
+        ];
+        let measurements = vec![
+            point_rep("q-V", vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
+            point_rep("q-t", vec![vec![1.0, 2.0], vec![1.0, 2.0]]),
+            measurement("py", &[100.0, 200.0]),
+        ];
+        let a =
+            compute_regresion(&quantities, &intermediates, &[], "R", "py", &measurements).unwrap();
+        assert_eq!(
+            a.regression.unwrap().points,
+            vec![(15.0, 100.0), (30.0, 200.0)]
+        );
+    }
+
+    #[test]
     fn compute_regresion_uses_pi_and_sqrt_in_axis_formulas() {
         // x = 2*pi*f ; y = math::sqrt(a). f=[1,2,3], a=[4,9,16] -> x=2pi*{1,2,3}, y={2,3,4}.
         // y crece 1 por unidad de f, x crece 2pi por unidad de f -> slope = 1/(2pi), intercept = 1.
@@ -1927,6 +2258,7 @@ mod tests {
         ];
         let analysis = compute_regresion(
             &quantities,
+            &[],
             &results,
             "2*pi*f",
             "math::sqrt(a)",
@@ -1955,7 +2287,7 @@ mod tests {
     fn compute_regresion_needs_at_least_two_points() {
         let quantities = vec![quantity("px"), quantity("py")];
         let measurements = vec![measurement("px", &[1.0]), measurement("py", &[2.0])];
-        assert!(compute_regresion(&quantities, &[], "px", "py", &measurements).is_err());
+        assert!(compute_regresion(&quantities, &[], &[], "px", "py", &measurements).is_err());
     }
 
     #[test]
@@ -1966,7 +2298,8 @@ mod tests {
             measurement("px", &[1.0, 2.0, 3.0]),
             measurement("py", &[4.0, 9.0, 16.0]),
         ];
-        let a = compute_curva(&quantities, &[curve("px", "py", false)], &measurements).unwrap();
+        let a =
+            compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).unwrap();
         assert!(a.regression.is_none());
         assert!(a.derived.is_empty());
         assert_eq!(a.scatters.len(), 1);
@@ -1987,6 +2320,7 @@ mod tests {
         ];
         let a = compute_curva(
             &quantities,
+            &[],
             &[curve("px", "py", false), curve("py", "px", false)],
             &measurements,
         )
@@ -2008,7 +2342,9 @@ mod tests {
     fn compute_curva_needs_at_least_two_points() {
         let quantities = vec![quantity("px"), quantity("py")];
         let measurements = vec![measurement("px", &[1.0]), measurement("py", &[2.0])];
-        assert!(compute_curva(&quantities, &[curve("px", "py", false)], &measurements).is_err());
+        assert!(
+            compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).is_err()
+        );
     }
 
     #[test]
@@ -2019,7 +2355,9 @@ mod tests {
             measurement("px", &[0.0, 10.0]),
             measurement("py", &[1.0, 2.0]),
         ];
-        assert!(compute_curva(&quantities, &[curve("px", "py", true)], &measurements).is_err());
+        assert!(
+            compute_curva(&quantities, &[], &[curve("px", "py", true)], &measurements).is_err()
+        );
     }
 
     #[test]
@@ -2032,7 +2370,8 @@ mod tests {
             measurement("py", &[4.0, 5.0, 6.0]),
             // 'aux' sin mediciones a propósito.
         ];
-        let a = compute_curva(&quantities, &[curve("px", "py", false)], &measurements).unwrap();
+        let a =
+            compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).unwrap();
         assert_eq!(
             a.scatters[0].points,
             vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
@@ -2056,7 +2395,7 @@ mod tests {
                 operator_replicas: None,
             },
         ];
-        let a = compute_regresion(&quantities, &[], "px", "py", &measurements).unwrap();
+        let a = compute_regresion(&quantities, &[], &[], "px", "py", &measurements).unwrap();
         let reg = a.regression.unwrap();
         assert_eq!(reg.points, vec![(1.0, 4.0), (2.0, 10.0)]);
         // Pendiente de (1,4)-(2,10) = 6.

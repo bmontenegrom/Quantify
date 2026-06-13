@@ -4,7 +4,7 @@ use crate::{
     db::{self, AppState, NewSubmission, ReviewSubmission},
     error::AppError,
     instruments::{self, CatalogExport, CreateInstrument, ScaleInput, UpdateInstrument},
-    practices::{self, CurveInput, QuantityInput, ResultInput},
+    practices::{self, CurveInput, IntermediateInput, QuantityInput, ResultInput},
 };
 use axum::{
     extract::{Multipart, Path, Query, Request, State},
@@ -180,6 +180,11 @@ pub fn api_router(state: SharedState) -> Router {
             post(update_curve).delete(delete_curve),
         )
         .route("/practices/{id}/curves/{cid}/move", post(move_curve))
+        .route("/practices/{id}/intermediates", post(create_intermediate))
+        .route(
+            "/practices/{id}/intermediates/{iid}",
+            post(update_intermediate).delete(delete_intermediate),
+        )
         .route(
             "/practices/{id}/results/{rid}/tolerance",
             post(set_result_tolerance),
@@ -1421,7 +1426,9 @@ async fn create_quantity(
     validate_quantity(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+        .await?
+    {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     Ok(Json(
@@ -1445,6 +1452,7 @@ async fn update_quantity(
         &practice_id,
         &input.symbol,
         Some(&qid),
+        None,
         None,
     )
     .await?
@@ -1522,6 +1530,106 @@ async fn move_curve(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `POST /api/practices/{id}/intermediates`: agrega una magnitud intermedia por punto (docente).
+async fn create_intermediate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<IntermediateInput>,
+) -> Result<Json<practices::PracticeIntermediate>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_intermediate(&def, &input, None)?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+        .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
+    Ok(Json(
+        practices::create_intermediate(&state.pool, &id, input).await?,
+    ))
+}
+
+/// `POST /api/practices/{id}/intermediates/{iid}`: actualiza una magnitud intermedia (docente).
+async fn update_intermediate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, iid)): Path<(String, String)>,
+    Json(input): Json<IntermediateInput>,
+) -> Result<Json<practices::PracticeIntermediate>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_intermediate(&def, &input, Some(&iid))?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, Some(&iid))
+        .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
+    let updated = practices::update_intermediate(&state.pool, &id, &iid, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
+    Ok(Json(updated))
+}
+
+/// `DELETE /api/practices/{id}/intermediates/{iid}`: elimina una magnitud intermedia (docente).
+async fn delete_intermediate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, iid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_intermediate(&state.pool, &id, &iid).await? {
+        return Err(AppError::not_found("magnitud intermedia no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// Valida una magnitud intermedia contra la definición de la práctica (docente): símbolo con
+/// formato válido, no reservado y único (vs magnitudes, mensurandos y otras intermedias), y fórmula
+/// que compila usando las magnitudes + las intermedias **anteriores** (por posición). `exclude_id`
+/// ignora la propia fila al editar. Todos los errores son 400 amigables.
+fn validate_intermediate(
+    def: &practices::PracticeDefinition,
+    input: &IntermediateInput,
+    exclude_id: Option<&str>,
+) -> Result<(), AppError> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
+        return Err(AppError::bad_request(
+            "La magnitud intermedia necesita un simbolo y una formula.",
+        ));
+    }
+    validate_symbol_format(symbol)?;
+    validate_symbol_not_reserved(symbol)?;
+    // (La unicidad del símbolo se verifica en el handler con `symbol_taken_in_practice`, que cubre
+    // los tres espacios de símbolos: magnitudes, mensurandos e intermedias.)
+    // Símbolos permitidos en la fórmula: magnitudes + intermedias anteriores (al crear, todas las
+    // existentes; al editar, solo las de menor posición que la editada).
+    let self_pos = exclude_id.and_then(|id| {
+        def.intermediates
+            .iter()
+            .find(|it| it.id == id)
+            .map(|it| it.position)
+    });
+    let mut allowed: Vec<String> = def.quantities.iter().map(|q| q.symbol.clone()).collect();
+    for it in &def.intermediates {
+        if Some(it.id.as_str()) == exclude_id {
+            continue;
+        }
+        if self_pos.is_none_or(|p| it.position < p) {
+            allowed.push(it.symbol.clone());
+        }
+    }
+    computation::check_formula(formula, &allowed)
+        .map_err(|e| AppError::bad_request(e.to_string()))?;
+    Ok(())
+}
+
 /// Una curva necesita ambas fórmulas de eje (sin ellas no se puede graficar). Error 400 amigable.
 fn validate_curve(input: &CurveInput) -> Result<(), AppError> {
     if input.x_formula.trim().is_empty() || input.y_formula.trim().is_empty() {
@@ -1556,7 +1664,9 @@ async fn create_result(
     validate_result(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+        .await?
+    {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     Ok(Json(
@@ -1581,6 +1691,7 @@ async fn update_result(
         &input.symbol,
         None,
         Some(&rid),
+        None,
     )
     .await?
     {
@@ -1850,6 +1961,57 @@ mod tests {
         // Estudiante: oculto hasta que el docente habilite.
         assert!(analysis_hidden_for("estudiante", false));
         assert!(!analysis_hidden_for("estudiante", true));
+    }
+
+    #[test]
+    fn validate_intermediate_checks_symbol_and_formula() {
+        // Práctica con magnitudes V, t y una intermedia previa Q = V/t.
+        let qty = |symbol: &str| db::PracticeQuantity {
+            id: format!("q-{symbol}"),
+            practice_id: "p".into(),
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "u".into(),
+            repeated: true,
+            quantity: None,
+            position: 0,
+            is_given: false,
+            replicas_per_point: None,
+        };
+        let def = practices::PracticeDefinition {
+            practice_id: "p".into(),
+            analysis_kind: Some("regresion_lineal".into()),
+            x_formula: None,
+            y_formula: None,
+            quantities: vec![qty("V"), qty("t")],
+            results: vec![],
+            curves: vec![],
+            operator_count: None,
+            intermediates: vec![practices::PracticeIntermediate {
+                id: "i1".into(),
+                practice_id: "p".into(),
+                position: 0,
+                symbol: "Q".into(),
+                name: "Q".into(),
+                unit: "u".into(),
+                formula: "V/t".into(),
+            }],
+        };
+        let input = |symbol: &str, formula: &str| IntermediateInput {
+            symbol: symbol.into(),
+            name: "x".into(),
+            unit: "u".into(),
+            formula: formula.into(),
+        };
+
+        // Símbolo reservado (constante del motor) y fórmula con símbolo inexistente → 400.
+        // (La unicidad del símbolo se valida aparte, vía `symbol_taken_in_practice`.)
+        assert!(validate_intermediate(&def, &input("pi", "V*2"), None).is_err());
+        assert!(validate_intermediate(&def, &input("Re", "V*zzz"), None).is_err());
+        // Nueva intermedia válida que referencia a Q (anterior) y magnitudes.
+        assert!(validate_intermediate(&def, &input("Re", "Q*V"), None).is_ok());
+        // Al editar Q (posición 0), no puede referenciarse a sí misma ni a posteriores.
+        assert!(validate_intermediate(&def, &input("Q", "Q*2"), Some("i1")).is_err());
     }
 
     /// Construye una escala mínima para los tests de validación.
