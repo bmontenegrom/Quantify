@@ -714,6 +714,27 @@ async fn insert_measurements(
     Ok(())
 }
 
+/// `true` si la práctica analiza **por puntos** (regresión o curva). Determina el layout de
+/// persistencia (el índice del punto va en `point_index`, no en `replicate_index`). Se deriva del
+/// `analysis_kind` declarado en la práctica —**no** del resultado del cálculo— para que el formato
+/// almacenado no dependa de que el ajuste haya producido salida con los datos cargados (p.ej. un
+/// punto único o valores no finitos dejarían `regression`/`scatter` en `None` sin dejar de ser una
+/// entrega por puntos).
+async fn is_point_based_practice(
+    pool: &sqlx::SqlitePool,
+    practice_id: &str,
+) -> anyhow::Result<bool> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT analysis_kind FROM practices WHERE id = ?1")
+            .bind(practice_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(matches!(
+        row.and_then(|r| r.0).as_deref(),
+        Some("regresion_lineal") | Some("curva")
+    ))
+}
+
 /// Crea una entrega por formulario: calcula el análisis, inserta la entrega y sus mediciones
 /// en una transacción, y devuelve el detalle. El usuario ya fue validado por el handler.
 pub async fn create_form_submission(
@@ -767,6 +788,7 @@ pub async fn create_form_submission(
     }
 
     let analysis = analyze(pool, &input.practice_id, &input.measurements).await?;
+    let point_based = is_point_based_practice(pool, &input.practice_id).await?;
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match &input.meta {
         Some(value) => Some(serde_json::to_string(value)?),
@@ -847,7 +869,6 @@ pub async fn create_form_submission(
     .execute(&mut *tx)
     .await?;
 
-    let point_based = analysis.regression.is_some() || analysis.scatter.is_some();
     insert_measurements(&mut tx, &id, &input.measurements, point_based).await?;
     tx.commit().await?;
 
@@ -881,6 +902,7 @@ pub async fn update_form_submission(
     meta: Option<&serde_json::Value>,
 ) -> anyhow::Result<db::SubmissionDetail> {
     let analysis = analyze(pool, practice_id, measurements).await?;
+    let point_based = is_point_based_practice(pool, practice_id).await?;
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match meta {
         Some(value) => Some(serde_json::to_string(value)?),
@@ -901,7 +923,6 @@ pub async fn update_form_submission(
         .execute(&mut *tx)
         .await?;
 
-    let point_based = analysis.regression.is_some() || analysis.scatter.is_some();
     insert_measurements(&mut tx, submission_id, measurements, point_based).await?;
     tx.commit().await?;
 
@@ -1285,6 +1306,112 @@ mod tests {
         assert!(tmed_rows
             .iter()
             .any(|m| m.point_index == 2 && m.replicate_index == 0 && close(m.value, 6.0, 1e-9)));
+    }
+
+    #[tokio::test]
+    async fn point_based_submission_stores_variable_replicas_per_point() {
+        // Cada punto puede traer una cantidad distinta de réplicas (p.ej. una esfera medida 1 vez,
+        // otra 3): se persisten todas con replicate_index 0..n del punto y el motor promedia con el
+        // n real de cada punto. Cubre el caso de grilla "irregular".
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+            .await
+            .unwrap();
+        crate::practices::set_regression_formulas(&pool, "p1-estadistica", "T", "t_med", false)
+            .await
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let qid = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        // Punto 0: 1 réplica; punto 1: 3 réplicas; punto 2: 2 réplicas. Medias: 4.0, 5.1, 6.05.
+        let input = FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![
+                MeasurementInput {
+                    quantity_id: qid("T"),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![1.0, 2.0, 3.0],
+                    given_u: None,
+                    point_replicas: None,
+                },
+                MeasurementInput {
+                    quantity_id: qid("t_med"),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![],
+                    given_u: None,
+                    point_replicas: Some(vec![vec![4.0], vec![5.0, 5.1, 5.2], vec![6.0, 6.1]]),
+                },
+            ],
+            meta: None,
+            table_number: None,
+        };
+        let detail = create_form_submission(&pool, &user, input).await.unwrap();
+        let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
+
+        // Cada punto guarda su cantidad propia de réplicas (1 + 3 + 2 = 6), con replicate_index
+        // contiguo desde 0 dentro del punto.
+        let tmed_rows: Vec<_> = rows
+            .iter()
+            .filter(|m| m.quantity_id == qid("t_med"))
+            .collect();
+        assert_eq!(tmed_rows.len(), 6);
+        for (point, expected_n) in [(0i64, 1usize), (1, 3), (2, 2)] {
+            let mut reps: Vec<i64> = tmed_rows
+                .iter()
+                .filter(|m| m.point_index == point)
+                .map(|m| m.replicate_index)
+                .collect();
+            reps.sort_unstable();
+            assert_eq!(reps.len(), expected_n, "réplicas del punto {point}");
+            assert_eq!(reps, (0..expected_n as i64).collect::<Vec<_>>());
+        }
+
+        // El motor promedia con el n real de cada punto: la curva usa (T, media de réplicas).
+        let points = detail.analysis["scatter"]["points"].as_array().unwrap();
+        assert_eq!(points.len(), 3);
+        let y = |i: usize| points[i][1].as_f64().unwrap();
+        assert!(close(y(0), 4.0, 1e-9));
+        assert!(close(y(1), 5.1, 1e-9));
+        assert!(close(y(2), 6.05, 1e-9));
     }
 
     #[tokio::test]

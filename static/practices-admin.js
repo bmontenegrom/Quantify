@@ -394,14 +394,17 @@ async function savePracticeRegressionFormulas(event) {
 
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
+  const repeated = "repeated" in raw;
   const replicas = Number(raw.replicas_per_point);
   return {
     symbol: raw.symbol,
     name: raw.name,
     unit: raw.unit,
     quantity: raw.quantity || null,
-    repeated: "repeated" in raw,
-    replicas_per_point: raw.replicas_per_point && replicas > 0 ? replicas : null,
+    repeated,
+    // La grilla de réplicas por punto solo aplica a magnitudes `repeated`: si no lo es, no
+    // guardamos un ancho de grilla muerto aunque el campo traiga un número.
+    replicas_per_point: repeated && raw.replicas_per_point && replicas > 0 ? replicas : null,
   };
 }
 

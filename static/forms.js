@@ -641,7 +641,15 @@ export function applyPrefill() {
       row.querySelectorAll(".series-cell--replicas").forEach((cell) => {
         const id = cell.querySelector(".series-replica")?.dataset.quantityId;
         const reps = byQ.get(id)?.pointGroups[i] ?? [];
-        [...cell.querySelectorAll(".series-replica")].forEach((input, k) => {
+        const group = cell.querySelector(".series-replica-group");
+        // Si la entrega guardó más réplicas que el ancho actual de la grilla (el docente redujo
+        // replicas_per_point luego de cargarse), agrega inputs para no perder datos al editar.
+        let inputs = [...cell.querySelectorAll(".series-replica")];
+        while (group && inputs.length < reps.length) {
+          group.insertAdjacentHTML("beforeend", replicaInputHtml(id, inputs.length));
+          inputs = [...cell.querySelectorAll(".series-replica")];
+        }
+        inputs.forEach((input, k) => {
           if (reps[k] != null) input.value = reps[k];
         });
       });
@@ -763,15 +771,18 @@ function seriesRowHtml(cols) {
     .map((q) => {
       const n = q.repeated ? Number(q.replicas_per_point) || 0 : 0;
       if (n > 0) {
-        const inputs = Array.from({ length: n }, (_, k) =>
-          `<input class="series-replica" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="t${k + 1}" />`,
-        ).join("");
+        const inputs = Array.from({ length: n }, (_, k) => replicaInputHtml(q.id, k)).join("");
         return `<td class="series-cell series-cell--replicas">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div><span class="series-mean submission-meta">x̄ —</span></td>`;
       }
       return `<td class="series-cell">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`;
     })
     .join("");
   return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
+}
+
+/** HTML de un input de réplica (índice 0-based `k`) para la magnitud `quantityId`. */
+function replicaInputHtml(quantityId, k) {
+  return `<input class="series-replica" type="number" step="any" data-quantity-id="${escapeHtml(quantityId)}" placeholder="t${k + 1}" />`;
 }
 
 /** Lee las réplicas no vacías de una celda de réplicas, aplicando el prefijo SI de la celda. */
