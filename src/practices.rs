@@ -65,13 +65,34 @@ pub struct ResultInput {
 pub struct PracticeDefinition {
     pub practice_id: String,
     pub analysis_kind: Option<String>,
-    /// Para `regresion_lineal` y `curva`: expresiones por punto de los ejes `x` e `y`.
+    /// Solo `regresion_lineal`: expresiones por punto de los ejes `x` e `y` del ajuste.
     pub x_formula: Option<String>,
     pub y_formula: Option<String>,
-    /// Solo para `curva`: si es `true`, el gráfico de dispersión usa eje x logarítmico.
-    pub x_log: bool,
     pub quantities: Vec<PracticeQuantity>,
     pub results: Vec<PracticeResult>,
+    /// Solo `curva`: curvas a graficar sobre el mismo barrido (una o varias, p. ej. en Filtros).
+    pub curves: Vec<PracticeCurve>,
+}
+
+/// Una curva de una práctica `curva`: un par de fórmulas de eje sobre el barrido común, con eje x
+/// logarítmico opcional. `position` ordena las curvas en el gráfico.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PracticeCurve {
+    pub id: String,
+    pub practice_id: String,
+    pub position: i64,
+    pub x_formula: String,
+    pub y_formula: String,
+    pub x_log: bool,
+}
+
+/// Datos para crear o actualizar una curva de una práctica `curva`.
+#[derive(Debug, Deserialize)]
+pub struct CurveInput {
+    pub x_formula: String,
+    pub y_formula: String,
+    #[serde(default)]
+    pub x_log: bool,
 }
 
 /// Fila cruda con la configuración de análisis de una práctica.
@@ -80,7 +101,6 @@ struct PracticeConfigRow {
     analysis_kind: Option<String>,
     x_formula: Option<String>,
     y_formula: Option<String>,
-    x_log: Option<bool>,
 }
 
 /// Devuelve la definición completa de una práctica (quantities + results).
@@ -88,26 +108,120 @@ pub async fn definition(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
-    let row: Option<PracticeConfigRow> = sqlx::query_as(
-        "SELECT analysis_kind, x_formula, y_formula, x_log FROM practices WHERE id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_optional(pool)
-    .await?;
+    let row: Option<PracticeConfigRow> =
+        sqlx::query_as("SELECT analysis_kind, x_formula, y_formula FROM practices WHERE id = ?1")
+            .bind(practice_id)
+            .fetch_optional(pool)
+            .await?;
     let Some(row) = row else {
         return Ok(None);
     };
     let quantities = quantities_for(pool, practice_id).await?;
     let results = results_for(pool, practice_id).await?;
+    let curves = curves_for(pool, practice_id).await?;
     Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
         analysis_kind: row.analysis_kind,
         x_formula: row.x_formula,
         y_formula: row.y_formula,
-        x_log: row.x_log.unwrap_or(false),
         quantities,
         results,
+        curves,
     }))
+}
+
+/// Lee las curvas de una práctica (Motor B), ordenadas por posición.
+pub async fn curves_for(
+    pool: &SqlitePool,
+    practice_id: &str,
+) -> anyhow::Result<Vec<PracticeCurve>> {
+    Ok(sqlx::query_as::<_, PracticeCurve>(
+        "SELECT id, practice_id, position, x_formula, y_formula, x_log \
+         FROM practice_curves WHERE practice_id = ?1 ORDER BY position, id",
+    )
+    .bind(practice_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Crea una curva en la práctica; asigna la siguiente posición disponible. Las fórmulas se
+/// recortan; ambas son obligatorias (una curva sin ejes no se puede graficar).
+pub async fn create_curve(
+    pool: &SqlitePool,
+    practice_id: &str,
+    input: CurveInput,
+) -> anyhow::Result<PracticeCurve> {
+    let x = input.x_formula.trim();
+    let y = input.y_formula.trim();
+    if x.is_empty() || y.is_empty() {
+        anyhow::bail!("la curva necesita las fórmulas de ambos ejes");
+    }
+    let position: (i64,) = sqlx::query_as(
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_curves WHERE practice_id = ?1",
+    )
+    .bind(practice_id)
+    .fetch_one(pool)
+    .await?;
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO practice_curves (id, practice_id, position, x_formula, y_formula, x_log) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )
+    .bind(&id)
+    .bind(practice_id)
+    .bind(position.0)
+    .bind(x)
+    .bind(y)
+    .bind(input.x_log)
+    .execute(pool)
+    .await?;
+    fetch_curve(pool, &id).await
+}
+
+/// Actualiza las fórmulas y el flag `x_log` de una curva. Devuelve `None` si no existe.
+pub async fn update_curve(
+    pool: &SqlitePool,
+    curve_id: &str,
+    input: CurveInput,
+) -> anyhow::Result<Option<PracticeCurve>> {
+    let x = input.x_formula.trim();
+    let y = input.y_formula.trim();
+    if x.is_empty() || y.is_empty() {
+        anyhow::bail!("la curva necesita las fórmulas de ambos ejes");
+    }
+    let result = sqlx::query(
+        "UPDATE practice_curves SET x_formula = ?2, y_formula = ?3, x_log = ?4 WHERE id = ?1",
+    )
+    .bind(curve_id)
+    .bind(x)
+    .bind(y)
+    .bind(input.x_log)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+    Ok(Some(fetch_curve(pool, curve_id).await?))
+}
+
+/// Elimina una curva por id. Devuelve `true` si existía.
+pub async fn delete_curve(pool: &SqlitePool, curve_id: &str) -> anyhow::Result<bool> {
+    let result = sqlx::query("DELETE FROM practice_curves WHERE id = ?1")
+        .bind(curve_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Lee una curva por su id.
+async fn fetch_curve(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeCurve> {
+    Ok(sqlx::query_as::<_, PracticeCurve>(
+        "SELECT id, practice_id, position, x_formula, y_formula, x_log \
+         FROM practice_curves WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?)
 }
 
 /// Crea una magnitud en la práctica; asigna la siguiente posición disponible.
@@ -286,14 +400,13 @@ pub async fn set_analysis_kind(
     Ok(result.rows_affected() > 0)
 }
 
-/// Actualiza las fórmulas de eje (`x`, `y`) y el flag `x_log` (eje x logarítmico, solo `curva`)
-/// de una práctica. Una cadena vacía guarda `NULL`. Devuelve `true` si la práctica existía.
+/// Actualiza las fórmulas de eje (`x`, `y`) del ajuste lineal de una práctica `regresion_lineal`.
+/// Una cadena vacía guarda `NULL`. Devuelve `true` si la práctica existía.
 pub async fn set_regression_formulas(
     pool: &SqlitePool,
     practice_id: &str,
     x_formula: &str,
     y_formula: &str,
-    x_log: bool,
 ) -> anyhow::Result<bool> {
     let norm = |s: &str| {
         let t = s.trim();
@@ -303,15 +416,12 @@ pub async fn set_regression_formulas(
             Some(t.to_string())
         }
     };
-    let result = sqlx::query(
-        "UPDATE practices SET x_formula = ?2, y_formula = ?3, x_log = ?4 WHERE id = ?1",
-    )
-    .bind(practice_id)
-    .bind(norm(x_formula))
-    .bind(norm(y_formula))
-    .bind(x_log)
-    .execute(pool)
-    .await?;
+    let result = sqlx::query("UPDATE practices SET x_formula = ?2, y_formula = ?3 WHERE id = ?1")
+        .bind(practice_id)
+        .bind(norm(x_formula))
+        .bind(norm(y_formula))
+        .execute(pool)
+        .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -878,32 +988,115 @@ mod tests {
             "p1-estadistica",
             "2*pi*f",
             "b / math::sqrt(a*a - b*b)",
-            false
         )
         .await
         .unwrap());
         let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
         assert_eq!(def.x_formula.as_deref(), Some("2*pi*f"));
         assert_eq!(def.y_formula.as_deref(), Some("b / math::sqrt(a*a - b*b)"));
-        assert!(!def.x_log);
 
-        // Una cadena vacía (o solo espacios) guarda NULL; x_log persiste el flag enviado.
-        assert!(
-            set_regression_formulas(&pool, "p1-estadistica", "   ", "", true)
-                .await
-                .unwrap()
-        );
+        // Una cadena vacía (o solo espacios) guarda NULL.
+        assert!(set_regression_formulas(&pool, "p1-estadistica", "   ", "")
+            .await
+            .unwrap());
         let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
         assert_eq!(def.x_formula, None);
         assert_eq!(def.y_formula, None);
-        assert!(def.x_log);
 
         // Práctica inexistente devuelve false.
-        assert!(
-            !set_regression_formulas(&pool, "no-existe", "f", "f", false)
-                .await
-                .unwrap()
-        );
+        assert!(!set_regression_formulas(&pool, "no-existe", "f", "f")
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn curve_crud_roundtrip_and_ordering() {
+        let (pool, _dir) = setup().await;
+        // Alta de dos curvas: quedan ordenadas por posición creciente, con x_log por curva.
+        let c1 = create_curve(
+            &pool,
+            "p1-estadistica",
+            CurveInput {
+                x_formula: " logw ".into(), // se recorta
+                y_formula: "VR / Vg".into(),
+                x_log: true,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(c1.x_formula, "logw");
+        assert!(c1.x_log);
+        create_curve(
+            &pool,
+            "p1-estadistica",
+            CurveInput {
+                x_formula: "logw".into(),
+                y_formula: "phi".into(),
+                x_log: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        assert_eq!(def.curves.len(), 2);
+        assert_eq!(def.curves[0].position, 1);
+        assert_eq!(def.curves[0].y_formula, "VR / Vg");
+        assert_eq!(def.curves[1].position, 2);
+        assert_eq!(def.curves[1].y_formula, "phi");
+
+        // Edición de una curva.
+        let updated = update_curve(
+            &pool,
+            &c1.id,
+            CurveInput {
+                x_formula: "logw".into(),
+                y_formula: "Vg / VR".into(),
+                x_log: false,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(updated.y_formula, "Vg / VR");
+        assert!(!updated.x_log);
+
+        // Baja: queda una sola curva.
+        assert!(delete_curve(&pool, &c1.id).await.unwrap());
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        assert_eq!(def.curves.len(), 1);
+        assert_eq!(def.curves[0].y_formula, "phi");
+
+        // Curva inexistente: update devuelve None, delete devuelve false.
+        assert!(update_curve(
+            &pool,
+            "no-existe",
+            CurveInput {
+                x_formula: "a".into(),
+                y_formula: "b".into(),
+                x_log: false,
+            },
+        )
+        .await
+        .unwrap()
+        .is_none());
+        assert!(!delete_curve(&pool, "no-existe").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn create_curve_requires_both_formulas() {
+        let (pool, _dir) = setup().await;
+        assert!(create_curve(
+            &pool,
+            "p1-estadistica",
+            CurveInput {
+                x_formula: "logw".into(),
+                y_formula: "  ".into(),
+                x_log: false,
+            },
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
