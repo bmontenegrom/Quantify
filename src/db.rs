@@ -15,6 +15,11 @@ pub use crate::sessions::*;
 pub use crate::submissions::*;
 pub use crate::users::*;
 
+/// Intentos fallidos consecutivos que disparan el bloqueo de login.
+pub const MAX_LOGIN_ATTEMPTS: u8 = 5;
+/// Duración del bloqueo (en minutos) tras superar [`MAX_LOGIN_ATTEMPTS`].
+pub const LOGIN_BLOCK_MINUTES: i64 = 15;
+
 /// Registro de intentos fallidos de login por email (para rate-limiting).
 #[derive(Debug, Default)]
 pub struct AttemptInfo {
@@ -22,13 +27,115 @@ pub struct AttemptInfo {
     pub count: u8,
     /// Si está seteado, no se permiten logins hasta este instante.
     pub blocked_until: Option<DateTime<Utc>>,
+    /// Instante del último intento fallido; se usa para purgar entradas inactivas.
+    pub last_seen: Option<DateTime<Utc>>,
+}
+
+impl AttemptInfo {
+    /// Indica si el email está bloqueado en el instante `now`. Si el bloqueo ya
+    /// expiró, lo limpia y resetea el contador (arranca una ventana nueva de intentos),
+    /// devolviendo `false`.
+    ///
+    /// # Ejemplos
+    ///
+    /// ```
+    /// use chrono::{Duration, Utc};
+    /// use quantify::db::AttemptInfo;
+    /// let now = Utc::now();
+    /// let mut info = AttemptInfo::default();
+    /// // Sin bloqueo: nunca está bloqueado.
+    /// assert!(!info.is_blocked(now));
+    /// // Bloqueo vigente.
+    /// info.blocked_until = Some(now + Duration::minutes(15));
+    /// info.count = 5;
+    /// assert!(info.is_blocked(now));
+    /// // Bloqueo expirado: se resetea y deja de estar bloqueado.
+    /// assert!(!info.is_blocked(now + Duration::minutes(16)));
+    /// assert_eq!(info.count, 0);
+    /// ```
+    pub fn is_blocked(&mut self, now: DateTime<Utc>) -> bool {
+        match self.blocked_until {
+            Some(until) if until > now => true,
+            Some(_) => {
+                self.blocked_until = None;
+                self.count = 0;
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Registra un intento fallido en `now`; al alcanzar [`MAX_LOGIN_ATTEMPTS`] activa
+    /// el bloqueo por [`LOGIN_BLOCK_MINUTES`] minutos.
+    ///
+    /// # Ejemplos
+    ///
+    /// ```
+    /// use chrono::Utc;
+    /// use quantify::db::{AttemptInfo, MAX_LOGIN_ATTEMPTS};
+    /// let now = Utc::now();
+    /// let mut info = AttemptInfo::default();
+    /// for _ in 0..MAX_LOGIN_ATTEMPTS - 1 {
+    ///     info.register_failure(now);
+    ///     assert!(info.blocked_until.is_none());
+    /// }
+    /// info.register_failure(now);
+    /// assert!(info.blocked_until.is_some());
+    /// ```
+    pub fn register_failure(&mut self, now: DateTime<Utc>) {
+        self.count = self.count.saturating_add(1);
+        self.last_seen = Some(now);
+        if self.count >= MAX_LOGIN_ATTEMPTS {
+            self.blocked_until = Some(now + chrono::Duration::minutes(LOGIN_BLOCK_MINUTES));
+        }
+    }
+}
+
+/// Elimina del mapa de rate-limiting las entradas inactivas: sin bloqueo vigente y
+/// sin actividad dentro de la última ventana de [`LOGIN_BLOCK_MINUTES`] minutos.
+/// Acota el crecimiento de memoria ante intentos de enumeración de emails.
+///
+/// # Ejemplos
+///
+/// ```
+/// use std::collections::HashMap;
+/// use chrono::{Duration, Utc};
+/// use quantify::db::{purge_expired_attempts, AttemptInfo};
+/// let now = Utc::now();
+/// let mut map = HashMap::new();
+/// // Entrada vieja e inactiva → se purga.
+/// map.insert("viejo@x".to_string(), AttemptInfo {
+///     count: 1,
+///     blocked_until: None,
+///     last_seen: Some(now - Duration::minutes(20)),
+/// });
+/// // Entrada con bloqueo vigente → se conserva.
+/// map.insert("bloqueado@x".to_string(), AttemptInfo {
+///     count: 5,
+///     blocked_until: Some(now + Duration::minutes(10)),
+///     last_seen: Some(now - Duration::minutes(1)),
+/// });
+/// purge_expired_attempts(&mut map, now);
+/// assert!(!map.contains_key("viejo@x"));
+/// assert!(map.contains_key("bloqueado@x"));
+/// ```
+pub fn purge_expired_attempts(map: &mut HashMap<String, AttemptInfo>, now: DateTime<Utc>) {
+    let window = chrono::Duration::minutes(LOGIN_BLOCK_MINUTES);
+    map.retain(|_, info| {
+        let blocked = info.blocked_until.map(|until| until > now).unwrap_or(false);
+        let recent = info
+            .last_seen
+            .map(|seen| now - seen < window)
+            .unwrap_or(false);
+        blocked || recent
+    });
 }
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub upload_dir: PathBuf,
-    /// Clave secreta para derivar los tokens CSRF (SHA-256 del token de sesión).
+    /// Clave secreta para derivar los tokens CSRF (HMAC-SHA256 del token de sesión).
     /// Se lee de `APP_SECRET_KEY` o se genera aleatoriamente al arranque.
     pub secret_key: String,
     /// Si es `true`, la cookie de sesión incluye el flag `Secure` (requerido con TLS).
@@ -1058,9 +1165,76 @@ pub(crate) fn clean_zero(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use std::str::FromStr;
     use tempfile::TempDir;
+
+    #[test]
+    fn rate_limit_blocks_after_max_attempts() {
+        let now = Utc::now();
+        let mut info = AttemptInfo::default();
+        // Los primeros MAX-1 fallos no bloquean.
+        for _ in 0..MAX_LOGIN_ATTEMPTS - 1 {
+            info.register_failure(now);
+            assert!(!info.is_blocked(now));
+        }
+        // El fallo número MAX dispara el bloqueo.
+        info.register_failure(now);
+        assert!(info.is_blocked(now));
+    }
+
+    #[test]
+    fn rate_limit_resets_after_block_expires() {
+        let now = Utc::now();
+        let mut info = AttemptInfo::default();
+        for _ in 0..MAX_LOGIN_ATTEMPTS {
+            info.register_failure(now);
+        }
+        assert!(info.is_blocked(now));
+        // Pasada la ventana, deja de estar bloqueado y el contador arranca de cero.
+        let later = now + Duration::minutes(LOGIN_BLOCK_MINUTES + 1);
+        assert!(!info.is_blocked(later));
+        assert_eq!(info.count, 0);
+        assert!(info.blocked_until.is_none());
+        // Un nuevo fallo NO re-bloquea inmediatamente (ventana fresca de intentos).
+        info.register_failure(later);
+        assert!(!info.is_blocked(later));
+    }
+
+    #[test]
+    fn purge_keeps_blocked_and_recent_drops_stale() {
+        let now = Utc::now();
+        let mut map = HashMap::new();
+        map.insert(
+            "stale@x".to_string(),
+            AttemptInfo {
+                count: 2,
+                blocked_until: None,
+                last_seen: Some(now - Duration::minutes(LOGIN_BLOCK_MINUTES + 5)),
+            },
+        );
+        map.insert(
+            "recent@x".to_string(),
+            AttemptInfo {
+                count: 1,
+                blocked_until: None,
+                last_seen: Some(now - Duration::minutes(1)),
+            },
+        );
+        map.insert(
+            "blocked@x".to_string(),
+            AttemptInfo {
+                count: MAX_LOGIN_ATTEMPTS,
+                blocked_until: Some(now + Duration::minutes(5)),
+                last_seen: Some(now - Duration::minutes(LOGIN_BLOCK_MINUTES + 5)),
+            },
+        );
+        purge_expired_attempts(&mut map, now);
+        assert!(!map.contains_key("stale@x"));
+        assert!(map.contains_key("recent@x"));
+        assert!(map.contains_key("blocked@x"));
+    }
 
     /// Crea un pool sobre una base SQLite temporal con el esquema ya migrado.
     /// Devuelve también el `TempDir` para mantenerlo vivo mientras dure el test.

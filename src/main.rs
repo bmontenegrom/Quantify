@@ -30,19 +30,33 @@ async fn main() -> anyhow::Result<()> {
         env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:data/quantify.db".to_string());
     let upload_dir =
         PathBuf::from(env::var("UPLOAD_DIR").unwrap_or_else(|_| "data/uploads".into()));
-    // Si no se provee una clave, se genera una aleatoria (válida hasta el próximo reinicio).
-    let secret_key = env::var("APP_SECRET_KEY").unwrap_or_else(|_| {
-        let key = uuid::Uuid::new_v4().to_string();
-        tracing::warn!(
-            "APP_SECRET_KEY no configurada — se usará una clave efímera. \
-             Los tokens CSRF se invalidarán en cada reinicio. \
-             Para deploy estable: APP_SECRET_KEY=<clave-aleatoria-larga>"
-        );
-        key
-    });
+    let configured_secret = env::var("APP_SECRET_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty());
     let secure_cookies = env::var("APP_SECURE_COOKIES")
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
         .unwrap_or(false);
+
+    // En un deploy real (cookies Secure ⇒ TLS) la clave debe ser estable: con una clave
+    // efímera, todos los tokens CSRF se invalidan en cada reinicio. Exigirla evita ese fallo.
+    let secret_key = match configured_secret {
+        Some(key) => key,
+        None if secure_cookies => {
+            anyhow::bail!(
+                "APP_SECRET_KEY es obligatoria cuando APP_SECURE_COOKIES=true (deploy con TLS). \
+                 Generá una con `uuidgen` o `openssl rand -hex 32` y configurala en el entorno."
+            );
+        }
+        None => {
+            let key = uuid::Uuid::new_v4().to_string();
+            tracing::warn!(
+                "APP_SECRET_KEY no configurada — se usará una clave efímera. \
+                 Los tokens CSRF se invalidarán en cada reinicio. \
+                 Para deploy estable: APP_SECRET_KEY=<clave-aleatoria-larga>"
+            );
+            key
+        }
+    };
 
     tokio::fs::create_dir_all(&upload_dir)
         .await

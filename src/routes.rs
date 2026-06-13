@@ -15,22 +15,25 @@ use axum::{
     Json, Router,
 };
 use chrono::Utc;
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 
 type SharedState = Arc<AppState>;
 
 // ── CSRF ──────────────────────────────────────────────────────────────────────
 
-/// Deriva el token CSRF de un token de sesión usando SHA-256(secret + ":" + session_token).
-/// Stateless: no requiere consulta a la base de datos.
+/// Deriva el token CSRF de un token de sesión usando HMAC-SHA256 con `secret_key`.
+/// Stateless: no requiere consulta a la base de datos. HMAC evita ataques de
+/// extensión de longitud que afectarían a un `SHA-256(secret || token)` plano.
 ///
 /// # Ejemplos
 ///
 /// ```
 /// let token = quantify::routes::compute_csrf("mi-sesion", "clave-secreta");
-/// // SHA-256 produce siempre 64 caracteres hexadecimales.
+/// // HMAC-SHA256 produce siempre 64 caracteres hexadecimales.
 /// assert_eq!(token.len(), 64);
 /// assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
 /// // Mismos inputs → mismo token (determinista).
@@ -39,11 +42,10 @@ type SharedState = Arc<AppState>;
 /// assert_ne!(token, quantify::routes::compute_csrf("mi-sesion", "otra-clave"));
 /// ```
 pub fn compute_csrf(session_token: &str, secret_key: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(secret_key.as_bytes());
-    hasher.update(b":");
-    hasher.update(session_token.as_bytes());
-    format!("{:x}", hasher.finalize())
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret_key.as_bytes())
+        .expect("HMAC acepta claves de cualquier longitud");
+    mac.update(session_token.as_bytes());
+    format!("{:x}", mac.finalize().into_bytes())
 }
 
 /// Middleware que valida el token CSRF en todas las solicitudes mutantes (POST/PUT/PATCH/DELETE)
@@ -86,15 +88,23 @@ pub async fn csrf_middleware(
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
 
-    match (session_tok, csrf_header) {
-        (Some(tok), Some(csrf)) if csrf == compute_csrf(&tok, &state.secret_key) => {
-            next.run(request).await
+    let valid = match (session_tok, csrf_header) {
+        (Some(tok), Some(csrf)) => {
+            let expected = compute_csrf(&tok, &state.secret_key);
+            // Comparación en tiempo constante para no filtrar el token por timing.
+            expected.as_bytes().ct_eq(csrf.as_bytes()).into()
         }
-        _ => (
+        _ => false,
+    };
+
+    if valid {
+        next.run(request).await
+    } else {
+        (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({ "error": "token CSRF inválido o ausente" })),
         )
-            .into_response(),
+            .into_response()
     }
 }
 
@@ -232,19 +242,19 @@ async fn login(
         .trim()
         .to_lowercase();
 
+    let now = Utc::now();
+
     // Verificar rate-limit antes de consultar la BD.
     {
-        let attempts = state
+        let mut attempts = state
             .login_attempts
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if let Some(info) = attempts.get(&email_key) {
-            if let Some(until) = info.blocked_until {
-                if until > Utc::now() {
-                    return Err(AppError::bad_request(
-                        "demasiados intentos fallidos, esperá 15 minutos",
-                    ));
-                }
+        if let Some(info) = attempts.get_mut(&email_key) {
+            if info.is_blocked(now) {
+                return Err(AppError::bad_request(
+                    "demasiados intentos fallidos, esperá 15 minutos",
+                ));
             }
         }
     }
@@ -262,13 +272,14 @@ async fn login(
                 attempts.remove(&email_key);
             }
             None => {
-                let info = attempts.entry(email_key.clone()).or_default();
-                info.count = info.count.saturating_add(1);
-                if info.count >= 5 {
-                    info.blocked_until = Some(Utc::now() + chrono::Duration::minutes(15));
-                }
+                attempts
+                    .entry(email_key.clone())
+                    .or_default()
+                    .register_failure(now);
             }
         }
+        // Acota el crecimiento del mapa ante enumeración de emails.
+        db::purge_expired_attempts(&mut attempts, now);
     }
 
     let Some((token, auth_user)) = result else {
@@ -311,6 +322,8 @@ async fn me(
     headers: HeaderMap,
 ) -> Result<Json<db::LoginResponse>, AppError> {
     let auth_user = current_user(&state, &headers).await?;
+    // `current_user` ya validó que la cookie de sesión existe, así que el token siempre está
+    // presente; el `unwrap_or_default` es solo defensivo y nunca debería usarse en la práctica.
     let token = session_token(&headers).unwrap_or_default();
     let user = db::me_user(&state.pool, &auth_user.id)
         .await?
