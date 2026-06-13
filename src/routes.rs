@@ -47,8 +47,11 @@ pub fn compute_csrf(session_token: &str, secret_key: &str) -> String {
 }
 
 /// Middleware que valida el token CSRF en todas las solicitudes mutantes (POST/PUT/PATCH/DELETE)
-/// excepto `POST /api/auth/login` (que no tiene sesión aún) y `POST /api/auth/logout`
+/// excepto `POST /auth/login` (que no tiene sesión aún) y `POST /auth/logout`
 /// (que no necesita protección: el daño de un logout forzado es mínimo y reversible).
+///
+/// Nota: el middleware vive dentro del router montado en `/api`, por lo que Axum
+/// le entrega la ruta ya sin ese prefijo (`/auth/login`, no `/api/auth/login`).
 pub async fn csrf_middleware(
     State(state): State<SharedState>,
     request: Request,
@@ -60,8 +63,8 @@ pub async fn csrf_middleware(
     let needs_csrf = matches!(
         *method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
-    ) && path != "/api/auth/login"
-        && path != "/api/auth/logout";
+    ) && path != "/auth/login"
+        && path != "/auth/logout";
 
     if !needs_csrf {
         return next.run(request).await;
