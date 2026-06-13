@@ -471,21 +471,65 @@ fn build_points(
 ) -> anyhow::Result<(PointSeries, Vec<String>, Vec<PointContext>)> {
     let mut warnings = Vec::new();
     let magnitude_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
+
+    // Magnitudes que son **escalares compartidos** (no por punto): se colapsan a un único valor
+    // representativo —el mismo que usa `compute_quantities` para los mensurandos: el valor dado
+    // para datos de cátedra, la media de las lecturas si es medida única— y se difunde a todos los
+    // puntos. Así nunca varían entre puntos aunque lleguen varias lecturas (vía API o entregas
+    // viejas reconvertidas de por-punto a compartida).
+    let given_ids: std::collections::HashSet<&str> = quantities
+        .iter()
+        .filter(|q| q.is_given)
+        .map(|q| q.id.as_str())
+        .collect();
+    let shared_ids: std::collections::HashSet<&str> = quantities
+        .iter()
+        .filter(|q| !q.per_point || q.is_given)
+        .map(|q| q.id.as_str())
+        .collect();
+    let shared_repr = |m: &MeasurementInput| -> f64 {
+        if given_ids.contains(m.quantity_id.as_str()) {
+            m.values.first().copied().unwrap_or(f64::NAN)
+        } else {
+            let xs = m.point_values();
+            if xs.is_empty() {
+                f64::NAN
+            } else {
+                xs.iter().sum::<f64>() / xs.len() as f64
+            }
+        }
+    };
+
     // Valor por punto (media de réplicas) y matriz punto×réplica (para las intermedias) por magnitud.
+    // Los escalares compartidos se reducen a una sola fila/valor (su representativo).
     let point_values: HashMap<&str, Vec<f64>> = measurements
         .iter()
-        .map(|m| (m.quantity_id.as_str(), m.point_values()))
+        .map(|m| {
+            let vals = if shared_ids.contains(m.quantity_id.as_str()) {
+                vec![shared_repr(m)]
+            } else {
+                m.point_values()
+            };
+            (m.quantity_id.as_str(), vals)
+        })
         .collect();
     let point_matrix: HashMap<&str, Vec<Vec<f64>>> = measurements
         .iter()
-        .map(|m| (m.quantity_id.as_str(), m.point_replica_matrix()))
+        .map(|m| {
+            let mat = if shared_ids.contains(m.quantity_id.as_str()) {
+                vec![vec![shared_repr(m)]]
+            } else {
+                m.point_replica_matrix()
+            };
+            (m.quantity_id.as_str(), mat)
+        })
         .collect();
-    // Magnitudes de un solo valor por punto (sin `point_replicas`): se difunden a todas las
-    // réplicas al evaluar una intermedia. Las replicadas NO se difunden (un conteo distinto entre
-    // ellas es dato incompleto → produce un punto no finito que se rechaza).
+    // Magnitudes de un solo valor por punto (sin `point_replicas`) y los escalares compartidos: se
+    // difunden a todas las réplicas al evaluar una intermedia. Las replicadas NO se difunden (un
+    // conteo distinto entre ellas es dato incompleto → produce un punto no finito que se rechaza).
     let broadcastable: std::collections::HashSet<&str> = measurements
         .iter()
-        .filter(|m| m.point_replicas.is_none())
+        .filter(|m| m.point_replicas.is_none() || shared_ids.contains(m.quantity_id.as_str()))
         .map(|m| m.quantity_id.as_str())
         .collect();
     let symbol_to_id: HashMap<&str, &str> = quantities
@@ -2470,6 +2514,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(a.regression.unwrap().points, vec![(0.1, 1.0), (0.2, 2.0)]);
+    }
+
+    #[test]
+    fn shared_scalar_with_multiple_readings_collapses_to_one_value() {
+        // Un escalar compartido con varias lecturas (c=[10,20]) se colapsa a su media (15) y se usa
+        // igual en todos los puntos; no varía por punto. D = px/c → {1/15, 2/15} (no {1/10, 2/20}).
+        let mut c = quantity("c");
+        c.per_point = false;
+        let quantities = vec![quantity("px"), quantity("py"), c];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: "D".into(),
+            name: "D".into(),
+            unit: "u".into(),
+            formula: "px/c".into(),
+        }];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0]),
+            measurement("py", &[1.0, 2.0]),
+            measurement("c", &[10.0, 20.0]), // dos lecturas de un escalar compartido
+        ];
+        let pts = compute_regresion(
+            &quantities,
+            &intermediates,
+            &[],
+            &[],
+            &HashMap::new(),
+            "D",
+            "py",
+            &measurements,
+        )
+        .unwrap()
+        .regression
+        .unwrap()
+        .points;
+        assert!(close(pts[0].0, 1.0 / 15.0, 1e-9));
+        assert!(close(pts[1].0, 2.0 / 15.0, 1e-9));
     }
 
     #[test]
