@@ -9,6 +9,22 @@ use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
+/// Deserializador para `Option<Option<T>>` que distingue campo ausente de `null` explícito.
+///
+/// El derive estándar de serde mapea tanto "ausente" como `null` a `None`, por lo que
+/// `Option<Option<T>>` no puede representar las tres variantes. Este helper envuelve
+/// cualquier valor presente (incluso `null`) en `Some(...)`, preservando la semántica:
+/// - campo ausente → `None`
+/// - `null` explícito → `Some(None)`
+/// - valor numérico → `Some(Some(v))`
+fn double_option<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(de).map(Some)
+}
+
 /// Datos para crear o actualizar una magnitud de entrada de una práctica.
 #[derive(Debug, Deserialize)]
 pub struct QuantityInput {
@@ -32,6 +48,13 @@ pub struct ResultInput {
     pub unit: String,
     /// Expresión matemática usando los símbolos de las magnitudes de la práctica.
     pub formula: String,
+    /// Tolerancia máxima aceptable como |Δ%|.
+    ///
+    /// `None` (campo ausente en el JSON) = no modificar la tolerancia existente.
+    /// `Some(None)` (campo presente con valor `null`) = borrar la tolerancia.
+    /// `Some(Some(v))` = fijar la tolerancia a `v`.
+    #[serde(default, deserialize_with = "double_option")]
+    pub tolerance: Option<Option<f64>>,
 }
 
 /// Definición completa de una práctica: tipo de análisis, magnitudes y mensurandos.
@@ -145,24 +168,42 @@ pub async fn create_result(
 }
 
 /// Actualiza un mensurando derivado. Devuelve `None` si no existe.
+/// Si `input.tolerance` es `None` (campo ausente), la columna `tolerance` no se modifica.
 pub async fn update_result(
     pool: &SqlitePool,
     result_id: &str,
     input: ResultInput,
 ) -> anyhow::Result<Option<PracticeResult>> {
-    let res = sqlx::query(
-        "UPDATE practice_results \
-         SET symbol = ?2, name = ?3, unit = ?4, formula = ?5 \
-         WHERE id = ?1",
-    )
-    .bind(result_id)
-    .bind(input.symbol.trim())
-    .bind(input.name.trim())
-    .bind(input.unit.trim())
-    .bind(input.formula.trim())
-    .execute(pool)
-    .await?;
-    if res.rows_affected() == 0 {
+    let rows = match input.tolerance {
+        None => sqlx::query(
+            "UPDATE practice_results \
+                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5 \
+                 WHERE id = ?1",
+        )
+        .bind(result_id)
+        .bind(input.symbol.trim())
+        .bind(input.name.trim())
+        .bind(input.unit.trim())
+        .bind(input.formula.trim())
+        .execute(pool)
+        .await?
+        .rows_affected(),
+        Some(tol) => sqlx::query(
+            "UPDATE practice_results \
+                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6 \
+                 WHERE id = ?1",
+        )
+        .bind(result_id)
+        .bind(input.symbol.trim())
+        .bind(input.name.trim())
+        .bind(input.unit.trim())
+        .bind(input.formula.trim())
+        .bind(tol)
+        .execute(pool)
+        .await?
+        .rows_affected(),
+    };
+    if rows == 0 {
         return Ok(None);
     }
     Ok(Some(fetch_result(pool, result_id).await?))
@@ -283,6 +324,7 @@ fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
         name: name.into(),
         unit: unit.into(),
         formula: formula.into(),
+        tolerance: None,
     }
 }
 
@@ -498,6 +540,26 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Fija (o borra) la tolerancia porcentual de un mensurando derivado.
+/// `None` elimina el veredicto para ese mensurando. Devuelve `true` si el mensurando
+/// existe y pertenece a `practice_id`.
+pub async fn set_result_tolerance(
+    pool: &SqlitePool,
+    result_id: &str,
+    practice_id: &str,
+    tolerance: Option<f64>,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE practice_results SET tolerance = ?2 WHERE id = ?1 AND practice_id = ?3",
+    )
+    .bind(result_id)
+    .bind(tolerance)
+    .bind(practice_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 // ── Helpers internos ─────────────────────────────────────────────────────────
 
 /// Lee las magnitudes de entrada de una práctica, ordenadas por posición y símbolo.
@@ -517,7 +579,7 @@ async fn quantities_for(
 /// Lee los mensurandos derivados de una práctica, ordenados por posición y símbolo.
 async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticeResult>> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position \
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance \
          FROM practice_results WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -539,7 +601,7 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
 /// Lee un mensurando derivado por su id.
 async fn fetch_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeResult> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position \
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance \
          FROM practice_results WHERE id = ?1",
     )
     .bind(id)
@@ -584,8 +646,8 @@ async fn insert_result(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_results \
-         (id, practice_id, symbol, name, unit, formula, position) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         (id, practice_id, symbol, name, unit, formula, position, tolerance) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -594,6 +656,7 @@ async fn insert_result(
     .bind(input.unit.trim())
     .bind(input.formula.trim())
     .bind(position)
+    .bind(input.tolerance.flatten())
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -642,6 +705,7 @@ mod tests {
             name: "Area".into(),
             unit: "mm2".into(),
             formula: "l*a".into(),
+            tolerance: None,
         }
     }
 
@@ -1080,5 +1144,33 @@ mod tests {
         assert!(reg.intercept.abs() < 1e-9);
         let tau_d = analysis.derived.iter().find(|d| d.symbol == "tau").unwrap();
         assert!((tau_d.value - tau).abs() < 1e-9);
+    }
+
+    /// Verifica que `double_option` distingue las tres variantes de `tolerance` en JSON:
+    /// campo ausente (no modificar), `null` explícito (borrar) y valor numérico (fijar).
+    #[test]
+    fn result_input_tolerance_serde_variants() {
+        // Sin campo -> None (no modificar).
+        let a: ResultInput =
+            serde_json::from_str(r#"{"symbol":"Q","name":"N","unit":"m","formula":"x"}"#).unwrap();
+        assert!(a.tolerance.is_none(), "campo ausente debe ser None");
+
+        // `null` explícito -> Some(None) (borrar).
+        let b: ResultInput = serde_json::from_str(
+            r#"{"symbol":"Q","name":"N","unit":"m","formula":"x","tolerance":null}"#,
+        )
+        .unwrap();
+        assert_eq!(b.tolerance, Some(None), "null debe ser Some(None)");
+
+        // Valor numérico -> Some(Some(v)) (fijar).
+        let c: ResultInput = serde_json::from_str(
+            r#"{"symbol":"Q","name":"N","unit":"m","formula":"x","tolerance":5.0}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            c.tolerance,
+            Some(Some(5.0)),
+            "número debe ser Some(Some(v))"
+        );
     }
 }

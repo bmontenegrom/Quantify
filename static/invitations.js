@@ -38,6 +38,9 @@ export function renderInvitations() {
   invitationBanner.querySelectorAll(".accept-invitation-btn").forEach((btn) => {
     btn.addEventListener("click", () => acceptInvitation(btn.dataset.id));
   });
+  invitationBanner.querySelectorAll(".decline-invitation-btn").forEach((btn) => {
+    btn.addEventListener("click", () => declineInvitation(btn.dataset.id));
+  });
 }
 
 function cardHtml(inv) {
@@ -55,9 +58,10 @@ function cardHtml(inv) {
         ${escapeHtml(inv.course)} · ${escapeHtml(inv.group_name)}${tableLabel}<br />
         <span class="submission-meta">Invitado por ${escapeHtml(inv.owner_name)} · vence en ${left}</span>
       </div>
-      <button type="button" class="accept-invitation-btn" data-id="${escapeHtml(inv.submission_id)}">
-        Aceptar
-      </button>
+      <div class="invitation-actions">
+        <button type="button" class="accept-invitation-btn" data-id="${escapeHtml(inv.submission_id)}">Aceptar</button>
+        <button type="button" class="decline-invitation-btn btn-secondary" data-id="${escapeHtml(inv.submission_id)}">Declinar</button>
+      </div>
     </div>
   `;
 }
@@ -68,7 +72,20 @@ export async function acceptInvitation(submissionId) {
     await postJson(`/api/submissions/${encodeURIComponent(submissionId)}/accept`, {});
     await Promise.all([loadInvitations(), loadSubmissions()]);
   } catch (error) {
-    // mostrar el mensaje amigable del servidor directamente
+    const banner = document.createElement("p");
+    banner.className = "submission-meta";
+    banner.textContent = error.message;
+    invitationBanner?.prepend(banner);
+    setTimeout(() => banner.remove(), 6000);
+  }
+}
+
+/** Declina la invitación al informe `submissionId` y recarga las invitaciones. */
+async function declineInvitation(submissionId) {
+  try {
+    await postJson(`/api/submissions/${encodeURIComponent(submissionId)}/decline`, {});
+    await loadInvitations();
+  } catch (error) {
     const banner = document.createElement("p");
     banner.className = "submission-meta";
     banner.textContent = error.message;

@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
+use std::collections::HashMap;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -194,6 +195,9 @@ pub struct SubmissionDetail {
     pub table_number: Option<i64>,
     /// Miembros del informe (owner + miembros aceptados/pendientes).
     pub members: Vec<ReportMember>,
+    /// Tolerancias porcentuales por símbolo de mensurando (solo los que tienen tolerancia fijada).
+    /// Usado por el frontend para mostrar el veredicto ✓/✗ en la tabla de comparación.
+    pub result_tolerances: HashMap<String, f64>,
 }
 
 /// Un mensurando final calculado por el estudiante (valor ± U), por símbolo.
@@ -1084,6 +1088,15 @@ pub async fn submission_detail(
     let student_results = student_results_for(pool, &row.id).await?;
     let measurements = measurements_for(pool, &row.id).await?;
     let members = report_members_for(pool, &row.id).await?;
+    let result_tolerances: HashMap<String, f64> = sqlx::query_as::<_, (String, f64)>(
+        "SELECT symbol, tolerance FROM practice_results \
+         WHERE practice_id = ?1 AND tolerance IS NOT NULL",
+    )
+    .bind(&row.practice_id)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .collect();
     // Ventana de edición: submitted_at + horas del curso. Editable si sigue abierta, la entrega
     // está pendiente y el cálculo aún no es visible (la propiedad la valida el endpoint).
     let editable_until = row.submitted_at
@@ -1115,6 +1128,7 @@ pub async fn submission_detail(
         measurements,
         table_number: row.table_number,
         members,
+        result_tolerances,
     }))
 }
 

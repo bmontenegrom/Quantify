@@ -346,15 +346,25 @@ function relPct(b, a) {
  * `u_expanded`). Itera sobre los automáticos (la fuente de los mensurandos) y empareja por símbolo.
  * Para cada uno devuelve la medida automática, la del estudiante (o `null` si no la cargó) y las
  * diferencias absoluta y relativa (%) de valor y de U. Las relativas son `null` si el denominador
- * automático es nulo o no finito. Función pura: el render arma la tabla con esto.
+ * automático es nulo o no finito.
+ *
+ * `tolerances` es un mapa `{ symbol → porcentaje_máximo }`. Si el símbolo tiene tolerancia y el
+ * alumno cargó un valor, `verdict` es `"pass"` o `"fail"`; en otro caso es `null`.
+ * Función pura: el render arma la tabla con esto.
  */
-export function compareResults(autoDerived, studentResults) {
+export function compareResults(autoDerived, studentResults, tolerances = {}) {
   const auto = autoDerived ?? [];
   const byStudent = new Map((studentResults ?? []).map((s) => [s.symbol, s]));
   return auto.map((d) => {
     const s = byStudent.get(d.symbol) ?? null;
     const sv = s ? s.value : null;
     const su = s && s.u_expanded != null ? s.u_expanded : null;
+    const dValuePct = relPct(sv, d.value);
+    const tol = tolerances[d.symbol] ?? null;
+    const verdict =
+      tol != null && dValuePct != null
+        ? Math.abs(dValuePct) <= tol ? "pass" : "fail"
+        : null;
     return {
       symbol: d.symbol,
       name: d.name,
@@ -362,9 +372,50 @@ export function compareResults(autoDerived, studentResults) {
       auto: { value: d.value, u: d.u_expanded },
       student: s ? { value: sv, u: su } : null,
       dValue: sv == null ? null : sv - d.value,
-      dValuePct: relPct(sv, d.value),
+      dValuePct,
       dU: su == null || d.u_expanded == null ? null : su - d.u_expanded,
       dUPct: relPct(su, d.u_expanded),
+      verdict,
     };
   });
+}
+
+/**
+ * Valida que las medidas del formulario sean suficientes para el tipo de análisis.
+ * Devuelve un mensaje de error en español, o `null` si todo está bien.
+ *
+ * `metaMap` es un mapa `{ [quantity_id]: { name, isGiven, isChrono } }` con la metadata de cada
+ * magnitud (extraída del DOM por el llamador). Si falta la metadata de una magnitud se usa su id
+ * como nombre. Función pura: no accede al DOM.
+ *
+ * @param {Array<{quantity_id: string, values: number[], given_u: number|null}>} measurements
+ * @param {string} analysisKind
+ * @param {Record<string, {name: string, isGiven: boolean, isChrono: boolean}>} [metaMap]
+ * @returns {string|null}
+ */
+export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
+  if (analysisKind === "regresion_lineal") {
+    const anyWithValues = measurements.some((m) => m.values.length > 0);
+    const minPoints = measurements[0]?.values.length ?? 0;
+    if (!anyWithValues || minPoints < 2) {
+      return "Cargá al menos 2 puntos completos para el ajuste lineal.";
+    }
+    return null;
+  }
+  for (const m of measurements) {
+    const meta = metaMap[m.quantity_id] ?? {};
+    const name = meta.name ?? m.quantity_id;
+    if (meta.isGiven) {
+      if (m.values.length === 0 || m.given_u == null) {
+        return `El dato "${name}" requiere valor e incertidumbre U.`;
+      }
+    } else if (meta.isChrono) {
+      if (m.values.length === 0) {
+        return `"${name}": registrá al menos una lectura con el cronómetro antes de entregar.`;
+      }
+    } else if (m.values.length === 0) {
+      return `La magnitud "${name}" no tiene lecturas cargadas.`;
+    }
+  }
+  return null;
 }
