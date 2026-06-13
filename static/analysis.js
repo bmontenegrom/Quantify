@@ -238,7 +238,7 @@ function aggregatesMarkup(aggregates) {
     .map(
       (a) =>
         `<tr><td>${escapeHtml(a.symbol)}</td><td>${escapeHtml(a.name)}</td>` +
-        `<td>${format(a.value)} <span class="submission-meta">${escapeHtml(a.unit)}</span></td></tr>`,
+        `<td>${a.value == null || !isFinite(a.value) ? '<span class="error-inline">—</span>' : format(a.value)} <span class="submission-meta">${escapeHtml(a.unit)}</span></td></tr>`,
     )
     .join("");
   return `

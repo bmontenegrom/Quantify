@@ -677,6 +677,7 @@ export async function openPracticeWorkspace(practiceId) {
   state.editingCurveId = null;
   state.editingIntermediateId = null;
   state.editingPointResultId = null;
+  state.editingAggregateId = null;
   state.practiceDefinition = null;
   renderPracticesPage();
   selectView("practices");
@@ -691,6 +692,7 @@ export async function openPracticeWorkspace(practiceId) {
 export function closePracticeWorkspace() {
   state.activePracticeId = null;
   state.practiceDefinition = null;
+  state.editingAggregateId = null;
   state.practiceActionStatus = "";
   state.editingQuantityId = null;
   state.editingResultId = null;
