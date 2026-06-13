@@ -624,6 +624,9 @@ fn point_intermediate(
     for r in 0..n_reps {
         let bound: HashMap<&str, f64> = tree
             .iter_variable_identifiers()
+            // Las constantes (`pi`, `e`) las precarga `eval_compiled`: no bindear acá (si no, las
+            // pisaríamos con NaN al tratarlas como intermedia anterior).
+            .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
             .map(|v| {
                 if symbol_to_id.contains_key(v) {
                     let reps = reps_at(v);
@@ -2154,6 +2157,31 @@ mod tests {
             a.regression.unwrap().points,
             vec![(15.0, 100.0), (45.0, 200.0)]
         );
+    }
+
+    #[test]
+    fn intermediate_formula_can_use_constants() {
+        // Una intermedia con una constante (pi): A = pi*r*r, r de un solo valor por punto.
+        // pi lo precarga el evaluador; no debe quedar bindeado a NaN. r=[2,3] → A=pi*4, pi*9.
+        let quantities = vec![quantity("r"), quantity("py")];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p1-estadistica".into(),
+            position: 0,
+            symbol: "A".into(),
+            name: "Area".into(),
+            unit: "u".into(),
+            formula: "pi*r*r".into(),
+        }];
+        let measurements = vec![
+            measurement("r", &[2.0, 3.0]),
+            measurement("py", &[10.0, 20.0]),
+        ];
+        let a =
+            compute_regresion(&quantities, &intermediates, &[], "A", "py", &measurements).unwrap();
+        let points = a.regression.unwrap().points;
+        assert!(close(points[0].0, std::f64::consts::PI * 4.0, 1e-9));
+        assert!(close(points[1].0, std::f64::consts::PI * 9.0, 1e-9));
     }
 
     #[test]
