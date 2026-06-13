@@ -803,6 +803,41 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
     }
 }
 
+/// Magnitud medida **por punto con réplicas** (regresión/curva): grilla de `replicas` por punto.
+fn qty_replicas(
+    symbol: &str,
+    name: &str,
+    unit: &str,
+    quantity: &str,
+    replicas: i64,
+) -> QuantityInput {
+    QuantityInput {
+        symbol: symbol.into(),
+        name: name.into(),
+        unit: unit.into(),
+        repeated: true,
+        quantity: Some(quantity.into()),
+        is_given: false,
+        replicas_per_point: Some(replicas),
+        per_point: true,
+    }
+}
+
+/// Escalar **compartido** medido una sola vez (no por punto, no dato de cátedra): p. ej. la
+/// densidad medida con densímetro al final de la práctica.
+fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
+    QuantityInput {
+        symbol: symbol.into(),
+        name: name.into(),
+        unit: unit.into(),
+        repeated: false,
+        quantity: Some(quantity.into()),
+        is_given: false,
+        replicas_per_point: None,
+        per_point: false,
+    }
+}
+
 /// Construye un `ResultInput` (mensurando derivado) para el seed de definiciones.
 fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
@@ -814,21 +849,23 @@ fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     }
 }
 
-/// Siembra la definición de una práctica (magnitudes + mensurandos). Idempotente:
-/// no hace nada si la práctica ya tiene magnitudes cargadas.
+/// Siembra la definición de una práctica (magnitudes + mensurandos). Idempotente: no hace nada si
+/// la práctica ya tiene magnitudes. Devuelve `true` si la sembró ahora (`false` si ya existía),
+/// para que el llamador siembre los extras (intermedias/derivadas) solo en el alta fresca y no los
+/// re-cree si el docente los borró luego.
 async fn seed_practice(
     pool: &SqlitePool,
     practice_id: &str,
     quantities: &[QuantityInput],
     results: &[ResultInput],
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let count: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1")
             .bind(practice_id)
             .fetch_one(pool)
             .await?;
     if count.0 > 0 {
-        return Ok(());
+        return Ok(false);
     }
     let mut conn = pool.acquire().await?;
     for (pos, q) in quantities.iter().enumerate() {
@@ -837,7 +874,7 @@ async fn seed_practice(
     for (pos, r) in results.iter().enumerate() {
         insert_result(&mut conn, practice_id, pos as i64 + 1, r).await?;
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Siembra las definiciones iniciales de las prácticas (idempotente por práctica).
@@ -1022,6 +1059,65 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         &[res("tau", "Constante de tiempo RC", "s", "slope")],
     )
     .await?;
+
+    // Fluidos I — viscosidad por Hagen-Poiseuille. Por altura (punto) se miden V y t con 2
+    // réplicas; Q = V/t (intermedia, promedio por punto). Ejes: 1/Q vs h/Q^2 (set en seed_practices).
+    // Escalares compartidos: R, L, g (cátedra) y rho (medida única). `Temp` se registra solo como
+    // referencia (para buscar la viscosidad de tablas a esa temperatura): no entra en ninguna
+    // fórmula y va sin incertidumbre. Mensurando mu desde la pendiente; Reynolds por corrida.
+    let fresh = seed_practice(
+        pool,
+        "fluidos-1",
+        &[
+            qty("h", "Altura del Mariotte", "m", false, "longitud"),
+            qty_replicas("V", "Volumen recogido", "m3", "volumen", 2),
+            qty_replicas("t", "Tiempo de descarga", "s", "tiempo", 2),
+            qty_given("R", "Radio del capilar", "m", "longitud"),
+            qty_given("L", "Longitud del capilar", "m", "longitud"),
+            qty_given("g", "Aceleracion de la gravedad", "m/s2", "aceleracion"),
+            qty_shared("rho", "Densidad del agua", "kg/m3", "densidad"),
+            qty_shared(
+                "Temp",
+                "Temperatura del agua (referencia)",
+                "C",
+                "temperatura",
+            ),
+        ],
+        &[res(
+            "mu",
+            "Viscosidad del agua",
+            "Pa.s",
+            "slope*(pi*rho*g*R^4)/(8*L)",
+        )],
+    )
+    .await?;
+    // Intermedia Q (Motor C) y derivada por corrida Reynolds (Motor E): solo en el alta fresca,
+    // para no re-crearlas si el docente las edita/borra luego (`analysis_kind`/fórmulas se preservan
+    // en `seed_practices`).
+    if fresh {
+        create_intermediate(
+            pool,
+            "fluidos-1",
+            IntermediateInput {
+                symbol: "Q".into(),
+                name: "Caudal medio".into(),
+                unit: "m3/s".into(),
+                formula: "V/t".into(),
+            },
+        )
+        .await?;
+        create_point_result(
+            pool,
+            "fluidos-1",
+            PointResultInput {
+                symbol: "Re".into(),
+                name: "Numero de Reynolds".into(),
+                unit: "".into(),
+                formula: "2*rho*Q/(pi*mu*R)".into(),
+            },
+        )
+        .await?;
+    }
 
     Ok(())
 }

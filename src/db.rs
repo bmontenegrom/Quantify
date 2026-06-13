@@ -921,6 +921,17 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             Some("2*pi*f"),
             Some("b / math::sqrt(a*a - b*b)"),
         ),
+        // Fluidos I (Hagen-Poiseuille): por altura se miden V y t (replicas); Q = V/t (intermedia,
+        // Motor C). Ajuste de h/Q^2 vs 1/Q -> la viscosidad sale de la pendiente. R, L, g (catedra)
+        // y rho (medida unica) son escalares compartidos; Reynolds es una derivada por corrida (E).
+        (
+            "fluidos-1",
+            "Fluidos I",
+            "Viscosidad del agua por la ley de Hagen-Poiseuille: ajuste lineal de h/Q^2 contra 1/Q (Q = caudal medio por altura).",
+            "regresion_lineal",
+            Some("1/Q"),
+            Some("h/(Q*Q)"),
+        ),
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
@@ -1036,6 +1047,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "p2-corriente-continua",
         "p3-relajacion",
         "p3-relajacion-desfasaje",
+        "fluidos-1",
     ] {
         sqlx::query(
             r#"
@@ -1439,7 +1451,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 5);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 6);
     }
 
     #[test]
