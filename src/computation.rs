@@ -2699,6 +2699,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn seeded_fluidos_1_computes_regression_mu_and_reynolds() {
+        // La práctica Fluidos I sembrada: regresión h/Q² vs 1/Q con Q = V/t (intermedia), escalares
+        // compartidos (R, L, g de cátedra; rho medida única) → μ de la pendiente, Reynolds por corrida.
+        let (pool, _dir) = setup().await;
+        let def = crate::practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(def.analysis_kind.as_deref(), Some("regresion_lineal"));
+        assert_eq!(def.intermediates.len(), 1, "Q");
+        assert_eq!(def.point_results.len(), 1, "Re");
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let mk = |sym: &str,
+                  values: Vec<f64>,
+                  given_u: Option<f64>,
+                  point_replicas: Option<Vec<Vec<f64>>>| {
+            MeasurementInput {
+                quantity_id: id(sym),
+                instrument_id: None,
+                scale_id: None,
+                values,
+                given_u,
+                point_replicas,
+                operator_replicas: None,
+            }
+        };
+        let measurements = vec![
+            mk("h", vec![0.30, 0.10], None, None), // un valor por punto (2 alturas)
+            mk(
+                "V",
+                vec![],
+                None,
+                Some(vec![vec![1e-4, 1e-4], vec![1e-4, 1e-4]]),
+            ),
+            mk(
+                "t",
+                vec![],
+                None,
+                Some(vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
+            ),
+            mk("R", vec![5e-4], Some(1e-6), None),
+            mk("L", vec![0.10], Some(1e-4), None),
+            mk("g", vec![9.8], Some(0.01), None),
+            mk("rho", vec![1000.0], None, None),
+            mk("Temp", vec![20.0], None, None),
+        ];
+        let a = analyze(&pool, "fluidos-1", &measurements).await.unwrap();
+        let reg = a.regression.expect("hay ajuste");
+        assert_eq!(reg.points.len(), 2);
+        // μ derivado de la pendiente + escalares compartidos: finito.
+        let mu = a.derived.iter().find(|d| d.symbol == "mu").expect("mu");
+        assert!(mu.value.is_finite() && mu.value > 0.0);
+        // Reynolds: una columna por corrida, valores finitos.
+        let re = a
+            .point_results
+            .iter()
+            .find(|p| p.symbol == "Re")
+            .expect("Re");
+        assert_eq!(re.values.len(), 2);
+        assert!(re.values.iter().all(|v| v.is_finite()));
+    }
+
+    #[tokio::test]
     async fn analyze_routes_curva_to_scatter() {
         let (pool, _dir) = setup().await;
         // Configuramos P1 como curva con ejes sobre sus propias magnitudes (T vs t_med).

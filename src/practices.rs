@@ -803,6 +803,41 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
     }
 }
 
+/// Magnitud medida **por punto con réplicas** (regresión/curva): grilla de `replicas` por punto.
+fn qty_replicas(
+    symbol: &str,
+    name: &str,
+    unit: &str,
+    quantity: &str,
+    replicas: i64,
+) -> QuantityInput {
+    QuantityInput {
+        symbol: symbol.into(),
+        name: name.into(),
+        unit: unit.into(),
+        repeated: true,
+        quantity: Some(quantity.into()),
+        is_given: false,
+        replicas_per_point: Some(replicas),
+        per_point: true,
+    }
+}
+
+/// Escalar **compartido** medido una sola vez (no por punto, no dato de cátedra): p. ej. la
+/// densidad medida con densímetro al final de la práctica.
+fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
+    QuantityInput {
+        symbol: symbol.into(),
+        name: name.into(),
+        unit: unit.into(),
+        repeated: false,
+        quantity: Some(quantity.into()),
+        is_given: false,
+        replicas_per_point: None,
+        per_point: false,
+    }
+}
+
 /// Construye un `ResultInput` (mensurando derivado) para el seed de definiciones.
 fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
@@ -1022,6 +1057,59 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         &[res("tau", "Constante de tiempo RC", "s", "slope")],
     )
     .await?;
+
+    // Fluidos I — viscosidad por Hagen-Poiseuille. Por altura (punto) se miden V y t con 2
+    // réplicas; Q = V/t (intermedia, promedio por punto). Ejes: 1/Q vs h/Q^2 (set en seed_practices).
+    // Escalares compartidos: R, L, g (cátedra) y rho (medida única); Temp sin incertidumbre.
+    // Mensurando mu desde la pendiente; Reynolds como derivada por corrida.
+    seed_practice(
+        pool,
+        "fluidos-1",
+        &[
+            qty("h", "Altura del Mariotte", "m", false, "longitud"),
+            qty_replicas("V", "Volumen recogido", "m3", "volumen", 2),
+            qty_replicas("t", "Tiempo de descarga", "s", "tiempo", 2),
+            qty_given("R", "Radio del capilar", "m", "longitud"),
+            qty_given("L", "Longitud del capilar", "m", "longitud"),
+            qty_given("g", "Aceleracion de la gravedad", "m/s2", "aceleracion"),
+            qty_shared("rho", "Densidad del agua", "kg/m3", "densidad"),
+            qty_shared("Temp", "Temperatura del agua", "C", "temperatura"),
+        ],
+        &[res(
+            "mu",
+            "Viscosidad del agua",
+            "Pa.s",
+            "slope*(pi*rho*g*R^4)/(8*L)",
+        )],
+    )
+    .await?;
+    // Intermedia Q (Motor C) y derivada por corrida Reynolds (Motor E), idempotentes.
+    if intermediates_for(pool, "fluidos-1").await?.is_empty() {
+        create_intermediate(
+            pool,
+            "fluidos-1",
+            IntermediateInput {
+                symbol: "Q".into(),
+                name: "Caudal medio".into(),
+                unit: "m3/s".into(),
+                formula: "V/t".into(),
+            },
+        )
+        .await?;
+    }
+    if point_results_for(pool, "fluidos-1").await?.is_empty() {
+        create_point_result(
+            pool,
+            "fluidos-1",
+            PointResultInput {
+                symbol: "Re".into(),
+                name: "Numero de Reynolds".into(),
+                unit: "".into(),
+                formula: "2*rho*Q/(pi*mu*R)".into(),
+            },
+        )
+        .await?;
+    }
 
     Ok(())
 }
