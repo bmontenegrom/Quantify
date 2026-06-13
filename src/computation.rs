@@ -274,16 +274,20 @@ pub fn compute(
     })
 }
 
-/// Calcula el [`FormAnalysis`] de una práctica `regresion_lineal`: empareja las mediciones por
-/// punto, evalúa las fórmulas de eje `x_formula`/`y_formula` en cada punto, ajusta una recta
-/// (`analysis::linear_regression`) y deriva los mensurandos desde `slope`/`intercept`.
-pub fn compute_regresion(
+/// Serie de puntos `(x, y)` evaluados desde las fórmulas de eje.
+type PointSeries = Vec<(f64, f64)>;
+
+/// Empareja las mediciones por punto y evalúa las fórmulas de eje `x_formula`/`y_formula`,
+/// devolviendo la serie de puntos `(x, y)` junto con las advertencias acumuladas. Compartido por
+/// los caminos `regresion_lineal` y `curva`. Falla si hay menos de 2 puntos o si un punto produce
+/// un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
+fn build_points(
     quantities: &[PracticeQuantity],
-    results: &[PracticeResult],
     x_formula: &str,
     y_formula: &str,
     measurements: &[MeasurementInput],
-) -> anyhow::Result<FormAnalysis> {
+    too_few_msg: &str,
+) -> anyhow::Result<(PointSeries, Vec<String>)> {
     let mut warnings = Vec::new();
     let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
     let by_quantity: HashMap<&str, &MeasurementInput> = measurements
@@ -304,7 +308,7 @@ pub fn compute_regresion(
         );
     }
     if n_points < 2 {
-        anyhow::bail!("se necesitan al menos 2 puntos para el ajuste lineal");
+        anyhow::bail!("{too_few_msg}");
     }
 
     let x_tree = compile_formula(x_formula, &symbols)?;
@@ -329,6 +333,26 @@ pub fn compute_regresion(
         }
         points.push((x, y));
     }
+    Ok((points, warnings))
+}
+
+/// Calcula el [`FormAnalysis`] de una práctica `regresion_lineal`: empareja las mediciones por
+/// punto, evalúa las fórmulas de eje `x_formula`/`y_formula` en cada punto, ajusta una recta
+/// (`analysis::linear_regression`) y deriva los mensurandos desde `slope`/`intercept`.
+pub fn compute_regresion(
+    quantities: &[PracticeQuantity],
+    results: &[PracticeResult],
+    x_formula: &str,
+    y_formula: &str,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<FormAnalysis> {
+    let (points, mut warnings) = build_points(
+        quantities,
+        x_formula,
+        y_formula,
+        measurements,
+        "se necesitan al menos 2 puntos para el ajuste lineal",
+    )?;
 
     let fit = analysis::linear_regression("x", "y", &points)
         .ok_or_else(|| anyhow::anyhow!("no se pudo ajustar la recta (¿todos los x iguales?)"))?;
@@ -375,53 +399,16 @@ pub fn compute_curva(
     x_log: bool,
     measurements: &[MeasurementInput],
 ) -> anyhow::Result<FormAnalysis> {
-    let mut warnings = Vec::new();
-    let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    let by_quantity: HashMap<&str, &MeasurementInput> = measurements
-        .iter()
-        .map(|m| (m.quantity_id.as_str(), m))
-        .collect();
+    let (points, warnings) = build_points(
+        quantities,
+        x_formula,
+        y_formula,
+        measurements,
+        "se necesitan al menos 2 puntos para graficar la curva",
+    )?;
 
-    // Cantidad de puntos = mínimo de réplicas entre las magnitudes (deben venir parejas).
-    let lengths: Vec<usize> = quantities
-        .iter()
-        .map(|q| by_quantity.get(q.id.as_str()).map_or(0, |m| m.values.len()))
-        .collect();
-    let n_points = lengths.iter().copied().min().unwrap_or(0);
-    if lengths.iter().any(|&l| l != n_points) {
-        warnings.push(
-            "Las magnitudes tienen distinta cantidad de puntos; se usa la menor cantidad comun."
-                .into(),
-        );
-    }
-    if n_points < 2 {
-        anyhow::bail!("se necesitan al menos 2 puntos para graficar la curva");
-    }
-
-    let x_tree = compile_formula(x_formula, &symbols)?;
-    let y_tree = compile_formula(y_formula, &symbols)?;
-
-    let mut points = Vec::with_capacity(n_points);
-    for i in 0..n_points {
-        let bound: HashMap<&str, f64> = quantities
-            .iter()
-            .filter_map(|q| {
-                by_quantity
-                    .get(q.id.as_str())
-                    .map(|m| (q.symbol.as_str(), m.values[i]))
-            })
-            .collect();
-        let x = eval_compiled(&x_tree, &bound);
-        let y = eval_compiled(&y_tree, &bound);
-        if !x.is_finite() || !y.is_finite() {
-            anyhow::bail!(
-                "un punto produjo un valor no finito al evaluar los ejes (revisa las formulas y las lecturas)"
-            );
-        }
-        if x_log && x <= 0.0 {
-            anyhow::bail!("el eje x es logaritmico pero un punto tiene x <= 0");
-        }
-        points.push((x, y));
+    if x_log && points.iter().any(|(x, _)| *x <= 0.0) {
+        anyhow::bail!("el eje x es logaritmico pero un punto tiene x <= 0");
     }
 
     Ok(FormAnalysis {
@@ -1397,5 +1384,68 @@ mod tests {
             measurement("py", &[1.0, 2.0]),
         ];
         assert!(compute_curva(&quantities, "px", "py", true, &measurements).is_err());
+    }
+
+    /// Mediciones reales para una magnitud sembrada, buscando su id por símbolo en la definición.
+    fn measurement_for(
+        def: &crate::practices::PracticeDefinition,
+        symbol: &str,
+        values: &[f64],
+    ) -> MeasurementInput {
+        let id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == symbol)
+            .unwrap()
+            .id
+            .clone();
+        MeasurementInput {
+            quantity_id: id,
+            instrument_id: None,
+            scale_id: None,
+            values: values.to_vec(),
+            given_u: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn analyze_routes_curva_to_scatter() {
+        let (pool, _dir) = setup().await;
+        // Configuramos P1 como curva con ejes sobre sus propias magnitudes (T vs t_med).
+        crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+            .await
+            .unwrap();
+        crate::practices::set_regression_formulas(&pool, "p1-estadistica", "T", "t_med", false)
+            .await
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        // Todas las magnitudes deben traer la misma cantidad de puntos (build_points usa el
+        // mínimo común); L no se usa en los ejes pero igual necesita valores parejos.
+        let measurements = vec![
+            measurement_for(&def, "T", &[1.0, 2.0, 3.0]),
+            measurement_for(&def, "L", &[1.0, 1.0, 1.0]),
+            measurement_for(&def, "t_med", &[4.0, 5.0, 6.0]),
+        ];
+        let analysis = analyze(&pool, "p1-estadistica", &measurements)
+            .await
+            .unwrap();
+        assert!(analysis.regression.is_none());
+        assert!(analysis.derived.is_empty());
+        let scatter = analysis.scatter.expect("la curva debe producir scatter");
+        assert_eq!(scatter.points, vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]);
+    }
+
+    #[tokio::test]
+    async fn analyze_curva_without_formulas_errors() {
+        let (pool, _dir) = setup().await;
+        crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+            .await
+            .unwrap();
+        // Sin fórmulas de eje, el dispatcher debe fallar con un error claro (no entrar al cálculo).
+        let result = analyze(&pool, "p1-estadistica", &[]).await;
+        assert!(result.is_err());
     }
 }
