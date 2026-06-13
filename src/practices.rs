@@ -1904,6 +1904,8 @@ mod tests {
             &def.quantities,
             &def.intermediates,
             &def.results,
+            &def.point_results,
+            &Default::default(),
             def.x_formula.as_deref().unwrap(),
             def.y_formula.as_deref().unwrap(),
             &measurements,

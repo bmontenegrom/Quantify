@@ -8,7 +8,7 @@
 
 use crate::analysis;
 use crate::db::{self, AuthUser, InstrumentScale, PracticeQuantity, PracticeResult};
-use crate::practices::PracticeIntermediate;
+use crate::practices::{PracticeIntermediate, PracticePointResult};
 use crate::uncertainty::{self, BModel, QuantityResult, ScaleSpec};
 use chrono::Utc;
 use evalexpr::{build_operator_tree, ContextWithMutableVariables, HashMapContext, Node, Value};
@@ -147,6 +147,16 @@ pub struct OperatorComputation {
     pub derived: Vec<DerivedComputation>,
 }
 
+/// Magnitud derivada **por punto, post-ajuste** (Motor E): un valor por corrida (mismo orden que
+/// los puntos del ajuste). Sin incertidumbre (la técnica las usa con cifras significativas).
+#[derive(Debug, Serialize)]
+pub struct PointResultComputation {
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    pub values: Vec<f64>,
+}
+
 /// Resultado completo del cálculo de una entrega por formulario. Según el `analysis_kind` se
 /// llena un camino: `quantities` (estadístico), `regression` (ajuste lineal) o `scatters` (curva:
 /// una o varias curvas sobre el mismo barrido). `derived` y `warnings` aplican a los caminos que
@@ -164,6 +174,9 @@ pub struct FormAnalysis {
     pub derived: Vec<DerivedComputation>,
     #[serde(default)]
     pub operators: Vec<OperatorComputation>,
+    /// Solo regresión (Motor E): magnitudes derivadas por punto (tabla por corrida, p. ej. Reynolds).
+    #[serde(default)]
+    pub point_results: Vec<PointResultComputation>,
     pub warnings: Vec<String>,
 }
 
@@ -377,6 +390,7 @@ pub fn compute(
             scatters: Vec::new(),
             derived,
             operators: Vec::new(),
+            point_results: Vec::new(),
             warnings,
         });
     }
@@ -431,6 +445,7 @@ pub fn compute(
         scatters: Vec::new(),
         derived: Vec::new(),
         operators,
+        point_results: Vec::new(),
         warnings,
     })
 }
@@ -439,9 +454,13 @@ pub fn compute(
 type PointSeries = Vec<(f64, f64)>;
 
 /// Empareja las mediciones por punto y evalúa las fórmulas de eje `x_formula`/`y_formula`,
-/// devolviendo la serie de puntos `(x, y)` junto con las advertencias acumuladas. Compartido por
-/// los caminos `regresion_lineal` y `curva`. Falla si hay menos de 2 puntos o si un punto produce
-/// un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
+/// devolviendo la serie de puntos `(x, y)`, las advertencias, y el **contexto por punto** (valor de
+/// cada magnitud e intermedia en cada punto). Compartido por `regresion_lineal` y `curva`. Las
+/// magnitudes con `per_point = false` o `is_given` son escalares compartidos: se difunden a todos
+/// los puntos y **no** condicionan la cantidad de puntos. Falla si hay menos de 2 puntos o si un
+/// punto produce un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
+type PointContext = HashMap<String, f64>;
+
 fn build_points(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
@@ -449,7 +468,7 @@ fn build_points(
     y_formula: &str,
     measurements: &[MeasurementInput],
     too_few_msg: &str,
-) -> anyhow::Result<(PointSeries, Vec<String>)> {
+) -> anyhow::Result<(PointSeries, Vec<String>, Vec<PointContext>)> {
     let mut warnings = Vec::new();
     let magnitude_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
     // Valor por punto (media de réplicas) y matriz punto×réplica (para las intermedias) por magnitud.
@@ -472,6 +491,13 @@ fn build_points(
     let symbol_to_id: HashMap<&str, &str> = quantities
         .iter()
         .map(|q| (q.symbol.as_str(), q.id.as_str()))
+        .collect();
+    // Magnitudes que se miden por punto (van en la serie): solo estas condicionan la cantidad de
+    // puntos. Las `per_point = false` o `is_given` son escalares compartidos que se difunden.
+    let per_point_syms: std::collections::HashSet<&str> = quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .map(|q| q.symbol.as_str())
         .collect();
 
     // Las intermedias (Motor C) se compilan **en orden**: cada una puede usar las magnitudes y las
@@ -513,24 +539,23 @@ fn build_points(
         }
     }
 
-    // Magnitudes que condicionan los puntos: las referenciadas por los ejes, más las referenciadas
-    // por las intermedias necesarias (p. ej. x=1/Q, Q=V/t → V y t condicionan los puntos).
-    let mut conditioning: std::collections::HashSet<&str> = quantities
+    // Cantidad de puntos: solo las magnitudes **medidas por punto** referenciadas por los ejes —o
+    // por las intermedias necesarias— condicionan (los escalares compartidos se difunden).
+    let mut conditioning: std::collections::HashSet<&str> = axis_refs
         .iter()
-        .filter(|q| axis_refs.contains(q.symbol.as_str()))
-        .map(|q| q.symbol.as_str())
+        .copied()
+        .filter(|s| per_point_syms.contains(s))
         .collect();
     for (it, tree) in &compiled_intermediates {
         if needed.contains(it.symbol.as_str()) {
             for v in tree.iter_variable_identifiers() {
-                if symbol_to_id.contains_key(v) {
+                if per_point_syms.contains(v) {
                     conditioning.insert(v);
                 }
             }
         }
     }
 
-    // Cantidad de puntos = mínimo de puntos entre las magnitudes que condicionan (deben venir parejas).
     let lengths: Vec<usize> = conditioning
         .iter()
         .filter_map(|sym| symbol_to_id.get(sym))
@@ -547,15 +572,26 @@ fn build_points(
         anyhow::bail!("{too_few_msg}");
     }
 
+    // Valor por punto de una magnitud: el del punto `i`; los escalares (un solo valor) se difunden.
+    let magnitude_at = |id: &str, i: usize| -> f64 {
+        point_values
+            .get(id)
+            .and_then(|v| v.get(i).or_else(|| v.last()))
+            .copied()
+            .unwrap_or(f64::NAN)
+    };
+
     let mut points = Vec::with_capacity(n_points);
+    let mut contexts = Vec::with_capacity(n_points);
     for i in 0..n_points {
-        // Intermedias necesarias en orden: cada una se evalúa por réplica (las magnitudes de un
-        // solo valor y las intermedias anteriores se difunden) y se promedia.
+        // Contexto del punto: todas las magnitudes (difundiendo escalares) + todas las intermedias
+        // (en orden; cada una puede usar las anteriores). Sirve a los ejes y a las derivadas por punto.
+        let mut context: PointContext = quantities
+            .iter()
+            .map(|q| (q.symbol.clone(), magnitude_at(q.id.as_str(), i)))
+            .collect();
         let mut intermediate_values: HashMap<&str, f64> = HashMap::new();
         for (it, tree) in &compiled_intermediates {
-            if !needed.contains(it.symbol.as_str()) {
-                continue;
-            }
             let value = point_intermediate(
                 tree,
                 &point_matrix,
@@ -565,18 +601,10 @@ fn build_points(
                 i,
             );
             intermediate_values.insert(it.symbol.as_str(), value);
+            context.insert(it.symbol.clone(), value);
         }
-        // Binding de ejes: media por punto de las magnitudes + valores por punto de las intermedias.
-        let mut bound: HashMap<&str, f64> = quantities
-            .iter()
-            .filter(|q| axis_refs.contains(q.symbol.as_str()))
-            .filter_map(|q| {
-                point_values
-                    .get(q.id.as_str())
-                    .map(|v| (q.symbol.as_str(), v[i]))
-            })
-            .collect();
-        bound.extend(&intermediate_values);
+
+        let bound: HashMap<&str, f64> = context.iter().map(|(k, v)| (k.as_str(), *v)).collect();
         let x = eval_compiled(&x_tree, &bound);
         let y = eval_compiled(&y_tree, &bound);
         if !x.is_finite() || !y.is_finite() {
@@ -585,8 +613,9 @@ fn build_points(
             );
         }
         points.push((x, y));
+        contexts.push(context);
     }
-    Ok((points, warnings))
+    Ok((points, warnings, contexts))
 }
 
 /// Valor de una magnitud intermedia en el punto `i`: evalúa su fórmula para cada réplica del punto
@@ -650,17 +679,25 @@ fn point_intermediate(
 }
 
 /// Calcula el [`FormAnalysis`] de una práctica `regresion_lineal`: empareja las mediciones por
-/// punto, evalúa las fórmulas de eje `x_formula`/`y_formula` en cada punto, ajusta una recta
-/// (`analysis::linear_regression`) y deriva los mensurandos desde `slope`/`intercept`.
+/// punto, evalúa las fórmulas de eje en cada punto, ajusta una recta y deriva los mensurandos.
+///
+/// Los mensurandos (`results`) se derivan de `slope`/`intercept` **y de los escalares compartidos**
+/// (magnitudes con `per_point = false` o `is_given`), con propagación de incertidumbre — p. ej.
+/// μ = slope·(π·ρ·g·R⁴)/(8·L). Las magnitudes derivadas **por punto** (`point_results`, Motor E) se
+/// evalúan tras el ajuste con el contexto de cada punto + slope/intercept + los mensurandos
+/// (p. ej. el número de Reynolds por corrida).
+#[allow(clippy::too_many_arguments)]
 pub fn compute_regresion(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
     results: &[PracticeResult],
+    point_results: &[PracticePointResult],
+    scales: &HashMap<String, InstrumentScale>,
     x_formula: &str,
     y_formula: &str,
     measurements: &[MeasurementInput],
 ) -> anyhow::Result<FormAnalysis> {
-    let (points, mut warnings) = build_points(
+    let (points, mut warnings, contexts) = build_points(
         quantities,
         intermediates,
         x_formula,
@@ -672,19 +709,66 @@ pub fn compute_regresion(
     let fit = analysis::linear_regression("x", "y", &points)
         .ok_or_else(|| anyhow::anyhow!("no se pudo ajustar la recta (¿todos los x iguales?)"))?;
 
-    // Mensurandos derivados de la pendiente/intercepto.
-    let means: HashMap<String, f64> = [
-        ("slope".to_string(), fit.slope),
-        ("intercept".to_string(), fit.intercept),
-    ]
-    .into();
-    let us: HashMap<String, f64> = [
-        ("slope".to_string(), fit.u_slope),
-        ("intercept".to_string(), fit.u_intercept),
-    ]
-    .into();
-    let allowed = vec!["slope".to_string(), "intercept".to_string()];
+    // Escalares compartidos (valor ± u) disponibles para los mensurandos, junto a slope/intercept.
+    let by_quantity: HashMap<&str, &MeasurementInput> = measurements
+        .iter()
+        .map(|m| (m.quantity_id.as_str(), m))
+        .collect();
+    let shared: Vec<&PracticeQuantity> = quantities
+        .iter()
+        .filter(|q| !q.per_point || q.is_given)
+        .collect();
+    let mut means: HashMap<String, f64> = HashMap::new();
+    let mut us: HashMap<String, f64> = HashMap::new();
+    compute_quantities(
+        &shared,
+        &by_quantity,
+        scales,
+        None,
+        &mut means,
+        &mut us,
+        &mut warnings,
+    )?;
+    means.insert("slope".into(), fit.slope);
+    means.insert("intercept".into(), fit.intercept);
+    us.insert("slope".into(), fit.u_slope);
+    us.insert("intercept".into(), fit.u_intercept);
+    let mut allowed: Vec<String> = shared.iter().map(|q| q.symbol.clone()).collect();
+    allowed.push("slope".into());
+    allowed.push("intercept".into());
     let derived = derive_results(results, &allowed, &means, &us, &mut warnings)?;
+
+    // Derivadas por punto (post-ajuste): contexto del punto + slope/intercept + mensurandos.
+    let mut extras: HashMap<&str, f64> = HashMap::new();
+    extras.insert("slope", fit.slope);
+    extras.insert("intercept", fit.intercept);
+    for d in &derived {
+        extras.insert(d.symbol.as_str(), d.value);
+    }
+    let mut pr_allowed: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
+    pr_allowed.extend(intermediates.iter().map(|it| it.symbol.clone()));
+    pr_allowed.extend(results.iter().map(|r| r.symbol.clone()));
+    pr_allowed.push("slope".into());
+    pr_allowed.push("intercept".into());
+    let mut point_results_out = Vec::with_capacity(point_results.len());
+    for pr in point_results {
+        let tree = compile_formula(&pr.formula, &pr_allowed)?;
+        let values: Vec<f64> = contexts
+            .iter()
+            .map(|ctx| {
+                let mut bound: HashMap<&str, f64> =
+                    ctx.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+                bound.extend(&extras);
+                eval_compiled(&tree, &bound)
+            })
+            .collect();
+        point_results_out.push(PointResultComputation {
+            symbol: pr.symbol.clone(),
+            name: pr.name.clone(),
+            unit: pr.unit.clone(),
+            values,
+        });
+    }
 
     Ok(FormAnalysis {
         quantities: Vec::new(),
@@ -701,6 +785,7 @@ pub fn compute_regresion(
         scatters: Vec::new(),
         derived,
         operators: Vec::new(),
+        point_results: point_results_out,
         warnings,
     })
 }
@@ -718,7 +803,7 @@ pub fn compute_curva(
     let mut scatters = Vec::with_capacity(curves.len());
     let mut warnings = Vec::new();
     for curve in curves {
-        let (points, mut curve_warnings) = build_points(
+        let (points, mut curve_warnings, _ctx) = build_points(
             quantities,
             intermediates,
             curve.x_formula,
@@ -752,6 +837,7 @@ pub fn compute_curva(
         scatters,
         derived: Vec::new(),
         operators: Vec::new(),
+        point_results: Vec::new(),
         warnings,
     })
 }
@@ -870,6 +956,8 @@ pub async fn analyze(
             &definition.quantities,
             &definition.intermediates,
             &definition.results,
+            &definition.point_results,
+            &scales,
             x_formula,
             y_formula,
             measurements,
@@ -1298,6 +1386,27 @@ mod tests {
             point_replicas: None,
             operator_replicas: None,
         }
+    }
+
+    /// Atajo de test: `compute_regresion` sin derivadas por punto ni escalas (firma previa).
+    fn reg(
+        quantities: &[PracticeQuantity],
+        intermediates: &[PracticeIntermediate],
+        results: &[PracticeResult],
+        x: &str,
+        y: &str,
+        measurements: &[MeasurementInput],
+    ) -> anyhow::Result<FormAnalysis> {
+        compute_regresion(
+            quantities,
+            intermediates,
+            results,
+            &[],
+            &HashMap::new(),
+            x,
+            y,
+            measurements,
+        )
     }
 
     fn curve<'a>(x_formula: &'a str, y_formula: &'a str, x_log: bool) -> CurveSpec<'a> {
@@ -2064,7 +2173,7 @@ mod tests {
             measurement("px", &[0.0, 1.0, 2.0, 3.0]),
             measurement("py", &[1.0, 3.0, 5.0, 7.0]),
         ];
-        let a = compute_regresion(&quantities, &[], &results, "px", "py", &measurements).unwrap();
+        let a = reg(&quantities, &[], &results, "px", "py", &measurements).unwrap();
         let reg = a.regression.unwrap();
         assert!(close(reg.slope, 2.0, 1e-9));
         assert!(close(reg.intercept, 1.0, 1e-9));
@@ -2112,8 +2221,7 @@ mod tests {
             rep(vec![vec![1.0, 2.0], vec![1.0, 2.0]], "q-t"),
             measurement("py", &[100.0, 200.0]),
         ];
-        let a =
-            compute_regresion(&quantities, &intermediates, &[], "Q", "py", &measurements).unwrap();
+        let a = reg(&quantities, &intermediates, &[], "Q", "py", &measurements).unwrap();
         let reg = a.regression.unwrap();
         assert_eq!(reg.points, vec![(7.5, 100.0), (15.0, 200.0)]);
     }
@@ -2152,8 +2260,7 @@ mod tests {
             point_rep("q-t", vec![vec![1.0, 2.0], vec![1.0, 2.0]]),
             measurement("py", &[100.0, 200.0]),
         ];
-        let a =
-            compute_regresion(&quantities, &intermediates, &[], "D", "py", &measurements).unwrap();
+        let a = reg(&quantities, &intermediates, &[], "D", "py", &measurements).unwrap();
         assert_eq!(
             a.regression.unwrap().points,
             vec![(15.0, 100.0), (45.0, 200.0)]
@@ -2178,8 +2285,7 @@ mod tests {
             measurement("r", &[2.0, 3.0]),
             measurement("py", &[10.0, 20.0]),
         ];
-        let a =
-            compute_regresion(&quantities, &intermediates, &[], "A", "py", &measurements).unwrap();
+        let a = reg(&quantities, &intermediates, &[], "A", "py", &measurements).unwrap();
         let points = a.regression.unwrap().points;
         assert!(close(points[0].0, std::f64::consts::PI * 4.0, 1e-9));
         assert!(close(points[1].0, std::f64::consts::PI * 9.0, 1e-9));
@@ -2204,9 +2310,7 @@ mod tests {
             point_rep("q-t", vec![vec![1.0], vec![1.0]]), // replicada pero con 1 sola réplica
             measurement("py", &[100.0, 200.0]),
         ];
-        assert!(
-            compute_regresion(&quantities, &intermediates, &[], "Q", "py", &measurements).is_err()
-        );
+        assert!(reg(&quantities, &intermediates, &[], "Q", "py", &measurements).is_err());
     }
 
     #[test]
@@ -2239,8 +2343,7 @@ mod tests {
             point_rep("q-t", vec![vec![1.0, 2.0], vec![1.0, 2.0]]),
             measurement("py", &[100.0, 200.0]),
         ];
-        let a =
-            compute_regresion(&quantities, &intermediates, &[], "R", "py", &measurements).unwrap();
+        let a = reg(&quantities, &intermediates, &[], "R", "py", &measurements).unwrap();
         assert_eq!(
             a.regression.unwrap().points,
             vec![(15.0, 100.0), (30.0, 200.0)]
@@ -2261,6 +2364,8 @@ mod tests {
             &quantities,
             &[],
             &results,
+            &[],
+            &HashMap::new(),
             "2*pi*f",
             "math::sqrt(a)",
             &measurements,
@@ -2285,10 +2390,56 @@ mod tests {
     }
 
     #[test]
+    fn compute_regresion_shared_scalar_measurand_and_point_result() {
+        // Motor E: px,py por punto (slope=2, intercept=0); c escalar compartido=10. Mensurando
+        // m = slope*c = 20 (usa un escalar, no solo slope). Derivada por punto Re = px*m por corrida.
+        let mut c = quantity("c");
+        c.per_point = false; // escalar compartido (se carga una vez)
+        let quantities = vec![quantity("px"), quantity("py"), c];
+        let results = vec![result("m", "slope * c")];
+        let point_results = vec![PracticePointResult {
+            id: "pr1".into(),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: "Re".into(),
+            name: "Reynolds".into(),
+            unit: "".into(),
+            formula: "px * m".into(),
+        }];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0]),
+            measurement("py", &[2.0, 4.0]),
+            measurement("c", &[10.0]),
+        ];
+        let a = compute_regresion(
+            &quantities,
+            &[],
+            &results,
+            &point_results,
+            &HashMap::new(),
+            "px",
+            "py",
+            &measurements,
+        )
+        .unwrap();
+        // El mensurando usa el escalar compartido + slope: m = 2 * 10 = 20.
+        assert!(close(
+            a.derived.iter().find(|d| d.symbol == "m").unwrap().value,
+            20.0,
+            1e-9
+        ));
+        // La derivada por punto da un valor por corrida: Re = px * m = {20, 40}.
+        let re = a.point_results.iter().find(|p| p.symbol == "Re").unwrap();
+        assert_eq!(re.values.len(), 2);
+        assert!(close(re.values[0], 20.0, 1e-9));
+        assert!(close(re.values[1], 40.0, 1e-9));
+    }
+
+    #[test]
     fn compute_regresion_needs_at_least_two_points() {
         let quantities = vec![quantity("px"), quantity("py")];
         let measurements = vec![measurement("px", &[1.0]), measurement("py", &[2.0])];
-        assert!(compute_regresion(&quantities, &[], &[], "px", "py", &measurements).is_err());
+        assert!(reg(&quantities, &[], &[], "px", "py", &measurements).is_err());
     }
 
     #[test]
@@ -2396,7 +2547,7 @@ mod tests {
                 operator_replicas: None,
             },
         ];
-        let a = compute_regresion(&quantities, &[], &[], "px", "py", &measurements).unwrap();
+        let a = reg(&quantities, &[], &[], "px", "py", &measurements).unwrap();
         let reg = a.regression.unwrap();
         assert_eq!(reg.points, vec![(1.0, 4.0), (2.0, 10.0)]);
         // Pendiente de (1,4)-(2,10) = 6.
