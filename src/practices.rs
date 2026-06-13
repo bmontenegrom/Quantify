@@ -849,21 +849,23 @@ fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     }
 }
 
-/// Siembra la definición de una práctica (magnitudes + mensurandos). Idempotente:
-/// no hace nada si la práctica ya tiene magnitudes cargadas.
+/// Siembra la definición de una práctica (magnitudes + mensurandos). Idempotente: no hace nada si
+/// la práctica ya tiene magnitudes. Devuelve `true` si la sembró ahora (`false` si ya existía),
+/// para que el llamador siembre los extras (intermedias/derivadas) solo en el alta fresca y no los
+/// re-cree si el docente los borró luego.
 async fn seed_practice(
     pool: &SqlitePool,
     practice_id: &str,
     quantities: &[QuantityInput],
     results: &[ResultInput],
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let count: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1")
             .bind(practice_id)
             .fetch_one(pool)
             .await?;
     if count.0 > 0 {
-        return Ok(());
+        return Ok(false);
     }
     let mut conn = pool.acquire().await?;
     for (pos, q) in quantities.iter().enumerate() {
@@ -872,7 +874,7 @@ async fn seed_practice(
     for (pos, r) in results.iter().enumerate() {
         insert_result(&mut conn, practice_id, pos as i64 + 1, r).await?;
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Siembra las definiciones iniciales de las prácticas (idempotente por práctica).
@@ -1060,9 +1062,10 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
 
     // Fluidos I — viscosidad por Hagen-Poiseuille. Por altura (punto) se miden V y t con 2
     // réplicas; Q = V/t (intermedia, promedio por punto). Ejes: 1/Q vs h/Q^2 (set en seed_practices).
-    // Escalares compartidos: R, L, g (cátedra) y rho (medida única); Temp sin incertidumbre.
-    // Mensurando mu desde la pendiente; Reynolds como derivada por corrida.
-    seed_practice(
+    // Escalares compartidos: R, L, g (cátedra) y rho (medida única). `Temp` se registra solo como
+    // referencia (para buscar la viscosidad de tablas a esa temperatura): no entra en ninguna
+    // fórmula y va sin incertidumbre. Mensurando mu desde la pendiente; Reynolds por corrida.
+    let fresh = seed_practice(
         pool,
         "fluidos-1",
         &[
@@ -1073,7 +1076,12 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_given("L", "Longitud del capilar", "m", "longitud"),
             qty_given("g", "Aceleracion de la gravedad", "m/s2", "aceleracion"),
             qty_shared("rho", "Densidad del agua", "kg/m3", "densidad"),
-            qty_shared("Temp", "Temperatura del agua", "C", "temperatura"),
+            qty_shared(
+                "Temp",
+                "Temperatura del agua (referencia)",
+                "C",
+                "temperatura",
+            ),
         ],
         &[res(
             "mu",
@@ -1083,8 +1091,10 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         )],
     )
     .await?;
-    // Intermedia Q (Motor C) y derivada por corrida Reynolds (Motor E), idempotentes.
-    if intermediates_for(pool, "fluidos-1").await?.is_empty() {
+    // Intermedia Q (Motor C) y derivada por corrida Reynolds (Motor E): solo en el alta fresca,
+    // para no re-crearlas si el docente las edita/borra luego (`analysis_kind`/fórmulas se preservan
+    // en `seed_practices`).
+    if fresh {
         create_intermediate(
             pool,
             "fluidos-1",
@@ -1096,8 +1106,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             },
         )
         .await?;
-    }
-    if point_results_for(pool, "fluidos-1").await?.is_empty() {
         create_point_result(
             pool,
             "fluidos-1",
