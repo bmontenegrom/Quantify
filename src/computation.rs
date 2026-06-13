@@ -638,17 +638,22 @@ async fn load_scales(
     Ok(scales)
 }
 
-/// Persiste las mediciones de una entrega en `submission_measurements`. Cubre los tres modos:
-/// - **estadístico**: réplicas de una magnitud → `point_index = 0`, `replicate_index = réplica`.
-/// - **por puntos sin réplicas** (regresión/curva): un valor por punto → `point_index = 0`,
-///   `replicate_index = punto` (compatibilidad con el formato previo).
+/// Persiste las mediciones de una entrega en `submission_measurements`. Cubre los tres modos
+/// (según `point_based`, que indica si la entrega es por puntos — regresión/curva):
+/// - **estadístico** (`point_based = false`): réplicas de una magnitud → `point_index = 0`,
+///   `replicate_index = réplica`.
+/// - **por puntos sin réplicas** (`point_based = true`, `values`): un valor por punto →
+///   `point_index = punto`, `replicate_index = 0`.
 /// - **por puntos con réplicas** (`point_replicas`): `point_index = punto`, `replicate_index = réplica`.
 ///
-/// Los datos de cátedra (`given_u`) guardan su único valor con la U en `value_u`.
+/// El `point_index` explícito (no dejar el punto en `replicate_index`) permite reconstruir la
+/// serie al editar agrupando por punto. Los datos de cátedra (`given_u`) guardan su único valor
+/// con la U en `value_u`.
 async fn insert_measurements(
     conn: &mut sqlx::SqliteConnection,
     submission_id: &str,
     measurements: &[MeasurementInput],
+    point_based: bool,
 ) -> anyhow::Result<()> {
     for measurement in measurements {
         // Filas (point_index, replicate_index, value, value_u) según el modo de la medición.
@@ -669,7 +674,16 @@ async fn insert_measurements(
                     .first()
                     .map(|&v| vec![(0i64, 0i64, v, measurement.given_u)])
                     .unwrap_or_default()
+            } else if point_based {
+                // Un valor por punto: el índice va en point_index (replicate_index = 0).
+                measurement
+                    .values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| (i as i64, 0i64, v, None))
+                    .collect()
             } else {
+                // Réplicas estadísticas: un solo punto (0), el índice va en replicate_index.
                 measurement
                     .values
                     .iter()
@@ -833,7 +847,8 @@ pub async fn create_form_submission(
     .execute(&mut *tx)
     .await?;
 
-    insert_measurements(&mut tx, &id, &input.measurements).await?;
+    let point_based = analysis.regression.is_some() || analysis.scatter.is_some();
+    insert_measurements(&mut tx, &id, &input.measurements, point_based).await?;
     tx.commit().await?;
 
     // Invitar a los demás alumnos de la mesa (fuera de la tx para no bloquear).
@@ -886,7 +901,8 @@ pub async fn update_form_submission(
         .execute(&mut *tx)
         .await?;
 
-    insert_measurements(&mut tx, submission_id, measurements).await?;
+    let point_based = analysis.regression.is_some() || analysis.scatter.is_some();
+    insert_measurements(&mut tx, submission_id, measurements, point_based).await?;
     tx.commit().await?;
 
     db::submission_detail(pool, submission_id)
@@ -1165,6 +1181,110 @@ mod tests {
         let meta = detail.measurement_meta.expect("meta persistida");
         assert_eq!(meta["q1"]["bins"], 8);
         assert_eq!(meta["q1"]["discarded"][0], 9.9);
+    }
+
+    #[tokio::test]
+    async fn point_based_submission_stores_point_index_per_point() {
+        // Una entrega por puntos (curva/regresión) guarda cada punto con su point_index (no en
+        // replicate_index), para que la edición reconstruya la serie completa. Cubre el fix del
+        // bug de prefill. Se usa `curva` (misma ruta de persistencia point_based, sin derivar
+        // mensurandos que en p1 referencian T/L y no encajarían en el modo regresión).
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        // P1 como curva: T (un valor por punto) vs t_med (réplicas por punto).
+        crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+            .await
+            .unwrap();
+        crate::practices::set_regression_formulas(&pool, "p1-estadistica", "T", "t_med", false)
+            .await
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let qid = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let input = FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![
+                MeasurementInput {
+                    quantity_id: qid("T"),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![1.0, 2.0, 3.0],
+                    given_u: None,
+                    point_replicas: None,
+                },
+                MeasurementInput {
+                    quantity_id: qid("t_med"),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![],
+                    given_u: None,
+                    point_replicas: Some(vec![vec![4.0, 4.2], vec![5.0, 5.1], vec![6.0, 5.9]]),
+                },
+            ],
+            meta: None,
+            table_number: None,
+        };
+        let detail = create_form_submission(&pool, &user, input).await.unwrap();
+        let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
+
+        // T: un valor por punto → point_index 0,1,2 y replicate_index 0.
+        let mut t_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T")).collect();
+        t_rows.sort_by_key(|m| m.point_index);
+        assert_eq!(t_rows.len(), 3);
+        for (i, m) in t_rows.iter().enumerate() {
+            assert_eq!(m.point_index, i as i64);
+            assert_eq!(m.replicate_index, 0);
+            assert_eq!(m.value, (i + 1) as f64);
+        }
+
+        // t_med: réplicas por punto → point_index = punto, replicate_index = réplica.
+        let tmed_rows: Vec<_> = rows
+            .iter()
+            .filter(|m| m.quantity_id == qid("t_med"))
+            .collect();
+        assert_eq!(tmed_rows.len(), 6); // 3 puntos x 2 réplicas
+        assert!(tmed_rows
+            .iter()
+            .any(|m| m.point_index == 0 && m.replicate_index == 1 && m.value == 4.2));
+        assert!(tmed_rows
+            .iter()
+            .any(|m| m.point_index == 2 && m.replicate_index == 0 && m.value == 6.0));
     }
 
     #[tokio::test]
