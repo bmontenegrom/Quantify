@@ -844,13 +844,32 @@ pub fn compute_regresion(
         agg_values.insert(d.symbol.clone(), d.value);
     }
     let last = contexts.len() - 1; // >= 1: build_points garantiza al menos 2 puntos.
-    let endpoint_syms: Vec<String> = quantities
-        .iter()
-        .filter(|q| q.per_point && !q.is_given)
-        .map(|q| q.symbol.clone())
-        .chain(intermediates.iter().map(|it| it.symbol.clone()))
-        .collect();
-    for sym in &endpoint_syms {
+
+    // Alias de extremos para magnitudes por punto: se leen desde la serie cruda de cada
+    // magnitud (no desde `contexts`, que puede repetir el último valor o truncar si la
+    // magnitud no está en el conjunto de condicionamiento de los ejes).
+    for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
+        let sym = &q.symbol;
+        let series = by_quantity
+            .get(q.id.as_str())
+            .map(|m| m.point_values())
+            .unwrap_or_default();
+        let n = series.len();
+        let at = |i: usize| series.get(i).copied().unwrap_or(f64::NAN);
+        agg_values.insert(format!("{sym}_first"), at(0));
+        agg_values.insert(format!("{sym}_first2"), at(1));
+        agg_values.insert(
+            format!("{sym}_last"),
+            if n == 0 { f64::NAN } else { series[n - 1] },
+        );
+        agg_values.insert(
+            format!("{sym}_last2"),
+            if n < 2 { f64::NAN } else { series[n - 2] },
+        );
+    }
+    // Intermedias: no tienen serie independiente; se usan los contextos de la regresión.
+    for it in intermediates {
+        let sym = &it.symbol;
         let at = |i: usize| contexts[i].get(sym).copied().unwrap_or(f64::NAN);
         agg_values.insert(format!("{sym}_first"), at(0));
         agg_values.insert(format!("{sym}_first2"), at(1));
@@ -2644,6 +2663,64 @@ mod tests {
             "debe avisar del agregado no finito: {:?}",
             a.warnings
         );
+    }
+
+    #[test]
+    fn compute_regresion_aggregate_endpoints_use_own_series_not_contexts() {
+        // z es magnitud por punto que NO aparece en los ejes (x=px, y=py): build_points la omite
+        // del conditioning set y n_points = 3 (de px/py). Con la lógica anterior z_last leía
+        // contexts[2]["z"] = z[2] = 30 aunque z tiene 4 filas (z[3]=40 es el extremo correcto).
+        // Con la corrección se usa la serie propia de z, no contexts.
+        let quantities = vec![quantity("px"), quantity("py"), quantity("z")];
+        let agg = |symbol: &str, formula: &str| PracticeAggregate {
+            id: format!("a-{symbol}"),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "".into(),
+            formula: formula.into(),
+        };
+        let aggregates = vec![
+            agg("z_end", "z_last"),
+            agg("z_end2", "z_last2"),
+            agg("z_beg", "z_first"),
+            agg("z_beg2", "z_first2"),
+        ];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[2.0, 4.0, 6.0]),
+            measurement("z", &[10.0, 20.0, 30.0, 40.0]),
+        ];
+        let a = compute_regresion(
+            &quantities,
+            &[],
+            &[],
+            &[],
+            &aggregates,
+            &HashMap::new(),
+            "px",
+            "py",
+            &measurements,
+        )
+        .unwrap();
+        let val = |sym: &str| {
+            a.aggregates
+                .iter()
+                .find(|x| x.symbol == sym)
+                .unwrap_or_else(|| panic!("falta agregado {sym}"))
+                .value
+        };
+        assert!(
+            close(val("z_end"), 40.0, 1e-9),
+            "z_last debe ser el último de la serie de z"
+        );
+        assert!(
+            close(val("z_end2"), 30.0, 1e-9),
+            "z_last2 debe ser el penúltimo de la serie de z"
+        );
+        assert!(close(val("z_beg"), 10.0, 1e-9));
+        assert!(close(val("z_beg2"), 20.0, 1e-9));
     }
 
     #[test]
