@@ -940,6 +940,7 @@ mod tests {
             quantity: None,
             position: 0,
             is_given: false,
+            replicas_per_point: None,
         }
     }
 

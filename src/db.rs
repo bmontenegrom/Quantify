@@ -171,6 +171,9 @@ pub struct PracticeQuantity {
     pub position: i64,
     /// `true` si es un dato dado (valor ± U entregado por la cátedra), no medido por el alumno.
     pub is_given: bool,
+    /// Solo `repeated` en regresión/curva: cuántas réplicas por punto muestra la grilla de carga.
+    /// `None` = medida única por punto (sin grilla de réplicas).
+    pub replicas_per_point: Option<i64>,
 }
 
 /// Mensurando derivado de una práctica (determinación indirecta).
@@ -601,6 +604,17 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .await?;
     // Incertidumbre expandida U del dato aportado por el alumno.
     add_column_if_missing(pool, "submission_measurements", "value_u", "REAL").await?;
+    // Réplicas esperadas por punto (solo magnitudes `repeated` en regresión/curva con grilla).
+    add_column_if_missing(pool, "practice_quantities", "replicas_per_point", "INTEGER").await?;
+    // Índice de punto en análisis por puntos (regresión/curva). En estadístico/CSV queda 0;
+    // `replicate_index` pasa a ser la réplica dentro del punto.
+    add_column_if_missing(
+        pool,
+        "submission_measurements",
+        "point_index",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
 
     // Número de mesa del informe compartido (NULL en entregas legacy/CSV).
     add_column_if_missing(pool, "submissions", "table_number", "INTEGER").await?;
