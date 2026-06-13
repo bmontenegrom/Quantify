@@ -430,9 +430,10 @@ export function compareResults(autoDerived, studentResults, tolerances = {}) {
  */
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
   if (analysisKind === "regresion_lineal" || analysisKind === "curva") {
-    const anyWithValues = measurements.some((m) => m.values.length > 0);
-    const minPoints = measurements[0]?.values.length ?? 0;
-    if (!anyWithValues || minPoints < 2) {
+    // Cantidad de puntos por magnitud: réplicas por punto si las hay, si no los valores planos.
+    const pointCount = (m) => m.point_replicas?.length ?? m.values.length;
+    const points = Math.max(0, ...measurements.map(pointCount));
+    if (points < 2) {
       return analysisKind === "curva"
         ? "Cargá al menos 2 puntos completos para graficar la curva."
         : "Cargá al menos 2 puntos completos para el ajuste lineal.";

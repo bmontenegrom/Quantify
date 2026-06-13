@@ -224,6 +224,9 @@ function renderQuantityForm(qty, practiceId) {
         <input type="checkbox" name="repeated" ${qty ? (qty.repeated ? "checked" : "") : "checked"} />
         Admite réplicas (tipo A)
       </label>
+      <label>Réplicas por punto (regresión/curva)
+        <input name="replicas_per_point" type="number" min="1" step="1" value="${v("replicas_per_point")}" placeholder="sin grilla" />
+      </label>
       <div class="detail-actions">
         <button type="submit">${qty ? "Guardar" : "Agregar"}</button>
         ${qty ? `<button type="button" data-cancel-quantity>Cancelar</button>` : ""}
@@ -391,12 +394,14 @@ async function savePracticeRegressionFormulas(event) {
 
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
+  const replicas = Number(raw.replicas_per_point);
   return {
     symbol: raw.symbol,
     name: raw.name,
     unit: raw.unit,
     quantity: raw.quantity || null,
     repeated: "repeated" in raw,
+    replicas_per_point: raw.replicas_per_point && replicas > 0 ? replicas : null,
   };
 }
 

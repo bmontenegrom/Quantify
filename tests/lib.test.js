@@ -487,6 +487,24 @@ test("validateMeasurements: curva necesita ≥2 puntos y avisa con texto de curv
   assert.equal(valid, null);
 });
 
+test("validateMeasurements: cuenta puntos desde point_replicas (réplicas por punto)", () => {
+  // La magnitud de eje 'y' trae réplicas por punto; 'x' un valor por punto. 2 puntos → válido.
+  const ok = validateMeasurements(
+    [
+      { quantity_id: "x", values: [1, 2], given_u: null },
+      { quantity_id: "y", values: [], given_u: null, point_replicas: [[4, 5], [6, 7]] },
+    ],
+    "regresion_lineal",
+  );
+  assert.equal(ok, null);
+  // Un solo punto con réplicas → insuficiente.
+  const few = validateMeasurements(
+    [{ quantity_id: "y", values: [], given_u: null, point_replicas: [[4, 5]] }],
+    "regresion_lineal",
+  );
+  assert.ok(typeof few === "string");
+});
+
 test("validateMeasurements: estadistico reporta mensurando sin lecturas", () => {
   const meta = { q1: { name: "Longitud", isGiven: false, isChrono: false } };
   const err = validateMeasurements([{ quantity_id: "q1", values: [], given_u: null }], "estadistico", meta);
