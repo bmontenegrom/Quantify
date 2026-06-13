@@ -309,3 +309,88 @@ Detectadas con el código ya construido. Ordenadas por valor/riesgo; ninguna blo
 ### Fase 6 (pulido, sin cambios)
 - Completar P2/P3 con definiciones reales confirmadas; documentar formato y fórmulas en el README;
   revisar seeds y eventual migración de datos del curso.
+
+---
+
+# Plan de expansión — Fases 13–16 (2026-06-12)
+
+Insumos: hojas de resultados reales del curso (9 prácticas, convertidas con markitdown desde
+`OneDrive/Escritorio/tecnicas 103/informes`) y decisiones del docente:
+**no habrá gráfico de exponencial alguna**, y la app **va a operar desde PCs distintas**
+(deja de ser localhost single-machine).
+
+## Hallazgos de los informes reales
+
+Prácticas ya modeladas — confirmadas por las hojas:
+
+- **Estadística (P1)**: péndulo; serie de T por operador (n≈100), L dado, deriva g=4π²L/T²
+  por operador, y t½/τ/Q del decaimiento. La hoja real trabaja con **3 operadores** (3 series
+  de la misma magnitud) — hoy la app modela 1 serie por magnitud. Decidir con el docente si
+  cada operador es una entrega o si se agrega la dimensión "operador".
+- **Continua (P2)**: serie y paralelo confirman las definiciones sembradas (I, VR1–VR3; Req, I).
+  La hoja tiene una **Segunda Parte: curva de potencia** — tabla I(µA), R(kΩ), P(W) y búsqueda
+  del máximo (R_Pmax teórico, P_max). No es regresión: **solo se grafican los puntos**.
+- **RC (P3)**: partes 1 (τ directo) y 2 (desfasaje) confirman lo sembrado.
+
+Prácticas nuevas a modelar (6):
+
+| práctica | tipo | magnitudes clave | derivados / salida |
+|----------|------|------------------|--------------------|
+| **CA (RLC)** | estadístico | R, C, L, Vg, f_trabajo; por canal: a, b (Lissajous) | f_res teórica = 1/(2π√(LC)) vs experimental; módulos I, VR, VC, VL teóricos vs experimentales; desfasajes φ = asin(b/a) teóricos vs medidos |
+| **Filtros** | curva (sin ajuste) | barrido en f: VRpp, Vgpp, a, b por punto | f_pasaje y f_bloqueo teóricas vs experimentales; curvas VR/Vg vs log(ω) y φ vs log(ω) — **eje x logarítmico** |
+| **Fluidos I** | regresión | radio y largo del capilar, ρ, g; por altura: volumen, tiempo (réplicas) | caudal por altura; ajuste Q/h² vs 1/Q → viscosidad del agua de la pendiente; Reynolds por corrida |
+| **Fluidos II** | regresión | radios capilar/recipiente, g; serie H_i, t_i | ajuste √H₁−√H_i vs Δt → pendiente, ordenada, M_medio vs M_teórico |
+| **Hidrostática y TS** | estadístico | masa goma, ρ fluido, g; 3 medidas de pesas/posiciones; marco: m, d, d₁ | E (empuje), ρ_goma por medida y promedio; γ por medida y promedio |
+| **Viscosidad (Stokes)** | regresión | ρ acero, ρ fluido, g, distancia; por esfera: radio, tiempos (réplicas) | velocidad límite por esfera, Reynolds; ajuste v_lím vs R² → viscosidad de la glicerina |
+
+## Fase 13 (P0) — Seguridad multi-PC y despliegue
+
+Prerequisito del uso real desde varias PCs; antes de exponer el server a la red.
+
+1. **CSRF**: token por sesión (devuelto en `/api/session`), header `X-CSRF-Token` exigido en
+   todo POST/DELETE; `fetchJson`/`postJson` lo agregan centralizadamente en `api.js`.
+2. **Cookies**: `Secure` (detrás de TLS) y `HttpOnly` (verificar), `SameSite=Lax` se mantiene.
+3. **Despliegue LAN**: documentar topología (server en una máquina, clientes por IP), bind
+   configurable (`0.0.0.0`), reverse proxy con TLS (caddy local o autofirmado); script de
+   arranque. Backups: copia programada de `data/quantify.db`.
+4. **Hardening login**: rate-limit básico de intentos por IP/usuario (en memoria).
+
+## Fase 14 (P1) — `analysis_kind = "curva"` (puntos sin ajuste)
+
+Nuevo tipo de análisis: como `regresion_lineal` (tabla de puntos, fórmulas de eje x/y) pero
+**sin ajuste** — solo scatter SVG + tabla. Opción `x_log: bool` para Filtros (log ω).
+Habilita P2-parte2 (curva de potencia) y las dos curvas de Filtros (evaluar si una práctica
+admite **dos curvas** o se modelan como dos partes). Sin esto no se pueden sembrar Filtros
+ni la parte 2 de Continua.
+
+## Fase 15 (P1) — Sembrar las 6 prácticas nuevas + P2-parte2
+
+Con el docente, validando fórmulas contra las hojas reales (sección Hallazgos):
+1. P2-parte2 curva de potencia (depende de Fase 14).
+2. Hidrostática y TS; Viscosidad; Fluidos I; Fluidos II (el motor actual alcanza).
+3. CA (RLC) — verificar que `evalexpr` cubra `asin` para los desfasajes.
+4. Filtros (depende de Fase 14, eje log).
+Decisión pendiente con el docente: operadores múltiples en Estadística.
+
+## Fase 16 (P2) — Rediseño visual (moderno, vistoso, eficiente)
+
+Mantener vanilla JS/CSS (sin framework). Candidatos, a validar con screenshots Playwright:
+1. **Design tokens**: consolidar paleta/espaciado/radios en `:root` (hoy hay vars sueltas),
+   modo oscuro con `prefers-color-scheme` + toggle.
+2. **Tipografía e identidad**: stack tipográfico mejorado (Inter/variable), jerarquía de
+   títulos, marca simple para login y sidebar.
+3. **Componentes**: tarjetas con sombras suaves y hover, tablas con sticky header y zebra,
+   estados vacíos, toasts para feedback (hoy: texto inline), skeletons de carga.
+4. **Navegación**: sidebar colapsable con iconos, breadcrumbs en vistas de detalle,
+   transiciones de vista discretas.
+5. **Accesibilidad/eficiencia**: focus visible consistente, contraste AA, `prefers-reduced-motion`.
+
+## Descartado
+
+- ~~Gráfico de la curva exponencial en P3-parte1~~ — el docente confirmó que **no** debe haber
+  gráfico de ninguna exponencial.
+
+## Orden propuesto
+
+13 (seguridad, P0: van a operar multi-PC) → 14 (kind curva, bloquea prácticas) →
+15 (prácticas nuevas, con el docente) → 16 (rediseño UI).
