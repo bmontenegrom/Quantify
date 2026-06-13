@@ -1789,7 +1789,7 @@ async fn create_aggregate(
     let def = practices::definition(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
-    validate_aggregate(&def, &input)?;
+    validate_aggregate(&def, &input, None)?;
     if practices::symbol_taken_in_practice(
         &state.pool,
         &id,
@@ -1820,7 +1820,7 @@ async fn update_aggregate(
     let def = practices::definition(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
-    validate_aggregate(&def, &input)?;
+    validate_aggregate(&def, &input, Some(&aid))?;
     if practices::symbol_taken_in_practice(
         &state.pool,
         &id,
@@ -1855,12 +1855,14 @@ async fn delete_aggregate(
 }
 
 /// Valida símbolo (formato, no reservado) y fórmula de un mensurando agregado. La fórmula compila
-/// usando los escalares compartidos + mensurandos + `slope`/`intercept` + los agregados anteriores +
-/// los extremos de cada magnitud/intermedia por punto (`{sym}_first`/`_first2`/`_last`/`_last2`). La
+/// usando los escalares compartidos + mensurandos + `slope`/`intercept` + los agregados **anteriores**
+/// (por posición) + los extremos de cada magnitud/intermedia por punto
+/// (`{sym}_first`/`_first2`/`_last`/`_last2`). `exclude_id` ignora la propia fila al editar. La
 /// unicidad del símbolo la verifica el handler con `symbol_taken_in_practice`.
 fn validate_aggregate(
     def: &practices::PracticeDefinition,
     input: &AggregateInput,
+    exclude_id: Option<&str>,
 ) -> Result<(), AppError> {
     let symbol = input.symbol.trim();
     let formula = input.formula.trim();
@@ -1882,7 +1884,23 @@ fn validate_aggregate(
     allowed.extend(def.results.iter().map(|r| r.symbol.clone()));
     allowed.push("slope".into());
     allowed.push("intercept".into());
-    allowed.extend(def.aggregates.iter().map(|a| a.symbol.clone()));
+    // Solo los agregados **anteriores** (al editar, los de menor posición que el editado; al crear,
+    // todos los existentes): `compute_regresion` solo liga los agregados previos, así que admitir uno
+    // posterior o el propio dejaría pasar una fórmula que luego falla al computar la entrega.
+    let self_pos = exclude_id.and_then(|id| {
+        def.aggregates
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.position)
+    });
+    for a in &def.aggregates {
+        if Some(a.id.as_str()) == exclude_id {
+            continue;
+        }
+        if self_pos.is_none_or(|p| a.position < p) {
+            allowed.push(a.symbol.clone());
+        }
+    }
     let endpoint_bases = def
         .quantities
         .iter()
@@ -2295,6 +2313,94 @@ mod tests {
         assert!(validate_intermediate(&def, &input("Re", "Q*V"), None).is_ok());
         // Al editar Q (posición 0), no puede referenciarse a sí misma ni a posteriores.
         assert!(validate_intermediate(&def, &input("Q", "Q*2"), Some("i1")).is_err());
+    }
+
+    #[test]
+    fn validate_aggregate_checks_symbols_endpoints_and_order() {
+        // Práctica regresión: h por punto, c escalar compartido, mensurando m, intermedia Q, y dos
+        // agregados (Re_max pos 0, Re_min pos 1).
+        let h = db::PracticeQuantity {
+            id: "q-h".into(),
+            practice_id: "p".into(),
+            symbol: "h".into(),
+            name: "h".into(),
+            unit: "u".into(),
+            repeated: true,
+            quantity: None,
+            position: 0,
+            is_given: false,
+            replicas_per_point: None,
+            per_point: true,
+        };
+        let mut c = h.clone();
+        c.id = "q-c".into();
+        c.symbol = "c".into();
+        c.per_point = false; // escalar compartido
+        let agg = |id: &str, symbol: &str, position: i64| practices::PracticeAggregate {
+            id: id.into(),
+            practice_id: "p".into(),
+            position,
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "".into(),
+            formula: "slope".into(),
+        };
+        let def = practices::PracticeDefinition {
+            practice_id: "p".into(),
+            analysis_kind: Some("regresion_lineal".into()),
+            x_formula: None,
+            y_formula: None,
+            quantities: vec![h.clone(), c],
+            results: vec![db::PracticeResult {
+                id: "r-m".into(),
+                practice_id: "p".into(),
+                position: 0,
+                symbol: "m".into(),
+                name: "m".into(),
+                unit: "u".into(),
+                formula: "slope".into(),
+                tolerance: None,
+            }],
+            curves: vec![],
+            operator_count: None,
+            intermediates: vec![practices::PracticeIntermediate {
+                id: "i1".into(),
+                practice_id: "p".into(),
+                position: 0,
+                symbol: "Q".into(),
+                name: "Q".into(),
+                unit: "u".into(),
+                formula: "h".into(),
+            }],
+            point_results: vec![],
+            aggregates: vec![agg("a0", "Re_max", 0), agg("a1", "Re_min", 1)],
+        };
+        let input = |symbol: &str, formula: &str| AggregateInput {
+            symbol: symbol.into(),
+            name: "x".into(),
+            unit: "".into(),
+            formula: formula.into(),
+        };
+
+        // Válido: usa escalar compartido c, mensurando m, slope, y extremos de h (per punto) y Q.
+        assert!(validate_aggregate(
+            &def,
+            &input("Re_medio", "c + m + slope + h_first - h_last + Q_first2"),
+            None
+        )
+        .is_ok());
+        // Símbolo reservado y fórmula con símbolo inexistente → 400.
+        assert!(validate_aggregate(&def, &input("pi", "slope"), None).is_err());
+        assert!(validate_aggregate(&def, &input("Re_medio", "zzz"), None).is_err());
+        // Una magnitud **por punto** sin sufijo de extremo no es un escalar válido aquí.
+        assert!(validate_aggregate(&def, &input("Re_medio", "h"), None).is_err());
+        // Al crear, puede referenciar agregados existentes (Re_max, Re_min).
+        assert!(validate_aggregate(&def, &input("Re_medio", "(Re_max + Re_min)/2"), None).is_ok());
+        // Al editar Re_max (posición 0), no puede referenciarse a sí mismo ni a Re_min (posterior).
+        assert!(validate_aggregate(&def, &input("Re_max", "Re_max + 1"), Some("a0")).is_err());
+        assert!(validate_aggregate(&def, &input("Re_max", "Re_min + 1"), Some("a0")).is_err());
+        // Pero al editar Re_min (posición 1) sí puede usar Re_max (anterior).
+        assert!(validate_aggregate(&def, &input("Re_min", "Re_max + 1"), Some("a1")).is_ok());
     }
 
     /// Construye una escala mínima para los tests de validación.
