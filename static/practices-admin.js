@@ -65,6 +65,7 @@ export function renderPracticesPage() {
         ${renderAnalysisKindForm(practice, def)}
         ${def?.analysis_kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
         ${def?.analysis_kind === "curva" ? renderCurvesSection(practice, def) : ""}
+        ${def?.analysis_kind == null || def?.analysis_kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
       </section>
       <section class="panel workspace-panel">
         <h3>Nueva magnitud</h3>
@@ -89,6 +90,7 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", closePracticeWorkspace);
   practiceWorkspace.querySelector("#practice-kind-form")?.addEventListener("submit", savePracticeKind);
   practiceWorkspace.querySelector("#practice-regression-form")?.addEventListener("submit", savePracticeRegressionFormulas);
+  practiceWorkspace.querySelector("#practice-operators-form")?.addEventListener("submit", savePracticeOperatorCount);
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
@@ -213,6 +215,23 @@ function renderRegressionFormulasForm(practice, def) {
       <p class="submission-meta">Usá los símbolos de las magnitudes. Disponibles: <code>pi</code>, <code>e</code> y funciones <code>math::*</code> (p. ej. <code>math::sqrt</code>). La pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code> en los mensurandos.</p>
       <div class="detail-actions">
         <button type="submit">Guardar fórmulas</button>
+      </div>
+    </form>
+  `;
+}
+
+/// Cantidad de operadores de una práctica estadística (Motor D). 0/1 = sin operadores.
+function renderOperatorCountForm(practice, def) {
+  const count = def?.operator_count ?? "";
+  return `
+    <form id="practice-operators-form" class="detail-form detail-form-grid">
+      <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
+      <label>Operadores (estadística)
+        <input name="operator_count" type="number" min="0" step="1" value="${escapeHtml(String(count))}" placeholder="sin operadores" />
+      </label>
+      <p class="submission-meta">Con 2 o más operadores, cada uno carga su propia serie de las magnitudes repetidas (las dadas o de medida única se comparten) y se calculan los mensurandos por operador, sin promediar. 0 o 1 = comportamiento normal.</p>
+      <div class="detail-actions">
+        <button type="submit">Guardar operadores</button>
       </div>
     </form>
   `;
@@ -448,6 +467,21 @@ async function savePracticeKind(event) {
     state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
     state.practices = await fetchJson("/api/practices");
     state.practiceActionStatus = "Tipo de análisis guardado";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function savePracticeOperatorCount(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const count = Number(payload.operator_count) || 0;
+  try {
+    await postJson(`/api/practices/${payload.practice_id}/operator-count`, { count });
+    state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
+    state.practiceActionStatus = "Operadores actualizados";
     renderPracticesPage();
   } catch (error) {
     state.practiceActionStatus = error.message;

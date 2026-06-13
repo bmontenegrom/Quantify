@@ -447,6 +447,12 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
       if (m.values.length === 0 || m.given_u == null) {
         return `El dato "${name}" requiere valor e incertidumbre U.`;
       }
+    } else if (m.operator_replicas) {
+      // Motor D: cada operador debe tener al menos una lectura de la magnitud repetida.
+      const empty = m.operator_replicas.findIndex((reps) => reps.length === 0);
+      if (m.operator_replicas.length === 0 || empty !== -1) {
+        return `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
+      }
     } else if (meta.isChrono) {
       if (m.values.length === 0) {
         return `"${name}": registrá al menos una lectura con el cronómetro antes de entregar.`;

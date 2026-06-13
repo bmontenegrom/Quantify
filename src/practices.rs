@@ -72,6 +72,9 @@ pub struct PracticeDefinition {
     pub results: Vec<PracticeResult>,
     /// Solo `curva`: curvas a graficar sobre el mismo barrido (una o varias, p. ej. en Filtros).
     pub curves: Vec<PracticeCurve>,
+    /// Solo estadístico (Motor D): cantidad de operadores que cargan su propia serie. `None` o ≤1
+    /// = sin operadores (comportamiento por defecto, una sola serie por magnitud).
+    pub operator_count: Option<i64>,
 }
 
 /// Una curva de una práctica `curva`: un par de fórmulas de eje sobre el barrido común, con eje x
@@ -101,6 +104,7 @@ struct PracticeConfigRow {
     analysis_kind: Option<String>,
     x_formula: Option<String>,
     y_formula: Option<String>,
+    operator_count: Option<i64>,
 }
 
 /// Devuelve la definición completa de una práctica (quantities + results).
@@ -108,11 +112,12 @@ pub async fn definition(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
-    let row: Option<PracticeConfigRow> =
-        sqlx::query_as("SELECT analysis_kind, x_formula, y_formula FROM practices WHERE id = ?1")
-            .bind(practice_id)
-            .fetch_optional(pool)
-            .await?;
+    let row: Option<PracticeConfigRow> = sqlx::query_as(
+        "SELECT analysis_kind, x_formula, y_formula, operator_count FROM practices WHERE id = ?1",
+    )
+    .bind(practice_id)
+    .fetch_optional(pool)
+    .await?;
     let Some(row) = row else {
         return Ok(None);
     };
@@ -127,6 +132,7 @@ pub async fn definition(
         quantities,
         results,
         curves,
+        operator_count: row.operator_count,
     }))
 }
 
@@ -448,6 +454,22 @@ pub async fn set_analysis_kind(
     let result = sqlx::query("UPDATE practices SET analysis_kind = ?2 WHERE id = ?1")
         .bind(practice_id)
         .bind(kind)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Fija la cantidad de operadores de una práctica estadística (Motor D). `count <= 1` guarda `NULL`
+/// (sin operadores, comportamiento por defecto). Devuelve `true` si la práctica existía.
+pub async fn set_operator_count(
+    pool: &SqlitePool,
+    practice_id: &str,
+    count: i64,
+) -> anyhow::Result<bool> {
+    let stored: Option<i64> = if count <= 1 { None } else { Some(count) };
+    let result = sqlx::query("UPDATE practices SET operator_count = ?2 WHERE id = ?1")
+        .bind(practice_id)
+        .bind(stored)
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
@@ -1362,12 +1384,18 @@ mod tests {
                     values: vec![v],
                     given_u: if q.is_given { Some(0.0) } else { None },
                     point_replicas: None,
+                    operator_replicas: None,
                 }
             })
             .collect();
-        let a3 =
-            crate::computation::compute(&def3.quantities, &def3.results, &Default::default(), &m3)
-                .unwrap();
+        let a3 = crate::computation::compute(
+            &def3.quantities,
+            &def3.results,
+            &Default::default(),
+            &m3,
+            None,
+        )
+        .unwrap();
         let tau_t = a3
             .derived
             .iter()
@@ -1397,12 +1425,18 @@ mod tests {
                     values: vec![v],
                     given_u: None,
                     point_replicas: None,
+                    operator_replicas: None,
                 }
             })
             .collect();
-        let a2 =
-            crate::computation::compute(&def2.quantities, &def2.results, &Default::default(), &m2)
-                .unwrap();
+        let a2 = crate::computation::compute(
+            &def2.quantities,
+            &def2.results,
+            &Default::default(),
+            &m2,
+            None,
+        )
+        .unwrap();
         let req = a2.derived.iter().find(|d| d.symbol == "Req").unwrap();
         assert!((req.value - 210.0).abs() < 1e-9);
         let i = a2.derived.iter().find(|d| d.symbol == "I").unwrap();
@@ -1470,6 +1504,7 @@ mod tests {
                 values: freqs.to_vec(),
                 given_u: None,
                 point_replicas: None,
+                operator_replicas: None,
             },
             crate::computation::MeasurementInput {
                 quantity_id: id("a"),
@@ -1478,6 +1513,7 @@ mod tests {
                 values: freqs.iter().map(|_| 1.0).collect(),
                 given_u: None,
                 point_replicas: None,
+                operator_replicas: None,
             },
             crate::computation::MeasurementInput {
                 quantity_id: id("b"),
@@ -1486,6 +1522,7 @@ mod tests {
                 values: b_vals,
                 given_u: None,
                 point_replicas: None,
+                operator_replicas: None,
             },
         ];
         let analysis = crate::computation::compute_regresion(

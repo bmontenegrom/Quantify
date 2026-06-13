@@ -31,6 +31,12 @@ pub struct MeasurementInput {
     /// réplicas de ese punto. El motor usa la **media** de cada punto para evaluar los ejes.
     #[serde(default)]
     pub point_replicas: Option<Vec<Vec<f64>>>,
+    /// Solo en el camino estadístico con operadores (Motor D) y magnitudes `repeated`: cada
+    /// operador trae su propia serie de réplicas. Exterior = operador, interior = réplicas de ese
+    /// operador. Las magnitudes compartidas (dadas/medida única) usan `values` y dejan esto en
+    /// `None`.
+    #[serde(default)]
+    pub operator_replicas: Option<Vec<Vec<f64>>>,
 }
 
 impl MeasurementInput {
@@ -120,16 +126,33 @@ pub struct ScatterResult {
     pub x_log: bool,
 }
 
+/// Cálculo estadístico de un operador (Motor D): sus magnitudes repetidas y los mensurandos
+/// derivados con la serie de ese operador (las magnitudes compartidas quedan en
+/// [`FormAnalysis::quantities`], se calculan una sola vez).
+#[derive(Debug, Serialize)]
+pub struct OperatorComputation {
+    pub label: String,
+    pub quantities: Vec<QuantityComputation>,
+    pub derived: Vec<DerivedComputation>,
+}
+
 /// Resultado completo del cálculo de una entrega por formulario. Según el `analysis_kind` se
 /// llena un camino: `quantities` (estadístico), `regression` (ajuste lineal) o `scatters` (curva:
 /// una o varias curvas sobre el mismo barrido). `derived` y `warnings` aplican a los caminos que
 /// correspondan.
+///
+/// Con operadores (Motor D, estadístico): `quantities` lleva solo las magnitudes **compartidas**
+/// (dadas/medida única) y `operators` lleva el cálculo **por operador** (sus magnitudes repetidas
+/// y sus mensurandos derivados). Sin operadores, `operators` queda vacío y `quantities`/`derived`
+/// tienen el cálculo completo (comportamiento por defecto).
 #[derive(Debug, Serialize)]
 pub struct FormAnalysis {
     pub quantities: Vec<QuantityComputation>,
     pub regression: Option<RegressionResult>,
     pub scatters: Vec<ScatterResult>,
     pub derived: Vec<DerivedComputation>,
+    #[serde(default)]
+    pub operators: Vec<OperatorComputation>,
     pub warnings: Vec<String>,
 }
 
@@ -224,32 +247,33 @@ fn eval_compiled(tree: &Node, values: &HashMap<&str, f64>) -> f64 {
     tree.eval_float_with_context(&context).unwrap_or(f64::NAN)
 }
 
-/// Calcula el [`FormAnalysis`] de una entrega (función pura, sin base de datos).
-/// `scales` mapea `scale_id` → escala ya resuelta; `measurements` son las lecturas por magnitud.
-pub fn compute(
-    quantities: &[PracticeQuantity],
-    results: &[PracticeResult],
+/// Calcula la incertidumbre de un subconjunto de magnitudes y acumula sus medias/incertidumbres
+/// en `means`/`us` (para propagar los mensurandos). `operator` selecciona la serie a usar para las
+/// magnitudes repetidas: `Some(i)` toma `operator_replicas[i]` (Motor D); `None` usa `values`.
+fn compute_quantities(
+    quantities: &[&PracticeQuantity],
+    by_quantity: &HashMap<&str, &MeasurementInput>,
     scales: &HashMap<String, InstrumentScale>,
-    measurements: &[MeasurementInput],
-) -> anyhow::Result<FormAnalysis> {
-    let mut warnings = Vec::new();
-    let by_quantity: HashMap<&str, &MeasurementInput> = measurements
-        .iter()
-        .map(|m| (m.quantity_id.as_str(), m))
-        .collect();
-
+    operator: Option<usize>,
+    means: &mut HashMap<String, f64>,
+    us: &mut HashMap<String, f64>,
+    warnings: &mut Vec<String>,
+) -> anyhow::Result<Vec<QuantityComputation>> {
     let mut computed = Vec::with_capacity(quantities.len());
-    // Media de cada símbolo, para la propagación de los mensurandos.
-    let mut means_by_symbol: HashMap<String, f64> = HashMap::new();
-    let mut u_by_symbol: HashMap<String, f64> = HashMap::new();
-
-    for quantity in quantities {
+    for &quantity in quantities {
         let measurement = by_quantity.get(quantity.id.as_str());
+        // Serie a usar: del operador `i` para magnitudes repetidas con operadores; si no, `values`.
+        let values: Vec<f64> = match operator {
+            Some(i) => measurement
+                .and_then(|m| m.operator_replicas.as_ref())
+                .and_then(|ops| ops.get(i))
+                .cloned()
+                .unwrap_or_default(),
+            None => measurement.map(|m| m.values.clone()).unwrap_or_default(),
+        };
 
         let result = if quantity.is_given {
-            let value = measurement
-                .and_then(|m| m.values.first().copied())
-                .unwrap_or(f64::NAN);
+            let value = values.first().copied().unwrap_or(f64::NAN);
             let u_exp = measurement.and_then(|m| m.given_u).unwrap_or(0.0);
             if value.is_nan() {
                 warnings.push(format!(
@@ -259,7 +283,6 @@ pub fn compute(
             }
             uncertainty::measured_given(value, u_exp)
         } else {
-            let values: Vec<f64> = measurement.map(|m| m.values.clone()).unwrap_or_default();
             if values.is_empty() {
                 warnings.push(format!(
                     "La magnitud \"{}\" ({}) no tiene lecturas cargadas.",
@@ -276,9 +299,8 @@ pub fn compute(
             uncertainty::measured_quantity(&values, spec.as_ref())
         };
 
-        let values: Vec<f64> = measurement.map(|m| m.values.clone()).unwrap_or_default();
-        means_by_symbol.insert(quantity.symbol.clone(), result.mean);
-        u_by_symbol.insert(quantity.symbol.clone(), result.u_c);
+        means.insert(quantity.symbol.clone(), result.mean);
+        us.insert(quantity.symbol.clone(), result.u_c);
         computed.push(QuantityComputation {
             quantity_id: quantity.id.clone(),
             symbol: quantity.symbol.clone(),
@@ -290,21 +312,107 @@ pub fn compute(
             result,
         });
     }
+    Ok(computed)
+}
 
+/// Calcula el [`FormAnalysis`] de una entrega estadística (función pura, sin base de datos).
+/// `scales` mapea `scale_id` → escala ya resuelta; `measurements` son las lecturas por magnitud.
+///
+/// `operator_count` (Motor D): con `≥ 2`, las magnitudes **repetidas** se computan por operador
+/// (cada uno con su serie) y los mensurandos derivados se calculan por operador en
+/// [`FormAnalysis::operators`]; las magnitudes **compartidas** (dadas/medida única) se calculan una
+/// sola vez en `quantities`. Con `None`/`≤ 1` es el comportamiento por defecto (una sola serie).
+pub fn compute(
+    quantities: &[PracticeQuantity],
+    results: &[PracticeResult],
+    scales: &HashMap<String, InstrumentScale>,
+    measurements: &[MeasurementInput],
+    operator_count: Option<i64>,
+) -> anyhow::Result<FormAnalysis> {
+    let mut warnings = Vec::new();
+    let by_quantity: HashMap<&str, &MeasurementInput> = measurements
+        .iter()
+        .map(|m| (m.quantity_id.as_str(), m))
+        .collect();
+    // Todos los símbolos quedan disponibles al compilar las fórmulas de los mensurandos.
     let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    let derived = derive_results(
-        results,
-        &symbols,
-        &means_by_symbol,
-        &u_by_symbol,
+    let operator_count = operator_count.unwrap_or(0);
+
+    // Comportamiento por defecto (sin operadores): una sola serie por magnitud.
+    if operator_count <= 1 {
+        let all: Vec<&PracticeQuantity> = quantities.iter().collect();
+        let mut means = HashMap::new();
+        let mut us = HashMap::new();
+        let computed = compute_quantities(
+            &all,
+            &by_quantity,
+            scales,
+            None,
+            &mut means,
+            &mut us,
+            &mut warnings,
+        )?;
+        let derived = derive_results(results, &symbols, &means, &us, &mut warnings)?;
+        return Ok(FormAnalysis {
+            quantities: computed,
+            regression: None,
+            scatters: Vec::new(),
+            derived,
+            operators: Vec::new(),
+            warnings,
+        });
+    }
+
+    // Con operadores: las repetidas (tipo A) se cargan por operador; las dadas o de medida única se
+    // comparten. Cada operador deriva sus mensurandos con su serie + las compartidas, sin promediar.
+    let shared: Vec<&PracticeQuantity> = quantities
+        .iter()
+        .filter(|q| q.is_given || !q.repeated)
+        .collect();
+    let per_operator: Vec<&PracticeQuantity> = quantities
+        .iter()
+        .filter(|q| q.repeated && !q.is_given)
+        .collect();
+
+    let mut shared_means = HashMap::new();
+    let mut shared_us = HashMap::new();
+    let shared_computed = compute_quantities(
+        &shared,
+        &by_quantity,
+        scales,
+        None,
+        &mut shared_means,
+        &mut shared_us,
         &mut warnings,
     )?;
 
+    let mut operators = Vec::with_capacity(operator_count as usize);
+    for i in 0..operator_count as usize {
+        let mut means = shared_means.clone();
+        let mut us = shared_us.clone();
+        let op_quantities = compute_quantities(
+            &per_operator,
+            &by_quantity,
+            scales,
+            Some(i),
+            &mut means,
+            &mut us,
+            &mut warnings,
+        )?;
+        let derived = derive_results(results, &symbols, &means, &us, &mut warnings)?;
+        operators.push(OperatorComputation {
+            label: format!("Operador {}", i + 1),
+            quantities: op_quantities,
+            derived,
+        });
+    }
+
     Ok(FormAnalysis {
-        quantities: computed,
+        quantities: shared_computed,
         regression: None,
         scatters: Vec::new(),
-        derived,
+        derived: Vec::new(),
+        operators,
         warnings,
     })
 }
@@ -433,6 +541,7 @@ pub fn compute_regresion(
         }),
         scatters: Vec::new(),
         derived,
+        operators: Vec::new(),
         warnings,
     })
 }
@@ -481,6 +590,7 @@ pub fn compute_curva(
         regression: None,
         scatters,
         derived: Vec::new(),
+        operators: Vec::new(),
         warnings,
     })
 }
@@ -626,6 +736,7 @@ pub async fn analyze(
         &definition.results,
         &scales,
         measurements,
+        definition.operator_count,
     )
 }
 
@@ -660,13 +771,15 @@ async fn load_scales(
 /// (según `point_based`, que indica si la entrega es por puntos — regresión/curva):
 /// - **estadístico** (`point_based = false`): réplicas de una magnitud → `point_index = 0`,
 ///   `replicate_index = réplica`.
+/// - **estadístico con operadores** (`operator_replicas`): `operator_index = operador`,
+///   `replicate_index = réplica` (point_index = 0).
 /// - **por puntos sin réplicas** (`point_based = true`, `values`): un valor por punto →
 ///   `point_index = punto`, `replicate_index = 0`.
 /// - **por puntos con réplicas** (`point_replicas`): `point_index = punto`, `replicate_index = réplica`.
 ///
-/// El `point_index` explícito (no dejar el punto en `replicate_index`) permite reconstruir la
-/// serie al editar agrupando por punto. Los datos de cátedra (`given_u`) guardan su único valor
-/// con la U en `value_u`.
+/// Los índices explícitos (`operator_index`/`point_index`, en vez de meter todo en
+/// `replicate_index`) permiten reconstruir la serie al editar agrupando por operador/punto. Los
+/// datos de cátedra (`given_u`) guardan su único valor con la U en `value_u`.
 async fn insert_measurements(
     conn: &mut sqlx::SqliteConnection,
     submission_id: &str,
@@ -674,23 +787,33 @@ async fn insert_measurements(
     point_based: bool,
 ) -> anyhow::Result<()> {
     for measurement in measurements {
-        // Filas (point_index, replicate_index, value, value_u) según el modo de la medición.
-        let rows: Vec<(i64, i64, f64, Option<f64>)> =
-            if let Some(groups) = &measurement.point_replicas {
+        // Filas (operator_index, point_index, replicate_index, value, value_u) según el modo.
+        let rows: Vec<(i64, i64, i64, f64, Option<f64>)> =
+            if let Some(operators) = &measurement.operator_replicas {
+                operators
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(o, reps)| {
+                        reps.iter()
+                            .enumerate()
+                            .map(move |(r, &v)| (o as i64, 0i64, r as i64, v, None))
+                    })
+                    .collect()
+            } else if let Some(groups) = &measurement.point_replicas {
                 groups
                     .iter()
                     .enumerate()
                     .flat_map(|(p, reps)| {
                         reps.iter()
                             .enumerate()
-                            .map(move |(r, &v)| (p as i64, r as i64, v, None))
+                            .map(move |(r, &v)| (0i64, p as i64, r as i64, v, None))
                     })
                     .collect()
             } else if measurement.given_u.is_some() {
                 measurement
                     .values
                     .first()
-                    .map(|&v| vec![(0i64, 0i64, v, measurement.given_u)])
+                    .map(|&v| vec![(0i64, 0i64, 0i64, v, measurement.given_u)])
                     .unwrap_or_default()
             } else if point_based {
                 // Un valor por punto: el índice va en point_index (replicate_index = 0).
@@ -698,7 +821,7 @@ async fn insert_measurements(
                     .values
                     .iter()
                     .enumerate()
-                    .map(|(i, &v)| (i as i64, 0i64, v, None))
+                    .map(|(i, &v)| (0i64, i as i64, 0i64, v, None))
                     .collect()
             } else {
                 // Réplicas estadísticas: un solo punto (0), el índice va en replicate_index.
@@ -706,21 +829,22 @@ async fn insert_measurements(
                     .values
                     .iter()
                     .enumerate()
-                    .map(|(i, &v)| (0i64, i as i64, v, None))
+                    .map(|(i, &v)| (0i64, 0i64, i as i64, v, None))
                     .collect()
             };
-        for (point_index, replicate_index, value, value_u) in rows {
+        for (operator_index, point_index, replicate_index, value, value_u) in rows {
             sqlx::query(
                 "INSERT INTO submission_measurements \
                  (id, submission_id, quantity_id, instrument_id, scale_id, \
-                  point_index, replicate_index, value, value_u) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                  operator_index, point_index, replicate_index, value, value_u) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )
             .bind(Uuid::new_v4().to_string())
             .bind(submission_id)
             .bind(&measurement.quantity_id)
             .bind(measurement.instrument_id.as_deref())
             .bind(measurement.scale_id.as_deref())
+            .bind(operator_index)
             .bind(point_index)
             .bind(replicate_index)
             .bind(value)
@@ -1004,6 +1128,7 @@ mod tests {
             values: values.to_vec(),
             given_u: None,
             point_replicas: None,
+            operator_replicas: None,
         }
     }
 
@@ -1078,7 +1203,8 @@ mod tests {
             measurement("a", &[3.0]),
             measurement("b", &[4.0]),
         ];
-        let analysis = compute(&quantities, &results, &HashMap::new(), &measurements).unwrap();
+        let analysis =
+            compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
         assert_eq!(analysis.quantities.len(), 3);
         let q_l = &analysis.quantities[0];
         assert_eq!(q_l.symbol, "l");
@@ -1111,7 +1237,8 @@ mod tests {
             measurement("a", &[2.0]),
             measurement("b", &[3.0]),
         ];
-        let analysis = compute(&quantities, &results, &HashMap::new(), &measurements).unwrap();
+        let analysis =
+            compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
         let q_l = &analysis.quantities[0];
         assert!(close(q_l.result.u_a, 1.0, 1e-12));
         let q = &analysis.derived[0];
@@ -1123,9 +1250,64 @@ mod tests {
     #[test]
     fn compute_warns_on_missing_readings() {
         let quantities = vec![quantity("l")];
-        let analysis = compute(&quantities, &[], &HashMap::new(), &[]).unwrap();
+        let analysis = compute(&quantities, &[], &HashMap::new(), &[], None).unwrap();
         assert_eq!(analysis.warnings.len(), 1);
         assert!(analysis.warnings[0].contains("no tiene lecturas"));
+    }
+
+    #[test]
+    fn compute_with_operators_derives_per_operator() {
+        // Motor D: T (repetida) se carga por operador; L (medida única) es compartida.
+        // g = T + L. op1: T=10 → g=15 ; op2: T=20 → g=25. Sin promedio entre operadores.
+        let t = quantity("T"); // repeated = true → por operador
+        let mut l = quantity("L");
+        l.repeated = false; // medida única → compartida
+        let quantities = vec![t, l];
+        let results = vec![PracticeResult {
+            id: "r1".into(),
+            practice_id: "p1-estadistica".into(),
+            symbol: "g".into(),
+            name: "g".into(),
+            unit: "u".into(),
+            formula: "T + L".into(),
+            position: 0,
+            tolerance: None,
+        }];
+        let measurements = vec![
+            MeasurementInput {
+                quantity_id: "q-T".into(),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![],
+                given_u: None,
+                point_replicas: None,
+                operator_replicas: Some(vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
+            },
+            measurement("L", &[5.0]),
+        ];
+        let a = compute(
+            &quantities,
+            &results,
+            &HashMap::new(),
+            &measurements,
+            Some(2),
+        )
+        .unwrap();
+
+        // Compartida L una sola vez en `quantities`; nada en el `derived` de nivel superior.
+        assert_eq!(a.quantities.len(), 1);
+        assert_eq!(a.quantities[0].symbol, "L");
+        assert!(a.derived.is_empty());
+
+        // Un bloque por operador: su T y su g, sin promediar entre operadores.
+        assert_eq!(a.operators.len(), 2);
+        assert_eq!(a.operators[0].label, "Operador 1");
+        assert_eq!(a.operators[0].quantities.len(), 1);
+        assert_eq!(a.operators[0].quantities[0].symbol, "T");
+        assert!(close(a.operators[0].quantities[0].result.mean, 10.0, 1e-12));
+        assert!(close(a.operators[0].derived[0].value, 15.0, 1e-9));
+        assert!(close(a.operators[1].quantities[0].result.mean, 20.0, 1e-12));
+        assert!(close(a.operators[1].derived[0].value, 25.0, 1e-9));
     }
 
     #[tokio::test]
@@ -1150,6 +1332,7 @@ mod tests {
             values: vec![10.0, 12.0, 11.0],
             given_u: None,
             point_replicas: None,
+            operator_replicas: None,
         }];
         let analysis = analyze(&pool, "p1-estadistica", &measurements)
             .await
@@ -1216,6 +1399,7 @@ mod tests {
                 values: vec![5.0, 5.2, 4.9],
                 given_u: None,
                 point_replicas: None,
+                operator_replicas: None,
             }],
             meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
             table_number: None,
@@ -1228,6 +1412,90 @@ mod tests {
         let meta = detail.measurement_meta.expect("meta persistida");
         assert_eq!(meta["q1"]["bins"], 8);
         assert_eq!(meta["q1"]["discarded"][0], 9.9);
+    }
+
+    #[tokio::test]
+    async fn operator_submission_stores_operator_index_per_operator() {
+        // Estadístico con operadores: la magnitud repetida T guarda cada operador con su
+        // operator_index (replicate_index = réplica dentro del operador), para reconstruir al editar.
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        crate::practices::set_operator_count(&pool, "p1-estadistica", 2)
+            .await
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(def.operator_count, Some(2));
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
+        let input = FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: t_id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![],
+                given_u: None,
+                point_replicas: None,
+                // Operador 0: [1.0, 1.1] ; operador 1: [2.0, 2.1, 2.2].
+                operator_replicas: Some(vec![vec![1.0, 1.1], vec![2.0, 2.1, 2.2]]),
+            }],
+            meta: None,
+            table_number: None,
+        };
+        let detail = create_form_submission(&pool, &user, input).await.unwrap();
+        let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
+        let t_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == t_id).collect();
+
+        // Cada operador guarda su cantidad propia de réplicas con replicate_index contiguo.
+        assert_eq!(t_rows.len(), 5); // 2 + 3
+        for (op, expected_n) in [(0i64, 2usize), (1, 3)] {
+            let mut reps: Vec<i64> = t_rows
+                .iter()
+                .filter(|m| m.operator_index == op)
+                .map(|m| m.replicate_index)
+                .collect();
+            reps.sort_unstable();
+            assert_eq!(reps, (0..expected_n as i64).collect::<Vec<_>>());
+        }
+
+        // El análisis trae un bloque por operador (g por operador, sin agregado).
+        let operators = detail.analysis["operators"].as_array().unwrap();
+        assert_eq!(operators.len(), 2);
     }
 
     #[tokio::test]
@@ -1302,6 +1570,7 @@ mod tests {
                     values: vec![1.0, 2.0, 3.0],
                     given_u: None,
                     point_replicas: None,
+                    operator_replicas: None,
                 },
                 MeasurementInput {
                     quantity_id: qid("t_med"),
@@ -1310,6 +1579,7 @@ mod tests {
                     values: vec![],
                     given_u: None,
                     point_replicas: Some(vec![vec![4.0, 4.2], vec![5.0, 5.1], vec![6.0, 5.9]]),
+                    operator_replicas: None,
                 },
             ],
             meta: None,
@@ -1413,6 +1683,7 @@ mod tests {
                     values: vec![1.0, 2.0, 3.0],
                     given_u: None,
                     point_replicas: None,
+                    operator_replicas: None,
                 },
                 MeasurementInput {
                     quantity_id: qid("t_med"),
@@ -1421,6 +1692,7 @@ mod tests {
                     values: vec![],
                     given_u: None,
                     point_replicas: Some(vec![vec![4.0], vec![5.0, 5.1, 5.2], vec![6.0, 6.1]]),
+                    operator_replicas: None,
                 },
             ],
             meta: None,
@@ -1507,6 +1779,7 @@ mod tests {
                 values: vals,
                 given_u: None,
                 point_replicas: None,
+                operator_replicas: None,
             }],
             meta: None,
             table_number: None,
@@ -1549,6 +1822,7 @@ mod tests {
             values: vec![1.0],
             given_u: None,
             point_replicas: None,
+            operator_replicas: None,
         }];
         assert!(analyze(&pool, "p1-estadistica", &measurements)
             .await
@@ -1586,6 +1860,7 @@ mod tests {
                 values: vec![1.0],
                 given_u: None,
                 point_replicas: None,
+                operator_replicas: None,
             }],
             meta: None,
             table_number: None,
@@ -1778,6 +2053,7 @@ mod tests {
                 values: vec![],
                 given_u: None,
                 point_replicas: Some(vec![vec![3.0, 5.0], vec![8.0, 10.0, 12.0]]),
+                operator_replicas: None,
             },
         ];
         let a = compute_regresion(&quantities, &[], "px", "py", &measurements).unwrap();
@@ -1807,6 +2083,7 @@ mod tests {
             values: values.to_vec(),
             given_u: None,
             point_replicas: None,
+            operator_replicas: None,
         }
     }
 

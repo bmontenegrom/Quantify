@@ -483,6 +483,9 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     // Fórmulas de eje (x, y) del ajuste lineal, para prácticas `regresion_lineal`.
     add_column_if_missing(pool, "practices", "x_formula", "TEXT").await?;
     add_column_if_missing(pool, "practices", "y_formula", "TEXT").await?;
+    // Motor D (Fase 15): cantidad de operadores de una práctica estadística (cada uno carga su
+    // propia serie de las magnitudes repetidas). NULL o ≤1 = sin operadores (comportamiento actual).
+    add_column_if_missing(pool, "practices", "operator_count", "INTEGER").await?;
 
     // Motor B (Fase 15): una práctica `curva` define una o varias curvas sobre el mismo barrido,
     // cada una con su par de fórmulas de eje y su flag de eje x logarítmico (p. ej. dos en Filtros).
@@ -627,6 +630,14 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         pool,
         "submission_measurements",
         "point_index",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+    // Índice de operador en el estadístico con operadores (Motor D). 0 si no hay operadores.
+    add_column_if_missing(
+        pool,
+        "submission_measurements",
+        "operator_index",
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;

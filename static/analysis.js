@@ -10,10 +10,13 @@ export function renderAnalysis(target, submission, includeReview = false, defini
   if (submission.entry_mode === "form") {
     const isTeacher = canReview(state.user);
     const studentResults = submission.student_results ?? [];
+    // Motor D: con operadores los mensurandos son por operador (g por operador). Se muestran para
+    // comparar visualmente, sin entrada del alumno ni veredicto alumno-vs-automático.
+    const hasOperators = (submission.analysis?.operators?.length ?? 0) > 0;
     let body = "";
     if (submission.analysis) {
       body += formAnalysisMarkup(submission.analysis);
-      if (studentResults.length) {
+      if (studentResults.length && !hasOperators) {
         body += comparisonMarkup(
           submission.analysis.derived ?? [],
           studentResults,
@@ -25,7 +28,9 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     }
     body += measurementMetaMarkup(submission, definition);
     if (!isTeacher) {
-      body += studentResultsFormMarkup(submission, definition);
+      body += hasOperators
+        ? `<p class="submission-meta">Los mensurandos se calculan por operador para comparar las determinaciones; no hay carga de cálculos propios en esta práctica.</p>`
+        : studentResultsFormMarkup(submission, definition);
     }
     target.innerHTML = `
       ${submissionHeader(submission)}
@@ -155,53 +160,60 @@ function measurementMetaMarkup(submission, definition) {
   return `<section class="panel meta-panel"><h4>Depuración de series</h4>${blocks}</section>`;
 }
 
+/** Tabla de incertidumbres por magnitud (n, media, s, u_A, u_B, u_c, U). */
+function quantitiesTableMarkup(quantities) {
+  if (!quantities.length) return `<p class="submission-meta">Sin magnitudes cargadas.</p>`;
+  return `
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead>
+          <tr><th>Magnitud</th><th>n</th><th>media</th><th>s</th><th>u_A</th><th>u_B</th><th>u_c</th><th>U</th></tr>
+        </thead>
+        <tbody>
+          ${quantities
+            .map(
+              (q) => `
+              <tr>
+                <td class="directory-primary"><strong>${escapeHtml(q.symbol)}</strong> <span class="submission-meta">${escapeHtml(q.unit)}</span></td>
+                <td>${q.result.n}</td>
+                <td>${format(q.result.mean)}</td>
+                <td>${format(q.result.s)}</td>
+                <td>${format(q.result.u_a)}</td>
+                <td>${format(q.result.u_b)}</td>
+                <td>${format(q.result.u_c)}</td>
+                <td>${format(q.result.u_expanded)}</td>
+              </tr>`,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+/** Bloque de mensurandos derivados (valor ± U + fórmula). `heading` controla el título opcional. */
+function derivedBlockMarkup(derived, heading = "Mensurandos") {
+  if (!derived.length) return "";
+  return `
+    ${heading ? `<h3>${escapeHtml(heading)}</h3>` : ""}
+    <div class="metrics">
+      ${derived
+        .map(
+          (d) => `
+          <div class="metric">
+            <div class="metric-label">${escapeHtml(d.symbol)} (${escapeHtml(d.unit)})</div>
+            <div class="metric-value metric-text">${escapeHtml(measureText(d.value, d.u_expanded))}</div>
+            <div class="submission-meta">${escapeHtml(d.formula)}</div>
+          </div>`,
+        )
+        .join("")}
+    </div>`;
+}
+
 function formAnalysisMarkup(analysis) {
   const quantities = analysis.quantities ?? [];
   const derived = analysis.derived ?? [];
-  const quantitiesTable = quantities.length
-    ? `
-      <div class="directory-table-wrap">
-        <table class="grade-table directory-data-table">
-          <thead>
-            <tr><th>Magnitud</th><th>n</th><th>media</th><th>s</th><th>u_A</th><th>u_B</th><th>u_c</th><th>U</th></tr>
-          </thead>
-          <tbody>
-            ${quantities
-              .map(
-                (q) => `
-                <tr>
-                  <td class="directory-primary"><strong>${escapeHtml(q.symbol)}</strong> <span class="submission-meta">${escapeHtml(q.unit)}</span></td>
-                  <td>${q.result.n}</td>
-                  <td>${format(q.result.mean)}</td>
-                  <td>${format(q.result.s)}</td>
-                  <td>${format(q.result.u_a)}</td>
-                  <td>${format(q.result.u_b)}</td>
-                  <td>${format(q.result.u_c)}</td>
-                  <td>${format(q.result.u_expanded)}</td>
-                </tr>`,
-              )
-              .join("")}
-          </tbody>
-        </table>
-      </div>`
-    : `<p class="submission-meta">Sin magnitudes cargadas.</p>`;
-
-  const derivedBlock = derived.length
-    ? `
-      <h3>Mensurandos</h3>
-      <div class="metrics">
-        ${derived
-          .map(
-            (d) => `
-            <div class="metric">
-              <div class="metric-label">${escapeHtml(d.symbol)} (${escapeHtml(d.unit)})</div>
-              <div class="metric-value metric-text">${escapeHtml(measureText(d.value, d.u_expanded))}</div>
-              <div class="submission-meta">${escapeHtml(d.formula)}</div>
-            </div>`,
-          )
-          .join("")}
-      </div>`
-    : "";
+  const quantitiesTable = quantitiesTableMarkup(quantities);
+  const derivedBlock = derivedBlockMarkup(derived);
 
   if (analysis.regression) {
     return `
@@ -227,6 +239,31 @@ function formAnalysisMarkup(analysis) {
     return `
       <h3>${title}</h3>
       ${blocks}
+      ${renderWarnings(analysis.warnings ?? [])}
+    `;
+  }
+
+  // Motor D: con operadores, las magnitudes compartidas van arriba y cada operador trae su propio
+  // bloque (sus magnitudes repetidas + sus mensurandos), comparados lado a lado sin promedio.
+  const operators = analysis.operators ?? [];
+  if (operators.length) {
+    const sharedTable = quantities.length
+      ? `<h4>Magnitudes compartidas</h4>${quantitiesTable}`
+      : "";
+    const opBlocks = operators
+      .map(
+        (op) => `
+        <section class="operator-result panel">
+          <h4>${escapeHtml(op.label)}</h4>
+          ${quantitiesTableMarkup(op.quantities ?? [])}
+          ${derivedBlockMarkup(op.derived ?? [], "")}
+        </section>`,
+      )
+      .join("");
+    return `
+      <h3>Incertidumbres por operador</h3>
+      ${sharedTable}
+      ${opBlocks}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
   }

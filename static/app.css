@@ -1058,6 +1058,28 @@ textarea {
   min-width: 72px;
 }
 
+/* Magnitud por operador (Motor D): agrupa los bloques de cada operador. */
+.operator-quantity {
+  margin: 12px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--border, #d0d0d0);
+}
+
+.operator-block {
+  margin: 6px 0;
+}
+
+.operator-label {
+  margin: 8px 0 4px;
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
+/* Resultado por operador en el análisis (g por operador, lado a lado). */
+.operator-result {
+  margin-top: 12px;
+}
+
 /* Celda con grilla de réplicas por punto (regresión/curva con magnitud repetida). */
 .series-replica-group {
   display: flex;
