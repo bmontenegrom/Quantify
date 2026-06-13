@@ -25,6 +25,19 @@ type SharedState = Arc<AppState>;
 
 /// Deriva el token CSRF de un token de sesión usando SHA-256(secret + ":" + session_token).
 /// Stateless: no requiere consulta a la base de datos.
+///
+/// # Ejemplos
+///
+/// ```
+/// let token = quantify::routes::compute_csrf("mi-sesion", "clave-secreta");
+/// // SHA-256 produce siempre 64 caracteres hexadecimales.
+/// assert_eq!(token.len(), 64);
+/// assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+/// // Mismos inputs → mismo token (determinista).
+/// assert_eq!(token, quantify::routes::compute_csrf("mi-sesion", "clave-secreta"));
+/// // Distinto secret → distinto token.
+/// assert_ne!(token, quantify::routes::compute_csrf("mi-sesion", "otra-clave"));
+/// ```
 pub fn compute_csrf(session_token: &str, secret_key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(secret_key.as_bytes());
