@@ -694,6 +694,7 @@ pub async fn symbol_taken_in_practice(
     exclude_quantity_id: Option<&str>,
     exclude_result_id: Option<&str>,
     exclude_intermediate_id: Option<&str>,
+    exclude_point_result_id: Option<&str>,
 ) -> anyhow::Result<bool> {
     let sym = symbol.trim();
     let count = |table: &str, exclude: Option<&str>| {
@@ -715,7 +716,8 @@ pub async fn symbol_taken_in_practice(
     };
     Ok(count("practice_quantities", exclude_quantity_id).await?
         || count("practice_results", exclude_result_id).await?
-        || count("practice_intermediates", exclude_intermediate_id).await?)
+        || count("practice_intermediates", exclude_intermediate_id).await?
+        || count("practice_point_results", exclude_point_result_id).await?)
 }
 
 /// Actualiza el tipo de análisis de una práctica. Devuelve `true` si existía.
@@ -1285,16 +1287,22 @@ mod tests {
 
         // symbol_taken_in_practice lo detecta buscando en quantities.
         assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, None, None)
+            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, None, None, None)
                 .await
                 .unwrap()
         );
         // Excluir la misma magnitud (al renombrar) no debe reportar colisión.
-        assert!(
-            !symbol_taken_in_practice(&pool, "p1-estadistica", "l", Some(&q.id), None, None)
-                .await
-                .unwrap()
-        );
+        assert!(!symbol_taken_in_practice(
+            &pool,
+            "p1-estadistica",
+            "l",
+            Some(&q.id),
+            None,
+            None,
+            None
+        )
+        .await
+        .unwrap());
 
         // Crea un mensurando con símbolo "Q".
         let r = create_result(&pool, "p1-estadistica", sample_result())
@@ -1302,17 +1310,29 @@ mod tests {
             .unwrap();
 
         // Un mensurando nuevo con símbolo "l" (ya en quantities) es colisión cruzada.
-        assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, Some(&r.id), None)
-                .await
-                .unwrap()
-        );
+        assert!(symbol_taken_in_practice(
+            &pool,
+            "p1-estadistica",
+            "l",
+            None,
+            Some(&r.id),
+            None,
+            None
+        )
+        .await
+        .unwrap());
         // Una magnitud nueva con símbolo "Q" (ya en results) es colisión cruzada.
-        assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "Q", Some(&q.id), None, None)
-                .await
-                .unwrap()
-        );
+        assert!(symbol_taken_in_practice(
+            &pool,
+            "p1-estadistica",
+            "Q",
+            Some(&q.id),
+            None,
+            None,
+            None
+        )
+        .await
+        .unwrap());
 
         // Una magnitud intermedia con símbolo "Iv": magnitudes/mensurandos nuevos deben colisionar.
         create_intermediate(
@@ -1328,17 +1348,42 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "Iv", None, None, None)
+            symbol_taken_in_practice(&pool, "p1-estadistica", "Iv", None, None, None, None)
+                .await
+                .unwrap()
+        );
+
+        // Una magnitud derivada por punto con símbolo "Re": el resto debe colisionar con ella.
+        create_point_result(
+            &pool,
+            "p1-estadistica",
+            PointResultInput {
+                symbol: "Re".into(),
+                name: "Re".into(),
+                unit: "".into(),
+                formula: "L".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            symbol_taken_in_practice(&pool, "p1-estadistica", "Re", None, None, None, None)
                 .await
                 .unwrap()
         );
 
         // Símbolo inexistente no colisiona.
-        assert!(
-            !symbol_taken_in_practice(&pool, "p1-estadistica", "nuevo", None, None, None)
-                .await
-                .unwrap()
-        );
+        assert!(!symbol_taken_in_practice(
+            &pool,
+            "p1-estadistica",
+            "nuevo",
+            None,
+            None,
+            None,
+            None
+        )
+        .await
+        .unwrap());
     }
 
     #[tokio::test]

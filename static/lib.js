@@ -438,6 +438,19 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
         ? "Cargá al menos 2 puntos completos para graficar la curva."
         : "Cargá al menos 2 puntos completos para el ajuste lineal.";
     }
+    // Motor E: los escalares compartidos (datos de cátedra / medida única) también deben estar
+    // completos, aunque no formen parte de la serie de puntos.
+    for (const m of measurements) {
+      const meta = metaMap[m.quantity_id] ?? {};
+      const name = meta.name ?? m.quantity_id;
+      if (meta.isGiven) {
+        if (m.values.length === 0 || m.given_u == null) {
+          return `El dato "${name}" requiere valor e incertidumbre U.`;
+        }
+      } else if (meta.perPoint === false && m.values.length === 0) {
+        return `La magnitud compartida "${name}" no tiene valor cargado.`;
+      }
+    }
     return null;
   }
   for (const m of measurements) {

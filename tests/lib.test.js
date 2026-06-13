@@ -505,6 +505,29 @@ test("validateMeasurements: cuenta puntos desde point_replicas (réplicas por pu
   assert.ok(typeof few === "string");
 });
 
+test("validateMeasurements: regresión exige escalares compartidos completos (Motor E)", () => {
+  // 2 puntos OK, pero el escalar compartido 'R' (medida única) está vacío → error.
+  const meta = {
+    x: { name: "x", perPoint: true },
+    R: { name: "Radio", perPoint: false, isGiven: false },
+    g: { name: "g", perPoint: false, isGiven: true },
+  };
+  const measurements = [
+    { quantity_id: "x", values: [1, 2], given_u: null },
+    { quantity_id: "R", values: [], given_u: null },
+    { quantity_id: "g", values: [9.8], given_u: 0.1 },
+  ];
+  const err = validateMeasurements(measurements, "regresion_lineal", meta);
+  assert.ok(typeof err === "string" && err.includes("Radio"));
+  // Con R cargado → válido.
+  measurements[1].values = [0.001];
+  assert.equal(validateMeasurements(measurements, "regresion_lineal", meta), null);
+  // Dato de cátedra 'g' sin U → error.
+  measurements[2].given_u = null;
+  const errG = validateMeasurements(measurements, "regresion_lineal", meta);
+  assert.ok(typeof errG === "string" && errG.includes("g"));
+});
+
 test("validateMeasurements: estadistico reporta mensurando sin lecturas", () => {
   const meta = { q1: { name: "Longitud", isGiven: false, isChrono: false } };
   const err = validateMeasurements([{ quantity_id: "q1", values: [], given_u: null }], "estadistico", meta);

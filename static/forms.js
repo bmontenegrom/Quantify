@@ -603,8 +603,10 @@ function buildMetaMap(measurements) {
     );
     map[m.quantity_id] = {
       name: def?.name ?? row?.querySelector("legend")?.textContent?.trim() ?? m.quantity_id,
-      isGiven: row?.dataset.isGiven === "1",
+      isGiven: def?.is_given ?? row?.dataset.isGiven === "1",
       isChrono: row?.dataset.isChrono === "1",
+      // En regresión/curva: las magnitudes con per_point=false (o dadas) son escalares compartidos.
+      perPoint: def?.per_point ?? true,
     };
   }
   return map;
@@ -840,6 +842,8 @@ function renderSeriesTable(definition) {
       inst.addEventListener("change", () => populateScaleOptions(row));
       populateScaleOptions(row);
     }
+    // Oculta el botón ✕ de la única réplica (medida única: no se quitan ni agregan réplicas).
+    wireRemoveReplica(row);
   });
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));

@@ -1433,7 +1433,7 @@ async fn create_quantity(
     validate_quantity(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
         .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
@@ -1459,6 +1459,7 @@ async fn update_quantity(
         &practice_id,
         &input.symbol,
         Some(&qid),
+        None,
         None,
         None,
     )
@@ -1549,7 +1550,7 @@ async fn create_intermediate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_intermediate(&def, &input, None)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
         .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
@@ -1571,8 +1572,16 @@ async fn update_intermediate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_intermediate(&def, &input, Some(&iid))?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, Some(&iid))
-        .await?
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        Some(&iid),
+        None,
+    )
+    .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1759,7 +1768,7 @@ async fn create_result(
     validate_result(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
         .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
@@ -1786,6 +1795,7 @@ async fn update_result(
         &input.symbol,
         None,
         Some(&rid),
+        None,
         None,
     )
     .await?
