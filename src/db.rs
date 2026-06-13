@@ -61,6 +61,9 @@ pub struct PracticeResult {
     /// Expresión matemática en función de los símbolos de `practice_quantities`.
     pub formula: String,
     pub position: i64,
+    /// Tolerancia máxima aceptable como diferencia porcentual |Δ%| entre el valor del alumno y
+    /// el automático. `None` = sin veredicto. Configurable por el docente por mensurando.
+    pub tolerance: Option<f64>,
 }
 
 /// Instrumento de medida del catálogo de un curso. El `kind` (`analogico`/`digital`) es
@@ -569,6 +572,9 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(email)")
         .execute(pool)
         .await?;
+
+    // Tolerancia porcentual configurable por el docente para el veredicto de comparación.
+    add_column_if_missing(pool, "practice_results", "tolerance", "REAL").await?;
 
     Ok(())
 }

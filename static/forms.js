@@ -8,7 +8,7 @@ import { fetchJson, postJson } from "./api.js";
 import {
   escapeHtml, canReview,
   compatibleInstruments, SI_PREFIXES, prefixFactor,
-  seriesStats, histogram, normalCurve,
+  seriesStats, histogram, normalCurve, validateMeasurements,
 } from "./lib.js";
 import { PRACTICE_GROUPS, PRACTICE_SECTIONS } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
@@ -499,31 +499,19 @@ function setSubmissionBusy(busy) {
   if (submitButton) submitButton.disabled = busy;
 }
 
-function validateMeasurements(measurements, analysisKind) {
-  if (analysisKind === "regresion_lineal") {
-    const anyWithValues = measurements.some((m) => m.values.length > 0);
-    const minPoints = measurements[0]?.values.length ?? 0;
-    if (!anyWithValues || minPoints < 2) {
-      return "Cargá al menos 2 puntos completos para el ajuste lineal.";
-    }
-    return null;
-  }
+function buildMetaMap(measurements) {
+  const map = {};
   for (const m of measurements) {
     const row = measurementFields.querySelector(`[data-quantity-id="${CSS.escape(m.quantity_id)}"]`);
-    const name = row?.querySelector("legend")?.textContent?.trim() ?? m.quantity_id;
-    if (row?.dataset.isGiven === "1") {
-      if (m.values.length === 0 || m.given_u == null) {
-        return `El dato "${name}" requiere valor e incertidumbre U.`;
-      }
-    } else if (row?.dataset.isChrono === "1") {
-      if (m.values.length === 0) {
-        return `"${name}": registrá al menos una lectura con el cronómetro antes de entregar.`;
-      }
-    } else if (m.values.length === 0) {
-      return `La magnitud "${name}" no tiene lecturas cargadas.`;
+    if (row) {
+      map[m.quantity_id] = {
+        name: row.querySelector("legend")?.textContent?.trim() ?? m.quantity_id,
+        isGiven: row.dataset.isGiven === "1",
+        isChrono: row.dataset.isChrono === "1",
+      };
     }
   }
-  return null;
+  return map;
 }
 
 export async function submitFormSubmission() {
@@ -531,7 +519,7 @@ export async function submitFormSubmission() {
 
   const measurements = collectMeasurements();
   const analysisKind = state.practiceForm?.definition?.analysis_kind ?? "";
-  const validationError = validateMeasurements(measurements, analysisKind);
+  const validationError = validateMeasurements(measurements, analysisKind, buildMetaMap(measurements));
   if (validationError) {
     submitStatus.textContent = validationError;
     return;

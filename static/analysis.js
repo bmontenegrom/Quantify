@@ -14,7 +14,11 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     if (submission.analysis) {
       body += formAnalysisMarkup(submission.analysis);
       if (studentResults.length) {
-        body += comparisonMarkup(submission.analysis.derived ?? [], studentResults);
+        body += comparisonMarkup(
+          submission.analysis.derived ?? [],
+          studentResults,
+          submission.result_tolerances ?? {},
+        );
       }
     } else {
       body += `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
@@ -259,17 +263,28 @@ function regressionSvg(plot, xLabel = "x", yLabel = "y") {
   `;
 }
 
-function comparisonMarkup(autoDerived, studentResults) {
-  const rows = compareResults(autoDerived, studentResults);
+function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
+  const rows = compareResults(autoDerived, studentResults, tolerances);
   if (!rows.length) return "";
   const num = (v) => (v == null ? "—" : escapeHtml(format(v)));
   const pct = (v) => (v == null ? "—" : `${escapeHtml(format(v))} %`);
+  const hasVerdicts = rows.some((r) => r.verdict != null);
+  const verdictCell = (r) => {
+    if (!hasVerdicts) return "";
+    if (r.verdict === "pass") return `<td class="verdict-pass">✓</td>`;
+    if (r.verdict === "fail") return `<td class="verdict-fail">✗</td>`;
+    return `<td class="verdict-none">—</td>`;
+  };
   return `
     <h3>Comparación: tus cálculos vs automático</h3>
     <div class="directory-table-wrap">
       <table class="grade-table directory-data-table compare-table">
         <thead>
-          <tr><th>Mensurando</th><th>Automático</th><th>Tus cálculos</th><th>Δ valor</th><th>Δ valor (%)</th><th>Δ U</th><th>Δ U (%)</th></tr>
+          <tr>
+            <th>Mensurando</th><th>Automático</th><th>Tus cálculos</th>
+            <th>Δ valor</th><th>Δ valor (%)</th><th>Δ U</th><th>Δ U (%)</th>
+            ${hasVerdicts ? "<th>Veredicto</th>" : ""}
+          </tr>
         </thead>
         <tbody>
           ${rows
@@ -283,6 +298,7 @@ function comparisonMarkup(autoDerived, studentResults) {
               <td>${pct(r.dValuePct)}</td>
               <td>${num(r.dU)}</td>
               <td>${pct(r.dUPct)}</td>
+              ${verdictCell(r)}
             </tr>`,
             )
             .join("")}

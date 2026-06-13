@@ -877,6 +877,7 @@ mod tests {
             unit: "mm2".into(),
             formula: "l*a + l*b".into(),
             position: 0,
+            tolerance: None,
         }];
         let measurements = vec![
             measurement("l", &[2.0]),
@@ -909,6 +910,7 @@ mod tests {
             unit: "mm2".into(),
             formula: "l*a + l*b".into(),
             position: 0,
+            tolerance: None,
         }];
         let measurements = vec![
             measurement("l", &[9.0, 11.0]),
@@ -1181,6 +1183,7 @@ mod tests {
             unit: "u".into(),
             formula: formula.into(),
             position: 0,
+            tolerance: None,
         }
     }
 

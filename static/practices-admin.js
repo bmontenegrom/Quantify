@@ -258,6 +258,11 @@ function renderResultForm(res, practiceId) {
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" required placeholder="mm2" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" /></label>
+      <label>Tolerancia (%)
+        <input name="tolerance" type="number" min="0" step="any"
+          value="${res?.tolerance != null ? escapeHtml(String(res.tolerance)) : ""}"
+          placeholder="sin veredicto" />
+      </label>
       <div class="detail-actions">
         <button type="submit">${res ? "Guardar" : "Agregar"}</button>
         ${res ? `<button type="button" data-cancel-result>Cancelar</button>` : ""}
@@ -271,19 +276,21 @@ function renderResultsList(def, practiceId) {
   if (results.length === 0) return `<p class="submission-meta">Sin mensurandos. Agrega uno desde el panel lateral.</p>`;
 
   const rows = results.flatMap((r) => {
+    const tolLabel = r.tolerance != null ? `${escapeHtml(String(r.tolerance))} %` : `<span class="submission-meta">—</span>`;
     const baseRow = `
       <tr>
         <td class="directory-primary"><strong>${escapeHtml(r.symbol)}</strong></td>
         <td>${escapeHtml(r.name)}</td>
         <td>${escapeHtml(r.unit)}</td>
         <td><code>${escapeHtml(r.formula)}</code></td>
+        <td>${tolLabel}</td>
         <td class="directory-actions">
           <button type="button" data-edit-result data-rid="${escapeHtml(r.id)}">${state.editingResultId === r.id ? "Cerrar" : "Editar"}</button>
           <button type="button" data-delete-result data-rid="${escapeHtml(r.id)}">Eliminar</button>
         </td>
       </tr>`;
     const editRow = state.editingResultId === r.id
-      ? `<tr><td colspan="5" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
+      ? `<tr><td colspan="6" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
@@ -292,7 +299,7 @@ function renderResultsList(def, practiceId) {
     <div class="directory-table-wrap">
       <table class="grade-table directory-data-table">
         <thead>
-          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Fórmula</th><th>Acciones</th></tr>
+          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Fórmula</th><th>Tolerancia (%)</th><th>Acciones</th></tr>
         </thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -418,6 +425,12 @@ async function deletePracticeQuantity(qid, practiceId) {
   }
 }
 
+/** Parsea el campo tolerancia del formulario: número ≥ 0 o null si vacío/negativo. */
+function parseTolerance(raw) {
+  const v = parseFloat(raw);
+  return isNaN(v) || raw.trim() === "" || v < 0 ? null : v;
+}
+
 async function saveNewResult(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -429,6 +442,7 @@ async function saveNewResult(event) {
       name: raw.name,
       unit: raw.unit,
       formula: raw.formula,
+      tolerance: parseTolerance(raw.tolerance ?? ""),
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingResultId = null;
@@ -452,6 +466,7 @@ async function saveEditResult(event) {
       name: raw.name,
       unit: raw.unit,
       formula: raw.formula,
+      tolerance: parseTolerance(raw.tolerance ?? ""),
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingResultId = null;
