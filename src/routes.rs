@@ -1657,7 +1657,12 @@ async fn create_point_result(
     let def = practices::definition(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
-    validate_point_result(&def, &input, None)?;
+    validate_point_result(&def, &input)?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
+        .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
     Ok(Json(
         practices::create_point_result(&state.pool, &id, input).await?,
     ))
@@ -1674,7 +1679,20 @@ async fn update_point_result(
     let def = practices::definition(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
-    validate_point_result(&def, &input, Some(&pid))?;
+    validate_point_result(&def, &input)?;
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        None,
+        Some(&pid),
+    )
+    .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
     let updated = practices::update_point_result(&state.pool, &id, &pid, input)
         .await?
         .ok_or_else(|| AppError::not_found("magnitud derivada por punto no encontrada"))?;
@@ -1696,13 +1714,13 @@ async fn delete_point_result(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// Valida una magnitud derivada por punto: símbolo (formato, no reservado, único) y fórmula que
+/// Valida símbolo (formato, no reservado) y fórmula de una magnitud derivada por punto. La fórmula
 /// compila usando magnitudes + intermedias + mensurandos + `slope`/`intercept` (símbolos
-/// disponibles tras el ajuste). `exclude_id` ignora la propia fila al editar.
+/// disponibles tras el ajuste). La unicidad del símbolo la verifica el handler con
+/// `symbol_taken_in_practice`.
 fn validate_point_result(
     def: &practices::PracticeDefinition,
     input: &PointResultInput,
-    exclude_id: Option<&str>,
 ) -> Result<(), AppError> {
     let symbol = input.symbol.trim();
     let formula = input.formula.trim();
@@ -1713,16 +1731,6 @@ fn validate_point_result(
     }
     validate_symbol_format(symbol)?;
     validate_symbol_not_reserved(symbol)?;
-    let taken = def.quantities.iter().any(|q| q.symbol == symbol)
-        || def.results.iter().any(|r| r.symbol == symbol)
-        || def.intermediates.iter().any(|it| it.symbol == symbol)
-        || def
-            .point_results
-            .iter()
-            .any(|p| p.symbol == symbol && Some(p.id.as_str()) != exclude_id);
-    if taken {
-        return Err(duplicate_symbol_error(symbol));
-    }
     // Símbolos disponibles tras el ajuste: magnitudes + intermedias + mensurandos + slope/intercept.
     let mut allowed: Vec<String> = def.quantities.iter().map(|q| q.symbol.clone()).collect();
     allowed.extend(def.intermediates.iter().map(|it| it.symbol.clone()));
