@@ -10,10 +10,13 @@ export function renderAnalysis(target, submission, includeReview = false, defini
   if (submission.entry_mode === "form") {
     const isTeacher = canReview(state.user);
     const studentResults = submission.student_results ?? [];
+    // Motor D: con operadores los mensurandos son por operador (g por operador). Se muestran para
+    // comparar visualmente, sin entrada del alumno ni veredicto alumno-vs-automático.
+    const hasOperators = (submission.analysis?.operators?.length ?? 0) > 0;
     let body = "";
     if (submission.analysis) {
       body += formAnalysisMarkup(submission.analysis);
-      if (studentResults.length) {
+      if (studentResults.length && !hasOperators) {
         body += comparisonMarkup(
           submission.analysis.derived ?? [],
           studentResults,
@@ -25,7 +28,9 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     }
     body += measurementMetaMarkup(submission, definition);
     if (!isTeacher) {
-      body += studentResultsFormMarkup(submission, definition);
+      body += hasOperators
+        ? `<p class="submission-meta">Los mensurandos se calculan por operador para comparar las determinaciones; no hay carga de cálculos propios en esta práctica.</p>`
+        : studentResultsFormMarkup(submission, definition);
     }
     target.innerHTML = `
       ${submissionHeader(submission)}

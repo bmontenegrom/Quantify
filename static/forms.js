@@ -118,6 +118,10 @@ export async function loadSubmissionForm() {
       fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`),
     ]);
     state.practiceForm = { definition, instruments };
+    // Form nuevo: descartá cronómetros/depuración de la práctica anterior para no dejar
+    // instancias huérfanas (p. ej. claves `qid#i` de una config de operadores distinta).
+    state.chronometers.clear();
+    state.seriesDebug.clear();
     renderMeasurementFields();
     applyPrefill();
   } catch (error) {
@@ -580,15 +584,19 @@ function setSubmissionBusy(busy) {
 
 function buildMetaMap(measurements) {
   const map = {};
+  const quantities = state.practiceForm?.definition?.quantities ?? [];
   for (const m of measurements) {
-    const row = measurementFields.querySelector(`[data-quantity-id="${CSS.escape(m.quantity_id)}"]`);
-    if (row) {
-      map[m.quantity_id] = {
-        name: row.querySelector("legend")?.textContent?.trim() ?? m.quantity_id,
-        isGiven: row.dataset.isGiven === "1",
-        isChrono: row.dataset.isChrono === "1",
-      };
-    }
+    // El nombre sale de la definición (robusto: las magnitudes por operador no tienen una única
+    // fila con `legend`, sino N bloques bajo un contenedor). isGiven/isChrono salen de una fila real.
+    const def = quantities.find((q) => q.id === m.quantity_id);
+    const row = measurementFields.querySelector(
+      `.measurement-row[data-quantity-id="${CSS.escape(m.quantity_id)}"]`
+    );
+    map[m.quantity_id] = {
+      name: def?.name ?? row?.querySelector("legend")?.textContent?.trim() ?? m.quantity_id,
+      isGiven: row?.dataset.isGiven === "1",
+      isChrono: row?.dataset.isChrono === "1",
+    };
   }
   return map;
 }
