@@ -477,9 +477,11 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
     add_column_if_missing(pool, "users", "default_group_id", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
-    // Fórmulas de eje (x, y) por punto, solo para prácticas `regresion_lineal`.
+    // Fórmulas de eje (x, y) por punto, para prácticas `regresion_lineal` y `curva`.
     add_column_if_missing(pool, "practices", "x_formula", "TEXT").await?;
     add_column_if_missing(pool, "practices", "y_formula", "TEXT").await?;
+    // Eje x logarítmico en el gráfico de dispersión (solo `curva`; útil para barridos en frecuencia).
+    add_column_if_missing(pool, "practices", "x_log", "INTEGER").await?;
 
     sqlx::query(
         r#"

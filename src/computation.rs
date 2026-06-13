@@ -83,13 +83,24 @@ pub struct RegressionResult {
     pub y_label: String,
 }
 
-/// Resultado completo del cálculo de una entrega por formulario. En el camino estadístico se
-/// llenan `quantities` (incertidumbres por magnitud); en el de regresión, `regression` (ajuste).
-/// `derived` y `warnings` se usan en ambos.
+/// Serie de puntos sin ajuste (`analysis_kind = "curva"`): se grafica el scatter y se lista la
+/// tabla, sin recta ni mensurandos derivados. `x_log` indica eje x logarítmico en el gráfico.
+#[derive(Debug, Serialize)]
+pub struct ScatterResult {
+    pub points: Vec<(f64, f64)>,
+    pub x_label: String,
+    pub y_label: String,
+    pub x_log: bool,
+}
+
+/// Resultado completo del cálculo de una entrega por formulario. Según el `analysis_kind` se
+/// llena un camino: `quantities` (estadístico), `regression` (ajuste lineal) o `scatter` (curva).
+/// `derived` y `warnings` aplican a los caminos que correspondan.
 #[derive(Debug, Serialize)]
 pub struct FormAnalysis {
     pub quantities: Vec<QuantityComputation>,
     pub regression: Option<RegressionResult>,
+    pub scatter: Option<ScatterResult>,
     pub derived: Vec<DerivedComputation>,
     pub warnings: Vec<String>,
 }
@@ -257,21 +268,26 @@ pub fn compute(
     Ok(FormAnalysis {
         quantities: computed,
         regression: None,
+        scatter: None,
         derived,
         warnings,
     })
 }
 
-/// Calcula el [`FormAnalysis`] de una práctica `regresion_lineal`: empareja las mediciones por
-/// punto, evalúa las fórmulas de eje `x_formula`/`y_formula` en cada punto, ajusta una recta
-/// (`analysis::linear_regression`) y deriva los mensurandos desde `slope`/`intercept`.
-pub fn compute_regresion(
+/// Serie de puntos `(x, y)` evaluados desde las fórmulas de eje.
+type PointSeries = Vec<(f64, f64)>;
+
+/// Empareja las mediciones por punto y evalúa las fórmulas de eje `x_formula`/`y_formula`,
+/// devolviendo la serie de puntos `(x, y)` junto con las advertencias acumuladas. Compartido por
+/// los caminos `regresion_lineal` y `curva`. Falla si hay menos de 2 puntos o si un punto produce
+/// un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
+fn build_points(
     quantities: &[PracticeQuantity],
-    results: &[PracticeResult],
     x_formula: &str,
     y_formula: &str,
     measurements: &[MeasurementInput],
-) -> anyhow::Result<FormAnalysis> {
+    too_few_msg: &str,
+) -> anyhow::Result<(PointSeries, Vec<String>)> {
     let mut warnings = Vec::new();
     let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
     let by_quantity: HashMap<&str, &MeasurementInput> = measurements
@@ -279,8 +295,23 @@ pub fn compute_regresion(
         .map(|m| (m.quantity_id.as_str(), m))
         .collect();
 
-    // Cantidad de puntos = mínimo de réplicas entre las magnitudes (deben venir parejas).
-    let lengths: Vec<usize> = quantities
+    let x_tree = compile_formula(x_formula, &symbols)?;
+    let y_tree = compile_formula(y_formula, &symbols)?;
+
+    // Solo las magnitudes que aparecen en las fórmulas de eje condicionan los puntos. Las
+    // auxiliares (p. ej. un dato de cátedra usado en otra parte de la práctica, o una magnitud
+    // que no se grafica) se ignoran: no exigen mediciones ni arrastran el conteo de puntos.
+    let referenced: std::collections::HashSet<&str> = x_tree
+        .iter_variable_identifiers()
+        .chain(y_tree.iter_variable_identifiers())
+        .collect();
+    let axis_quantities: Vec<&PracticeQuantity> = quantities
+        .iter()
+        .filter(|q| referenced.contains(q.symbol.as_str()))
+        .collect();
+
+    // Cantidad de puntos = mínimo de réplicas entre las magnitudes de eje (deben venir parejas).
+    let lengths: Vec<usize> = axis_quantities
         .iter()
         .map(|q| by_quantity.get(q.id.as_str()).map_or(0, |m| m.values.len()))
         .collect();
@@ -292,15 +323,12 @@ pub fn compute_regresion(
         );
     }
     if n_points < 2 {
-        anyhow::bail!("se necesitan al menos 2 puntos para el ajuste lineal");
+        anyhow::bail!("{too_few_msg}");
     }
-
-    let x_tree = compile_formula(x_formula, &symbols)?;
-    let y_tree = compile_formula(y_formula, &symbols)?;
 
     let mut points = Vec::with_capacity(n_points);
     for i in 0..n_points {
-        let bound: HashMap<&str, f64> = quantities
+        let bound: HashMap<&str, f64> = axis_quantities
             .iter()
             .filter_map(|q| {
                 by_quantity
@@ -317,6 +345,26 @@ pub fn compute_regresion(
         }
         points.push((x, y));
     }
+    Ok((points, warnings))
+}
+
+/// Calcula el [`FormAnalysis`] de una práctica `regresion_lineal`: empareja las mediciones por
+/// punto, evalúa las fórmulas de eje `x_formula`/`y_formula` en cada punto, ajusta una recta
+/// (`analysis::linear_regression`) y deriva los mensurandos desde `slope`/`intercept`.
+pub fn compute_regresion(
+    quantities: &[PracticeQuantity],
+    results: &[PracticeResult],
+    x_formula: &str,
+    y_formula: &str,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<FormAnalysis> {
+    let (points, mut warnings) = build_points(
+        quantities,
+        x_formula,
+        y_formula,
+        measurements,
+        "se necesitan al menos 2 puntos para el ajuste lineal",
+    )?;
 
     let fit = analysis::linear_regression("x", "y", &points)
         .ok_or_else(|| anyhow::anyhow!("no se pudo ajustar la recta (¿todos los x iguales?)"))?;
@@ -347,7 +395,44 @@ pub fn compute_regresion(
             x_label: x_formula.to_string(),
             y_label: y_formula.to_string(),
         }),
+        scatter: None,
         derived,
+        warnings,
+    })
+}
+
+/// Calcula el [`FormAnalysis`] de una práctica `curva`: empareja las mediciones por punto y
+/// evalúa las fórmulas de eje `x_formula`/`y_formula`, produciendo una serie de puntos **sin
+/// ajuste** (scatter + tabla). No deriva mensurandos. `x_log` marca eje x logarítmico.
+pub fn compute_curva(
+    quantities: &[PracticeQuantity],
+    x_formula: &str,
+    y_formula: &str,
+    x_log: bool,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<FormAnalysis> {
+    let (points, warnings) = build_points(
+        quantities,
+        x_formula,
+        y_formula,
+        measurements,
+        "se necesitan al menos 2 puntos para graficar la curva",
+    )?;
+
+    if x_log && points.iter().any(|(x, _)| *x <= 0.0) {
+        anyhow::bail!("el eje x es logaritmico pero un punto tiene x <= 0");
+    }
+
+    Ok(FormAnalysis {
+        quantities: Vec::new(),
+        regression: None,
+        scatter: Some(ScatterResult {
+            points,
+            x_label: x_formula.to_string(),
+            y_label: y_formula.to_string(),
+            x_log,
+        }),
+        derived: Vec::new(),
         warnings,
     })
 }
@@ -467,6 +552,25 @@ pub async fn analyze(
             &definition.results,
             x_formula,
             y_formula,
+            measurements,
+        );
+    }
+
+    // Camino de curva (scatter sin ajuste): también requiere las fórmulas de eje.
+    if definition.analysis_kind.as_deref() == Some("curva") {
+        let (Some(x_formula), Some(y_formula)) = (
+            definition.x_formula.as_deref(),
+            definition.y_formula.as_deref(),
+        ) else {
+            anyhow::bail!(
+                "la practica es de curva pero no tiene definidas las formulas de los ejes"
+            );
+        };
+        return compute_curva(
+            &definition.quantities,
+            x_formula,
+            y_formula,
+            definition.x_log,
             measurements,
         );
     }
@@ -1256,5 +1360,120 @@ mod tests {
         let quantities = vec![quantity("px"), quantity("py")];
         let measurements = vec![measurement("px", &[1.0]), measurement("py", &[2.0])];
         assert!(compute_regresion(&quantities, &[], "px", "py", &measurements).is_err());
+    }
+
+    #[test]
+    fn compute_curva_builds_scatter_without_fit() {
+        // Curva sin ajuste: evalúa los ejes y produce los puntos, sin slope/intercept ni derivados.
+        let quantities = vec![quantity("px"), quantity("py")];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[4.0, 9.0, 16.0]),
+        ];
+        let a = compute_curva(&quantities, "px", "py", false, &measurements).unwrap();
+        assert!(a.regression.is_none());
+        assert!(a.derived.is_empty());
+        let scatter = a.scatter.unwrap();
+        assert_eq!(scatter.points, vec![(1.0, 4.0), (2.0, 9.0), (3.0, 16.0)]);
+        assert_eq!(scatter.x_label, "px");
+        assert_eq!(scatter.y_label, "py");
+        assert!(!scatter.x_log);
+    }
+
+    #[test]
+    fn compute_curva_needs_at_least_two_points() {
+        let quantities = vec![quantity("px"), quantity("py")];
+        let measurements = vec![measurement("px", &[1.0]), measurement("py", &[2.0])];
+        assert!(compute_curva(&quantities, "px", "py", false, &measurements).is_err());
+    }
+
+    #[test]
+    fn compute_curva_rejects_non_positive_x_when_log() {
+        // Con eje x logarítmico, un x <= 0 es inválido.
+        let quantities = vec![quantity("px"), quantity("py")];
+        let measurements = vec![
+            measurement("px", &[0.0, 10.0]),
+            measurement("py", &[1.0, 2.0]),
+        ];
+        assert!(compute_curva(&quantities, "px", "py", true, &measurements).is_err());
+    }
+
+    #[test]
+    fn build_points_ignores_quantities_not_in_axes() {
+        // 'aux' no aparece en las fórmulas de eje y no tiene mediciones: no debe bloquear ni
+        // arrastrar el conteo de puntos (regresión: antes el mínimo común la incluía y daba 0).
+        let quantities = vec![quantity("px"), quantity("py"), quantity("aux")];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[4.0, 5.0, 6.0]),
+            // 'aux' sin mediciones a propósito.
+        ];
+        let a = compute_curva(&quantities, "px", "py", false, &measurements).unwrap();
+        assert_eq!(
+            a.scatter.unwrap().points,
+            vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
+        );
+    }
+
+    /// Mediciones reales para una magnitud sembrada, buscando su id por símbolo en la definición.
+    fn measurement_for(
+        def: &crate::practices::PracticeDefinition,
+        symbol: &str,
+        values: &[f64],
+    ) -> MeasurementInput {
+        let id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == symbol)
+            .unwrap()
+            .id
+            .clone();
+        MeasurementInput {
+            quantity_id: id,
+            instrument_id: None,
+            scale_id: None,
+            values: values.to_vec(),
+            given_u: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn analyze_routes_curva_to_scatter() {
+        let (pool, _dir) = setup().await;
+        // Configuramos P1 como curva con ejes sobre sus propias magnitudes (T vs t_med).
+        crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+            .await
+            .unwrap();
+        crate::practices::set_regression_formulas(&pool, "p1-estadistica", "T", "t_med", false)
+            .await
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        // L es magnitud auxiliar (no está en los ejes T vs t_med): se omite a propósito y
+        // build_points debe ignorarla sin exigirle mediciones.
+        let measurements = vec![
+            measurement_for(&def, "T", &[1.0, 2.0, 3.0]),
+            measurement_for(&def, "t_med", &[4.0, 5.0, 6.0]),
+        ];
+        let analysis = analyze(&pool, "p1-estadistica", &measurements)
+            .await
+            .unwrap();
+        assert!(analysis.regression.is_none());
+        assert!(analysis.derived.is_empty());
+        let scatter = analysis.scatter.expect("la curva debe producir scatter");
+        assert_eq!(scatter.points, vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]);
+    }
+
+    #[tokio::test]
+    async fn analyze_curva_without_formulas_errors() {
+        let (pool, _dir) = setup().await;
+        crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+            .await
+            .unwrap();
+        // Sin fórmulas de eje, el dispatcher debe fallar con un error claro (no entrar al cálculo).
+        let result = analyze(&pool, "p1-estadistica", &[]).await;
+        assert!(result.is_err());
     }
 }

@@ -22,6 +22,7 @@ import {
   compatibleInstruments,
   measureText,
   regressionPlot,
+  scatterPlot,
   compareResults,
   SI_PREFIXES,
   prefixFactor,
@@ -242,6 +243,7 @@ test("allGroups aplana todos los grupos anotando el curso", () => {
 test("analysisKindLabel devuelve etiqueta legible o 'Sin definir'", () => {
   assert.equal(analysisKindLabel("estadistico"), "Estadístico");
   assert.equal(analysisKindLabel("regresion_lineal"), "Regresión lineal");
+  assert.equal(analysisKindLabel("curva"), "Curva (sin ajuste)");
   // Kind eliminado (decisión docente 2026-06: τ se obtiene por medida directa y desfasaje).
   assert.equal(analysisKindLabel("relajacion_exponencial"), "Sin definir");
   assert.equal(analysisKindLabel(null), "Sin definir");
@@ -304,6 +306,34 @@ test("regressionPlot devuelve null con <2 puntos o rango nulo", () => {
   assert.equal(regressionPlot([[1, 2], [1, 4]], 0, 1), null);
   // y constante y recta plana -> spanY 0.
   assert.equal(regressionPlot([[0, 3], [2, 3]], 0, 3), null);
+});
+
+test("scatterPlot proyecta puntos sin recta (no expone línea)", () => {
+  const plot = scatterPlot([[0, 1], [1, 3], [2, 5]]);
+  assert.equal(plot.scatter.length, 3);
+  assert.equal(plot.line, undefined);
+  assert.equal(plot.xLog, false);
+  // Primer punto a la izquierda-abajo, último a la derecha-arriba (eje Y invertido).
+  assert.ok(plot.scatter[0].cx < plot.scatter[2].cx);
+  assert.ok(plot.scatter[0].cy > plot.scatter[2].cy);
+});
+
+test("scatterPlot con xLog escala el eje x logarítmicamente", () => {
+  // x = 1, 10, 100 -> log10 = 0, 1, 2: equiespaciados en pantalla.
+  const plot = scatterPlot([[1, 5], [10, 6], [100, 7]], { xLog: true });
+  assert.equal(plot.xLog, true);
+  const d1 = plot.scatter[1].cx - plot.scatter[0].cx;
+  const d2 = plot.scatter[2].cx - plot.scatter[1].cx;
+  assert.ok(Math.abs(d1 - d2) < 1e-9);
+});
+
+test("scatterPlot devuelve null con <2 puntos, rango nulo o x≤0 en log", () => {
+  assert.equal(scatterPlot([]), null);
+  assert.equal(scatterPlot([[1, 2]]), null);
+  // Todos los x iguales -> spanX 0.
+  assert.equal(scatterPlot([[1, 2], [1, 4]]), null);
+  // Eje log con un x no positivo.
+  assert.equal(scatterPlot([[0, 2], [10, 4]], { xLog: true }), null);
 });
 
 test("compareResults empareja por símbolo y calcula Δ abs y %", () => {
@@ -442,6 +472,17 @@ test("validateMeasurements: regresion_lineal necesita ≥2 puntos completos", ()
   const valid = validateMeasurements(
     [{ quantity_id: "x", values: [1, 2, 3], given_u: null }, { quantity_id: "y", values: [4, 5, 6], given_u: null }],
     "regresion_lineal",
+  );
+  assert.equal(valid, null);
+});
+
+test("validateMeasurements: curva necesita ≥2 puntos y avisa con texto de curva", () => {
+  const onePoint = validateMeasurements([{ quantity_id: "x", values: [1], given_u: null }], "curva");
+  assert.ok(typeof onePoint === "string");
+  assert.ok(onePoint.includes("curva"));
+  const valid = validateMeasurements(
+    [{ quantity_id: "x", values: [1, 2], given_u: null }, { quantity_id: "y", values: [4, 5], given_u: null }],
+    "curva",
   );
   assert.equal(valid, null);
 });

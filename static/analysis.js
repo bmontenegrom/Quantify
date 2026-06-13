@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, format, canReview, formatDate, measureText, regressionPlot, compareResults, cssEscape, allStudents } from "./lib.js";
+import { escapeHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, cssEscape, allStudents } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -212,6 +212,14 @@ function formAnalysisMarkup(analysis) {
     `;
   }
 
+  if (analysis.scatter) {
+    return `
+      <h3>Curva (puntos sin ajuste)</h3>
+      ${scatterMarkup(analysis.scatter)}
+      ${renderWarnings(analysis.warnings ?? [])}
+    `;
+  }
+
   return `
     <h3>Incertidumbres por magnitud</h3>
     ${quantitiesTable}
@@ -245,22 +253,70 @@ export function regressionMarkup(regression) {
   `;
 }
 
-function regressionSvg(plot, xLabel = "x", yLabel = "y") {
+/**
+ * Markup SVG común a los gráficos de ajuste y de dispersión: ejes, puntos y rótulos.
+ * `lineMarkup` inyecta la recta del ajuste (vacío para scatter); `xText`/`yLabel`/`ariaLabel`
+ * deben venir ya escapados por el llamador.
+ */
+function plotSvg(plot, { ariaLabel, lineMarkup = "", xText, yLabel }) {
   const f = (n) => n.toFixed(1);
   const points = plot.scatter
     .map((p) => `<circle cx="${f(p.cx)}" cy="${f(p.cy)}" r="3" class="reg-point" />`)
     .join("");
   const axisY = plot.height - plot.pad;
   return `
-    <svg class="reg-plot" viewBox="0 0 ${plot.width} ${plot.height}" role="img" aria-label="Gráfico del ajuste lineal de ${escapeHtml(yLabel)} contra ${escapeHtml(xLabel)}">
+    <svg class="reg-plot" viewBox="0 0 ${plot.width} ${plot.height}" role="img" aria-label="${ariaLabel}">
       <line class="reg-axis" x1="${plot.pad}" y1="${axisY}" x2="${plot.width - plot.pad}" y2="${axisY}" />
       <line class="reg-axis" x1="${plot.pad}" y1="${plot.pad}" x2="${plot.pad}" y2="${axisY}" />
-      <line class="reg-line" x1="${f(plot.line.x1)}" y1="${f(plot.line.y1)}" x2="${f(plot.line.x2)}" y2="${f(plot.line.y2)}" />
+      ${lineMarkup}
       ${points}
-      <text class="reg-label" x="${plot.width - plot.pad}" y="${plot.height - 8}" text-anchor="end">x: ${escapeHtml(xLabel)}</text>
-      <text class="reg-label" x="${plot.pad}" y="${plot.pad - 12}" text-anchor="start">y: ${escapeHtml(yLabel)}</text>
+      <text class="reg-label" x="${plot.width - plot.pad}" y="${plot.height - 8}" text-anchor="end">${xText}</text>
+      <text class="reg-label" x="${plot.pad}" y="${plot.pad - 12}" text-anchor="start">y: ${yLabel}</text>
     </svg>
   `;
+}
+
+function regressionSvg(plot, xLabel = "x", yLabel = "y") {
+  const f = (n) => n.toFixed(1);
+  const lineMarkup = `<line class="reg-line" x1="${f(plot.line.x1)}" y1="${f(plot.line.y1)}" x2="${f(plot.line.x2)}" y2="${f(plot.line.y2)}" />`;
+  return plotSvg(plot, {
+    ariaLabel: `Gráfico del ajuste lineal de ${escapeHtml(yLabel)} contra ${escapeHtml(xLabel)}`,
+    lineMarkup,
+    xText: `x: ${escapeHtml(xLabel)}`,
+    yLabel: escapeHtml(yLabel),
+  });
+}
+
+export function scatterMarkup(scatter) {
+  const points = scatter.points ?? [];
+  const plot = scatterPlot(points, { xLog: scatter.x_log });
+  const xHeader = scatter.x_log ? `${escapeHtml(scatter.x_label)} (log)` : escapeHtml(scatter.x_label);
+  const table = `
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead>
+          <tr><th>#</th><th>${xHeader}</th><th>${escapeHtml(scatter.y_label)}</th></tr>
+        </thead>
+        <tbody>
+          ${points
+            .map((p, i) => `<tr><td>${i + 1}</td><td>${format(p[0])}</td><td>${format(p[1])}</td></tr>`)
+            .join("")}
+        </tbody>
+      </table>
+    </div>`;
+  const graph = plot
+    ? scatterSvg(plot, scatter.x_label, scatter.y_label)
+    : `<p class="submission-meta">No se puede graficar: el rango de los datos es nulo${scatter.x_log ? " o hay un x ≤ 0 con eje logarítmico" : ""}.</p>`;
+  return `${graph}${table}`;
+}
+
+function scatterSvg(plot, xLabel = "x", yLabel = "y") {
+  const xText = plot.xLog ? `x: ${escapeHtml(xLabel)} (log)` : `x: ${escapeHtml(xLabel)}`;
+  return plotSvg(plot, {
+    ariaLabel: `Gráfico de dispersión de ${escapeHtml(yLabel)} contra ${escapeHtml(xLabel)}`,
+    xText,
+    yLabel: escapeHtml(yLabel),
+  });
 }
 
 function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {

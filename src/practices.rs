@@ -62,11 +62,22 @@ pub struct ResultInput {
 pub struct PracticeDefinition {
     pub practice_id: String,
     pub analysis_kind: Option<String>,
-    /// Solo para `regresion_lineal`: expresiones por punto de los ejes `x` e `y` del ajuste.
+    /// Para `regresion_lineal` y `curva`: expresiones por punto de los ejes `x` e `y`.
     pub x_formula: Option<String>,
     pub y_formula: Option<String>,
+    /// Solo para `curva`: si es `true`, el gráfico de dispersión usa eje x logarítmico.
+    pub x_log: bool,
     pub quantities: Vec<PracticeQuantity>,
     pub results: Vec<PracticeResult>,
+}
+
+/// Fila cruda con la configuración de análisis de una práctica.
+#[derive(sqlx::FromRow)]
+struct PracticeConfigRow {
+    analysis_kind: Option<String>,
+    x_formula: Option<String>,
+    y_formula: Option<String>,
+    x_log: Option<bool>,
 }
 
 /// Devuelve la definición completa de una práctica (quantities + results).
@@ -74,21 +85,23 @@ pub async fn definition(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
-    let row: Option<(Option<String>, Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT analysis_kind, x_formula, y_formula FROM practices WHERE id = ?1")
-            .bind(practice_id)
-            .fetch_optional(pool)
-            .await?;
-    let Some((analysis_kind, x_formula, y_formula)) = row else {
+    let row: Option<PracticeConfigRow> = sqlx::query_as(
+        "SELECT analysis_kind, x_formula, y_formula, x_log FROM practices WHERE id = ?1",
+    )
+    .bind(practice_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else {
         return Ok(None);
     };
     let quantities = quantities_for(pool, practice_id).await?;
     let results = results_for(pool, practice_id).await?;
     Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
-        analysis_kind,
-        x_formula,
-        y_formula,
+        analysis_kind: row.analysis_kind,
+        x_formula: row.x_formula,
+        y_formula: row.y_formula,
+        x_log: row.x_log.unwrap_or(false),
         quantities,
         results,
     }))
@@ -268,13 +281,14 @@ pub async fn set_analysis_kind(
     Ok(result.rows_affected() > 0)
 }
 
-/// Actualiza las fórmulas de eje (`x`, `y`) usadas en el ajuste de una práctica de regresión.
-/// Una cadena vacía guarda `NULL`. Devuelve `true` si la práctica existía.
+/// Actualiza las fórmulas de eje (`x`, `y`) y el flag `x_log` (eje x logarítmico, solo `curva`)
+/// de una práctica. Una cadena vacía guarda `NULL`. Devuelve `true` si la práctica existía.
 pub async fn set_regression_formulas(
     pool: &SqlitePool,
     practice_id: &str,
     x_formula: &str,
     y_formula: &str,
+    x_log: bool,
 ) -> anyhow::Result<bool> {
     let norm = |s: &str| {
         let t = s.trim();
@@ -284,12 +298,15 @@ pub async fn set_regression_formulas(
             Some(t.to_string())
         }
     };
-    let result = sqlx::query("UPDATE practices SET x_formula = ?2, y_formula = ?3 WHERE id = ?1")
-        .bind(practice_id)
-        .bind(norm(x_formula))
-        .bind(norm(y_formula))
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        "UPDATE practices SET x_formula = ?2, y_formula = ?3, x_log = ?4 WHERE id = ?1",
+    )
+    .bind(practice_id)
+    .bind(norm(x_formula))
+    .bind(norm(y_formula))
+    .bind(x_log)
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -847,26 +864,33 @@ mod tests {
             &pool,
             "p1-estadistica",
             "2*pi*f",
-            "b / math::sqrt(a*a - b*b)"
+            "b / math::sqrt(a*a - b*b)",
+            false
         )
         .await
         .unwrap());
         let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
         assert_eq!(def.x_formula.as_deref(), Some("2*pi*f"));
         assert_eq!(def.y_formula.as_deref(), Some("b / math::sqrt(a*a - b*b)"));
+        assert!(!def.x_log);
 
-        // Una cadena vacía (o solo espacios) guarda NULL.
-        assert!(set_regression_formulas(&pool, "p1-estadistica", "   ", "")
-            .await
-            .unwrap());
+        // Una cadena vacía (o solo espacios) guarda NULL; x_log persiste el flag enviado.
+        assert!(
+            set_regression_formulas(&pool, "p1-estadistica", "   ", "", true)
+                .await
+                .unwrap()
+        );
         let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
         assert_eq!(def.x_formula, None);
         assert_eq!(def.y_formula, None);
+        assert!(def.x_log);
 
         // Práctica inexistente devuelve false.
-        assert!(!set_regression_formulas(&pool, "no-existe", "f", "f")
-            .await
-            .unwrap());
+        assert!(
+            !set_regression_formulas(&pool, "no-existe", "f", "f", false)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
