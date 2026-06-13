@@ -1471,7 +1471,8 @@ async fn update_curve(
 /// Cuerpo para reordenar una curva: dirección del movimiento.
 #[derive(Debug, Deserialize)]
 struct MoveCurveBody {
-    /// `true` mueve la curva una posición hacia arriba; `false`, hacia abajo.
+    /// `true` mueve la curva una posición hacia arriba; `false` (o ausente), hacia abajo.
+    #[serde(default)]
     up: bool,
 }
 

@@ -231,7 +231,16 @@ pub async fn move_curve(
     curve_id: &str,
     up: bool,
 ) -> anyhow::Result<bool> {
-    let curves = curves_for(pool, practice_id).await?;
+    // Lee y reordena dentro de la misma transacción: así dos reordenamientos concurrentes no se
+    // pisan (SQLite aborta el segundo con un error de snapshot en vez de corromper el orden).
+    let mut tx = pool.begin().await?;
+    let curves = sqlx::query_as::<_, PracticeCurve>(
+        "SELECT id, practice_id, position, x_formula, y_formula, x_log \
+         FROM practice_curves WHERE practice_id = ?1 ORDER BY position, id",
+    )
+    .bind(practice_id)
+    .fetch_all(&mut *tx)
+    .await?;
     let Some(idx) = curves.iter().position(|c| c.id == curve_id) else {
         return Ok(false);
     };
@@ -243,8 +252,6 @@ pub async fn move_curve(
     let Some(j) = neighbor else {
         return Ok(false);
     };
-    // Intercambia las posiciones de las dos curvas en una transacción.
-    let mut tx = pool.begin().await?;
     for (id, position) in [
         (&curves[idx].id, curves[j].position),
         (&curves[j].id, curves[idx].position),
