@@ -1337,10 +1337,10 @@ async fn set_practice_analysis_kind(
     require_teacher(&state, &headers).await?;
     if !matches!(
         body.analysis_kind.trim(),
-        "estadistico" | "regresion_lineal"
+        "estadistico" | "regresion_lineal" | "curva"
     ) {
         return Err(AppError::bad_request(
-            "analysis_kind debe ser estadistico o regresion_lineal",
+            "analysis_kind debe ser estadistico, regresion_lineal o curva",
         ));
     }
     if !practices::set_analysis_kind(&state.pool, &id, body.analysis_kind.trim()).await? {
@@ -1349,14 +1349,18 @@ async fn set_practice_analysis_kind(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// Cuerpo para definir las fórmulas de eje de una práctica de regresión.
+/// Cuerpo para definir las fórmulas de eje de una práctica de regresión o curva.
 #[derive(Debug, Deserialize)]
 struct RegressionFormulasBody {
     x_formula: String,
     y_formula: String,
+    /// Eje x logarítmico en el gráfico (solo aplica a `curva`); por defecto `false`.
+    #[serde(default)]
+    x_log: bool,
 }
 
-/// `POST /api/practices/{id}/regression-formulas`: define las fórmulas de eje `x`/`y` (docente/admin).
+/// `POST /api/practices/{id}/regression-formulas`: define las fórmulas de eje `x`/`y` y el flag
+/// `x_log` de una práctica de regresión o curva (docente/admin).
 async fn set_practice_regression_formulas(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -1364,8 +1368,14 @@ async fn set_practice_regression_formulas(
     Json(body): Json<RegressionFormulasBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    if !practices::set_regression_formulas(&state.pool, &id, &body.x_formula, &body.y_formula)
-        .await?
+    if !practices::set_regression_formulas(
+        &state.pool,
+        &id,
+        &body.x_formula,
+        &body.y_formula,
+        body.x_log,
+    )
+    .await?
     {
         return Err(AppError::not_found("practica no encontrada"));
     }

@@ -44,7 +44,7 @@ export function renderPracticesPage() {
       <section class="panel workspace-panel">
         <h3>Tipo de análisis</h3>
         ${renderAnalysisKindForm(practice, def)}
-        ${def?.analysis_kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
+        ${def?.analysis_kind === "regresion_lineal" || def?.analysis_kind === "curva" ? renderRegressionFormulasForm(practice, def) : ""}
       </section>
       <section class="panel workspace-panel">
         <h3>Nueva magnitud</h3>
@@ -159,7 +159,7 @@ function renderAnalysisKindForm(practice, def) {
       <label>Tipo de análisis
         <select name="analysis_kind" required>
           ${placeholder}
-          ${["estadistico", "regresion_lineal"].map((k) =>
+          ${["estadistico", "regresion_lineal", "curva"].map((k) =>
             `<option value="${k}" ${k === current ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
           ).join("")}
         </select>
@@ -174,12 +174,23 @@ function renderAnalysisKindForm(practice, def) {
 function renderRegressionFormulasForm(practice, def) {
   const x = escapeHtml(def?.x_formula ?? "");
   const y = escapeHtml(def?.y_formula ?? "");
+  const isCurva = def?.analysis_kind === "curva";
+  const slopeHint = isCurva
+    ? "Se grafican los puntos sin ajuste ni mensurandos derivados."
+    : "La pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code> en los mensurandos.";
+  const xLogField = isCurva
+    ? `<label class="detail-form-checkbox">
+        <input type="checkbox" name="x_log" ${def?.x_log ? "checked" : ""} />
+        Eje X logarítmico (barridos en frecuencia)
+      </label>`
+    : "";
   return `
     <form id="practice-regression-form" class="detail-form detail-form-grid">
       <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
       <label>Fórmula eje X <input name="x_formula" value="${x}" placeholder="2*pi*f" /></label>
       <label>Fórmula eje Y <input name="y_formula" value="${y}" placeholder="b / math::sqrt(a*a - b*b)" /></label>
-      <p class="submission-meta">Usá los símbolos de las magnitudes. Disponibles: <code>pi</code>, <code>e</code> y funciones <code>math::*</code> (p. ej. <code>math::sqrt</code>). La pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code> en los mensurandos.</p>
+      ${xLogField}
+      <p class="submission-meta">Usá los símbolos de las magnitudes. Disponibles: <code>pi</code>, <code>e</code> y funciones <code>math::*</code> (p. ej. <code>math::sqrt</code>). ${slopeHint}</p>
       <div class="detail-actions">
         <button type="submit">Guardar fórmulas</button>
       </div>
@@ -352,10 +363,12 @@ async function savePracticeKind(event) {
 async function savePracticeRegressionFormulas(event) {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const xLog = event.currentTarget.querySelector('[name="x_log"]')?.checked ?? false;
   try {
     await postJson(`/api/practices/${payload.practice_id}/regression-formulas`, {
       x_formula: payload.x_formula ?? "",
       y_formula: payload.y_formula ?? "",
+      x_log: xLog,
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
     state.practiceActionStatus = "Fórmulas de ajuste guardadas";

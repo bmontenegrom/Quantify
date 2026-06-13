@@ -167,7 +167,7 @@ export function allStudents(academic) {
 
 /**
  * Devuelve la etiqueta legible del tipo de análisis de una práctica.
- * Valores reconocidos: `estadistico`, `regresion_lineal`.
+ * Valores reconocidos: `estadistico`, `regresion_lineal`, `curva`.
  * Cualquier otro valor (incluido `null`/`undefined`) devuelve `"Sin definir"`.
  */
 export function analysisKindLabel(kind) {
@@ -176,6 +176,8 @@ export function analysisKindLabel(kind) {
       return "Estadístico";
     case "regresion_lineal":
       return "Regresión lineal";
+    case "curva":
+      return "Curva (sin ajuste)";
     default:
       return "Sin definir";
   }
@@ -268,6 +270,39 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
     pad,
     scatter: points.map((p) => ({ cx: sx(p[0]), cy: sy(p[1]) })),
     line: { x1: sx(minX), y1: sy(lineYmin), x2: sx(maxX), y2: sy(lineYmax) },
+    bounds: { minX, maxX, minY, maxY },
+  };
+}
+
+/**
+ * Proyecta una serie de puntos a coordenadas de SVG para un gráfico de dispersión **sin recta**
+ * (`analysis_kind = "curva"`). Si `xLog` es `true`, el eje x se escala logarítmicamente (base 10),
+ * útil para barridos en frecuencia. Devuelve `null` si hay menos de 2 puntos, si el rango en algún
+ * eje es nulo, o si `xLog` y algún `x <= 0`.
+ */
+export function scatterPlot(points, { width = 320, height = 220, pad = 32, xLog = false } = {}) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  if (xLog && points.some((p) => p[0] <= 0)) return null;
+  const tx = (x) => (xLog ? Math.log10(x) : x);
+  const xs = points.map((p) => tx(p[0]));
+  const ys = points.map((p) => p[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  if (spanX === 0 || spanY === 0) return null;
+  const innerW = width - 2 * pad;
+  const innerH = height - 2 * pad;
+  const sx = (x) => pad + ((tx(x) - minX) / spanX) * innerW;
+  const sy = (y) => height - pad - ((y - minY) / spanY) * innerH;
+  return {
+    width,
+    height,
+    pad,
+    xLog,
+    scatter: points.map((p) => ({ cx: sx(p[0]), cy: sy(p[1]) })),
     bounds: { minX, maxX, minY, maxY },
   };
 }
@@ -394,11 +429,13 @@ export function compareResults(autoDerived, studentResults, tolerances = {}) {
  * @returns {string|null}
  */
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
-  if (analysisKind === "regresion_lineal") {
+  if (analysisKind === "regresion_lineal" || analysisKind === "curva") {
     const anyWithValues = measurements.some((m) => m.values.length > 0);
     const minPoints = measurements[0]?.values.length ?? 0;
     if (!anyWithValues || minPoints < 2) {
-      return "Cargá al menos 2 puntos completos para el ajuste lineal.";
+      return analysisKind === "curva"
+        ? "Cargá al menos 2 puntos completos para graficar la curva."
+        : "Cargá al menos 2 puntos completos para el ajuste lineal.";
     }
     return null;
   }

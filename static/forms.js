@@ -221,7 +221,7 @@ export function renderMeasurementFields() {
     return;
   }
 
-  if (definition.analysis_kind === "regresion_lineal") {
+  if (definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva") {
     renderSeriesTable(definition);
     return;
   }
@@ -686,7 +686,7 @@ async function updateRegressionPreview() {
   const measurements = collectMeasurements();
   const points = measurements[0]?.values.length ?? 0;
   if (points < 2) {
-    container.innerHTML = `<p class="submission-meta">Cargá al menos 2 puntos completos para ver el ajuste.</p>`;
+    container.innerHTML = `<p class="submission-meta">Cargá al menos 2 puntos completos para ver la vista previa.</p>`;
     return;
   }
   try {
@@ -697,6 +697,9 @@ async function updateRegressionPreview() {
     if (analysis.regression) {
       const { regressionMarkup } = await import("./analysis.js");
       container.innerHTML = `<h4>Vista previa del ajuste</h4>${regressionMarkup(analysis.regression)}`;
+    } else if (analysis.scatter) {
+      const { scatterMarkup } = await import("./analysis.js");
+      container.innerHTML = `<h4>Vista previa de la curva</h4>${scatterMarkup(analysis.scatter)}`;
     } else {
       container.innerHTML = "";
     }
