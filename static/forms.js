@@ -485,11 +485,15 @@ export function collectMeasurements() {
         else singleValues.get(p.id).push(p.value);
       });
     });
-    return quantityIds.map((id) =>
+    const series = quantityIds.map((id) =>
       replicaIds.has(id)
         ? { quantity_id: id, instrument_id: null, scale_id: null, values: [], given_u: null, point_replicas: replicaPoints.get(id) }
         : { quantity_id: id, instrument_id: null, scale_id: null, values: singleValues.get(id), given_u: null },
     );
+    // Motor E: escalares compartidos (datos de cátedra / medida única), cargados una vez fuera de
+    // la serie. Se recolectan como filas sueltas y se suman a las magnitudes por punto.
+    const shared = [...measurementFields.querySelectorAll(".measurement-row")].map(collectStandaloneRow);
+    return [...series, ...shared];
   }
 
   // Motor D: magnitudes por operador → operator_replicas (una serie por bloque de operador).
@@ -512,32 +516,37 @@ export function collectMeasurements() {
     (row) => !row.closest(".operator-quantity")
   );
   for (const row of standalone) {
-    if (row.dataset.isGiven === "1") {
-      const valInput = row.querySelector(".measure-given-value");
-      const uInput = row.querySelector(".measure-given-u");
-      const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
-      const rawVal = valInput.value.trim();
-      const rawU = uInput.value.trim();
-      const value = rawVal === "" ? null : Number(rawVal) * prefixFactor(valPrefix);
-      const given_u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
-      out.push({
-        quantity_id: row.dataset.quantityId,
-        instrument_id: null,
-        scale_id: null,
-        values: value != null && Number.isFinite(value) ? [value] : [],
-        given_u: given_u != null && Number.isFinite(given_u) ? given_u : null,
-      });
-      continue;
-    }
-    out.push({
-      quantity_id: row.dataset.quantityId,
-      instrument_id: row.querySelector(".measure-instrument")?.value || null,
-      scale_id: row.querySelector(".measure-scale")?.value || null,
-      values: rowSeriesValues(row),
-      given_u: null,
-    });
+    out.push(collectStandaloneRow(row));
   }
   return out;
+}
+
+/// Recolecta una fila suelta: dato dado (valor ± U) o medida única/réplicas (instrumento/escala +
+/// lecturas). Usada por el estadístico y por la sección de escalares compartidos de regresión.
+function collectStandaloneRow(row) {
+  if (row.dataset.isGiven === "1") {
+    const valInput = row.querySelector(".measure-given-value");
+    const uInput = row.querySelector(".measure-given-u");
+    const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
+    const rawVal = valInput.value.trim();
+    const rawU = uInput.value.trim();
+    const value = rawVal === "" ? null : Number(rawVal) * prefixFactor(valPrefix);
+    const given_u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
+    return {
+      quantity_id: row.dataset.quantityId,
+      instrument_id: null,
+      scale_id: null,
+      values: value != null && Number.isFinite(value) ? [value] : [],
+      given_u: given_u != null && Number.isFinite(given_u) ? given_u : null,
+    };
+  }
+  return {
+    quantity_id: row.dataset.quantityId,
+    instrument_id: row.querySelector(".measure-instrument")?.value || null,
+    scale_id: row.querySelector(".measure-scale")?.value || null,
+    values: rowSeriesValues(row),
+    given_u: null,
+  };
 }
 
 /** Lecturas numéricas de una fila de medición (cronómetro con descartes, o inputs de réplica). */
@@ -708,7 +717,8 @@ export function applyPrefill() {
   if (seriesTable) {
     const qids = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
     const nPoints = Math.max(...qids.map((id) => byQ.get(id)?.pointGroups.length ?? 0), 0);
-    const cols = state.practiceForm.definition.quantities;
+    // Solo las columnas por punto (las compartidas se rellenan aparte, abajo).
+    const cols = state.practiceForm.definition.quantities.filter((q) => q.per_point && !q.is_given);
     const tbody = seriesTable.querySelector("tbody");
     tbody.innerHTML = Array.from({ length: Math.max(nPoints, 1) }, () => seriesRowHtml(cols)).join("");
     wireSeriesRemove();
@@ -736,6 +746,10 @@ export function applyPrefill() {
       });
     });
     updateSeriesMeans();
+    // Escalares compartidos (Motor E): se rellenan como filas sueltas fuera de la serie.
+    measurementFields
+      .querySelectorAll(".shared-quantities .measurement-row")
+      .forEach((row) => prefillStandaloneRow(row, byQ));
     return;
   }
 
@@ -754,17 +768,22 @@ export function applyPrefill() {
     (row) => !row.closest(".operator-quantity")
   );
   for (const row of standalone) {
-    const e = byQ.get(row.dataset.quantityId);
-    if (!e) continue;
-    if (row.dataset.isGiven === "1") {
-      const v = row.querySelector(".measure-given-value");
-      const u = row.querySelector(".measure-given-u");
-      if (v) v.value = e.values[0] ?? "";
-      if (u && e.value_u != null) u.value = e.value_u;
-      continue;
-    }
-    fillReplicaRow(row, e, e.values);
+    prefillStandaloneRow(row, byQ);
   }
+}
+
+/// Rellena una fila suelta (dato dado o medida única/réplicas) desde el prefill de edición.
+function prefillStandaloneRow(row, byQ) {
+  const e = byQ.get(row.dataset.quantityId);
+  if (!e) return;
+  if (row.dataset.isGiven === "1") {
+    const v = row.querySelector(".measure-given-value");
+    const u = row.querySelector(".measure-given-u");
+    if (v) v.value = e.values[0] ?? "";
+    if (u && e.value_u != null) u.value = e.value_u;
+    return;
+  }
+  fillReplicaRow(row, e, e.values);
 }
 
 /** Rellena una fila de réplicas con `values`, restaurando instrumento/escala desde el prefill. */
@@ -789,13 +808,20 @@ function fillReplicaRow(row, e, values) {
 }
 
 function renderSeriesTable(definition) {
-  const cols = definition.quantities;
+  // Motor E: separa las magnitudes que se miden por punto (van en la serie) de los escalares
+  // compartidos (datos de cátedra / medida única), que se cargan una sola vez.
+  const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
+  const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
   const header = cols
     .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${escapeHtml(q.symbol)} <span class="submission-meta">(${escapeHtml(q.unit)})</span></th>`)
     .join("");
   const INITIAL_ROWS = 3;
   const body = Array.from({ length: INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
+  const sharedSection = shared.length
+    ? `<div class="shared-quantities"><h4>Datos compartidos</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`
+    : "";
   measurementFields.innerHTML = `
+    ${sharedSection}
     <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
     <div class="directory-table-wrap">
       <table class="series-table grade-table directory-data-table">
@@ -806,6 +832,15 @@ function renderSeriesTable(definition) {
     <button type="button" class="add-series-row">＋ agregar punto</button>
     <section class="series-preview panel" aria-live="polite"></section>
   `;
+  // Wiring de las filas compartidas de medida única: instrumento → escalas compatibles.
+  measurementFields.querySelectorAll(".shared-quantities .measurement-row").forEach((row) => {
+    if (row.dataset.isGiven === "1") return;
+    const inst = row.querySelector(".measure-instrument");
+    if (inst) {
+      inst.addEventListener("change", () => populateScaleOptions(row));
+      populateScaleOptions(row);
+    }
+  });
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
     wireSeriesRemove();
@@ -890,6 +925,44 @@ function seriesRowHtml(cols) {
     })
     .join("");
   return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
+}
+
+/// HTML de una fila de escalar compartido (Motor E): dato de cátedra (valor ± U) o medida única
+/// (instrumento/escala + un valor). Se cargan una sola vez, fuera de la tabla de la serie.
+function sharedRowHtml(q) {
+  if (q.is_given) {
+    return `
+      <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
+        <legend>${escapeHtml(q.name)} <span class="submission-meta">(dato — ${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+        <div class="form-grid">
+          <label>Valor
+            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-value" type="number" step="any" placeholder="valor" /><span class="replica-unit">${escapeHtml(q.unit)}</span></div>
+          </label>
+          <label>Incertidumbre U (expandida)
+            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${escapeHtml(q.unit)}</span></div>
+          </label>
+        </div>
+      </fieldset>`;
+  }
+  const instruments = state.practiceForm?.instruments ?? [];
+  const options = compatibleInstruments(instruments, q.quantity);
+  const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
+    .concat(options.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`))
+    .join("");
+  return `
+    <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
+      <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)}, medida única)</span></legend>
+      <div class="measure-body">
+        <div class="measure-selectors">
+          <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
+          <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
+        </div>
+        <div class="measure-sep"></div>
+        <div class="measure-right">
+          <div class="measure-values" data-repeated="0">${renderReplicaInput(q.unit)}</div>
+        </div>
+      </div>
+    </fieldset>`;
 }
 
 /** HTML de un input de réplica (índice 0-based `k`) para la magnitud `quantityId`. */
