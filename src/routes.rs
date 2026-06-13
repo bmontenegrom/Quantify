@@ -160,6 +160,10 @@ pub fn api_router(state: SharedState) -> Router {
             "/practices/{id}/regression-formulas",
             post(set_practice_regression_formulas),
         )
+        .route(
+            "/practices/{id}/operator-count",
+            post(set_practice_operator_count),
+        )
         .route("/practices/{id}/quantities", post(create_quantity))
         .route(
             "/practices/{id}/quantities/{qid}",
@@ -1360,6 +1364,33 @@ async fn set_practice_analysis_kind(
 struct RegressionFormulasBody {
     x_formula: String,
     y_formula: String,
+}
+
+/// Cuerpo para definir la cantidad de operadores de una práctica estadística (Motor D).
+#[derive(Debug, Deserialize)]
+struct OperatorCountBody {
+    /// Cantidad de operadores; `<= 1` desactiva los operadores (comportamiento por defecto).
+    count: i64,
+}
+
+/// `POST /api/practices/{id}/operator-count`: fija la cantidad de operadores de una práctica
+/// estadística (docente/admin). Se acota a un máximo razonable para no explotar el formulario.
+async fn set_practice_operator_count(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<OperatorCountBody>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if body.count > 20 {
+        return Err(AppError::bad_request(
+            "La cantidad de operadores no puede superar 20.",
+        ));
+    }
+    if !practices::set_operator_count(&state.pool, &id, body.count).await? {
+        return Err(AppError::not_found("practica no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
 }
 
 /// `POST /api/practices/{id}/regression-formulas`: define las fórmulas de eje `x`/`y` del ajuste
