@@ -9,6 +9,22 @@ use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
+/// Deserializador para `Option<Option<T>>` que distingue campo ausente de `null` explícito.
+///
+/// El derive estándar de serde mapea tanto "ausente" como `null` a `None`, por lo que
+/// `Option<Option<T>>` no puede representar las tres variantes. Este helper envuelve
+/// cualquier valor presente (incluso `null`) en `Some(...)`, preservando la semántica:
+/// - campo ausente → `None`
+/// - `null` explícito → `Some(None)`
+/// - valor numérico → `Some(Some(v))`
+fn double_option<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(de).map(Some)
+}
+
 /// Datos para crear o actualizar una magnitud de entrada de una práctica.
 #[derive(Debug, Deserialize)]
 pub struct QuantityInput {
@@ -37,7 +53,7 @@ pub struct ResultInput {
     /// `None` (campo ausente en el JSON) = no modificar la tolerancia existente.
     /// `Some(None)` (campo presente con valor `null`) = borrar la tolerancia.
     /// `Some(Some(v))` = fijar la tolerancia a `v`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "double_option")]
     pub tolerance: Option<Option<f64>>,
 }
 
@@ -1128,5 +1144,33 @@ mod tests {
         assert!(reg.intercept.abs() < 1e-9);
         let tau_d = analysis.derived.iter().find(|d| d.symbol == "tau").unwrap();
         assert!((tau_d.value - tau).abs() < 1e-9);
+    }
+
+    /// Verifica que `double_option` distingue las tres variantes de `tolerance` en JSON:
+    /// campo ausente (no modificar), `null` explícito (borrar) y valor numérico (fijar).
+    #[test]
+    fn result_input_tolerance_serde_variants() {
+        // Sin campo -> None (no modificar).
+        let a: ResultInput =
+            serde_json::from_str(r#"{"symbol":"Q","name":"N","unit":"m","formula":"x"}"#).unwrap();
+        assert!(a.tolerance.is_none(), "campo ausente debe ser None");
+
+        // `null` explícito -> Some(None) (borrar).
+        let b: ResultInput = serde_json::from_str(
+            r#"{"symbol":"Q","name":"N","unit":"m","formula":"x","tolerance":null}"#,
+        )
+        .unwrap();
+        assert_eq!(b.tolerance, Some(None), "null debe ser Some(None)");
+
+        // Valor numérico -> Some(Some(v)) (fijar).
+        let c: ResultInput = serde_json::from_str(
+            r#"{"symbol":"Q","name":"N","unit":"m","formula":"x","tolerance":5.0}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            c.tolerance,
+            Some(Some(5.0)),
+            "número debe ser Some(Some(v))"
+        );
     }
 }
