@@ -1,6 +1,6 @@
 import { state } from "./state.js";
 import { loginScreen, appShell } from "./dom.js";
-import { fetchJson } from "./api.js";
+import { fetchJson, setCsrfToken } from "./api.js";
 import { canReview } from "./lib.js";
 import { renderSessionUser, renderAccount, setupAuth } from "./auth.js";
 import { selectView } from "./navigation.js";
@@ -23,6 +23,7 @@ async function init() {
   try {
     const body = await fetchJson("/api/auth/me");
     state.user = body.user;
+    setCsrfToken(body.csrf_token);
     await startApp();
   } catch {
     loginScreen.classList.remove("hidden");

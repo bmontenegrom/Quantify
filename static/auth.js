@@ -5,7 +5,7 @@ import {
   accountEmail, accountRole, accountStatus,
   passwordForm, passwordStatus, logoutButton,
 } from "./dom.js";
-import { postJson, errorText } from "./api.js";
+import { postJson, setCsrfToken, errorText } from "./api.js";
 import { escapeHtml, canReview } from "./lib.js";
 
 const accountDefaultGroup = () => document.querySelector("#account-default-group");
@@ -89,6 +89,7 @@ export function setupAuth(onLogin) {
       if (!response.ok) throw new Error(await errorText(response));
       const body = await response.json();
       state.user = body.user;
+      setCsrfToken(body.csrf_token);
       loginForm.reset();
       loginStatus.textContent = "";
       await onLogin();
@@ -99,6 +100,7 @@ export function setupAuth(onLogin) {
 
   logoutButton.addEventListener("click", async () => {
     await fetch("/api/auth/logout", { method: "POST" });
+    setCsrfToken(null);
     state.user = null;
     appShell.classList.add("hidden");
     loginScreen.classList.remove("hidden");

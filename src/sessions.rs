@@ -26,6 +26,8 @@ pub struct LoginRequest {
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
     pub user: MeUser,
+    /// Token CSRF derivado de la sesión; debe enviarse en `X-CSRF-Token` en cada mutación.
+    pub csrf_token: String,
 }
 
 /// Valida credenciales (email o username + contraseña) y, si son correctas, crea una

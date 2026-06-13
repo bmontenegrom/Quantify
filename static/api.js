@@ -1,3 +1,10 @@
+let csrfToken = null;
+
+/** Guarda el token CSRF recibido del servidor (en login y en /auth/me). */
+export function setCsrfToken(token) {
+  csrfToken = token ?? null;
+}
+
 export async function fetchJson(url) {
   const response = await fetch(url);
   if (!response.ok) throw new Error(await errorText(response));
@@ -5,11 +12,21 @@ export async function fetchJson(url) {
 }
 
 export async function postJson(url, payload) {
+  const headers = { "content-type": "application/json" };
+  if (csrfToken) headers["x-csrf-token"] = csrfToken;
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
+  if (!response.ok) throw new Error(await errorText(response));
+  return response.json();
+}
+
+export async function deleteJson(url) {
+  const headers = {};
+  if (csrfToken) headers["x-csrf-token"] = csrfToken;
+  const response = await fetch(url, { method: "DELETE", headers });
   if (!response.ok) throw new Error(await errorText(response));
   return response.json();
 }

@@ -1,6 +1,6 @@
 import { state } from "./state.js";
 import { instrumentCatalog, instrumentWorkspace, instrumentCourseFilter, instrumentStatus } from "./dom.js";
-import { fetchJson, postJson, errorText } from "./api.js";
+import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
 import { escapeHtml, format, scalePayload } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -394,8 +394,7 @@ async function saveEditScale(event) {
 async function deleteScale(scaleId, instrumentId) {
   if (!window.confirm("¿Eliminar esta escala? Esta accion no se puede deshacer.")) return;
   try {
-    const response = await fetch(`/api/instruments/${instrumentId}/scales/${scaleId}`, { method: "DELETE" });
-    if (!response.ok) throw new Error(await errorText(response));
+    await deleteJson(`/api/instruments/${instrumentId}/scales/${scaleId}`);
     await loadInstruments();
     state.editingScaleId = null;
     state.instrumentActionStatus = "Escala eliminada";
@@ -412,8 +411,7 @@ async function deleteInstrument(instrumentId) {
   if (!window.confirm(`¿Eliminar el instrumento "${item?.name ?? ""}"${extra}? Esta accion no se puede deshacer.`)) return;
   try {
     withInstrumentStatus("");
-    const response = await fetch(`/api/instruments/${instrumentId}`, { method: "DELETE" });
-    if (!response.ok) throw new Error(await errorText(response));
+    await deleteJson(`/api/instruments/${instrumentId}`);
     await loadInstruments();
     renderInstrumentsPage();
     withInstrumentStatus("Instrumento eliminado");

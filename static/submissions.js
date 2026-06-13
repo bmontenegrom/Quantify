@@ -3,7 +3,7 @@ import {
   submissionList, submissionWorkspace, submissionsTitle,
   submissionsSubtitle, submissionsListTitle,
 } from "./dom.js";
-import { fetchJson, errorText } from "./api.js";
+import { fetchJson, postJson, errorText } from "./api.js";
 import { escapeHtml, canReview, formatDate, groupBy } from "./lib.js";
 
 const filterGroupEl = () => document.querySelector("#submission-filter-group");
@@ -323,18 +323,13 @@ export async function saveReview(event, id) {
   payload.score = payload.score === "" ? null : Number(payload.score);
   payload.results_visible = form.querySelector('[name="results_visible"]').checked;
 
-  const response = await fetch(`/api/submissions/${id}/review`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    alert(await errorText(response));
+  let updated;
+  try {
+    updated = await postJson(`/api/submissions/${id}/review`, payload);
+  } catch (error) {
+    alert(error.message);
     return;
   }
-
-  const updated = await response.json();
   state.activeSubmission = updated;
   const detailBody = submissionWorkspace?.querySelector("#submission-detail-body");
   if (detailBody) {

@@ -82,6 +82,22 @@ impl AppError {
             message: message.into(),
         }
     }
+
+    /// Crea un error 429 Too Many Requests con el mensaje dado (rate-limiting).
+    ///
+    /// # Ejemplos
+    ///
+    /// ```
+    /// use axum::response::IntoResponse;
+    /// let resp = quantify::error::AppError::too_many_requests("frená un poco").into_response();
+    /// assert_eq!(resp.status().as_u16(), 429);
+    /// ```
+    pub fn too_many_requests(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for AppError {

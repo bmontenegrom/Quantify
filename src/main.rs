@@ -5,8 +5,10 @@ use axum::Router;
 use quantify::db::{self, AppState};
 use quantify::{instruments, practices, routes};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use std::collections::HashMap;
 use std::str::FromStr;
-use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::sync::{Arc, Mutex};
+use std::{env, net::SocketAddr, path::PathBuf};
 use tokio::net::TcpListener;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -28,6 +30,33 @@ async fn main() -> anyhow::Result<()> {
         env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:data/quantify.db".to_string());
     let upload_dir =
         PathBuf::from(env::var("UPLOAD_DIR").unwrap_or_else(|_| "data/uploads".into()));
+    let configured_secret = env::var("APP_SECRET_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty());
+    let secure_cookies = env::var("APP_SECURE_COOKIES")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false);
+
+    // En un deploy real (cookies Secure ⇒ TLS) la clave debe ser estable: con una clave
+    // efímera, todos los tokens CSRF se invalidan en cada reinicio. Exigirla evita ese fallo.
+    let secret_key = match configured_secret {
+        Some(key) => key,
+        None if secure_cookies => {
+            anyhow::bail!(
+                "APP_SECRET_KEY es obligatoria cuando APP_SECURE_COOKIES=true (deploy con TLS). \
+                 Generá una con `uuidgen` o `openssl rand -hex 32` y configurala en el entorno."
+            );
+        }
+        None => {
+            let key = uuid::Uuid::new_v4().to_string();
+            tracing::warn!(
+                "APP_SECRET_KEY no configurada — se usará una clave efímera. \
+                 Los tokens CSRF se invalidarán en cada reinicio. \
+                 Para deploy estable: APP_SECRET_KEY=<clave-aleatoria-larga>"
+            );
+            key
+        }
+    };
 
     tokio::fs::create_dir_all(&upload_dir)
         .await
@@ -61,7 +90,13 @@ async fn main() -> anyhow::Result<()> {
     practices::seed_definitions(&pool).await?;
     db::seed_submissions(&pool).await?;
 
-    let state = Arc::new(AppState { pool, upload_dir });
+    let state = Arc::new(AppState {
+        pool,
+        upload_dir,
+        secret_key,
+        secure_cookies,
+        login_attempts: Arc::new(Mutex::new(HashMap::new())),
+    });
     let app = Router::new()
         .nest("/api", routes::api_router(state))
         .fallback_service(ServeDir::new("static").append_index_html_on_directories(true))
