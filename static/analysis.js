@@ -209,6 +209,28 @@ function derivedBlockMarkup(derived, heading = "Mensurandos") {
     </div>`;
 }
 
+/// Tabla de magnitudes derivadas por punto (Motor E): una fila por corrida, una columna por
+/// magnitud. Vacío si no hay ninguna.
+function pointResultsMarkup(pointResults) {
+  if (!pointResults.length) return "";
+  const n = Math.max(0, ...pointResults.map((p) => p.values.length));
+  const headers = pointResults
+    .map((p) => `<th>${escapeHtml(p.symbol)} <span class="submission-meta">${escapeHtml(p.unit)}</span></th>`)
+    .join("");
+  const rows = Array.from({ length: n }, (_, i) => {
+    const cells = pointResults.map((p) => `<td>${p.values[i] != null ? format(p.values[i]) : ""}</td>`).join("");
+    return `<tr><td>${i + 1}</td>${cells}</tr>`;
+  }).join("");
+  return `
+    <h3>Por corrida</h3>
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead><tr><th>#</th>${headers}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
 function formAnalysisMarkup(analysis) {
   const quantities = analysis.quantities ?? [];
   const derived = analysis.derived ?? [];
@@ -220,6 +242,7 @@ function formAnalysisMarkup(analysis) {
       <h3>Ajuste lineal</h3>
       ${regressionMarkup(analysis.regression)}
       ${derivedBlock}
+      ${pointResultsMarkup(analysis.point_results ?? [])}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
   }

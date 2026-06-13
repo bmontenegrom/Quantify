@@ -4,7 +4,9 @@ use crate::{
     db::{self, AppState, NewSubmission, ReviewSubmission},
     error::AppError,
     instruments::{self, CatalogExport, CreateInstrument, ScaleInput, UpdateInstrument},
-    practices::{self, CurveInput, IntermediateInput, QuantityInput, ResultInput},
+    practices::{
+        self, CurveInput, IntermediateInput, PointResultInput, QuantityInput, ResultInput,
+    },
 };
 use axum::{
     extract::{Multipart, Path, Query, Request, State},
@@ -184,6 +186,11 @@ pub fn api_router(state: SharedState) -> Router {
         .route(
             "/practices/{id}/intermediates/{iid}",
             post(update_intermediate).delete(delete_intermediate),
+        )
+        .route("/practices/{id}/point-results", post(create_point_result))
+        .route(
+            "/practices/{id}/point-results/{pid}",
+            post(update_point_result).delete(delete_point_result),
         )
         .route(
             "/practices/{id}/results/{rid}/tolerance",
@@ -1426,7 +1433,7 @@ async fn create_quantity(
     validate_quantity(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
         .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
@@ -1452,6 +1459,7 @@ async fn update_quantity(
         &practice_id,
         &input.symbol,
         Some(&qid),
+        None,
         None,
         None,
     )
@@ -1542,7 +1550,7 @@ async fn create_intermediate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_intermediate(&def, &input, None)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
         .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
@@ -1564,8 +1572,16 @@ async fn update_intermediate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_intermediate(&def, &input, Some(&iid))?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, Some(&iid))
-        .await?
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        Some(&iid),
+        None,
+    )
+    .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1630,6 +1646,102 @@ fn validate_intermediate(
     Ok(())
 }
 
+/// `POST /api/practices/{id}/point-results`: agrega una magnitud derivada por punto (docente).
+async fn create_point_result(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<PointResultInput>,
+) -> Result<Json<practices::PracticePointResult>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_point_result(&def, &input)?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
+        .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
+    Ok(Json(
+        practices::create_point_result(&state.pool, &id, input).await?,
+    ))
+}
+
+/// `POST /api/practices/{id}/point-results/{pid}`: actualiza una magnitud derivada por punto.
+async fn update_point_result(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(input): Json<PointResultInput>,
+) -> Result<Json<practices::PracticePointResult>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_point_result(&def, &input)?;
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        None,
+        Some(&pid),
+    )
+    .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
+    let updated = practices::update_point_result(&state.pool, &id, &pid, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("magnitud derivada por punto no encontrada"))?;
+    Ok(Json(updated))
+}
+
+/// `DELETE /api/practices/{id}/point-results/{pid}`: elimina una magnitud derivada por punto.
+async fn delete_point_result(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_point_result(&state.pool, &id, &pid).await? {
+        return Err(AppError::not_found(
+            "magnitud derivada por punto no encontrada",
+        ));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// Valida símbolo (formato, no reservado) y fórmula de una magnitud derivada por punto. La fórmula
+/// compila usando magnitudes + intermedias + mensurandos + `slope`/`intercept` (símbolos
+/// disponibles tras el ajuste). La unicidad del símbolo la verifica el handler con
+/// `symbol_taken_in_practice`.
+fn validate_point_result(
+    def: &practices::PracticeDefinition,
+    input: &PointResultInput,
+) -> Result<(), AppError> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
+        return Err(AppError::bad_request(
+            "La magnitud derivada por punto necesita un simbolo y una formula.",
+        ));
+    }
+    validate_symbol_format(symbol)?;
+    validate_symbol_not_reserved(symbol)?;
+    // Símbolos disponibles tras el ajuste: magnitudes + intermedias + mensurandos + slope/intercept.
+    let mut allowed: Vec<String> = def.quantities.iter().map(|q| q.symbol.clone()).collect();
+    allowed.extend(def.intermediates.iter().map(|it| it.symbol.clone()));
+    allowed.extend(def.results.iter().map(|r| r.symbol.clone()));
+    allowed.push("slope".into());
+    allowed.push("intercept".into());
+    computation::check_formula(formula, &allowed)
+        .map_err(|e| AppError::bad_request(e.to_string()))?;
+    Ok(())
+}
+
 /// Una curva necesita ambas fórmulas de eje (sin ellas no se puede graficar). Error 400 amigable.
 fn validate_curve(input: &CurveInput) -> Result<(), AppError> {
     if input.x_formula.trim().is_empty() || input.y_formula.trim().is_empty() {
@@ -1664,7 +1776,7 @@ async fn create_result(
     validate_result(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
         .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
@@ -1691,6 +1803,7 @@ async fn update_result(
         &input.symbol,
         None,
         Some(&rid),
+        None,
         None,
     )
     .await?
@@ -1977,6 +2090,7 @@ mod tests {
             position: 0,
             is_given: false,
             replicas_per_point: None,
+            per_point: true,
         };
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),
@@ -1996,6 +2110,7 @@ mod tests {
                 unit: "u".into(),
                 formula: "V/t".into(),
             }],
+            point_results: vec![],
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
             symbol: symbol.into(),

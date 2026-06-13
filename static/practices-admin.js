@@ -66,6 +66,7 @@ export function renderPracticesPage() {
         ${def?.analysis_kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
         ${def?.analysis_kind === "curva" ? renderCurvesSection(practice, def) : ""}
         ${def?.analysis_kind === "regresion_lineal" || def?.analysis_kind === "curva" ? renderIntermediatesSection(practice, def) : ""}
+        ${def?.analysis_kind === "regresion_lineal" ? renderPointResultsSection(practice, def) : ""}
         ${def?.analysis_kind == null || def?.analysis_kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
       </section>
       <section class="panel workspace-panel">
@@ -111,6 +112,23 @@ export function renderPracticesPage() {
   });
   practiceWorkspace.querySelectorAll("[data-edit-intermediate-form]").forEach((form) => {
     form.addEventListener("submit", saveEditIntermediate);
+  });
+
+  practiceWorkspace.querySelector("#new-point-result-form")?.addEventListener("submit", saveNewPointResult);
+  practiceWorkspace.querySelectorAll("[data-edit-point-result]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingPointResultId = state.editingPointResultId === btn.dataset.pid ? null : btn.dataset.pid;
+      renderPracticesPage();
+    });
+  });
+  practiceWorkspace.querySelectorAll("[data-delete-point-result]").forEach((btn) => {
+    btn.addEventListener("click", () => deletePracticePointResult(btn.dataset.pid, practice.id));
+  });
+  practiceWorkspace.querySelectorAll("[data-cancel-point-result]").forEach((btn) => {
+    btn.addEventListener("click", () => { state.editingPointResultId = null; renderPracticesPage(); });
+  });
+  practiceWorkspace.querySelectorAll("[data-edit-point-result-form]").forEach((form) => {
+    form.addEventListener("submit", saveEditPointResult);
   });
 
   practiceWorkspace.querySelectorAll("[data-edit-curve]").forEach((btn) => {
@@ -252,6 +270,66 @@ function renderOperatorCountForm(practice, def) {
         <button type="submit">Guardar operadores</button>
       </div>
     </form>
+  `;
+}
+
+/// Gestión de magnitudes derivadas por punto (Motor E): lista editable + alta. Se evalúan tras el
+/// ajuste, una por corrida, usando magnitudes/intermedias del punto + slope/intercept + mensurandos.
+function renderPointResultsSection(practice, def) {
+  return `
+    <h4>Magnitudes derivadas por punto</h4>
+    <p class="submission-meta">Se calculan tras el ajuste, una por corrida (p. ej. Reynolds). La fórmula puede usar las magnitudes y las intermedias del punto, <code>slope</code>/<code>intercept</code> y los mensurandos. Sin incertidumbre.</p>
+    ${renderPointResultsList(def, practice.id)}
+    <h4>Nueva derivada por punto</h4>
+    ${renderPointResultForm(null, practice.id)}
+  `;
+}
+
+function renderPointResultForm(pr, practiceId) {
+  const formId = pr ? "edit-point-result-form" : "new-point-result-form";
+  const formAttr = pr ? `data-edit-point-result-form data-pid="${escapeHtml(pr.id)}"` : "";
+  const v = (f) => (pr ? escapeHtml(String(pr[f] ?? "")) : "");
+  return `
+    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
+      <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
+      ${pr ? `<input name="pid" type="hidden" value="${escapeHtml(pr.id)}" />` : ""}
+      <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Re" /></label>
+      <label>Nombre <input name="name" value="${v("name")}" placeholder="Número de Reynolds" /></label>
+      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="" /></label>
+      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="2*rho*Q / (pi*mu*R)" /></label>
+      <div class="detail-actions">
+        <button type="submit">${pr ? "Guardar" : "Agregar"}</button>
+        ${pr ? `<button type="button" data-cancel-point-result>Cancelar</button>` : ""}
+      </div>
+    </form>
+  `;
+}
+
+function renderPointResultsList(def, practiceId) {
+  const items = def?.point_results ?? [];
+  if (items.length === 0) return `<p class="submission-meta">Sin magnitudes derivadas por punto.</p>`;
+  const rows = items.flatMap((pr) => {
+    const baseRow = `
+      <tr>
+        <td class="directory-primary"><strong>${escapeHtml(pr.symbol)}</strong> <span class="submission-meta">${escapeHtml(pr.name)} (${escapeHtml(pr.unit)})</span></td>
+        <td><code>${escapeHtml(pr.formula)}</code></td>
+        <td class="directory-actions">
+          <button type="button" data-edit-point-result data-pid="${escapeHtml(pr.id)}">${state.editingPointResultId === pr.id ? "Cerrar" : "Editar"}</button>
+          <button type="button" data-delete-point-result data-pid="${escapeHtml(pr.id)}">Eliminar</button>
+        </td>
+      </tr>`;
+    const editRow = state.editingPointResultId === pr.id
+      ? `<tr><td colspan="3" class="scale-edit-cell">${renderPointResultForm(pr, practiceId)}</td></tr>`
+      : "";
+    return [baseRow, editRow];
+  });
+  return `
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
+        <tbody>${rows.join("")}</tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -404,6 +482,10 @@ function renderQuantityForm(qty, practiceId) {
       <label>Réplicas por punto (regresión/curva)
         <input name="replicas_per_point" type="number" min="1" step="1" value="${v("replicas_per_point")}" placeholder="sin grilla" />
       </label>
+      <label class="detail-form-checkbox">
+        <input type="checkbox" name="per_point" ${qty ? (qty.per_point ? "checked" : "") : "checked"} />
+        Se mide por punto (regresión/curva; desmarcá para escalar compartido)
+      </label>
       <div class="detail-actions">
         <button type="submit">${qty ? "Guardar" : "Agregar"}</button>
         ${qty ? `<button type="button" data-cancel-quantity>Cancelar</button>` : ""}
@@ -515,6 +597,7 @@ export async function openPracticeWorkspace(practiceId) {
   state.editingResultId = null;
   state.editingCurveId = null;
   state.editingIntermediateId = null;
+  state.editingPointResultId = null;
   state.practiceDefinition = null;
   renderPracticesPage();
   selectView("practices");
@@ -534,6 +617,7 @@ export function closePracticeWorkspace() {
   state.editingResultId = null;
   state.editingCurveId = null;
   state.editingIntermediateId = null;
+  state.editingPointResultId = null;
   renderPracticesPage();
 }
 
@@ -599,6 +683,7 @@ function quantityPayloadFromForm(form) {
     // La grilla de réplicas por punto solo aplica a magnitudes `repeated`: si no lo es, no
     // guardamos un ancho de grilla muerto aunque el campo traiga un número.
     replicas_per_point: repeated && raw.replicas_per_point && replicas > 0 ? replicas : null,
+    per_point: "per_point" in raw,
   };
 }
 
@@ -667,6 +752,7 @@ async function saveNewCurve(event) {
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingCurveId = null;
   state.editingIntermediateId = null;
+  state.editingPointResultId = null;
     state.practiceActionStatus = "Curva agregada";
     renderPracticesPage();
   } catch (error) {
@@ -685,6 +771,7 @@ async function saveEditCurve(event) {
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingCurveId = null;
   state.editingIntermediateId = null;
+  state.editingPointResultId = null;
     state.practiceActionStatus = "Curva actualizada";
     renderPracticesPage();
   } catch (error) {
@@ -701,6 +788,7 @@ async function saveNewIntermediate(event) {
     await postJson(`/api/practices/${practiceId}/intermediates`, intermediatePayloadFromForm(form));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingIntermediateId = null;
+  state.editingPointResultId = null;
     state.practiceActionStatus = "Intermedia agregada";
     renderPracticesPage();
   } catch (error) {
@@ -718,6 +806,7 @@ async function saveEditIntermediate(event) {
     await postJson(`/api/practices/${practiceId}/intermediates/${iid}`, intermediatePayloadFromForm(form));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingIntermediateId = null;
+  state.editingPointResultId = null;
     state.practiceActionStatus = "Intermedia actualizada";
     renderPracticesPage();
   } catch (error) {
@@ -732,7 +821,55 @@ async function deletePracticeIntermediate(iid, practiceId) {
     await deleteJson(`/api/practices/${practiceId}/intermediates/${iid}`);
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingIntermediateId = null;
+  state.editingPointResultId = null;
     state.practiceActionStatus = "Intermedia eliminada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function saveNewPointResult(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  try {
+    await postJson(`/api/practices/${practiceId}/point-results`, intermediatePayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingPointResultId = null;
+    state.practiceActionStatus = "Derivada por punto agregada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function saveEditPointResult(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  const pid = form.querySelector('[name="pid"]').value;
+  try {
+    await postJson(`/api/practices/${practiceId}/point-results/${pid}`, intermediatePayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingPointResultId = null;
+    state.practiceActionStatus = "Derivada por punto actualizada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function deletePracticePointResult(pid, practiceId) {
+  if (!window.confirm("¿Eliminar esta magnitud derivada por punto? Esta accion no se puede deshacer.")) return;
+  try {
+    await deleteJson(`/api/practices/${practiceId}/point-results/${pid}`);
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingPointResultId = null;
+    state.practiceActionStatus = "Derivada por punto eliminada";
     renderPracticesPage();
   } catch (error) {
     state.practiceActionStatus = error.message;
@@ -768,6 +905,7 @@ async function deletePracticeCurve(cid, practiceId) {
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingCurveId = null;
   state.editingIntermediateId = null;
+  state.editingPointResultId = null;
     state.practiceActionStatus = "Curva eliminada";
     renderPracticesPage();
   } catch (error) {
