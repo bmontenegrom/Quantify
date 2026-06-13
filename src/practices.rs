@@ -1119,6 +1119,49 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
+    // Viscosidad (Stokes) — ajuste v_lim vs R^2 (ejes en seed_practices: x=R^2, y=dx/t). Por esfera
+    // (punto): R (un valor) y t (5 réplicas → Motor A promedia → t medio, así y = dx/t = v_lim).
+    // Escalares compartidos: dx, rho_e, rho_f (medida única), g (cátedra); Temp de referencia.
+    // Mensurando mu = (rho_e - rho_f)*2*g/(9*slope); Reynolds por corrida. Sin intermedia.
+    let fresh_visc = seed_practice(
+        pool,
+        "viscosidad",
+        &[
+            qty("R", "Radio de la esfera", "m", false, "longitud"),
+            qty_replicas("t", "Tiempo de caida", "s", "tiempo", 5),
+            qty_shared("dx", "Distancia recorrida", "m", "longitud"),
+            qty_shared("rho_e", "Densidad del acero", "kg/m3", "densidad"),
+            qty_shared("rho_f", "Densidad de la glicerina", "kg/m3", "densidad"),
+            qty_given("g", "Aceleracion de la gravedad", "m/s2", "aceleracion"),
+            qty_shared(
+                "Temp",
+                "Temperatura de la glicerina (referencia)",
+                "C",
+                "temperatura",
+            ),
+        ],
+        &[res(
+            "mu",
+            "Viscosidad de la glicerina",
+            "Pa.s",
+            "(rho_e - rho_f)*2*g/(9*slope)",
+        )],
+    )
+    .await?;
+    if fresh_visc {
+        create_point_result(
+            pool,
+            "viscosidad",
+            PointResultInput {
+                symbol: "Re".into(),
+                name: "Numero de Reynolds".into(),
+                unit: "".into(),
+                formula: "rho_f*(dx/t)*2*R/mu".into(),
+            },
+        )
+        .await?;
+    }
+
     Ok(())
 }
 
