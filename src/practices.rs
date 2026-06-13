@@ -178,9 +178,11 @@ pub async fn create_curve(
     fetch_curve(pool, &id).await
 }
 
-/// Actualiza las fórmulas y el flag `x_log` de una curva. Devuelve `None` si no existe.
+/// Actualiza las fórmulas y el flag `x_log` de una curva **de esa práctica**. Devuelve `None` si
+/// no existe una curva con ese id en la práctica indicada.
 pub async fn update_curve(
     pool: &SqlitePool,
+    practice_id: &str,
     curve_id: &str,
     input: CurveInput,
 ) -> anyhow::Result<Option<PracticeCurve>> {
@@ -190,9 +192,11 @@ pub async fn update_curve(
         anyhow::bail!("la curva necesita las fórmulas de ambos ejes");
     }
     let result = sqlx::query(
-        "UPDATE practice_curves SET x_formula = ?2, y_formula = ?3, x_log = ?4 WHERE id = ?1",
+        "UPDATE practice_curves SET x_formula = ?3, y_formula = ?4, x_log = ?5 \
+         WHERE id = ?1 AND practice_id = ?2",
     )
     .bind(curve_id)
+    .bind(practice_id)
     .bind(x)
     .bind(y)
     .bind(input.x_log)
@@ -204,13 +208,55 @@ pub async fn update_curve(
     Ok(Some(fetch_curve(pool, curve_id).await?))
 }
 
-/// Elimina una curva por id. Devuelve `true` si existía.
-pub async fn delete_curve(pool: &SqlitePool, curve_id: &str) -> anyhow::Result<bool> {
-    let result = sqlx::query("DELETE FROM practice_curves WHERE id = ?1")
+/// Elimina una curva de esa práctica por id. Devuelve `true` si existía en la práctica indicada.
+pub async fn delete_curve(
+    pool: &SqlitePool,
+    practice_id: &str,
+    curve_id: &str,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query("DELETE FROM practice_curves WHERE id = ?1 AND practice_id = ?2")
         .bind(curve_id)
+        .bind(practice_id)
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Mueve una curva una posición hacia arriba (`up = true`) o hacia abajo dentro de su práctica,
+/// intercambiando su `position` con la de la curva vecina. Devuelve `false` si la curva no existe
+/// en esa práctica o ya está en el extremo correspondiente.
+pub async fn move_curve(
+    pool: &SqlitePool,
+    practice_id: &str,
+    curve_id: &str,
+    up: bool,
+) -> anyhow::Result<bool> {
+    let curves = curves_for(pool, practice_id).await?;
+    let Some(idx) = curves.iter().position(|c| c.id == curve_id) else {
+        return Ok(false);
+    };
+    let neighbor = if up {
+        idx.checked_sub(1)
+    } else {
+        Some(idx + 1).filter(|&j| j < curves.len())
+    };
+    let Some(j) = neighbor else {
+        return Ok(false);
+    };
+    // Intercambia las posiciones de las dos curvas en una transacción.
+    let mut tx = pool.begin().await?;
+    for (id, position) in [
+        (&curves[idx].id, curves[j].position),
+        (&curves[j].id, curves[idx].position),
+    ] {
+        sqlx::query("UPDATE practice_curves SET position = ?2 WHERE id = ?1")
+            .bind(id)
+            .bind(position)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(true)
 }
 
 /// Lee una curva por su id.
@@ -1045,9 +1091,10 @@ mod tests {
         assert_eq!(def.curves[1].position, 2);
         assert_eq!(def.curves[1].y_formula, "phi");
 
-        // Edición de una curva.
+        // Edición de una curva (acotada por práctica).
         let updated = update_curve(
             &pool,
+            "p1-estadistica",
             &c1.id,
             CurveInput {
                 x_formula: "logw".into(),
@@ -1061,16 +1108,12 @@ mod tests {
         assert_eq!(updated.y_formula, "Vg / VR");
         assert!(!updated.x_log);
 
-        // Baja: queda una sola curva.
-        assert!(delete_curve(&pool, &c1.id).await.unwrap());
-        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-        assert_eq!(def.curves.len(), 1);
-        assert_eq!(def.curves[0].y_formula, "phi");
-
-        // Curva inexistente: update devuelve None, delete devuelve false.
+        // Editar/borrar con la práctica equivocada no afecta la curva (el id no pertenece a esa
+        // práctica): update → None, delete → false.
         assert!(update_curve(
             &pool,
-            "no-existe",
+            "p2-serie",
+            &c1.id,
             CurveInput {
                 x_formula: "a".into(),
                 y_formula: "b".into(),
@@ -1080,7 +1123,83 @@ mod tests {
         .await
         .unwrap()
         .is_none());
-        assert!(!delete_curve(&pool, "no-existe").await.unwrap());
+        assert!(!delete_curve(&pool, "p2-serie", &c1.id).await.unwrap());
+
+        // Baja correcta: queda una sola curva.
+        assert!(delete_curve(&pool, "p1-estadistica", &c1.id).await.unwrap());
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        assert_eq!(def.curves.len(), 1);
+        assert_eq!(def.curves[0].y_formula, "phi");
+    }
+
+    #[tokio::test]
+    async fn move_curve_swaps_position_with_neighbor() {
+        let (pool, _dir) = setup().await;
+        let mk = |y: &str| CurveInput {
+            x_formula: "logw".into(),
+            y_formula: y.into(),
+            x_log: false,
+        };
+        let a = create_curve(&pool, "p1-estadistica", mk("a"))
+            .await
+            .unwrap();
+        create_curve(&pool, "p1-estadistica", mk("b"))
+            .await
+            .unwrap();
+        let c = create_curve(&pool, "p1-estadistica", mk("c"))
+            .await
+            .unwrap();
+
+        // 'a' no puede subir (ya es la primera); 'c' no puede bajar (ya es la última).
+        assert!(!move_curve(&pool, "p1-estadistica", &a.id, true)
+            .await
+            .unwrap());
+        assert!(!move_curve(&pool, "p1-estadistica", &c.id, false)
+            .await
+            .unwrap());
+
+        // Bajar 'a' la intercambia con 'b' → orden b, a, c.
+        assert!(move_curve(&pool, "p1-estadistica", &a.id, false)
+            .await
+            .unwrap());
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        assert_eq!(
+            def.curves
+                .iter()
+                .map(|c| c.y_formula.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b", "a", "c"]
+        );
+
+        // Curva inexistente devuelve false.
+        assert!(!move_curve(&pool, "p1-estadistica", "no-existe", true)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn deleting_practice_cascades_to_curves() {
+        let (pool, _dir) = setup().await;
+        create_curve(
+            &pool,
+            "p1-estadistica",
+            CurveInput {
+                x_formula: "logw".into(),
+                y_formula: "VR / Vg".into(),
+                x_log: true,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(curves_for(&pool, "p1-estadistica").await.unwrap().len(), 1);
+
+        // Con foreign_keys activo, borrar la práctica arrastra sus curvas (ON DELETE CASCADE).
+        sqlx::query("DELETE FROM practices WHERE id = ?1")
+            .bind("p1-estadistica")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(curves_for(&pool, "p1-estadistica").await.unwrap().len(), 0);
     }
 
     #[tokio::test]

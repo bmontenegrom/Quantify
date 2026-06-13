@@ -467,7 +467,13 @@ pub fn compute_curva(
             y_label: curve.y_formula.to_string(),
             x_log: curve.x_log,
         });
-        warnings.append(&mut curve_warnings);
+        // Varias curvas comparten el mismo barrido: evita repetir el mismo aviso (p. ej. el mismo
+        // punto no finito) una vez por curva.
+        for w in curve_warnings.drain(..) {
+            if !warnings.contains(&w) {
+                warnings.push(w);
+            }
+        }
     }
 
     Ok(FormAnalysis {

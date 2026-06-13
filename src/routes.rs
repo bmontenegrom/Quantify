@@ -175,6 +175,7 @@ pub fn api_router(state: SharedState) -> Router {
             "/practices/{id}/curves/{cid}",
             post(update_curve).delete(delete_curve),
         )
+        .route("/practices/{id}/curves/{cid}/move", post(move_curve))
         .route(
             "/practices/{id}/results/{rid}/tolerance",
             post(set_result_tolerance),
@@ -1456,15 +1457,37 @@ async fn create_curve(
 async fn update_curve(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Path((_id, cid)): Path<(String, String)>,
+    Path((id, cid)): Path<(String, String)>,
     Json(input): Json<CurveInput>,
 ) -> Result<Json<practices::PracticeCurve>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_curve(&input)?;
-    let updated = practices::update_curve(&state.pool, &cid, input)
+    let updated = practices::update_curve(&state.pool, &id, &cid, input)
         .await?
         .ok_or_else(|| AppError::not_found("curva no encontrada"))?;
     Ok(Json(updated))
+}
+
+/// Cuerpo para reordenar una curva: dirección del movimiento.
+#[derive(Debug, Deserialize)]
+struct MoveCurveBody {
+    /// `true` mueve la curva una posición hacia arriba; `false`, hacia abajo.
+    up: bool,
+}
+
+/// `POST /api/practices/{id}/curves/{cid}/move`: reordena una curva intercambiándola con la vecina
+/// (docente/admin). Si ya está en el extremo, no cambia nada.
+async fn move_curve(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, cid)): Path<(String, String)>,
+    Json(body): Json<MoveCurveBody>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::move_curve(&state.pool, &id, &cid, body.up).await? {
+        return Err(AppError::not_found("curva no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
 }
 
 /// Una curva necesita ambas fórmulas de eje (sin ellas no se puede graficar). Error 400 amigable.
@@ -1481,10 +1504,10 @@ fn validate_curve(input: &CurveInput) -> Result<(), AppError> {
 async fn delete_curve(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Path((_id, cid)): Path<(String, String)>,
+    Path((id, cid)): Path<(String, String)>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    if !practices::delete_curve(&state.pool, &cid).await? {
+    if !practices::delete_curve(&state.pool, &id, &cid).await? {
         return Err(AppError::not_found("curva no encontrada"));
     }
     Ok(Json(Health { status: "ok" }))

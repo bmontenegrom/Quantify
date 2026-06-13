@@ -102,6 +102,9 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("[data-delete-curve]").forEach((btn) => {
     btn.addEventListener("click", () => deletePracticeCurve(btn.dataset.cid, practice.id));
   });
+  practiceWorkspace.querySelectorAll("[data-move-curve]").forEach((btn) => {
+    btn.addEventListener("click", () => movePracticeCurve(btn.dataset.cid, practice.id, btn.dataset.dir));
+  });
   practiceWorkspace.querySelectorAll("[data-cancel-curve]").forEach((btn) => {
     btn.addEventListener("click", () => { state.editingCurveId = null; renderPracticesPage(); });
   });
@@ -261,6 +264,8 @@ function renderCurvesList(def, practiceId) {
         <td><code>${escapeHtml(c.x_formula)}</code>${c.x_log ? ' <span class="submission-meta">(log)</span>' : ""}</td>
         <td><code>${escapeHtml(c.y_formula)}</code></td>
         <td class="directory-actions">
+          <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="up" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
+          <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="down" title="Bajar" ${i === curves.length - 1 ? "disabled" : ""}>▼</button>
           <button type="button" data-edit-curve data-cid="${escapeHtml(c.id)}">${state.editingCurveId === c.id ? "Cerrar" : "Editar"}</button>
           <button type="button" data-delete-curve data-cid="${escapeHtml(c.id)}">Eliminar</button>
         </td>
@@ -565,6 +570,17 @@ async function saveEditCurve(event) {
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingCurveId = null;
     state.practiceActionStatus = "Curva actualizada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function movePracticeCurve(cid, practiceId, dir) {
+  try {
+    await postJson(`/api/practices/${practiceId}/curves/${cid}/move`, { up: dir === "up" });
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     renderPracticesPage();
   } catch (error) {
     state.practiceActionStatus = error.message;

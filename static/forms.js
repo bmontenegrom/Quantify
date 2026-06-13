@@ -216,8 +216,18 @@ export function renderMeasurementFields() {
     return;
   }
   const { definition, instruments } = state.practiceForm;
+  // El formulario arranca habilitado; los guards de abajo lo deshabilitan si la práctica no está
+  // lista para entregar (p. ej. una curva sin curvas definidas).
+  if (submitButton) submitButton.disabled = false;
   if (definition.quantities.length === 0) {
     measurementFields.innerHTML = `<p class="submission-meta">Esta practica todavia no tiene magnitudes definidas.</p>`;
+    return;
+  }
+
+  // Una curva necesita al menos una curva definida; si no, no hay nada para graficar ni entregar.
+  if (definition.analysis_kind === "curva" && (definition.curves?.length ?? 0) === 0) {
+    measurementFields.innerHTML = `<p class="submission-meta">Esta práctica de curva todavía no tiene curvas definidas. Pedile al docente que las configure antes de entregar.</p>`;
+    if (submitButton) submitButton.disabled = true;
     return;
   }
 
