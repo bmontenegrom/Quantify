@@ -638,6 +638,68 @@ async fn load_scales(
     Ok(scales)
 }
 
+/// Persiste las mediciones de una entrega en `submission_measurements`. Cubre los tres modos:
+/// - **estadístico**: réplicas de una magnitud → `point_index = 0`, `replicate_index = réplica`.
+/// - **por puntos sin réplicas** (regresión/curva): un valor por punto → `point_index = 0`,
+///   `replicate_index = punto` (compatibilidad con el formato previo).
+/// - **por puntos con réplicas** (`point_replicas`): `point_index = punto`, `replicate_index = réplica`.
+///
+/// Los datos de cátedra (`given_u`) guardan su único valor con la U en `value_u`.
+async fn insert_measurements(
+    conn: &mut sqlx::SqliteConnection,
+    submission_id: &str,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<()> {
+    for measurement in measurements {
+        // Filas (point_index, replicate_index, value, value_u) según el modo de la medición.
+        let rows: Vec<(i64, i64, f64, Option<f64>)> =
+            if let Some(groups) = &measurement.point_replicas {
+                groups
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(p, reps)| {
+                        reps.iter()
+                            .enumerate()
+                            .map(move |(r, &v)| (p as i64, r as i64, v, None))
+                    })
+                    .collect()
+            } else if measurement.given_u.is_some() {
+                measurement
+                    .values
+                    .first()
+                    .map(|&v| vec![(0i64, 0i64, v, measurement.given_u)])
+                    .unwrap_or_default()
+            } else {
+                measurement
+                    .values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| (0i64, i as i64, v, None))
+                    .collect()
+            };
+        for (point_index, replicate_index, value, value_u) in rows {
+            sqlx::query(
+                "INSERT INTO submission_measurements \
+                 (id, submission_id, quantity_id, instrument_id, scale_id, \
+                  point_index, replicate_index, value, value_u) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(submission_id)
+            .bind(&measurement.quantity_id)
+            .bind(measurement.instrument_id.as_deref())
+            .bind(measurement.scale_id.as_deref())
+            .bind(point_index)
+            .bind(replicate_index)
+            .bind(value)
+            .bind(value_u)
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 /// Crea una entrega por formulario: calcula el análisis, inserta la entrega y sus mediciones
 /// en una transacción, y devuelve el detalle. El usuario ya fue validado por el handler.
 pub async fn create_form_submission(
@@ -771,41 +833,7 @@ pub async fn create_form_submission(
     .execute(&mut *tx)
     .await?;
 
-    for measurement in &input.measurements {
-        // Para magnitudes `is_given`, persiste el único valor con su U en value_u.
-        // Para medidas normales, persiste cada réplica con value_u = NULL.
-        if measurement.values.is_empty() && measurement.given_u.is_some() {
-            // Dato sin valor numérico (no debería llegar, pero evitamos insertar filas vacías).
-        } else {
-            let rows: Vec<(f64, Option<f64>)> = if measurement.given_u.is_some() {
-                measurement
-                    .values
-                    .first()
-                    .map(|&v| vec![(v, measurement.given_u)])
-                    .unwrap_or_default()
-            } else {
-                measurement.values.iter().map(|&v| (v, None)).collect()
-            };
-            for (index, (value, value_u)) in rows.iter().enumerate() {
-                sqlx::query(
-                    "INSERT INTO submission_measurements \
-                     (id, submission_id, quantity_id, instrument_id, scale_id, \
-                      replicate_index, value, value_u) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                )
-                .bind(Uuid::new_v4().to_string())
-                .bind(&id)
-                .bind(&measurement.quantity_id)
-                .bind(measurement.instrument_id.as_deref())
-                .bind(measurement.scale_id.as_deref())
-                .bind(index as i64)
-                .bind(*value)
-                .bind(*value_u)
-                .execute(&mut *tx)
-                .await?;
-            }
-        }
-    }
+    insert_measurements(&mut tx, &id, &input.measurements).await?;
     tx.commit().await?;
 
     // Invitar a los demás alumnos de la mesa (fuera de la tx para no bloquear).
@@ -858,38 +886,7 @@ pub async fn update_form_submission(
         .execute(&mut *tx)
         .await?;
 
-    for measurement in measurements {
-        if measurement.values.is_empty() && measurement.given_u.is_some() {
-            continue;
-        }
-        let rows: Vec<(f64, Option<f64>)> = if measurement.given_u.is_some() {
-            measurement
-                .values
-                .first()
-                .map(|&v| vec![(v, measurement.given_u)])
-                .unwrap_or_default()
-        } else {
-            measurement.values.iter().map(|&v| (v, None)).collect()
-        };
-        for (index, (value, value_u)) in rows.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO submission_measurements \
-                 (id, submission_id, quantity_id, instrument_id, scale_id, \
-                  replicate_index, value, value_u) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            )
-            .bind(Uuid::new_v4().to_string())
-            .bind(submission_id)
-            .bind(&measurement.quantity_id)
-            .bind(measurement.instrument_id.as_deref())
-            .bind(measurement.scale_id.as_deref())
-            .bind(index as i64)
-            .bind(*value)
-            .bind(*value_u)
-            .execute(&mut *tx)
-            .await?;
-        }
-    }
+    insert_measurements(&mut tx, submission_id, measurements).await?;
     tx.commit().await?;
 
     db::submission_detail(pool, submission_id)
