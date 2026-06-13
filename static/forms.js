@@ -755,9 +755,21 @@ async function updateRegressionPreview() {
     if (analysis.regression) {
       const { regressionMarkup } = await import("./analysis.js");
       container.innerHTML = `<h4>Vista previa del ajuste</h4>${regressionMarkup(analysis.regression)}`;
-    } else if (analysis.scatter) {
+      return;
+    }
+    const scatters = analysis.scatters ?? [];
+    if (scatters.length) {
       const { scatterMarkup } = await import("./analysis.js");
-      container.innerHTML = `<h4>Vista previa de la curva</h4>${scatterMarkup(analysis.scatter)}`;
+      const blocks = scatters
+        .map((s) => {
+          const heading = scatters.length > 1
+            ? `<h5>${escapeHtml(s.y_label)} vs ${escapeHtml(s.x_label)}${s.x_log ? " (x log)" : ""}</h5>`
+            : "";
+          return `${heading}${scatterMarkup(s)}`;
+        })
+        .join("");
+      const title = scatters.length > 1 ? "Vista previa de las curvas" : "Vista previa de la curva";
+      container.innerHTML = `<h4>${title}</h4>${blocks}`;
     } else {
       container.innerHTML = "";
     }

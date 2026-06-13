@@ -212,10 +212,21 @@ function formAnalysisMarkup(analysis) {
     `;
   }
 
-  if (analysis.scatter) {
+  const scatters = analysis.scatters ?? [];
+  if (scatters.length) {
+    const title = scatters.length > 1 ? "Curvas (puntos sin ajuste)" : "Curva (puntos sin ajuste)";
+    const blocks = scatters
+      .map((s) => {
+        // Con varias curvas, encabeza cada una con "y vs x" para distinguirlas.
+        const heading = scatters.length > 1
+          ? `<h4>${escapeHtml(s.y_label)} vs ${escapeHtml(s.x_label)}${s.x_log ? " (x log)" : ""}</h4>`
+          : "";
+        return `${heading}${scatterMarkup(s)}`;
+      })
+      .join("");
     return `
-      <h3>Curva (puntos sin ajuste)</h3>
-      ${scatterMarkup(analysis.scatter)}
+      <h3>${title}</h3>
+      ${blocks}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
   }
