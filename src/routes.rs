@@ -1535,7 +1535,10 @@ async fn create_intermediate(
     Json(input): Json<IntermediateInput>,
 ) -> Result<Json<practices::PracticeIntermediate>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_intermediate(&input)?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_intermediate(&def, &input, None)?;
     Ok(Json(
         practices::create_intermediate(&state.pool, &id, input).await?,
     ))
@@ -1549,7 +1552,10 @@ async fn update_intermediate(
     Json(input): Json<IntermediateInput>,
 ) -> Result<Json<practices::PracticeIntermediate>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_intermediate(&input)?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_intermediate(&def, &input, Some(&iid))?;
     let updated = practices::update_intermediate(&state.pool, &id, &iid, input)
         .await?
         .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
@@ -1569,13 +1575,53 @@ async fn delete_intermediate(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// Una intermedia necesita símbolo y fórmula. Error 400 amigable.
-fn validate_intermediate(input: &IntermediateInput) -> Result<(), AppError> {
-    if input.symbol.trim().is_empty() || input.formula.trim().is_empty() {
+/// Valida una magnitud intermedia contra la definición de la práctica (docente): símbolo con
+/// formato válido, no reservado y único (vs magnitudes, mensurandos y otras intermedias), y fórmula
+/// que compila usando las magnitudes + las intermedias **anteriores** (por posición). `exclude_id`
+/// ignora la propia fila al editar. Todos los errores son 400 amigables.
+fn validate_intermediate(
+    def: &practices::PracticeDefinition,
+    input: &IntermediateInput,
+    exclude_id: Option<&str>,
+) -> Result<(), AppError> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
         return Err(AppError::bad_request(
             "La magnitud intermedia necesita un simbolo y una formula.",
         ));
     }
+    validate_symbol_format(symbol)?;
+    validate_symbol_not_reserved(symbol)?;
+    // Unicidad: el símbolo no debe chocar con otra magnitud, mensurando o intermedia de la práctica.
+    let taken = def.quantities.iter().any(|q| q.symbol == symbol)
+        || def.results.iter().any(|r| r.symbol == symbol)
+        || def
+            .intermediates
+            .iter()
+            .any(|it| it.symbol == symbol && Some(it.id.as_str()) != exclude_id);
+    if taken {
+        return Err(duplicate_symbol_error(symbol));
+    }
+    // Símbolos permitidos en la fórmula: magnitudes + intermedias anteriores (al crear, todas las
+    // existentes; al editar, solo las de menor posición que la editada).
+    let self_pos = exclude_id.and_then(|id| {
+        def.intermediates
+            .iter()
+            .find(|it| it.id == id)
+            .map(|it| it.position)
+    });
+    let mut allowed: Vec<String> = def.quantities.iter().map(|q| q.symbol.clone()).collect();
+    for it in &def.intermediates {
+        if Some(it.id.as_str()) == exclude_id {
+            continue;
+        }
+        if self_pos.is_none_or(|p| it.position < p) {
+            allowed.push(it.symbol.clone());
+        }
+    }
+    computation::check_formula(formula, &allowed)
+        .map_err(|e| AppError::bad_request(e.to_string()))?;
     Ok(())
 }
 
@@ -1907,6 +1953,59 @@ mod tests {
         // Estudiante: oculto hasta que el docente habilite.
         assert!(analysis_hidden_for("estudiante", false));
         assert!(!analysis_hidden_for("estudiante", true));
+    }
+
+    #[test]
+    fn validate_intermediate_checks_symbol_and_formula() {
+        // Práctica con magnitudes V, t y una intermedia previa Q = V/t.
+        let qty = |symbol: &str| db::PracticeQuantity {
+            id: format!("q-{symbol}"),
+            practice_id: "p".into(),
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "u".into(),
+            repeated: true,
+            quantity: None,
+            position: 0,
+            is_given: false,
+            replicas_per_point: None,
+        };
+        let def = practices::PracticeDefinition {
+            practice_id: "p".into(),
+            analysis_kind: Some("regresion_lineal".into()),
+            x_formula: None,
+            y_formula: None,
+            quantities: vec![qty("V"), qty("t")],
+            results: vec![],
+            curves: vec![],
+            operator_count: None,
+            intermediates: vec![practices::PracticeIntermediate {
+                id: "i1".into(),
+                practice_id: "p".into(),
+                position: 0,
+                symbol: "Q".into(),
+                name: "Q".into(),
+                unit: "u".into(),
+                formula: "V/t".into(),
+            }],
+        };
+        let input = |symbol: &str, formula: &str| IntermediateInput {
+            symbol: symbol.into(),
+            name: "x".into(),
+            unit: "u".into(),
+            formula: formula.into(),
+        };
+
+        // Símbolo reservado, duplicado (vs magnitud o intermedia) y fórmula con símbolo inexistente
+        // → 400.
+        assert!(validate_intermediate(&def, &input("pi", "V*2"), None).is_err());
+        assert!(validate_intermediate(&def, &input("V", "V*2"), None).is_err());
+        assert!(validate_intermediate(&def, &input("Q", "V*2"), None).is_err());
+        assert!(validate_intermediate(&def, &input("Re", "V*zzz"), None).is_err());
+        // Nueva intermedia válida que referencia a Q (anterior) y magnitudes.
+        assert!(validate_intermediate(&def, &input("Re", "Q*V"), None).is_ok());
+        // Al editar Q (posición 0), no puede referenciarse a sí misma ni a posteriores.
+        assert!(validate_intermediate(&def, &input("Q", "Q*2"), Some("i1")).is_err());
     }
 
     /// Construye una escala mínima para los tests de validación.

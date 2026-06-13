@@ -240,6 +240,13 @@ fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
     Ok(tree)
 }
 
+/// Valida que `formula` sea sintácticamente correcta y solo use símbolos de `allowed` (o las
+/// constantes `pi`/`e`). Para validar fórmulas en el alta (p. ej. una magnitud intermedia) sin
+/// esperar a que falle en el cálculo. Devuelve el error amigable de [`compile_formula`].
+pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
+    compile_formula(formula, allowed).map(|_| ())
+}
+
 /// Evalúa una fórmula precompilada con los valores dados por símbolo (más las constantes
 /// `pi`/`e`). Devuelve `NaN` si la evaluación falla, para no romper la propagación numérica.
 fn eval_compiled(tree: &Node, values: &HashMap<&str, f64>) -> f64 {
@@ -459,39 +466,58 @@ fn build_points(
         .map(|q| (q.symbol.as_str(), q.id.as_str()))
         .collect();
 
-    // Las intermedias (Motor C) se compilan sobre los símbolos de las magnitudes; sus símbolos
-    // quedan disponibles para los ejes.
-    let compiled_intermediates: Vec<(&PracticeIntermediate, _)> = intermediates
-        .iter()
-        .map(|it| compile_formula(&it.formula, &magnitude_symbols).map(|tree| (it, tree)))
-        .collect::<anyhow::Result<_>>()?;
-    let axis_symbols: Vec<String> = magnitude_symbols
-        .iter()
-        .cloned()
-        .chain(intermediates.iter().map(|it| it.symbol.clone()))
-        .collect();
+    // Las intermedias (Motor C) se compilan **en orden**: cada una puede usar las magnitudes y las
+    // intermedias **anteriores** (a estas las ve como su valor por punto, ya promediado). Sus
+    // símbolos quedan disponibles para los ejes.
+    let mut allowed = magnitude_symbols.clone();
+    let mut compiled_intermediates: Vec<(&PracticeIntermediate, Node)> = Vec::new();
+    for it in intermediates {
+        let tree = compile_formula(&it.formula, &allowed)?;
+        allowed.push(it.symbol.clone());
+        compiled_intermediates.push((it, tree));
+    }
+    let axis_symbols = allowed; // magnitudes + todas las intermedias
     let x_tree = compile_formula(x_formula, &axis_symbols)?;
     let y_tree = compile_formula(y_formula, &axis_symbols)?;
+    let intermediate_symbols: std::collections::HashSet<&str> = compiled_intermediates
+        .iter()
+        .map(|(it, _)| it.symbol.as_str())
+        .collect();
 
-    // Magnitudes que condicionan los puntos: las referenciadas por los ejes, más las referenciadas
-    // por las intermedias que los ejes usan (p. ej. x=1/Q, Q=V/t → V y t condicionan los puntos).
+    // Intermedias necesarias = las que usan los ejes, más (cierre) las que esas referencian. Como
+    // una intermedia solo referencia anteriores, un recorrido inverso basta.
     let axis_refs: std::collections::HashSet<&str> = x_tree
         .iter_variable_identifiers()
         .chain(y_tree.iter_variable_identifiers())
         .collect();
-    let used_intermediates: Vec<&(&PracticeIntermediate, _)> = compiled_intermediates
+    let mut needed: std::collections::HashSet<&str> = compiled_intermediates
         .iter()
         .filter(|(it, _)| axis_refs.contains(it.symbol.as_str()))
+        .map(|(it, _)| it.symbol.as_str())
         .collect();
+    for (it, tree) in compiled_intermediates.iter().rev() {
+        if needed.contains(it.symbol.as_str()) {
+            for v in tree.iter_variable_identifiers() {
+                if intermediate_symbols.contains(v) {
+                    needed.insert(v);
+                }
+            }
+        }
+    }
+
+    // Magnitudes que condicionan los puntos: las referenciadas por los ejes, más las referenciadas
+    // por las intermedias necesarias (p. ej. x=1/Q, Q=V/t → V y t condicionan los puntos).
     let mut conditioning: std::collections::HashSet<&str> = quantities
         .iter()
         .filter(|q| axis_refs.contains(q.symbol.as_str()))
         .map(|q| q.symbol.as_str())
         .collect();
-    for (_, tree) in &used_intermediates {
-        for v in tree.iter_variable_identifiers() {
-            if symbol_to_id.contains_key(v) {
-                conditioning.insert(v);
+    for (it, tree) in &compiled_intermediates {
+        if needed.contains(it.symbol.as_str()) {
+            for v in tree.iter_variable_identifiers() {
+                if symbol_to_id.contains_key(v) {
+                    conditioning.insert(v);
+                }
             }
         }
     }
@@ -515,7 +541,18 @@ fn build_points(
 
     let mut points = Vec::with_capacity(n_points);
     for i in 0..n_points {
-        // Binding base: media por punto de cada magnitud referenciada directamente por los ejes.
+        // Intermedias necesarias en orden: cada una se evalúa por réplica (las magnitudes de un
+        // solo valor y las intermedias anteriores se difunden) y se promedia.
+        let mut intermediate_values: HashMap<&str, f64> = HashMap::new();
+        for (it, tree) in &compiled_intermediates {
+            if !needed.contains(it.symbol.as_str()) {
+                continue;
+            }
+            let value =
+                point_intermediate(tree, &point_matrix, &symbol_to_id, &intermediate_values, i);
+            intermediate_values.insert(it.symbol.as_str(), value);
+        }
+        // Binding de ejes: media por punto de las magnitudes + valores por punto de las intermedias.
         let mut bound: HashMap<&str, f64> = quantities
             .iter()
             .filter(|q| axis_refs.contains(q.symbol.as_str()))
@@ -525,13 +562,7 @@ fn build_points(
                     .map(|v| (q.symbol.as_str(), v[i]))
             })
             .collect();
-        // Intermedias: evaluar la fórmula por réplica del punto y promediar.
-        for (it, tree) in &used_intermediates {
-            bound.insert(
-                it.symbol.as_str(),
-                point_intermediate(tree, &point_matrix, &symbol_to_id, i),
-            );
-        }
+        bound.extend(&intermediate_values);
         let x = eval_compiled(&x_tree, &bound);
         let y = eval_compiled(&y_tree, &bound);
         if !x.is_finite() || !y.is_finite() {
@@ -545,18 +576,16 @@ fn build_points(
 }
 
 /// Valor de una magnitud intermedia en el punto `i`: evalúa su fórmula para cada réplica del punto
-/// (las magnitudes de un solo valor se difunden a todas las réplicas) y promedia los resultados.
+/// y promedia. Las magnitudes de un solo valor —y las intermedias anteriores (`earlier`, ya
+/// promediadas por punto)— se difunden a todas las réplicas. Una fórmula sin magnitudes (solo
+/// intermedias anteriores o constantes) se evalúa una vez.
 fn point_intermediate(
     tree: &Node,
     point_matrix: &HashMap<&str, Vec<Vec<f64>>>,
     symbol_to_id: &HashMap<&str, &str>,
+    earlier: &HashMap<&str, f64>,
     i: usize,
 ) -> f64 {
-    // Réplicas del punto: el máximo entre las magnitudes de la fórmula (las de 1 valor se difunden).
-    let vars: Vec<&str> = tree
-        .iter_variable_identifiers()
-        .filter(|v| symbol_to_id.contains_key(v))
-        .collect();
     let reps_at = |sym: &str| -> &[f64] {
         symbol_to_id
             .get(sym)
@@ -564,23 +593,35 @@ fn point_intermediate(
             .and_then(|m| m.get(i))
             .map_or(&[][..], |v| v.as_slice())
     };
-    let n_reps = vars.iter().map(|v| reps_at(v).len()).max().unwrap_or(0);
-    if n_reps == 0 {
-        return f64::NAN;
-    }
+    // Réplicas del punto: el máximo entre las magnitudes de la fórmula; al menos 1 si no hay
+    // magnitudes (la fórmula es solo intermedias anteriores / constantes).
+    let n_reps = tree
+        .iter_variable_identifiers()
+        .filter(|v| symbol_to_id.contains_key(v))
+        .map(reps_at)
+        .map(<[f64]>::len)
+        .max()
+        .unwrap_or(0)
+        .max(1);
     let mut sum = 0.0;
     for r in 0..n_reps {
-        let bound: HashMap<&str, f64> = vars
-            .iter()
-            .map(|&v| {
-                let reps = reps_at(v);
-                // Difunde la última réplica si esta magnitud tiene menos (p. ej. un valor único).
-                let value = reps
-                    .get(r)
-                    .or_else(|| reps.last())
-                    .copied()
-                    .unwrap_or(f64::NAN);
-                (v, value)
+        let bound: HashMap<&str, f64> = tree
+            .iter_variable_identifiers()
+            .map(|v| {
+                if symbol_to_id.contains_key(v) {
+                    // Magnitud: réplica r (difunde la última si tiene menos, p. ej. un valor único).
+                    let reps = reps_at(v);
+                    (
+                        v,
+                        reps.get(r)
+                            .or_else(|| reps.last())
+                            .copied()
+                            .unwrap_or(f64::NAN),
+                    )
+                } else {
+                    // Intermedia anterior: escalar por punto, difundido a todas las réplicas.
+                    (v, earlier.get(v).copied().unwrap_or(f64::NAN))
+                }
             })
             .collect();
         sum += eval_compiled(tree, &bound);
@@ -2054,6 +2095,86 @@ mod tests {
             compute_regresion(&quantities, &intermediates, &[], "Q", "py", &measurements).unwrap();
         let reg = a.regression.unwrap();
         assert_eq!(reg.points, vec![(7.5, 100.0), (15.0, 200.0)]);
+    }
+
+    /// Helper de test: una magnitud con réplicas por punto.
+    fn point_rep(id: &str, groups: Vec<Vec<f64>>) -> MeasurementInput {
+        MeasurementInput {
+            quantity_id: id.into(),
+            instrument_id: None,
+            scale_id: None,
+            values: vec![],
+            given_u: None,
+            point_replicas: Some(groups),
+            operator_replicas: None,
+        }
+    }
+
+    #[test]
+    fn intermediate_broadcasts_single_value_magnitudes_over_replicas() {
+        // Difusión: D = h*V/t, con h de un solo valor por punto y V,t con 2 réplicas. h se difunde.
+        // Punto 0: h=2, V=[10,10], t=[1,2] → D=(2*10/1 + 2*10/2)/2 = (20+10)/2 = 15.
+        // Punto 1: h=3, V=[20,20], t=[1,2] → D=(60+30)/2 = 45.
+        let quantities = vec![quantity("h"), quantity("V"), quantity("t"), quantity("py")];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p1-estadistica".into(),
+            position: 0,
+            symbol: "D".into(),
+            name: "D".into(),
+            unit: "u".into(),
+            formula: "h*V/t".into(),
+        }];
+        let measurements = vec![
+            measurement("h", &[2.0, 3.0]),
+            point_rep("q-V", vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
+            point_rep("q-t", vec![vec![1.0, 2.0], vec![1.0, 2.0]]),
+            measurement("py", &[100.0, 200.0]),
+        ];
+        let a =
+            compute_regresion(&quantities, &intermediates, &[], "D", "py", &measurements).unwrap();
+        assert_eq!(
+            a.regression.unwrap().points,
+            vec![(15.0, 100.0), (45.0, 200.0)]
+        );
+    }
+
+    #[test]
+    fn intermediate_can_reference_an_earlier_intermediate() {
+        // Encadenado: Q = V/t (promedio por réplica), R = Q*2 (ve a Q como su valor por punto).
+        // Punto 0: Q=(10/1+10/2)/2=7.5 → R=15 ; punto 1: Q=(20/1+20/2)/2=15 → R=30.
+        let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
+        let intermediates = vec![
+            PracticeIntermediate {
+                id: "i1".into(),
+                practice_id: "p1-estadistica".into(),
+                position: 0,
+                symbol: "Q".into(),
+                name: "Q".into(),
+                unit: "u".into(),
+                formula: "V/t".into(),
+            },
+            PracticeIntermediate {
+                id: "i2".into(),
+                practice_id: "p1-estadistica".into(),
+                position: 1,
+                symbol: "R".into(),
+                name: "R".into(),
+                unit: "u".into(),
+                formula: "Q*2".into(),
+            },
+        ];
+        let measurements = vec![
+            point_rep("q-V", vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
+            point_rep("q-t", vec![vec![1.0, 2.0], vec![1.0, 2.0]]),
+            measurement("py", &[100.0, 200.0]),
+        ];
+        let a =
+            compute_regresion(&quantities, &intermediates, &[], "R", "py", &measurements).unwrap();
+        assert_eq!(
+            a.regression.unwrap().points,
+            vec![(15.0, 100.0), (30.0, 200.0)]
+        );
     }
 
     #[test]
