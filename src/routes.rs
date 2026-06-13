@@ -252,9 +252,10 @@ async fn login(
             .unwrap_or_else(|e| e.into_inner());
         if let Some(info) = attempts.get_mut(&email_key) {
             if info.is_blocked(now) {
-                return Err(AppError::bad_request(
-                    "demasiados intentos fallidos, esperá 15 minutos",
-                ));
+                return Err(AppError::too_many_requests(format!(
+                    "demasiados intentos fallidos, esperá {} minutos",
+                    db::LOGIN_BLOCK_MINUTES
+                )));
             }
         }
     }
