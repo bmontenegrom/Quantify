@@ -214,6 +214,8 @@ pub struct SubmissionMeasurement {
     pub quantity_id: String,
     pub instrument_id: Option<String>,
     pub scale_id: Option<String>,
+    /// Índice de punto en análisis por puntos (0 en estadístico/CSV).
+    pub point_index: i64,
     pub replicate_index: i64,
     pub value: f64,
     pub value_u: Option<f64>,
@@ -1138,9 +1140,9 @@ pub async fn measurements_for(
     submission_id: &str,
 ) -> anyhow::Result<Vec<SubmissionMeasurement>> {
     Ok(sqlx::query_as::<_, SubmissionMeasurement>(
-        "SELECT quantity_id, instrument_id, scale_id, replicate_index, value, value_u \
+        "SELECT quantity_id, instrument_id, scale_id, point_index, replicate_index, value, value_u \
          FROM submission_measurements WHERE submission_id = ?1 \
-         ORDER BY quantity_id, replicate_index",
+         ORDER BY quantity_id, point_index, replicate_index",
     )
     .bind(submission_id)
     .fetch_all(pool)

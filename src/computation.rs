@@ -21,10 +21,37 @@ pub struct MeasurementInput {
     pub quantity_id: String,
     pub instrument_id: Option<String>,
     pub scale_id: Option<String>,
-    /// Réplicas medidas (una o varias) de la magnitud.
+    /// Réplicas medidas (una o varias) de la magnitud. En análisis por puntos (regresión/curva)
+    /// con una magnitud sin réplicas por punto, es un valor por punto.
     pub values: Vec<f64>,
     /// Incertidumbre expandida U para magnitudes `is_given` (dato de la cátedra).
     pub given_u: Option<f64>,
+    /// Solo en análisis por puntos con magnitudes que repiten medición **en cada punto**
+    /// (p.ej. tiempo medido varias veces por altura/esfera). Exterior = puntos, interior =
+    /// réplicas de ese punto. El motor usa la **media** de cada punto para evaluar los ejes.
+    #[serde(default)]
+    pub point_replicas: Option<Vec<Vec<f64>>>,
+}
+
+impl MeasurementInput {
+    /// Valor representativo por punto en análisis por puntos: la media de las réplicas de cada
+    /// punto si hay `point_replicas`; si no, los `values` tal cual (un valor por punto). Un punto
+    /// con réplicas vacías produce `NaN` (lo descarta luego el chequeo de finitud).
+    fn point_values(&self) -> Vec<f64> {
+        match &self.point_replicas {
+            Some(groups) => groups
+                .iter()
+                .map(|g| {
+                    if g.is_empty() {
+                        f64::NAN
+                    } else {
+                        g.iter().sum::<f64>() / g.len() as f64
+                    }
+                })
+                .collect(),
+            None => self.values.clone(),
+        }
+    }
 }
 
 /// Cuerpo para crear una entrega por formulario.
@@ -290,9 +317,10 @@ fn build_points(
 ) -> anyhow::Result<(PointSeries, Vec<String>)> {
     let mut warnings = Vec::new();
     let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    let by_quantity: HashMap<&str, &MeasurementInput> = measurements
+    // Valor representativo por punto de cada magnitud (media de réplicas por punto si las hay).
+    let point_values: HashMap<&str, Vec<f64>> = measurements
         .iter()
-        .map(|m| (m.quantity_id.as_str(), m))
+        .map(|m| (m.quantity_id.as_str(), m.point_values()))
         .collect();
 
     let x_tree = compile_formula(x_formula, &symbols)?;
@@ -310,10 +338,10 @@ fn build_points(
         .filter(|q| referenced.contains(q.symbol.as_str()))
         .collect();
 
-    // Cantidad de puntos = mínimo de réplicas entre las magnitudes de eje (deben venir parejas).
+    // Cantidad de puntos = mínimo de puntos entre las magnitudes de eje (deben venir parejas).
     let lengths: Vec<usize> = axis_quantities
         .iter()
-        .map(|q| by_quantity.get(q.id.as_str()).map_or(0, |m| m.values.len()))
+        .map(|q| point_values.get(q.id.as_str()).map_or(0, |v| v.len()))
         .collect();
     let n_points = lengths.iter().copied().min().unwrap_or(0);
     if lengths.iter().any(|&l| l != n_points) {
@@ -331,9 +359,9 @@ fn build_points(
         let bound: HashMap<&str, f64> = axis_quantities
             .iter()
             .filter_map(|q| {
-                by_quantity
+                point_values
                     .get(q.id.as_str())
-                    .map(|m| (q.symbol.as_str(), m.values[i]))
+                    .map(|v| (q.symbol.as_str(), v[i]))
             })
             .collect();
         let x = eval_compiled(&x_tree, &bound);
@@ -610,6 +638,103 @@ async fn load_scales(
     Ok(scales)
 }
 
+/// Persiste las mediciones de una entrega en `submission_measurements`. Cubre los tres modos
+/// (según `point_based`, que indica si la entrega es por puntos — regresión/curva):
+/// - **estadístico** (`point_based = false`): réplicas de una magnitud → `point_index = 0`,
+///   `replicate_index = réplica`.
+/// - **por puntos sin réplicas** (`point_based = true`, `values`): un valor por punto →
+///   `point_index = punto`, `replicate_index = 0`.
+/// - **por puntos con réplicas** (`point_replicas`): `point_index = punto`, `replicate_index = réplica`.
+///
+/// El `point_index` explícito (no dejar el punto en `replicate_index`) permite reconstruir la
+/// serie al editar agrupando por punto. Los datos de cátedra (`given_u`) guardan su único valor
+/// con la U en `value_u`.
+async fn insert_measurements(
+    conn: &mut sqlx::SqliteConnection,
+    submission_id: &str,
+    measurements: &[MeasurementInput],
+    point_based: bool,
+) -> anyhow::Result<()> {
+    for measurement in measurements {
+        // Filas (point_index, replicate_index, value, value_u) según el modo de la medición.
+        let rows: Vec<(i64, i64, f64, Option<f64>)> =
+            if let Some(groups) = &measurement.point_replicas {
+                groups
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(p, reps)| {
+                        reps.iter()
+                            .enumerate()
+                            .map(move |(r, &v)| (p as i64, r as i64, v, None))
+                    })
+                    .collect()
+            } else if measurement.given_u.is_some() {
+                measurement
+                    .values
+                    .first()
+                    .map(|&v| vec![(0i64, 0i64, v, measurement.given_u)])
+                    .unwrap_or_default()
+            } else if point_based {
+                // Un valor por punto: el índice va en point_index (replicate_index = 0).
+                measurement
+                    .values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| (i as i64, 0i64, v, None))
+                    .collect()
+            } else {
+                // Réplicas estadísticas: un solo punto (0), el índice va en replicate_index.
+                measurement
+                    .values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| (0i64, i as i64, v, None))
+                    .collect()
+            };
+        for (point_index, replicate_index, value, value_u) in rows {
+            sqlx::query(
+                "INSERT INTO submission_measurements \
+                 (id, submission_id, quantity_id, instrument_id, scale_id, \
+                  point_index, replicate_index, value, value_u) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(submission_id)
+            .bind(&measurement.quantity_id)
+            .bind(measurement.instrument_id.as_deref())
+            .bind(measurement.scale_id.as_deref())
+            .bind(point_index)
+            .bind(replicate_index)
+            .bind(value)
+            .bind(value_u)
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// `true` si la práctica analiza **por puntos** (regresión o curva). Determina el layout de
+/// persistencia (el índice del punto va en `point_index`, no en `replicate_index`). Se deriva del
+/// `analysis_kind` declarado en la práctica —**no** del resultado del cálculo— para que el formato
+/// almacenado no dependa de que el ajuste haya producido salida con los datos cargados (p.ej. un
+/// punto único o valores no finitos dejarían `regression`/`scatter` en `None` sin dejar de ser una
+/// entrega por puntos).
+async fn is_point_based_practice(
+    pool: &sqlx::SqlitePool,
+    practice_id: &str,
+) -> anyhow::Result<bool> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT analysis_kind FROM practices WHERE id = ?1")
+            .bind(practice_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(matches!(
+        row.and_then(|r| r.0).as_deref(),
+        Some("regresion_lineal") | Some("curva")
+    ))
+}
+
 /// Crea una entrega por formulario: calcula el análisis, inserta la entrega y sus mediciones
 /// en una transacción, y devuelve el detalle. El usuario ya fue validado por el handler.
 pub async fn create_form_submission(
@@ -663,6 +788,7 @@ pub async fn create_form_submission(
     }
 
     let analysis = analyze(pool, &input.practice_id, &input.measurements).await?;
+    let point_based = is_point_based_practice(pool, &input.practice_id).await?;
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match &input.meta {
         Some(value) => Some(serde_json::to_string(value)?),
@@ -743,41 +869,7 @@ pub async fn create_form_submission(
     .execute(&mut *tx)
     .await?;
 
-    for measurement in &input.measurements {
-        // Para magnitudes `is_given`, persiste el único valor con su U en value_u.
-        // Para medidas normales, persiste cada réplica con value_u = NULL.
-        if measurement.values.is_empty() && measurement.given_u.is_some() {
-            // Dato sin valor numérico (no debería llegar, pero evitamos insertar filas vacías).
-        } else {
-            let rows: Vec<(f64, Option<f64>)> = if measurement.given_u.is_some() {
-                measurement
-                    .values
-                    .first()
-                    .map(|&v| vec![(v, measurement.given_u)])
-                    .unwrap_or_default()
-            } else {
-                measurement.values.iter().map(|&v| (v, None)).collect()
-            };
-            for (index, (value, value_u)) in rows.iter().enumerate() {
-                sqlx::query(
-                    "INSERT INTO submission_measurements \
-                     (id, submission_id, quantity_id, instrument_id, scale_id, \
-                      replicate_index, value, value_u) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                )
-                .bind(Uuid::new_v4().to_string())
-                .bind(&id)
-                .bind(&measurement.quantity_id)
-                .bind(measurement.instrument_id.as_deref())
-                .bind(measurement.scale_id.as_deref())
-                .bind(index as i64)
-                .bind(*value)
-                .bind(*value_u)
-                .execute(&mut *tx)
-                .await?;
-            }
-        }
-    }
+    insert_measurements(&mut tx, &id, &input.measurements, point_based).await?;
     tx.commit().await?;
 
     // Invitar a los demás alumnos de la mesa (fuera de la tx para no bloquear).
@@ -810,6 +902,7 @@ pub async fn update_form_submission(
     meta: Option<&serde_json::Value>,
 ) -> anyhow::Result<db::SubmissionDetail> {
     let analysis = analyze(pool, practice_id, measurements).await?;
+    let point_based = is_point_based_practice(pool, practice_id).await?;
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match meta {
         Some(value) => Some(serde_json::to_string(value)?),
@@ -830,38 +923,7 @@ pub async fn update_form_submission(
         .execute(&mut *tx)
         .await?;
 
-    for measurement in measurements {
-        if measurement.values.is_empty() && measurement.given_u.is_some() {
-            continue;
-        }
-        let rows: Vec<(f64, Option<f64>)> = if measurement.given_u.is_some() {
-            measurement
-                .values
-                .first()
-                .map(|&v| vec![(v, measurement.given_u)])
-                .unwrap_or_default()
-        } else {
-            measurement.values.iter().map(|&v| (v, None)).collect()
-        };
-        for (index, (value, value_u)) in rows.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO submission_measurements \
-                 (id, submission_id, quantity_id, instrument_id, scale_id, \
-                  replicate_index, value, value_u) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            )
-            .bind(Uuid::new_v4().to_string())
-            .bind(submission_id)
-            .bind(&measurement.quantity_id)
-            .bind(measurement.instrument_id.as_deref())
-            .bind(measurement.scale_id.as_deref())
-            .bind(index as i64)
-            .bind(*value)
-            .bind(*value_u)
-            .execute(&mut *tx)
-            .await?;
-        }
-    }
+    insert_measurements(&mut tx, submission_id, measurements, point_based).await?;
     tx.commit().await?;
 
     db::submission_detail(pool, submission_id)
@@ -912,6 +974,7 @@ mod tests {
             quantity: None,
             position: 0,
             is_given: false,
+            replicas_per_point: None,
         }
     }
 
@@ -922,6 +985,7 @@ mod tests {
             scale_id: None,
             values: values.to_vec(),
             given_u: None,
+            point_replicas: None,
         }
     }
 
@@ -1059,6 +1123,7 @@ mod tests {
             scale_id: None,
             values: vec![10.0, 12.0, 11.0],
             given_u: None,
+            point_replicas: None,
         }];
         let analysis = analyze(&pool, "p1-estadistica", &measurements)
             .await
@@ -1124,6 +1189,7 @@ mod tests {
                 scale_id: None,
                 values: vec![5.0, 5.2, 4.9],
                 given_u: None,
+                point_replicas: None,
             }],
             meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
             table_number: None,
@@ -1136,6 +1202,216 @@ mod tests {
         let meta = detail.measurement_meta.expect("meta persistida");
         assert_eq!(meta["q1"]["bins"], 8);
         assert_eq!(meta["q1"]["discarded"][0], 9.9);
+    }
+
+    #[tokio::test]
+    async fn point_based_submission_stores_point_index_per_point() {
+        // Una entrega por puntos (curva/regresión) guarda cada punto con su point_index (no en
+        // replicate_index), para que la edición reconstruya la serie completa. Cubre el fix del
+        // bug de prefill. Se usa `curva` (misma ruta de persistencia point_based, sin derivar
+        // mensurandos que en p1 referencian T/L y no encajarían en el modo regresión).
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        // P1 como curva: T (un valor por punto) vs t_med (réplicas por punto).
+        crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+            .await
+            .unwrap();
+        crate::practices::set_regression_formulas(&pool, "p1-estadistica", "T", "t_med", false)
+            .await
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let qid = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let input = FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![
+                MeasurementInput {
+                    quantity_id: qid("T"),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![1.0, 2.0, 3.0],
+                    given_u: None,
+                    point_replicas: None,
+                },
+                MeasurementInput {
+                    quantity_id: qid("t_med"),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![],
+                    given_u: None,
+                    point_replicas: Some(vec![vec![4.0, 4.2], vec![5.0, 5.1], vec![6.0, 5.9]]),
+                },
+            ],
+            meta: None,
+            table_number: None,
+        };
+        let detail = create_form_submission(&pool, &user, input).await.unwrap();
+        let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
+
+        // T: un valor por punto → point_index 0,1,2 y replicate_index 0.
+        let mut t_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T")).collect();
+        t_rows.sort_by_key(|m| m.point_index);
+        assert_eq!(t_rows.len(), 3);
+        for (i, m) in t_rows.iter().enumerate() {
+            assert_eq!(m.point_index, i as i64);
+            assert_eq!(m.replicate_index, 0);
+            assert!(close(m.value, (i + 1) as f64, 1e-9));
+        }
+
+        // t_med: réplicas por punto → point_index = punto, replicate_index = réplica.
+        let tmed_rows: Vec<_> = rows
+            .iter()
+            .filter(|m| m.quantity_id == qid("t_med"))
+            .collect();
+        assert_eq!(tmed_rows.len(), 6); // 3 puntos x 2 réplicas
+        assert!(tmed_rows
+            .iter()
+            .any(|m| m.point_index == 0 && m.replicate_index == 1 && close(m.value, 4.2, 1e-9)));
+        assert!(tmed_rows
+            .iter()
+            .any(|m| m.point_index == 2 && m.replicate_index == 0 && close(m.value, 6.0, 1e-9)));
+    }
+
+    #[tokio::test]
+    async fn point_based_submission_stores_variable_replicas_per_point() {
+        // Cada punto puede traer una cantidad distinta de réplicas (p.ej. una esfera medida 1 vez,
+        // otra 3): se persisten todas con replicate_index 0..n del punto y el motor promedia con el
+        // n real de cada punto. Cubre el caso de grilla "irregular".
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+            .await
+            .unwrap();
+        crate::practices::set_regression_formulas(&pool, "p1-estadistica", "T", "t_med", false)
+            .await
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let qid = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        // Punto 0: 1 réplica; punto 1: 3 réplicas; punto 2: 2 réplicas. Medias: 4.0, 5.1, 6.05.
+        let input = FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![
+                MeasurementInput {
+                    quantity_id: qid("T"),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![1.0, 2.0, 3.0],
+                    given_u: None,
+                    point_replicas: None,
+                },
+                MeasurementInput {
+                    quantity_id: qid("t_med"),
+                    instrument_id: None,
+                    scale_id: None,
+                    values: vec![],
+                    given_u: None,
+                    point_replicas: Some(vec![vec![4.0], vec![5.0, 5.1, 5.2], vec![6.0, 6.1]]),
+                },
+            ],
+            meta: None,
+            table_number: None,
+        };
+        let detail = create_form_submission(&pool, &user, input).await.unwrap();
+        let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
+
+        // Cada punto guarda su cantidad propia de réplicas (1 + 3 + 2 = 6), con replicate_index
+        // contiguo desde 0 dentro del punto.
+        let tmed_rows: Vec<_> = rows
+            .iter()
+            .filter(|m| m.quantity_id == qid("t_med"))
+            .collect();
+        assert_eq!(tmed_rows.len(), 6);
+        for (point, expected_n) in [(0i64, 1usize), (1, 3), (2, 2)] {
+            let mut reps: Vec<i64> = tmed_rows
+                .iter()
+                .filter(|m| m.point_index == point)
+                .map(|m| m.replicate_index)
+                .collect();
+            reps.sort_unstable();
+            assert_eq!(reps.len(), expected_n, "réplicas del punto {point}");
+            assert_eq!(reps, (0..expected_n as i64).collect::<Vec<_>>());
+        }
+
+        // El motor promedia con el n real de cada punto: la curva usa (T, media de réplicas).
+        let points = detail.analysis["scatter"]["points"].as_array().unwrap();
+        assert_eq!(points.len(), 3);
+        let y = |i: usize| points[i][1].as_f64().unwrap();
+        assert!(close(y(0), 4.0, 1e-9));
+        assert!(close(y(1), 5.1, 1e-9));
+        assert!(close(y(2), 6.05, 1e-9));
     }
 
     #[tokio::test]
@@ -1188,6 +1464,7 @@ mod tests {
                 scale_id: None,
                 values: vals,
                 given_u: None,
+                point_replicas: None,
             }],
             meta: None,
             table_number: None,
@@ -1229,6 +1506,7 @@ mod tests {
             scale_id: None,
             values: vec![1.0],
             given_u: None,
+            point_replicas: None,
         }];
         assert!(analyze(&pool, "p1-estadistica", &measurements)
             .await
@@ -1265,6 +1543,7 @@ mod tests {
                 scale_id: None,
                 values: vec![1.0],
                 given_u: None,
+                point_replicas: None,
             }],
             meta: None,
             table_number: None,
@@ -1415,6 +1694,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn build_points_averages_per_point_replicas() {
+        // 'py' mide réplicas por punto: el motor usa la media de cada punto en el eje.
+        // Punto 1: media(3,5)=4 ; punto 2: media(8,10,12)=10.
+        let quantities = vec![quantity("px"), quantity("py")];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0]),
+            MeasurementInput {
+                quantity_id: "q-py".into(),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![],
+                given_u: None,
+                point_replicas: Some(vec![vec![3.0, 5.0], vec![8.0, 10.0, 12.0]]),
+            },
+        ];
+        let a = compute_regresion(&quantities, &[], "px", "py", &measurements).unwrap();
+        let reg = a.regression.unwrap();
+        assert_eq!(reg.points, vec![(1.0, 4.0), (2.0, 10.0)]);
+        // Pendiente de (1,4)-(2,10) = 6.
+        assert!(close(reg.slope, 6.0, 1e-9));
+    }
+
     /// Mediciones reales para una magnitud sembrada, buscando su id por símbolo en la definición.
     fn measurement_for(
         def: &crate::practices::PracticeDefinition,
@@ -1434,6 +1736,7 @@ mod tests {
             scale_id: None,
             values: values.to_vec(),
             given_u: None,
+            point_replicas: None,
         }
     }
 

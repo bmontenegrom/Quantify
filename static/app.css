@@ -1058,6 +1058,23 @@ textarea {
   min-width: 72px;
 }
 
+/* Celda con grilla de réplicas por punto (regresión/curva con magnitud repetida). */
+.series-replica-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.series-table input.series-replica {
+  width: 60px;
+}
+
+.series-mean {
+  display: block;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
 .remove-series-row,
 .add-series-row {
   cursor: pointer;

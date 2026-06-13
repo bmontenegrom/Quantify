@@ -6,7 +6,7 @@ import {
 } from "./dom.js";
 import { fetchJson, postJson } from "./api.js";
 import {
-  escapeHtml, canReview,
+  escapeHtml, canReview, format,
   compatibleInstruments, SI_PREFIXES, prefixFactor,
   seriesStats, histogram, normalCurve, validateMeasurements,
 } from "./lib.js";
@@ -407,24 +407,42 @@ export function collectMeasurements() {
   const seriesTable = measurementFields.querySelector(".series-table");
   if (seriesTable) {
     const quantityIds = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
-    const byQuantity = new Map(quantityIds.map((id) => [id, []]));
+    // Magnitudes con grilla de réplicas por punto (tienen inputs .series-replica).
+    const replicaIds = new Set(
+      [...seriesTable.querySelectorAll(".series-replica")].map((i) => i.dataset.quantityId),
+    );
+    const singleValues = new Map(quantityIds.map((id) => [id, []]));
+    const replicaPoints = new Map([...replicaIds].map((id) => [id, []]));
     seriesTable.querySelectorAll(".series-row").forEach((row) => {
       const cells = [...row.querySelectorAll(".series-cell")];
+      // Parsea cada celda a un valor único o a una lista de réplicas; marca si está completa.
       const parsed = cells.map((cell) => {
-        const raw = cell.querySelector(".series-value").value.trim();
+        const replicaInput = cell.querySelector(".series-replica");
+        if (replicaInput) {
+          const reps = cellReplicaValues(cell);
+          return {
+            id: replicaInput.dataset.quantityId,
+            replicas: reps,
+            ok: reps.length > 0 && reps.every(Number.isFinite),
+          };
+        }
+        const input = cell.querySelector(".series-value");
+        const raw = input.value.trim();
         const factor = prefixFactor(cell.querySelector(".prefix-select").value);
-        return raw === "" ? NaN : Number(raw) * factor;
+        const v = raw === "" ? NaN : Number(raw) * factor;
+        return { id: input.dataset.quantityId, value: v, ok: Number.isFinite(v) };
       });
-      if (parsed.some((n) => !Number.isFinite(n))) return;
-      cells.forEach((cell, i) => byQuantity.get(cell.querySelector(".series-value").dataset.quantityId).push(parsed[i]));
+      if (parsed.some((p) => !p.ok)) return; // fila incompleta: se ignora el punto
+      parsed.forEach((p) => {
+        if (p.replicas) replicaPoints.get(p.id).push(p.replicas);
+        else singleValues.get(p.id).push(p.value);
+      });
     });
-    return quantityIds.map((id) => ({
-      quantity_id: id,
-      instrument_id: null,
-      scale_id: null,
-      values: byQuantity.get(id),
-      given_u: null,
-    }));
+    return quantityIds.map((id) =>
+      replicaIds.has(id)
+        ? { quantity_id: id, instrument_id: null, scale_id: null, values: [], given_u: null, point_replicas: replicaPoints.get(id) }
+        : { quantity_id: id, instrument_id: null, scale_id: null, values: singleValues.get(id), given_u: null },
+    );
   }
 
   return [...measurementFields.querySelectorAll(".measurement-row")].map((row) => {
@@ -582,11 +600,21 @@ function editPrefillByQuantity() {
   for (const m of state.editPrefill ?? []) {
     let e = map.get(m.quantity_id);
     if (!e) {
-      e = { values: [], instrument_id: m.instrument_id, scale_id: m.scale_id, value_u: m.value_u };
+      e = { points: new Map(), instrument_id: m.instrument_id, scale_id: m.scale_id, value_u: m.value_u };
       map.set(m.quantity_id, e);
     }
-    e.values.push(m.value);
+    const pidx = m.point_index ?? 0;
+    if (!e.points.has(pidx)) e.points.set(pidx, []);
+    e.points.get(pidx).push(m.value);
     if (m.value_u != null) e.value_u = m.value_u;
+  }
+  // Normaliza a `pointGroups` (réplicas por punto, ordenadas por índice de punto) y `values`
+  // (lista plana, para el modo estadístico de un solo punto y para un valor por punto).
+  for (const e of map.values()) {
+    const indices = [...e.points.keys()].sort((a, b) => a - b);
+    e.pointGroups = indices.map((i) => e.points.get(i));
+    e.values = e.pointGroups.flat();
+    delete e.points;
   }
   return map;
 }
@@ -598,17 +626,35 @@ export function applyPrefill() {
   const seriesTable = measurementFields.querySelector(".series-table");
   if (seriesTable) {
     const qids = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
-    const nPoints = Math.max(...qids.map((id) => byQ.get(id)?.values.length ?? 0), 0);
+    const nPoints = Math.max(...qids.map((id) => byQ.get(id)?.pointGroups.length ?? 0), 0);
     const cols = state.practiceForm.definition.quantities;
     const tbody = seriesTable.querySelector("tbody");
     tbody.innerHTML = Array.from({ length: Math.max(nPoints, 1) }, () => seriesRowHtml(cols)).join("");
     wireSeriesRemove();
     [...tbody.querySelectorAll(".series-row")].forEach((row, i) => {
+      // Columnas de un valor por punto.
       row.querySelectorAll(".series-value").forEach((input) => {
-        const v = byQ.get(input.dataset.quantityId)?.values[i];
+        const v = byQ.get(input.dataset.quantityId)?.pointGroups[i]?.[0];
         if (v != null) input.value = v;
       });
+      // Columnas con grilla de réplicas: rellena cada input del punto i.
+      row.querySelectorAll(".series-cell--replicas").forEach((cell) => {
+        const id = cell.querySelector(".series-replica")?.dataset.quantityId;
+        const reps = byQ.get(id)?.pointGroups[i] ?? [];
+        const group = cell.querySelector(".series-replica-group");
+        // Si la entrega guardó más réplicas que el ancho actual de la grilla (el docente redujo
+        // replicas_per_point luego de cargarse), agrega inputs para no perder datos al editar.
+        let inputs = [...cell.querySelectorAll(".series-replica")];
+        while (group && inputs.length < reps.length) {
+          group.insertAdjacentHTML("beforeend", replicaInputHtml(id, inputs.length));
+          inputs = [...cell.querySelectorAll(".series-replica")];
+        }
+        inputs.forEach((input, k) => {
+          if (reps[k] != null) input.value = reps[k];
+        });
+      });
     });
+    updateSeriesMeans();
     return;
   }
 
@@ -673,18 +719,30 @@ function renderSeriesTable(definition) {
     previewTimer = setTimeout(updateRegressionPreview, 350);
   };
   measurementFields.querySelector(".series-table").addEventListener("input", (e) => {
-    if (e.target.classList.contains("series-value") || e.target.classList.contains("prefix-select")) {
+    if (
+      e.target.classList.contains("series-value") ||
+      e.target.classList.contains("series-replica") ||
+      e.target.classList.contains("prefix-select")
+    ) {
+      updateSeriesMeans();
       schedulePreview();
     }
   });
-  measurementFields.querySelector(".series-table").addEventListener("change", schedulePreview);
+  measurementFields.querySelector(".series-table").addEventListener("change", () => {
+    updateSeriesMeans();
+    schedulePreview();
+  });
+  updateSeriesMeans();
 }
 
 async function updateRegressionPreview() {
   const container = measurementFields.querySelector(".series-preview");
   if (!container) return;
   const measurements = collectMeasurements();
-  const points = measurements[0]?.values.length ?? 0;
+  const points = measurements.reduce(
+    (n, m) => Math.max(n, m.point_replicas?.length ?? m.values.length),
+    0,
+  );
   if (points < 2) {
     container.innerHTML = `<p class="submission-meta">Cargá al menos 2 puntos completos para ver la vista previa.</p>`;
     return;
@@ -710,9 +768,46 @@ async function updateRegressionPreview() {
 
 function seriesRowHtml(cols) {
   const cells = cols
-    .map((q) => `<td class="series-cell">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`)
+    .map((q) => {
+      const n = q.repeated ? Number(q.replicas_per_point) || 0 : 0;
+      if (n > 0) {
+        const inputs = Array.from({ length: n }, (_, k) => replicaInputHtml(q.id, k)).join("");
+        return `<td class="series-cell series-cell--replicas">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div><span class="series-mean submission-meta">x̄ —</span></td>`;
+      }
+      return `<td class="series-cell">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`;
+    })
     .join("");
   return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
+}
+
+/** HTML de un input de réplica (índice 0-based `k`) para la magnitud `quantityId`. */
+function replicaInputHtml(quantityId, k) {
+  return `<input class="series-replica" type="number" step="any" data-quantity-id="${escapeHtml(quantityId)}" placeholder="t${k + 1}" />`;
+}
+
+/** Lee las réplicas no vacías de una celda de réplicas, aplicando el prefijo SI de la celda. */
+function cellReplicaValues(cell) {
+  const factor = prefixFactor(cell.querySelector(".prefix-select").value);
+  return [...cell.querySelectorAll(".series-replica")]
+    .map((input) => input.value.trim())
+    .filter((raw) => raw !== "")
+    .map((raw) => Number(raw) * factor);
+}
+
+/** Actualiza el promedio (x̄) mostrado en cada celda de réplicas de la tabla de series. */
+function updateSeriesMeans() {
+  measurementFields.querySelectorAll(".series-cell--replicas").forEach((cell) => {
+    const meanEl = cell.querySelector(".series-mean");
+    if (!meanEl) return;
+    const reps = cellReplicaValues(cell);
+    const valid = reps.filter((n) => Number.isFinite(n));
+    if (valid.length === 0) {
+      meanEl.textContent = "x̄ —";
+      return;
+    }
+    const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
+    meanEl.textContent = `x̄ ${format(mean)} (n=${valid.length})`;
+  });
 }
 
 function wireSeriesRemove() {
