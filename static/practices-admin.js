@@ -65,6 +65,7 @@ export function renderPracticesPage() {
         ${renderAnalysisKindForm(practice, def)}
         ${def?.analysis_kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
         ${def?.analysis_kind === "curva" ? renderCurvesSection(practice, def) : ""}
+        ${def?.analysis_kind === "regresion_lineal" || def?.analysis_kind === "curva" ? renderIntermediatesSection(practice, def) : ""}
         ${def?.analysis_kind == null || def?.analysis_kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
       </section>
       <section class="panel workspace-panel">
@@ -94,6 +95,23 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
+  practiceWorkspace.querySelector("#new-intermediate-form")?.addEventListener("submit", saveNewIntermediate);
+
+  practiceWorkspace.querySelectorAll("[data-edit-intermediate]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingIntermediateId = state.editingIntermediateId === btn.dataset.iid ? null : btn.dataset.iid;
+      renderPracticesPage();
+    });
+  });
+  practiceWorkspace.querySelectorAll("[data-delete-intermediate]").forEach((btn) => {
+    btn.addEventListener("click", () => deletePracticeIntermediate(btn.dataset.iid, practice.id));
+  });
+  practiceWorkspace.querySelectorAll("[data-cancel-intermediate]").forEach((btn) => {
+    btn.addEventListener("click", () => { state.editingIntermediateId = null; renderPracticesPage(); });
+  });
+  practiceWorkspace.querySelectorAll("[data-edit-intermediate-form]").forEach((form) => {
+    form.addEventListener("submit", saveEditIntermediate);
+  });
 
   practiceWorkspace.querySelectorAll("[data-edit-curve]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -234,6 +252,66 @@ function renderOperatorCountForm(practice, def) {
         <button type="submit">Guardar operadores</button>
       </div>
     </form>
+  `;
+}
+
+/// Gestión de magnitudes intermedias por punto (Motor C): lista editable + alta. Cada una define
+/// un símbolo y una fórmula que se promedia por punto y queda disponible en las fórmulas de eje.
+function renderIntermediatesSection(practice, def) {
+  return `
+    <h4>Magnitudes intermedias por punto</h4>
+    <p class="submission-meta">Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio). El símbolo queda disponible en las fórmulas de eje.</p>
+    ${renderIntermediatesList(def, practice.id)}
+    <h4>Nueva intermedia</h4>
+    ${renderIntermediateForm(null, practice.id)}
+  `;
+}
+
+function renderIntermediateForm(it, practiceId) {
+  const formId = it ? "edit-intermediate-form" : "new-intermediate-form";
+  const formAttr = it ? `data-edit-intermediate-form data-iid="${escapeHtml(it.id)}"` : "";
+  const v = (f) => (it ? escapeHtml(String(it[f] ?? "")) : "");
+  return `
+    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
+      <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
+      ${it ? `<input name="iid" type="hidden" value="${escapeHtml(it.id)}" />` : ""}
+      <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Q" /></label>
+      <label>Nombre <input name="name" value="${v("name")}" placeholder="Caudal medio" /></label>
+      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="m3/s" /></label>
+      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="V / t" /></label>
+      <div class="detail-actions">
+        <button type="submit">${it ? "Guardar" : "Agregar"}</button>
+        ${it ? `<button type="button" data-cancel-intermediate>Cancelar</button>` : ""}
+      </div>
+    </form>
+  `;
+}
+
+function renderIntermediatesList(def, practiceId) {
+  const items = def?.intermediates ?? [];
+  if (items.length === 0) return `<p class="submission-meta">Sin magnitudes intermedias.</p>`;
+  const rows = items.flatMap((it) => {
+    const baseRow = `
+      <tr>
+        <td class="directory-primary"><strong>${escapeHtml(it.symbol)}</strong> <span class="submission-meta">${escapeHtml(it.name)} (${escapeHtml(it.unit)})</span></td>
+        <td><code>${escapeHtml(it.formula)}</code></td>
+        <td class="directory-actions">
+          <button type="button" data-edit-intermediate data-iid="${escapeHtml(it.id)}">${state.editingIntermediateId === it.id ? "Cerrar" : "Editar"}</button>
+          <button type="button" data-delete-intermediate data-iid="${escapeHtml(it.id)}">Eliminar</button>
+        </td>
+      </tr>`;
+    const editRow = state.editingIntermediateId === it.id
+      ? `<tr><td colspan="3" class="scale-edit-cell">${renderIntermediateForm(it, practiceId)}</td></tr>`
+      : "";
+    return [baseRow, editRow];
+  });
+  return `
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
+        <tbody>${rows.join("")}</tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -436,6 +514,7 @@ export async function openPracticeWorkspace(practiceId) {
   state.editingQuantityId = null;
   state.editingResultId = null;
   state.editingCurveId = null;
+  state.editingIntermediateId = null;
   state.practiceDefinition = null;
   renderPracticesPage();
   selectView("practices");
@@ -454,6 +533,7 @@ export function closePracticeWorkspace() {
   state.editingQuantityId = null;
   state.editingResultId = null;
   state.editingCurveId = null;
+  state.editingIntermediateId = null;
   renderPracticesPage();
 }
 
@@ -586,6 +666,7 @@ async function saveNewCurve(event) {
     await postJson(`/api/practices/${practiceId}/curves`, curvePayloadFromForm(form));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingCurveId = null;
+  state.editingIntermediateId = null;
     state.practiceActionStatus = "Curva agregada";
     renderPracticesPage();
   } catch (error) {
@@ -603,12 +684,70 @@ async function saveEditCurve(event) {
     await postJson(`/api/practices/${practiceId}/curves/${cid}`, curvePayloadFromForm(form));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingCurveId = null;
+  state.editingIntermediateId = null;
     state.practiceActionStatus = "Curva actualizada";
     renderPracticesPage();
   } catch (error) {
     state.practiceActionStatus = error.message;
     renderPracticesPage();
   }
+}
+
+async function saveNewIntermediate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  try {
+    await postJson(`/api/practices/${practiceId}/intermediates`, intermediatePayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingIntermediateId = null;
+    state.practiceActionStatus = "Intermedia agregada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function saveEditIntermediate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  const iid = form.querySelector('[name="iid"]').value;
+  try {
+    await postJson(`/api/practices/${practiceId}/intermediates/${iid}`, intermediatePayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingIntermediateId = null;
+    state.practiceActionStatus = "Intermedia actualizada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function deletePracticeIntermediate(iid, practiceId) {
+  if (!window.confirm("¿Eliminar esta magnitud intermedia? Esta accion no se puede deshacer.")) return;
+  try {
+    await deleteJson(`/api/practices/${practiceId}/intermediates/${iid}`);
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingIntermediateId = null;
+    state.practiceActionStatus = "Intermedia eliminada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+function intermediatePayloadFromForm(form) {
+  const raw = Object.fromEntries(new FormData(form).entries());
+  return {
+    symbol: raw.symbol,
+    name: raw.name || "",
+    unit: raw.unit || "",
+    formula: raw.formula,
+  };
 }
 
 async function movePracticeCurve(cid, practiceId, dir) {
@@ -628,6 +767,7 @@ async function deletePracticeCurve(cid, practiceId) {
     await deleteJson(`/api/practices/${practiceId}/curves/${cid}`);
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingCurveId = null;
+  state.editingIntermediateId = null;
     state.practiceActionStatus = "Curva eliminada";
     renderPracticesPage();
   } catch (error) {

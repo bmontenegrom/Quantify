@@ -504,6 +504,25 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Motor C (Fase 15): magnitud intermedia por punto en regresión/curva. Su `formula` se evalúa
+    // por réplica de cada punto y se promedia → un valor por punto, disponible como símbolo en las
+    // fórmulas de eje (p. ej. Q = V/t por réplica, promediado, para graficar h/Q² vs 1/Q).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_intermediates (
+            id TEXT PRIMARY KEY,
+            practice_id TEXT NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL DEFAULT 0,
+            symbol TEXT NOT NULL,
+            name TEXT NOT NULL,
+            unit TEXT NOT NULL,
+            formula TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS grade_components (

@@ -8,6 +8,7 @@
 
 use crate::analysis;
 use crate::db::{self, AuthUser, InstrumentScale, PracticeQuantity, PracticeResult};
+use crate::practices::PracticeIntermediate;
 use crate::uncertainty::{self, BModel, QuantityResult, ScaleSpec};
 use chrono::Utc;
 use evalexpr::{build_operator_tree, ContextWithMutableVariables, HashMapContext, Node, Value};
@@ -56,6 +57,16 @@ impl MeasurementInput {
                 })
                 .collect(),
             None => self.values.clone(),
+        }
+    }
+
+    /// Matriz punto × réplica (Motor C): las réplicas de cada punto si hay `point_replicas`; si no,
+    /// cada valor de `values` como un punto de una sola réplica. Permite evaluar una magnitud
+    /// intermedia por réplica antes de promediar.
+    fn point_replica_matrix(&self) -> Vec<Vec<f64>> {
+        match &self.point_replicas {
+            Some(groups) => groups.clone(),
+            None => self.values.iter().map(|&v| vec![v]).collect(),
         }
     }
 }
@@ -426,38 +437,70 @@ type PointSeries = Vec<(f64, f64)>;
 /// un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
 fn build_points(
     quantities: &[PracticeQuantity],
+    intermediates: &[PracticeIntermediate],
     x_formula: &str,
     y_formula: &str,
     measurements: &[MeasurementInput],
     too_few_msg: &str,
 ) -> anyhow::Result<(PointSeries, Vec<String>)> {
     let mut warnings = Vec::new();
-    let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    // Valor representativo por punto de cada magnitud (media de réplicas por punto si las hay).
+    let magnitude_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
+    // Valor por punto (media de réplicas) y matriz punto×réplica (para las intermedias) por magnitud.
     let point_values: HashMap<&str, Vec<f64>> = measurements
         .iter()
         .map(|m| (m.quantity_id.as_str(), m.point_values()))
         .collect();
+    let point_matrix: HashMap<&str, Vec<Vec<f64>>> = measurements
+        .iter()
+        .map(|m| (m.quantity_id.as_str(), m.point_replica_matrix()))
+        .collect();
+    let symbol_to_id: HashMap<&str, &str> = quantities
+        .iter()
+        .map(|q| (q.symbol.as_str(), q.id.as_str()))
+        .collect();
 
-    let x_tree = compile_formula(x_formula, &symbols)?;
-    let y_tree = compile_formula(y_formula, &symbols)?;
+    // Las intermedias (Motor C) se compilan sobre los símbolos de las magnitudes; sus símbolos
+    // quedan disponibles para los ejes.
+    let compiled_intermediates: Vec<(&PracticeIntermediate, _)> = intermediates
+        .iter()
+        .map(|it| compile_formula(&it.formula, &magnitude_symbols).map(|tree| (it, tree)))
+        .collect::<anyhow::Result<_>>()?;
+    let axis_symbols: Vec<String> = magnitude_symbols
+        .iter()
+        .cloned()
+        .chain(intermediates.iter().map(|it| it.symbol.clone()))
+        .collect();
+    let x_tree = compile_formula(x_formula, &axis_symbols)?;
+    let y_tree = compile_formula(y_formula, &axis_symbols)?;
 
-    // Solo las magnitudes que aparecen en las fórmulas de eje condicionan los puntos. Las
-    // auxiliares (p. ej. un dato de cátedra usado en otra parte de la práctica, o una magnitud
-    // que no se grafica) se ignoran: no exigen mediciones ni arrastran el conteo de puntos.
-    let referenced: std::collections::HashSet<&str> = x_tree
+    // Magnitudes que condicionan los puntos: las referenciadas por los ejes, más las referenciadas
+    // por las intermedias que los ejes usan (p. ej. x=1/Q, Q=V/t → V y t condicionan los puntos).
+    let axis_refs: std::collections::HashSet<&str> = x_tree
         .iter_variable_identifiers()
         .chain(y_tree.iter_variable_identifiers())
         .collect();
-    let axis_quantities: Vec<&PracticeQuantity> = quantities
+    let used_intermediates: Vec<&(&PracticeIntermediate, _)> = compiled_intermediates
         .iter()
-        .filter(|q| referenced.contains(q.symbol.as_str()))
+        .filter(|(it, _)| axis_refs.contains(it.symbol.as_str()))
         .collect();
-
-    // Cantidad de puntos = mínimo de puntos entre las magnitudes de eje (deben venir parejas).
-    let lengths: Vec<usize> = axis_quantities
+    let mut conditioning: std::collections::HashSet<&str> = quantities
         .iter()
-        .map(|q| point_values.get(q.id.as_str()).map_or(0, |v| v.len()))
+        .filter(|q| axis_refs.contains(q.symbol.as_str()))
+        .map(|q| q.symbol.as_str())
+        .collect();
+    for (_, tree) in &used_intermediates {
+        for v in tree.iter_variable_identifiers() {
+            if symbol_to_id.contains_key(v) {
+                conditioning.insert(v);
+            }
+        }
+    }
+
+    // Cantidad de puntos = mínimo de puntos entre las magnitudes que condicionan (deben venir parejas).
+    let lengths: Vec<usize> = conditioning
+        .iter()
+        .filter_map(|sym| symbol_to_id.get(sym))
+        .map(|id| point_values.get(id).map_or(0, |v| v.len()))
         .collect();
     let n_points = lengths.iter().copied().min().unwrap_or(0);
     if lengths.iter().any(|&l| l != n_points) {
@@ -472,14 +515,23 @@ fn build_points(
 
     let mut points = Vec::with_capacity(n_points);
     for i in 0..n_points {
-        let bound: HashMap<&str, f64> = axis_quantities
+        // Binding base: media por punto de cada magnitud referenciada directamente por los ejes.
+        let mut bound: HashMap<&str, f64> = quantities
             .iter()
+            .filter(|q| axis_refs.contains(q.symbol.as_str()))
             .filter_map(|q| {
                 point_values
                     .get(q.id.as_str())
                     .map(|v| (q.symbol.as_str(), v[i]))
             })
             .collect();
+        // Intermedias: evaluar la fórmula por réplica del punto y promediar.
+        for (it, tree) in &used_intermediates {
+            bound.insert(
+                it.symbol.as_str(),
+                point_intermediate(tree, &point_matrix, &symbol_to_id, i),
+            );
+        }
         let x = eval_compiled(&x_tree, &bound);
         let y = eval_compiled(&y_tree, &bound);
         if !x.is_finite() || !y.is_finite() {
@@ -492,11 +544,56 @@ fn build_points(
     Ok((points, warnings))
 }
 
+/// Valor de una magnitud intermedia en el punto `i`: evalúa su fórmula para cada réplica del punto
+/// (las magnitudes de un solo valor se difunden a todas las réplicas) y promedia los resultados.
+fn point_intermediate(
+    tree: &Node,
+    point_matrix: &HashMap<&str, Vec<Vec<f64>>>,
+    symbol_to_id: &HashMap<&str, &str>,
+    i: usize,
+) -> f64 {
+    // Réplicas del punto: el máximo entre las magnitudes de la fórmula (las de 1 valor se difunden).
+    let vars: Vec<&str> = tree
+        .iter_variable_identifiers()
+        .filter(|v| symbol_to_id.contains_key(v))
+        .collect();
+    let reps_at = |sym: &str| -> &[f64] {
+        symbol_to_id
+            .get(sym)
+            .and_then(|id| point_matrix.get(id))
+            .and_then(|m| m.get(i))
+            .map_or(&[][..], |v| v.as_slice())
+    };
+    let n_reps = vars.iter().map(|v| reps_at(v).len()).max().unwrap_or(0);
+    if n_reps == 0 {
+        return f64::NAN;
+    }
+    let mut sum = 0.0;
+    for r in 0..n_reps {
+        let bound: HashMap<&str, f64> = vars
+            .iter()
+            .map(|&v| {
+                let reps = reps_at(v);
+                // Difunde la última réplica si esta magnitud tiene menos (p. ej. un valor único).
+                let value = reps
+                    .get(r)
+                    .or_else(|| reps.last())
+                    .copied()
+                    .unwrap_or(f64::NAN);
+                (v, value)
+            })
+            .collect();
+        sum += eval_compiled(tree, &bound);
+    }
+    sum / n_reps as f64
+}
+
 /// Calcula el [`FormAnalysis`] de una práctica `regresion_lineal`: empareja las mediciones por
 /// punto, evalúa las fórmulas de eje `x_formula`/`y_formula` en cada punto, ajusta una recta
 /// (`analysis::linear_regression`) y deriva los mensurandos desde `slope`/`intercept`.
 pub fn compute_regresion(
     quantities: &[PracticeQuantity],
+    intermediates: &[PracticeIntermediate],
     results: &[PracticeResult],
     x_formula: &str,
     y_formula: &str,
@@ -504,6 +601,7 @@ pub fn compute_regresion(
 ) -> anyhow::Result<FormAnalysis> {
     let (points, mut warnings) = build_points(
         quantities,
+        intermediates,
         x_formula,
         y_formula,
         measurements,
@@ -552,6 +650,7 @@ pub fn compute_regresion(
 /// barrido de mediciones; una `x_log` marca eje x logarítmico en esa curva.
 pub fn compute_curva(
     quantities: &[PracticeQuantity],
+    intermediates: &[PracticeIntermediate],
     curves: &[CurveSpec],
     measurements: &[MeasurementInput],
 ) -> anyhow::Result<FormAnalysis> {
@@ -560,6 +659,7 @@ pub fn compute_curva(
     for curve in curves {
         let (points, mut curve_warnings) = build_points(
             quantities,
+            intermediates,
             curve.x_formula,
             curve.y_formula,
             measurements,
@@ -707,6 +807,7 @@ pub async fn analyze(
         };
         return compute_regresion(
             &definition.quantities,
+            &definition.intermediates,
             &definition.results,
             x_formula,
             y_formula,
@@ -728,7 +829,12 @@ pub async fn analyze(
                 x_log: c.x_log,
             })
             .collect();
-        return compute_curva(&definition.quantities, &curves, measurements);
+        return compute_curva(
+            &definition.quantities,
+            &definition.intermediates,
+            &curves,
+            measurements,
+        );
     }
 
     compute(
@@ -1896,7 +2002,7 @@ mod tests {
             measurement("px", &[0.0, 1.0, 2.0, 3.0]),
             measurement("py", &[1.0, 3.0, 5.0, 7.0]),
         ];
-        let a = compute_regresion(&quantities, &results, "px", "py", &measurements).unwrap();
+        let a = compute_regresion(&quantities, &[], &results, "px", "py", &measurements).unwrap();
         let reg = a.regression.unwrap();
         assert!(close(reg.slope, 2.0, 1e-9));
         assert!(close(reg.intercept, 1.0, 1e-9));
@@ -1916,6 +2022,41 @@ mod tests {
     }
 
     #[test]
+    fn compute_regresion_uses_per_point_intermediate_averaged_over_replicas() {
+        // Motor C: la intermedia Q = V/t se evalúa por réplica y se promedia por punto, NO como
+        // media(V)/media(t). Punto 0: V=[10,10], t=[1,2] → Q=(10+5)/2=7.5 (media(V)/media(t) daría
+        // 10/1.5≈6.67). Punto 1: V=[20,20], t=[1,2] → Q=(20+10)/2=15.
+        let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p1-estadistica".into(),
+            position: 0,
+            symbol: "Q".into(),
+            name: "Caudal".into(),
+            unit: "u".into(),
+            formula: "V/t".into(),
+        }];
+        let rep = |groups: Vec<Vec<f64>>, id: &str| MeasurementInput {
+            quantity_id: id.into(),
+            instrument_id: None,
+            scale_id: None,
+            values: vec![],
+            given_u: None,
+            point_replicas: Some(groups),
+            operator_replicas: None,
+        };
+        let measurements = vec![
+            rep(vec![vec![10.0, 10.0], vec![20.0, 20.0]], "q-V"),
+            rep(vec![vec![1.0, 2.0], vec![1.0, 2.0]], "q-t"),
+            measurement("py", &[100.0, 200.0]),
+        ];
+        let a =
+            compute_regresion(&quantities, &intermediates, &[], "Q", "py", &measurements).unwrap();
+        let reg = a.regression.unwrap();
+        assert_eq!(reg.points, vec![(7.5, 100.0), (15.0, 200.0)]);
+    }
+
+    #[test]
     fn compute_regresion_uses_pi_and_sqrt_in_axis_formulas() {
         // x = 2*pi*f ; y = math::sqrt(a). f=[1,2,3], a=[4,9,16] -> x=2pi*{1,2,3}, y={2,3,4}.
         // y crece 1 por unidad de f, x crece 2pi por unidad de f -> slope = 1/(2pi), intercept = 1.
@@ -1927,6 +2068,7 @@ mod tests {
         ];
         let analysis = compute_regresion(
             &quantities,
+            &[],
             &results,
             "2*pi*f",
             "math::sqrt(a)",
@@ -1955,7 +2097,7 @@ mod tests {
     fn compute_regresion_needs_at_least_two_points() {
         let quantities = vec![quantity("px"), quantity("py")];
         let measurements = vec![measurement("px", &[1.0]), measurement("py", &[2.0])];
-        assert!(compute_regresion(&quantities, &[], "px", "py", &measurements).is_err());
+        assert!(compute_regresion(&quantities, &[], &[], "px", "py", &measurements).is_err());
     }
 
     #[test]
@@ -1966,7 +2108,8 @@ mod tests {
             measurement("px", &[1.0, 2.0, 3.0]),
             measurement("py", &[4.0, 9.0, 16.0]),
         ];
-        let a = compute_curva(&quantities, &[curve("px", "py", false)], &measurements).unwrap();
+        let a =
+            compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).unwrap();
         assert!(a.regression.is_none());
         assert!(a.derived.is_empty());
         assert_eq!(a.scatters.len(), 1);
@@ -1987,6 +2130,7 @@ mod tests {
         ];
         let a = compute_curva(
             &quantities,
+            &[],
             &[curve("px", "py", false), curve("py", "px", false)],
             &measurements,
         )
@@ -2008,7 +2152,9 @@ mod tests {
     fn compute_curva_needs_at_least_two_points() {
         let quantities = vec![quantity("px"), quantity("py")];
         let measurements = vec![measurement("px", &[1.0]), measurement("py", &[2.0])];
-        assert!(compute_curva(&quantities, &[curve("px", "py", false)], &measurements).is_err());
+        assert!(
+            compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).is_err()
+        );
     }
 
     #[test]
@@ -2019,7 +2165,9 @@ mod tests {
             measurement("px", &[0.0, 10.0]),
             measurement("py", &[1.0, 2.0]),
         ];
-        assert!(compute_curva(&quantities, &[curve("px", "py", true)], &measurements).is_err());
+        assert!(
+            compute_curva(&quantities, &[], &[curve("px", "py", true)], &measurements).is_err()
+        );
     }
 
     #[test]
@@ -2032,7 +2180,8 @@ mod tests {
             measurement("py", &[4.0, 5.0, 6.0]),
             // 'aux' sin mediciones a propósito.
         ];
-        let a = compute_curva(&quantities, &[curve("px", "py", false)], &measurements).unwrap();
+        let a =
+            compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).unwrap();
         assert_eq!(
             a.scatters[0].points,
             vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
@@ -2056,7 +2205,7 @@ mod tests {
                 operator_replicas: None,
             },
         ];
-        let a = compute_regresion(&quantities, &[], "px", "py", &measurements).unwrap();
+        let a = compute_regresion(&quantities, &[], &[], "px", "py", &measurements).unwrap();
         let reg = a.regression.unwrap();
         assert_eq!(reg.points, vec![(1.0, 4.0), (2.0, 10.0)]);
         // Pendiente de (1,4)-(2,10) = 6.

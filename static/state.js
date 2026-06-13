@@ -28,6 +28,7 @@ export const state = {
   editingQuantityId: null,
   editingResultId: null,
   editingCurveId: null,
+  editingIntermediateId: null,
   practiceForm: null,
   chronometers: new Map(),
   seriesDebug: new Map(),

@@ -75,6 +75,9 @@ pub struct PracticeDefinition {
     /// Solo estadístico (Motor D): cantidad de operadores que cargan su propia serie. `None` o ≤1
     /// = sin operadores (comportamiento por defecto, una sola serie por magnitud).
     pub operator_count: Option<i64>,
+    /// Solo regresión/curva (Motor C): magnitudes intermedias por punto (promedio del derivado por
+    /// réplica), disponibles como símbolos en las fórmulas de eje.
+    pub intermediates: Vec<PracticeIntermediate>,
 }
 
 /// Una curva de una práctica `curva`: un par de fórmulas de eje sobre el barrido común, con eje x
@@ -96,6 +99,28 @@ pub struct CurveInput {
     pub y_formula: String,
     #[serde(default)]
     pub x_log: bool,
+}
+
+/// Magnitud intermedia por punto (Motor C) de una práctica de regresión/curva: su `formula` se
+/// evalúa por réplica de cada punto y se promedia, quedando disponible como símbolo en los ejes.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PracticeIntermediate {
+    pub id: String,
+    pub practice_id: String,
+    pub position: i64,
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    pub formula: String,
+}
+
+/// Datos para crear o actualizar una magnitud intermedia por punto.
+#[derive(Debug, Deserialize)]
+pub struct IntermediateInput {
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    pub formula: String,
 }
 
 /// Fila cruda con la configuración de análisis de una práctica.
@@ -124,6 +149,7 @@ pub async fn definition(
     let quantities = quantities_for(pool, practice_id).await?;
     let results = results_for(pool, practice_id).await?;
     let curves = curves_for(pool, practice_id).await?;
+    let intermediates = intermediates_for(pool, practice_id).await?;
     Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
         analysis_kind: row.analysis_kind,
@@ -133,7 +159,112 @@ pub async fn definition(
         results,
         curves,
         operator_count: row.operator_count,
+        intermediates,
     }))
+}
+
+/// Lee las magnitudes intermedias por punto de una práctica (Motor C), ordenadas por posición.
+pub async fn intermediates_for(
+    pool: &SqlitePool,
+    practice_id: &str,
+) -> anyhow::Result<Vec<PracticeIntermediate>> {
+    Ok(sqlx::query_as::<_, PracticeIntermediate>(
+        "SELECT id, practice_id, position, symbol, name, unit, formula \
+         FROM practice_intermediates WHERE practice_id = ?1 ORDER BY position, id",
+    )
+    .bind(practice_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Crea una magnitud intermedia; asigna la siguiente posición. Símbolo y fórmula obligatorios.
+pub async fn create_intermediate(
+    pool: &SqlitePool,
+    practice_id: &str,
+    input: IntermediateInput,
+) -> anyhow::Result<PracticeIntermediate> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
+        anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
+    }
+    let position: (i64,) = sqlx::query_as(
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_intermediates WHERE practice_id = ?1",
+    )
+    .bind(practice_id)
+    .fetch_one(pool)
+    .await?;
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO practice_intermediates (id, practice_id, position, symbol, name, unit, formula) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )
+    .bind(&id)
+    .bind(practice_id)
+    .bind(position.0)
+    .bind(symbol)
+    .bind(input.name.trim())
+    .bind(input.unit.trim())
+    .bind(formula)
+    .execute(pool)
+    .await?;
+    fetch_intermediate(pool, &id).await
+}
+
+/// Actualiza una magnitud intermedia de esa práctica. Devuelve `None` si no existe.
+pub async fn update_intermediate(
+    pool: &SqlitePool,
+    practice_id: &str,
+    intermediate_id: &str,
+    input: IntermediateInput,
+) -> anyhow::Result<Option<PracticeIntermediate>> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
+        anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
+    }
+    let result = sqlx::query(
+        "UPDATE practice_intermediates SET symbol = ?3, name = ?4, unit = ?5, formula = ?6 \
+         WHERE id = ?1 AND practice_id = ?2",
+    )
+    .bind(intermediate_id)
+    .bind(practice_id)
+    .bind(symbol)
+    .bind(input.name.trim())
+    .bind(input.unit.trim())
+    .bind(formula)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+    Ok(Some(fetch_intermediate(pool, intermediate_id).await?))
+}
+
+/// Elimina una magnitud intermedia de esa práctica por id. Devuelve `true` si existía.
+pub async fn delete_intermediate(
+    pool: &SqlitePool,
+    practice_id: &str,
+    intermediate_id: &str,
+) -> anyhow::Result<bool> {
+    let result =
+        sqlx::query("DELETE FROM practice_intermediates WHERE id = ?1 AND practice_id = ?2")
+            .bind(intermediate_id)
+            .bind(practice_id)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Lee una magnitud intermedia por su id.
+async fn fetch_intermediate(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeIntermediate> {
+    Ok(sqlx::query_as::<_, PracticeIntermediate>(
+        "SELECT id, practice_id, position, symbol, name, unit, formula \
+         FROM practice_intermediates WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?)
 }
 
 /// Lee las curvas de una práctica (Motor B), ordenadas por posición.
@@ -1248,6 +1379,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn intermediate_crud_roundtrip() {
+        let (pool, _dir) = setup().await;
+        let q = create_intermediate(
+            &pool,
+            "p1-estadistica",
+            IntermediateInput {
+                symbol: " Q ".into(), // se recorta
+                name: "Caudal".into(),
+                unit: "m3/s".into(),
+                formula: "V/t".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(q.symbol, "Q");
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        assert_eq!(def.intermediates.len(), 1);
+        assert_eq!(def.intermediates[0].formula, "V/t");
+
+        // Editar acotado por práctica; práctica equivocada → None.
+        assert!(update_intermediate(
+            &pool,
+            "p2-serie",
+            &q.id,
+            IntermediateInput {
+                symbol: "Q".into(),
+                name: "x".into(),
+                unit: "x".into(),
+                formula: "V*t".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .is_none());
+        let updated = update_intermediate(
+            &pool,
+            "p1-estadistica",
+            &q.id,
+            IntermediateInput {
+                symbol: "Q".into(),
+                name: "Caudal".into(),
+                unit: "m3/s".into(),
+                formula: "V*t".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(updated.formula, "V*t");
+
+        // Símbolo/fórmula vacíos → error.
+        assert!(create_intermediate(
+            &pool,
+            "p1-estadistica",
+            IntermediateInput {
+                symbol: "Z".into(),
+                name: "z".into(),
+                unit: "".into(),
+                formula: "   ".into(),
+            },
+        )
+        .await
+        .is_err());
+
+        assert!(delete_intermediate(&pool, "p1-estadistica", &q.id)
+            .await
+            .unwrap());
+        assert_eq!(
+            intermediates_for(&pool, "p1-estadistica")
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    #[tokio::test]
     async fn seed_definitions_populates_p1_and_is_idempotent() {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
@@ -1527,6 +1735,7 @@ mod tests {
         ];
         let analysis = crate::computation::compute_regresion(
             &def.quantities,
+            &def.intermediates,
             &def.results,
             def.x_formula.as_deref().unwrap(),
             def.y_formula.as_deref().unwrap(),

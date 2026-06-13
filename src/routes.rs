@@ -4,7 +4,7 @@ use crate::{
     db::{self, AppState, NewSubmission, ReviewSubmission},
     error::AppError,
     instruments::{self, CatalogExport, CreateInstrument, ScaleInput, UpdateInstrument},
-    practices::{self, CurveInput, QuantityInput, ResultInput},
+    practices::{self, CurveInput, IntermediateInput, QuantityInput, ResultInput},
 };
 use axum::{
     extract::{Multipart, Path, Query, Request, State},
@@ -180,6 +180,11 @@ pub fn api_router(state: SharedState) -> Router {
             post(update_curve).delete(delete_curve),
         )
         .route("/practices/{id}/curves/{cid}/move", post(move_curve))
+        .route("/practices/{id}/intermediates", post(create_intermediate))
+        .route(
+            "/practices/{id}/intermediates/{iid}",
+            post(update_intermediate).delete(delete_intermediate),
+        )
         .route(
             "/practices/{id}/results/{rid}/tolerance",
             post(set_result_tolerance),
@@ -1520,6 +1525,58 @@ async fn move_curve(
         return Err(AppError::not_found("curva no encontrada"));
     }
     Ok(Json(Health { status: "ok" }))
+}
+
+/// `POST /api/practices/{id}/intermediates`: agrega una magnitud intermedia por punto (docente).
+async fn create_intermediate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<IntermediateInput>,
+) -> Result<Json<practices::PracticeIntermediate>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_intermediate(&input)?;
+    Ok(Json(
+        practices::create_intermediate(&state.pool, &id, input).await?,
+    ))
+}
+
+/// `POST /api/practices/{id}/intermediates/{iid}`: actualiza una magnitud intermedia (docente).
+async fn update_intermediate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, iid)): Path<(String, String)>,
+    Json(input): Json<IntermediateInput>,
+) -> Result<Json<practices::PracticeIntermediate>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_intermediate(&input)?;
+    let updated = practices::update_intermediate(&state.pool, &id, &iid, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
+    Ok(Json(updated))
+}
+
+/// `DELETE /api/practices/{id}/intermediates/{iid}`: elimina una magnitud intermedia (docente).
+async fn delete_intermediate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, iid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_intermediate(&state.pool, &id, &iid).await? {
+        return Err(AppError::not_found("magnitud intermedia no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// Una intermedia necesita símbolo y fórmula. Error 400 amigable.
+fn validate_intermediate(input: &IntermediateInput) -> Result<(), AppError> {
+    if input.symbol.trim().is_empty() || input.formula.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "La magnitud intermedia necesita un simbolo y una formula.",
+        ));
+    }
+    Ok(())
 }
 
 /// Una curva necesita ambas fórmulas de eje (sin ellas no se puede graficar). Error 400 amigable.
