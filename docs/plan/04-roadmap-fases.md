@@ -390,6 +390,34 @@ Mantener vanilla JS/CSS (sin framework). Candidatos, a validar con screenshots P
 - ~~Gráfico de la curva exponencial en P3-parte1~~ — el docente confirmó que **no** debe haber
   gráfico de ninguna exponencial.
 
+## Decisiones tomadas — Fase 15 (2026-06-13)
+
+Tras leer las 6 hojas de resultados reales (markitdown), se confirmó que solo **P2-parte2**
+(curva de potencia) y **Fluidos II** (regresión) encajan en el motor tal cual; las demás
+exigían decisiones de modelado o extensiones. Decisiones:
+
+- **Réplicas por punto (motor A):** en regresión/curva, cada punto puede tener varias réplicas
+  de una magnitud (p.ej. tiempo medio por altura en Fluidos I, por esfera en Viscosidad), con su
+  incertidumbre tipo A. **Se extiende el motor** (no se aproxima con un valor único por punto).
+- **Filtros — dos curvas (motor B):** una práctica `curva` admite una **lista de curvas**, cada
+  una con su `x_formula`/`y_formula`/`x_log`. Filtros define dos (VR/Vg vs logω y φ vs logω)
+  sobre el mismo barrido. (No se modela como "partes".)
+- **Teórico vs experimental (RLC, Continua) — solo visual, sin motor nuevo:** el valor
+  **experimental** es una **magnitud medida** (su incertidumbre sale del instrumento, tipo B);
+  el **teórico** es un **mensurando derivado** por fórmula sobre otras magnitudes medidas (su
+  incertidumbre sale de propagación de varianzas). La app muestra ambos con sus incertidumbres
+  lado a lado; el alumno los compara **visualmente, pueden diferir, sin veredicto**. La
+  comparación con tolerancia/veredicto existente sigue siendo solo **alumno-vs-automático**.
+- **`evalexpr` soporta** `math::asin/sin/cos/atan/sqrt/ln` (verificado) → `φ = asin(b/a)` de RLC
+  es viable.
+
+Pendiente de confirmar con el docente al sembrar: Hidrostática deriva E/ρ_goma/γ **por medida y
+luego promedia** (3 determinaciones independientes, no réplicas) — evaluar si el promedio de
+derivados por medida es aceptable vs derivar del promedio de entradas.
+
+Orden de ejecución de Fase 15: motor A (réplicas/punto) → motor B (lista de curvas) → siembra
+de las 6 prácticas + P2-parte2.
+
 ## Orden propuesto
 
 13 (seguridad, P0: van a operar multi-PC) → 14 (kind curva, bloquea prácticas) →
