@@ -1336,10 +1336,12 @@ async fn delete_result(
 
 /// `POST /api/practices/{id}/results/{rid}/tolerance`: fija la tolerancia % del veredicto.
 /// Body: `{ "tolerance": 5.0 }` para activar, `{ "tolerance": null }` para desactivar.
+/// Se mantiene como endpoint independiente para actualizar solo la tolerancia sin reenviar
+/// símbolo, nombre, unidad ni fórmula del mensurando.
 async fn set_result_tolerance(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Path((_id, rid)): Path<(String, String)>,
+    Path((practice_id, rid)): Path<(String, String)>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
@@ -1360,7 +1362,7 @@ async fn set_result_tolerance(
             ))
         }
     };
-    if !practices::set_result_tolerance(&state.pool, &rid, &_id, tolerance).await? {
+    if !practices::set_result_tolerance(&state.pool, &rid, &practice_id, tolerance).await? {
         return Err(AppError::not_found("mensurando no encontrado"));
     }
     Ok(Json(Health { status: "ok" }))
@@ -1428,7 +1430,7 @@ fn validate_result(input: &ResultInput) -> Result<(), AppError> {
     {
         return Err(AppError::bad_request("datos de mensurando invalidos"));
     }
-    if let Some(t) = input.tolerance {
+    if let Some(Some(t)) = input.tolerance {
         if t < 0.0 {
             return Err(AppError::bad_request("tolerancia no puede ser negativa"));
         }

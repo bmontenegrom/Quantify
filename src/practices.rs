@@ -32,9 +32,13 @@ pub struct ResultInput {
     pub unit: String,
     /// Expresión matemática usando los símbolos de las magnitudes de la práctica.
     pub formula: String,
-    /// Tolerancia máxima aceptable como |Δ%|. `None` = sin veredicto.
+    /// Tolerancia máxima aceptable como |Δ%|.
+    ///
+    /// `None` (campo ausente en el JSON) = no modificar la tolerancia existente.
+    /// `Some(None)` (campo presente con valor `null`) = borrar la tolerancia.
+    /// `Some(Some(v))` = fijar la tolerancia a `v`.
     #[serde(default)]
-    pub tolerance: Option<f64>,
+    pub tolerance: Option<Option<f64>>,
 }
 
 /// Definición completa de una práctica: tipo de análisis, magnitudes y mensurandos.
@@ -148,25 +152,42 @@ pub async fn create_result(
 }
 
 /// Actualiza un mensurando derivado. Devuelve `None` si no existe.
+/// Si `input.tolerance` es `None` (campo ausente), la columna `tolerance` no se modifica.
 pub async fn update_result(
     pool: &SqlitePool,
     result_id: &str,
     input: ResultInput,
 ) -> anyhow::Result<Option<PracticeResult>> {
-    let res = sqlx::query(
-        "UPDATE practice_results \
-         SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6 \
-         WHERE id = ?1",
-    )
-    .bind(result_id)
-    .bind(input.symbol.trim())
-    .bind(input.name.trim())
-    .bind(input.unit.trim())
-    .bind(input.formula.trim())
-    .bind(input.tolerance)
-    .execute(pool)
-    .await?;
-    if res.rows_affected() == 0 {
+    let rows = match input.tolerance {
+        None => sqlx::query(
+            "UPDATE practice_results \
+                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5 \
+                 WHERE id = ?1",
+        )
+        .bind(result_id)
+        .bind(input.symbol.trim())
+        .bind(input.name.trim())
+        .bind(input.unit.trim())
+        .bind(input.formula.trim())
+        .execute(pool)
+        .await?
+        .rows_affected(),
+        Some(tol) => sqlx::query(
+            "UPDATE practice_results \
+                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6 \
+                 WHERE id = ?1",
+        )
+        .bind(result_id)
+        .bind(input.symbol.trim())
+        .bind(input.name.trim())
+        .bind(input.unit.trim())
+        .bind(input.formula.trim())
+        .bind(tol)
+        .execute(pool)
+        .await?
+        .rows_affected(),
+    };
+    if rows == 0 {
         return Ok(None);
     }
     Ok(Some(fetch_result(pool, result_id).await?))
@@ -619,7 +640,7 @@ async fn insert_result(
     .bind(input.unit.trim())
     .bind(input.formula.trim())
     .bind(position)
-    .bind(input.tolerance)
+    .bind(input.tolerance.flatten())
     .execute(&mut *conn)
     .await?;
     Ok(id)
