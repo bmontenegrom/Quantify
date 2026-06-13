@@ -540,40 +540,40 @@ pub async fn delete_result(pool: &SqlitePool, result_id: &str) -> anyhow::Result
     Ok(result.rows_affected() > 0)
 }
 
-/// `true` si `symbol` ya está tomado por alguna magnitud o mensurando de la práctica.
+/// `true` si `symbol` ya está tomado por alguna magnitud, mensurando o magnitud intermedia de la
+/// práctica (los tres comparten un mismo espacio de símbolos en las fórmulas).
 ///
-/// `exclude_quantity_id` / `exclude_result_id` permiten ignorar la fila que se está editando
-/// (para que renombrar a su propio símbolo no falle).
+/// `exclude_*_id` permiten ignorar la fila que se está editando (para que renombrar a su propio
+/// símbolo no falle).
 pub async fn symbol_taken_in_practice(
     pool: &SqlitePool,
     practice_id: &str,
     symbol: &str,
     exclude_quantity_id: Option<&str>,
     exclude_result_id: Option<&str>,
+    exclude_intermediate_id: Option<&str>,
 ) -> anyhow::Result<bool> {
     let sym = symbol.trim();
-    let in_quantities: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM practice_quantities \
-         WHERE practice_id = ?1 AND symbol = ?2 AND id <> ?3",
-    )
-    .bind(practice_id)
-    .bind(sym)
-    .bind(exclude_quantity_id.unwrap_or(""))
-    .fetch_one(pool)
-    .await?;
-    if in_quantities.0 > 0 {
-        return Ok(true);
-    }
-    let in_results: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM practice_results \
-         WHERE practice_id = ?1 AND symbol = ?2 AND id <> ?3",
-    )
-    .bind(practice_id)
-    .bind(sym)
-    .bind(exclude_result_id.unwrap_or(""))
-    .fetch_one(pool)
-    .await?;
-    Ok(in_results.0 > 0)
+    let count = |table: &str, exclude: Option<&str>| {
+        let q = format!(
+            "SELECT COUNT(*) FROM {table} WHERE practice_id = ?1 AND symbol = ?2 AND id <> ?3"
+        );
+        let exclude = exclude.unwrap_or("").to_string();
+        let practice_id = practice_id.to_string();
+        let sym = sym.to_string();
+        async move {
+            let row: (i64,) = sqlx::query_as(&q)
+                .bind(practice_id)
+                .bind(sym)
+                .bind(exclude)
+                .fetch_one(pool)
+                .await?;
+            anyhow::Ok(row.0 > 0)
+        }
+    };
+    Ok(count("practice_quantities", exclude_quantity_id).await?
+        || count("practice_results", exclude_result_id).await?
+        || count("practice_intermediates", exclude_intermediate_id).await?)
 }
 
 /// Actualiza el tipo de análisis de una práctica. Devuelve `true` si existía.
@@ -1138,13 +1138,13 @@ mod tests {
 
         // symbol_taken_in_practice lo detecta buscando en quantities.
         assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, None)
+            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, None, None)
                 .await
                 .unwrap()
         );
         // Excluir la misma magnitud (al renombrar) no debe reportar colisión.
         assert!(
-            !symbol_taken_in_practice(&pool, "p1-estadistica", "l", Some(&q.id), None)
+            !symbol_taken_in_practice(&pool, "p1-estadistica", "l", Some(&q.id), None, None)
                 .await
                 .unwrap()
         );
@@ -1156,19 +1156,39 @@ mod tests {
 
         // Un mensurando nuevo con símbolo "l" (ya en quantities) es colisión cruzada.
         assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, Some(&r.id))
+            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, Some(&r.id), None)
                 .await
                 .unwrap()
         );
         // Una magnitud nueva con símbolo "Q" (ya en results) es colisión cruzada.
         assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "Q", Some(&q.id), None)
+            symbol_taken_in_practice(&pool, "p1-estadistica", "Q", Some(&q.id), None, None)
                 .await
                 .unwrap()
         );
+
+        // Una magnitud intermedia con símbolo "Iv": magnitudes/mensurandos nuevos deben colisionar.
+        create_intermediate(
+            &pool,
+            "p1-estadistica",
+            IntermediateInput {
+                symbol: "Iv".into(),
+                name: "Iv".into(),
+                unit: "u".into(),
+                formula: "l".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            symbol_taken_in_practice(&pool, "p1-estadistica", "Iv", None, None, None)
+                .await
+                .unwrap()
+        );
+
         // Símbolo inexistente no colisiona.
         assert!(
-            !symbol_taken_in_practice(&pool, "p1-estadistica", "nuevo", None, None)
+            !symbol_taken_in_practice(&pool, "p1-estadistica", "nuevo", None, None, None)
                 .await
                 .unwrap()
         );

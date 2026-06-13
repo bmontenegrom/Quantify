@@ -461,6 +461,14 @@ fn build_points(
         .iter()
         .map(|m| (m.quantity_id.as_str(), m.point_replica_matrix()))
         .collect();
+    // Magnitudes de un solo valor por punto (sin `point_replicas`): se difunden a todas las
+    // réplicas al evaluar una intermedia. Las replicadas NO se difunden (un conteo distinto entre
+    // ellas es dato incompleto → produce un punto no finito que se rechaza).
+    let broadcastable: std::collections::HashSet<&str> = measurements
+        .iter()
+        .filter(|m| m.point_replicas.is_none())
+        .map(|m| m.quantity_id.as_str())
+        .collect();
     let symbol_to_id: HashMap<&str, &str> = quantities
         .iter()
         .map(|q| (q.symbol.as_str(), q.id.as_str()))
@@ -548,8 +556,14 @@ fn build_points(
             if !needed.contains(it.symbol.as_str()) {
                 continue;
             }
-            let value =
-                point_intermediate(tree, &point_matrix, &symbol_to_id, &intermediate_values, i);
+            let value = point_intermediate(
+                tree,
+                &point_matrix,
+                &symbol_to_id,
+                &broadcastable,
+                &intermediate_values,
+                i,
+            );
             intermediate_values.insert(it.symbol.as_str(), value);
         }
         // Binding de ejes: media por punto de las magnitudes + valores por punto de las intermedias.
@@ -576,30 +590,33 @@ fn build_points(
 }
 
 /// Valor de una magnitud intermedia en el punto `i`: evalúa su fórmula para cada réplica del punto
-/// y promedia. Las magnitudes de un solo valor —y las intermedias anteriores (`earlier`, ya
-/// promediadas por punto)— se difunden a todas las réplicas. Una fórmula sin magnitudes (solo
-/// intermedias anteriores o constantes) se evalúa una vez.
+/// y promedia. Las magnitudes de **un solo valor por punto** (`broadcastable`) —y las intermedias
+/// anteriores (`earlier`, ya promediadas por punto)— se difunden a todas las réplicas. Las
+/// magnitudes **replicadas** NO se difunden: si una tiene menos réplicas que el punto (dato
+/// incompleto/desparejo), la réplica faltante produce `NaN` y el punto se rechaza aguas arriba. Una
+/// fórmula sin magnitudes replicadas (solo magnitudes de un valor, intermedias o constantes) se
+/// evalúa una vez.
 fn point_intermediate(
     tree: &Node,
     point_matrix: &HashMap<&str, Vec<Vec<f64>>>,
     symbol_to_id: &HashMap<&str, &str>,
+    broadcastable: &std::collections::HashSet<&str>,
     earlier: &HashMap<&str, f64>,
     i: usize,
 ) -> f64 {
+    let id_of = |sym: &str| symbol_to_id.get(sym).copied();
     let reps_at = |sym: &str| -> &[f64] {
-        symbol_to_id
-            .get(sym)
+        id_of(sym)
             .and_then(|id| point_matrix.get(id))
             .and_then(|m| m.get(i))
             .map_or(&[][..], |v| v.as_slice())
     };
-    // Réplicas del punto: el máximo entre las magnitudes de la fórmula; al menos 1 si no hay
-    // magnitudes (la fórmula es solo intermedias anteriores / constantes).
+    let is_broadcastable = |sym: &str| id_of(sym).is_some_and(|id| broadcastable.contains(id));
+    // Réplicas del punto: el máximo entre las magnitudes **replicadas** de la fórmula; al menos 1.
     let n_reps = tree
         .iter_variable_identifiers()
-        .filter(|v| symbol_to_id.contains_key(v))
-        .map(reps_at)
-        .map(<[f64]>::len)
+        .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
+        .map(|v| reps_at(v).len())
         .max()
         .unwrap_or(0)
         .max(1);
@@ -609,15 +626,15 @@ fn point_intermediate(
             .iter_variable_identifiers()
             .map(|v| {
                 if symbol_to_id.contains_key(v) {
-                    // Magnitud: réplica r (difunde la última si tiene menos, p. ej. un valor único).
                     let reps = reps_at(v);
-                    (
-                        v,
-                        reps.get(r)
-                            .or_else(|| reps.last())
-                            .copied()
-                            .unwrap_or(f64::NAN),
-                    )
+                    let value = if is_broadcastable(v) {
+                        // Magnitud de un solo valor por punto: se difunde a todas las réplicas.
+                        reps.first().copied().unwrap_or(f64::NAN)
+                    } else {
+                        // Magnitud replicada: réplica r exacta (sin difundir → NaN si falta).
+                        reps.get(r).copied().unwrap_or(f64::NAN)
+                    };
+                    (v, value)
                 } else {
                     // Intermedia anterior: escalar por punto, difundido a todas las réplicas.
                     (v, earlier.get(v).copied().unwrap_or(f64::NAN))
@@ -2136,6 +2153,30 @@ mod tests {
         assert_eq!(
             a.regression.unwrap().points,
             vec![(15.0, 100.0), (45.0, 200.0)]
+        );
+    }
+
+    #[test]
+    fn intermediate_rejects_mismatched_replica_counts() {
+        // Dos magnitudes replicadas con distinto conteo (V con 2, t con 1) en una intermedia son
+        // dato incompleto: NO se difunde la réplica faltante → el punto da NaN → se rechaza.
+        let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p1-estadistica".into(),
+            position: 0,
+            symbol: "Q".into(),
+            name: "Q".into(),
+            unit: "u".into(),
+            formula: "V/t".into(),
+        }];
+        let measurements = vec![
+            point_rep("q-V", vec![vec![10.0, 20.0], vec![10.0, 20.0]]),
+            point_rep("q-t", vec![vec![1.0], vec![1.0]]), // replicada pero con 1 sola réplica
+            measurement("py", &[100.0, 200.0]),
+        ];
+        assert!(
+            compute_regresion(&quantities, &intermediates, &[], "Q", "py", &measurements).is_err()
         );
     }
 

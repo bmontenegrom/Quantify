@@ -1426,7 +1426,9 @@ async fn create_quantity(
     validate_quantity(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+        .await?
+    {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     Ok(Json(
@@ -1450,6 +1452,7 @@ async fn update_quantity(
         &practice_id,
         &input.symbol,
         Some(&qid),
+        None,
         None,
     )
     .await?
@@ -1539,6 +1542,11 @@ async fn create_intermediate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_intermediate(&def, &input, None)?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+        .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
     Ok(Json(
         practices::create_intermediate(&state.pool, &id, input).await?,
     ))
@@ -1556,6 +1564,11 @@ async fn update_intermediate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_intermediate(&def, &input, Some(&iid))?;
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, Some(&iid))
+        .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
     let updated = practices::update_intermediate(&state.pool, &id, &iid, input)
         .await?
         .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
@@ -1593,16 +1606,8 @@ fn validate_intermediate(
     }
     validate_symbol_format(symbol)?;
     validate_symbol_not_reserved(symbol)?;
-    // Unicidad: el símbolo no debe chocar con otra magnitud, mensurando o intermedia de la práctica.
-    let taken = def.quantities.iter().any(|q| q.symbol == symbol)
-        || def.results.iter().any(|r| r.symbol == symbol)
-        || def
-            .intermediates
-            .iter()
-            .any(|it| it.symbol == symbol && Some(it.id.as_str()) != exclude_id);
-    if taken {
-        return Err(duplicate_symbol_error(symbol));
-    }
+    // (La unicidad del símbolo se verifica en el handler con `symbol_taken_in_practice`, que cubre
+    // los tres espacios de símbolos: magnitudes, mensurandos e intermedias.)
     // Símbolos permitidos en la fórmula: magnitudes + intermedias anteriores (al crear, todas las
     // existentes; al editar, solo las de menor posición que la editada).
     let self_pos = exclude_id.and_then(|id| {
@@ -1659,7 +1664,9 @@ async fn create_result(
     validate_result(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None).await? {
+    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None)
+        .await?
+    {
         return Err(duplicate_symbol_error(&input.symbol));
     }
     Ok(Json(
@@ -1684,6 +1691,7 @@ async fn update_result(
         &input.symbol,
         None,
         Some(&rid),
+        None,
     )
     .await?
     {
@@ -1996,11 +2004,9 @@ mod tests {
             formula: formula.into(),
         };
 
-        // Símbolo reservado, duplicado (vs magnitud o intermedia) y fórmula con símbolo inexistente
-        // → 400.
+        // Símbolo reservado (constante del motor) y fórmula con símbolo inexistente → 400.
+        // (La unicidad del símbolo se valida aparte, vía `symbol_taken_in_practice`.)
         assert!(validate_intermediate(&def, &input("pi", "V*2"), None).is_err());
-        assert!(validate_intermediate(&def, &input("V", "V*2"), None).is_err());
-        assert!(validate_intermediate(&def, &input("Q", "V*2"), None).is_err());
         assert!(validate_intermediate(&def, &input("Re", "V*zzz"), None).is_err());
         // Nueva intermedia válida que referencia a Q (anterior) y magnitudes.
         assert!(validate_intermediate(&def, &input("Re", "Q*V"), None).is_ok());
