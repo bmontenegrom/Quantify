@@ -21,10 +21,37 @@ pub struct MeasurementInput {
     pub quantity_id: String,
     pub instrument_id: Option<String>,
     pub scale_id: Option<String>,
-    /// Réplicas medidas (una o varias) de la magnitud.
+    /// Réplicas medidas (una o varias) de la magnitud. En análisis por puntos (regresión/curva)
+    /// con una magnitud sin réplicas por punto, es un valor por punto.
     pub values: Vec<f64>,
     /// Incertidumbre expandida U para magnitudes `is_given` (dato de la cátedra).
     pub given_u: Option<f64>,
+    /// Solo en análisis por puntos con magnitudes que repiten medición **en cada punto**
+    /// (p.ej. tiempo medido varias veces por altura/esfera). Exterior = puntos, interior =
+    /// réplicas de ese punto. El motor usa la **media** de cada punto para evaluar los ejes.
+    #[serde(default)]
+    pub point_replicas: Option<Vec<Vec<f64>>>,
+}
+
+impl MeasurementInput {
+    /// Valor representativo por punto en análisis por puntos: la media de las réplicas de cada
+    /// punto si hay `point_replicas`; si no, los `values` tal cual (un valor por punto). Un punto
+    /// con réplicas vacías produce `NaN` (lo descarta luego el chequeo de finitud).
+    fn point_values(&self) -> Vec<f64> {
+        match &self.point_replicas {
+            Some(groups) => groups
+                .iter()
+                .map(|g| {
+                    if g.is_empty() {
+                        f64::NAN
+                    } else {
+                        g.iter().sum::<f64>() / g.len() as f64
+                    }
+                })
+                .collect(),
+            None => self.values.clone(),
+        }
+    }
 }
 
 /// Cuerpo para crear una entrega por formulario.
@@ -290,9 +317,10 @@ fn build_points(
 ) -> anyhow::Result<(PointSeries, Vec<String>)> {
     let mut warnings = Vec::new();
     let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    let by_quantity: HashMap<&str, &MeasurementInput> = measurements
+    // Valor representativo por punto de cada magnitud (media de réplicas por punto si las hay).
+    let point_values: HashMap<&str, Vec<f64>> = measurements
         .iter()
-        .map(|m| (m.quantity_id.as_str(), m))
+        .map(|m| (m.quantity_id.as_str(), m.point_values()))
         .collect();
 
     let x_tree = compile_formula(x_formula, &symbols)?;
@@ -310,10 +338,10 @@ fn build_points(
         .filter(|q| referenced.contains(q.symbol.as_str()))
         .collect();
 
-    // Cantidad de puntos = mínimo de réplicas entre las magnitudes de eje (deben venir parejas).
+    // Cantidad de puntos = mínimo de puntos entre las magnitudes de eje (deben venir parejas).
     let lengths: Vec<usize> = axis_quantities
         .iter()
-        .map(|q| by_quantity.get(q.id.as_str()).map_or(0, |m| m.values.len()))
+        .map(|q| point_values.get(q.id.as_str()).map_or(0, |v| v.len()))
         .collect();
     let n_points = lengths.iter().copied().min().unwrap_or(0);
     if lengths.iter().any(|&l| l != n_points) {
@@ -331,9 +359,9 @@ fn build_points(
         let bound: HashMap<&str, f64> = axis_quantities
             .iter()
             .filter_map(|q| {
-                by_quantity
+                point_values
                     .get(q.id.as_str())
-                    .map(|m| (q.symbol.as_str(), m.values[i]))
+                    .map(|v| (q.symbol.as_str(), v[i]))
             })
             .collect();
         let x = eval_compiled(&x_tree, &bound);
@@ -922,6 +950,7 @@ mod tests {
             scale_id: None,
             values: values.to_vec(),
             given_u: None,
+            point_replicas: None,
         }
     }
 
@@ -1059,6 +1088,7 @@ mod tests {
             scale_id: None,
             values: vec![10.0, 12.0, 11.0],
             given_u: None,
+            point_replicas: None,
         }];
         let analysis = analyze(&pool, "p1-estadistica", &measurements)
             .await
@@ -1124,6 +1154,7 @@ mod tests {
                 scale_id: None,
                 values: vec![5.0, 5.2, 4.9],
                 given_u: None,
+                point_replicas: None,
             }],
             meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
             table_number: None,
@@ -1188,6 +1219,7 @@ mod tests {
                 scale_id: None,
                 values: vals,
                 given_u: None,
+                point_replicas: None,
             }],
             meta: None,
             table_number: None,
@@ -1229,6 +1261,7 @@ mod tests {
             scale_id: None,
             values: vec![1.0],
             given_u: None,
+            point_replicas: None,
         }];
         assert!(analyze(&pool, "p1-estadistica", &measurements)
             .await
@@ -1265,6 +1298,7 @@ mod tests {
                 scale_id: None,
                 values: vec![1.0],
                 given_u: None,
+                point_replicas: None,
             }],
             meta: None,
             table_number: None,
@@ -1415,6 +1449,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn build_points_averages_per_point_replicas() {
+        // 'py' mide réplicas por punto: el motor usa la media de cada punto en el eje.
+        // Punto 1: media(3,5)=4 ; punto 2: media(8,10,12)=10.
+        let quantities = vec![quantity("px"), quantity("py")];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0]),
+            MeasurementInput {
+                quantity_id: "q-py".into(),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![],
+                given_u: None,
+                point_replicas: Some(vec![vec![3.0, 5.0], vec![8.0, 10.0, 12.0]]),
+            },
+        ];
+        let a = compute_regresion(&quantities, &[], "px", "py", &measurements).unwrap();
+        let reg = a.regression.unwrap();
+        assert_eq!(reg.points, vec![(1.0, 4.0), (2.0, 10.0)]);
+        // Pendiente de (1,4)-(2,10) = 6.
+        assert!(close(reg.slope, 6.0, 1e-9));
+    }
+
     /// Mediciones reales para una magnitud sembrada, buscando su id por símbolo en la definición.
     fn measurement_for(
         def: &crate::practices::PracticeDefinition,
@@ -1434,6 +1491,7 @@ mod tests {
             scale_id: None,
             values: values.to_vec(),
             given_u: None,
+            point_replicas: None,
         }
     }
 

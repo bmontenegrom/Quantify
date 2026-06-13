@@ -1029,6 +1029,7 @@ mod tests {
                     scale_id: None,
                     values: vec![v],
                     given_u: if q.is_given { Some(0.0) } else { None },
+                    point_replicas: None,
                 }
             })
             .collect();
@@ -1063,6 +1064,7 @@ mod tests {
                     scale_id: None,
                     values: vec![v],
                     given_u: None,
+                    point_replicas: None,
                 }
             })
             .collect();
@@ -1135,6 +1137,7 @@ mod tests {
                 scale_id: None,
                 values: freqs.to_vec(),
                 given_u: None,
+                point_replicas: None,
             },
             crate::computation::MeasurementInput {
                 quantity_id: id("a"),
@@ -1142,6 +1145,7 @@ mod tests {
                 scale_id: None,
                 values: freqs.iter().map(|_| 1.0).collect(),
                 given_u: None,
+                point_replicas: None,
             },
             crate::computation::MeasurementInput {
                 quantity_id: id("b"),
@@ -1149,6 +1153,7 @@ mod tests {
                 scale_id: None,
                 values: b_vals,
                 given_u: None,
+                point_replicas: None,
             },
         ];
         let analysis = crate::computation::compute_regresion(
