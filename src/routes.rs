@@ -5,7 +5,8 @@ use crate::{
     error::AppError,
     instruments::{self, CatalogExport, CreateInstrument, ScaleInput, UpdateInstrument},
     practices::{
-        self, CurveInput, IntermediateInput, PointResultInput, QuantityInput, ResultInput,
+        self, AggregateInput, CurveInput, IntermediateInput, PointResultInput, QuantityInput,
+        ResultInput,
     },
 };
 use axum::{
@@ -191,6 +192,11 @@ pub fn api_router(state: SharedState) -> Router {
         .route(
             "/practices/{id}/point-results/{pid}",
             post(update_point_result).delete(delete_point_result),
+        )
+        .route("/practices/{id}/aggregates", post(create_aggregate))
+        .route(
+            "/practices/{id}/aggregates/{aid}",
+            post(update_aggregate).delete(delete_aggregate),
         )
         .route(
             "/practices/{id}/results/{rid}/tolerance",
@@ -1433,8 +1439,17 @@ async fn create_quantity(
     validate_quantity(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
-        .await?
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1459,6 +1474,7 @@ async fn update_quantity(
         &practice_id,
         &input.symbol,
         Some(&qid),
+        None,
         None,
         None,
         None,
@@ -1550,8 +1566,17 @@ async fn create_intermediate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_intermediate(&def, &input, None)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
-        .await?
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1579,6 +1604,7 @@ async fn update_intermediate(
         None,
         None,
         Some(&iid),
+        None,
         None,
     )
     .await?
@@ -1658,8 +1684,17 @@ async fn create_point_result(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_point_result(&def, &input)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
-        .await?
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1688,6 +1723,7 @@ async fn update_point_result(
         None,
         None,
         Some(&pid),
+        None,
     )
     .await?
     {
@@ -1742,6 +1778,127 @@ fn validate_point_result(
     Ok(())
 }
 
+/// `POST /api/practices/{id}/aggregates`: agrega un mensurando agregado (Motor F, docente).
+async fn create_aggregate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<AggregateInput>,
+) -> Result<Json<practices::PracticeAggregate>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_aggregate(&def, &input)?;
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
+    Ok(Json(
+        practices::create_aggregate(&state.pool, &id, input).await?,
+    ))
+}
+
+/// `POST /api/practices/{id}/aggregates/{aid}`: actualiza un mensurando agregado.
+async fn update_aggregate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, aid)): Path<(String, String)>,
+    Json(input): Json<AggregateInput>,
+) -> Result<Json<practices::PracticeAggregate>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_aggregate(&def, &input)?;
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        None,
+        None,
+        Some(&aid),
+    )
+    .await?
+    {
+        return Err(duplicate_symbol_error(&input.symbol));
+    }
+    let updated = practices::update_aggregate(&state.pool, &id, &aid, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("mensurando agregado no encontrado"))?;
+    Ok(Json(updated))
+}
+
+/// `DELETE /api/practices/{id}/aggregates/{aid}`: elimina un mensurando agregado.
+async fn delete_aggregate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, aid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_aggregate(&state.pool, &id, &aid).await? {
+        return Err(AppError::not_found("mensurando agregado no encontrado"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// Valida símbolo (formato, no reservado) y fórmula de un mensurando agregado. La fórmula compila
+/// usando los escalares compartidos + mensurandos + `slope`/`intercept` + los agregados anteriores +
+/// los extremos de cada magnitud/intermedia por punto (`{sym}_first`/`_first2`/`_last`/`_last2`). La
+/// unicidad del símbolo la verifica el handler con `symbol_taken_in_practice`.
+fn validate_aggregate(
+    def: &practices::PracticeDefinition,
+    input: &AggregateInput,
+) -> Result<(), AppError> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
+        return Err(AppError::bad_request(
+            "El mensurando agregado necesita un simbolo y una formula.",
+        ));
+    }
+    validate_symbol_format(symbol)?;
+    validate_symbol_not_reserved(symbol)?;
+    // Escalares compartidos (per_point=false o is_given) + mensurandos + slope/intercept + agregados
+    // anteriores + extremos de cada magnitud por punto e intermedia.
+    let mut allowed: Vec<String> = def
+        .quantities
+        .iter()
+        .filter(|q| !q.per_point || q.is_given)
+        .map(|q| q.symbol.clone())
+        .collect();
+    allowed.extend(def.results.iter().map(|r| r.symbol.clone()));
+    allowed.push("slope".into());
+    allowed.push("intercept".into());
+    allowed.extend(def.aggregates.iter().map(|a| a.symbol.clone()));
+    let endpoint_bases = def
+        .quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .map(|q| q.symbol.clone())
+        .chain(def.intermediates.iter().map(|it| it.symbol.clone()));
+    for base in endpoint_bases {
+        for suffix in ["first", "first2", "last", "last2"] {
+            allowed.push(format!("{base}_{suffix}"));
+        }
+    }
+    computation::check_formula(formula, &allowed)
+        .map_err(|e| AppError::bad_request(e.to_string()))?;
+    Ok(())
+}
+
 /// Una curva necesita ambas fórmulas de eje (sin ellas no se puede graficar). Error 400 amigable.
 fn validate_curve(input: &CurveInput) -> Result<(), AppError> {
     if input.x_formula.trim().is_empty() || input.y_formula.trim().is_empty() {
@@ -1776,8 +1933,17 @@ async fn create_result(
     validate_result(&input)?;
     validate_symbol_format(&input.symbol)?;
     validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(&state.pool, &id, &input.symbol, None, None, None, None)
-        .await?
+    if practices::symbol_taken_in_practice(
+        &state.pool,
+        &id,
+        &input.symbol,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await?
     {
         return Err(duplicate_symbol_error(&input.symbol));
     }
@@ -1803,6 +1969,7 @@ async fn update_result(
         &input.symbol,
         None,
         Some(&rid),
+        None,
         None,
         None,
     )
@@ -2111,6 +2278,7 @@ mod tests {
                 formula: "V/t".into(),
             }],
             point_results: vec![],
+            aggregates: vec![],
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
             symbol: symbol.into(),

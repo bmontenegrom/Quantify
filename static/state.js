@@ -30,6 +30,7 @@ export const state = {
   editingCurveId: null,
   editingIntermediateId: null,
   editingPointResultId: null,
+  editingAggregateId: null,
   practiceForm: null,
   chronometers: new Map(),
   seriesDebug: new Map(),

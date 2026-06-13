@@ -546,6 +546,26 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Motor F (Fase 15): mensurando **agregado** escalar (un valor) en regresión, evaluado tras el
+    // ajuste. Su `formula` puede usar escalares compartidos, slope/intercept, los mensurandos, los
+    // agregados anteriores (encadenable), y los **valores de extremo** de cada magnitud por punto
+    // (`X_first`, `X_first2`, `X_last`, `X_last2`). P. ej. Reynolds máx/mín con el primer/último par.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_aggregates (
+            id TEXT PRIMARY KEY,
+            practice_id TEXT NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL DEFAULT 0,
+            symbol TEXT NOT NULL,
+            name TEXT NOT NULL,
+            unit TEXT NOT NULL,
+            formula TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS grade_components (

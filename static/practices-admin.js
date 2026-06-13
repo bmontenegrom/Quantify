@@ -67,6 +67,7 @@ export function renderPracticesPage() {
         ${def?.analysis_kind === "curva" ? renderCurvesSection(practice, def) : ""}
         ${def?.analysis_kind === "regresion_lineal" || def?.analysis_kind === "curva" ? renderIntermediatesSection(practice, def) : ""}
         ${def?.analysis_kind === "regresion_lineal" ? renderPointResultsSection(practice, def) : ""}
+        ${def?.analysis_kind === "regresion_lineal" ? renderAggregatesSection(practice, def) : ""}
         ${def?.analysis_kind == null || def?.analysis_kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
       </section>
       <section class="panel workspace-panel">
@@ -129,6 +130,23 @@ export function renderPracticesPage() {
   });
   practiceWorkspace.querySelectorAll("[data-edit-point-result-form]").forEach((form) => {
     form.addEventListener("submit", saveEditPointResult);
+  });
+
+  practiceWorkspace.querySelector("#new-aggregate-form")?.addEventListener("submit", saveNewAggregate);
+  practiceWorkspace.querySelectorAll("[data-edit-aggregate]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingAggregateId = state.editingAggregateId === btn.dataset.aid ? null : btn.dataset.aid;
+      renderPracticesPage();
+    });
+  });
+  practiceWorkspace.querySelectorAll("[data-delete-aggregate]").forEach((btn) => {
+    btn.addEventListener("click", () => deletePracticeAggregate(btn.dataset.aid, practice.id));
+  });
+  practiceWorkspace.querySelectorAll("[data-cancel-aggregate]").forEach((btn) => {
+    btn.addEventListener("click", () => { state.editingAggregateId = null; renderPracticesPage(); });
+  });
+  practiceWorkspace.querySelectorAll("[data-edit-aggregate-form]").forEach((form) => {
+    form.addEventListener("submit", saveEditAggregate);
   });
 
   practiceWorkspace.querySelectorAll("[data-edit-curve]").forEach((btn) => {
@@ -320,6 +338,67 @@ function renderPointResultsList(def, practiceId) {
       </tr>`;
     const editRow = state.editingPointResultId === pr.id
       ? `<tr><td colspan="3" class="scale-edit-cell">${renderPointResultForm(pr, practiceId)}</td></tr>`
+      : "";
+    return [baseRow, editRow];
+  });
+  return `
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
+        <tbody>${rows.join("")}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+/// Gestión de mensurandos agregados (Motor F): lista editable + alta. Se evalúan una vez tras el
+/// ajuste (un valor escalar) y pueden usar escalares compartidos, slope/intercept, los mensurandos,
+/// los agregados anteriores y los extremos de cada magnitud por punto.
+function renderAggregatesSection(practice, def) {
+  return `
+    <h4>Mensurandos agregados</h4>
+    <p class="submission-meta">Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Sin incertidumbre.</p>
+    ${renderAggregatesList(def, practice.id)}
+    <h4>Nuevo agregado</h4>
+    ${renderAggregateForm(null, practice.id)}
+  `;
+}
+
+function renderAggregateForm(agg, practiceId) {
+  const formId = agg ? "edit-aggregate-form" : "new-aggregate-form";
+  const formAttr = agg ? `data-edit-aggregate-form data-aid="${escapeHtml(agg.id)}"` : "";
+  const v = (f) => (agg ? escapeHtml(String(agg[f] ?? "")) : "");
+  return `
+    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
+      <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
+      ${agg ? `<input name="aid" type="hidden" value="${escapeHtml(agg.id)}" />` : ""}
+      <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Re_medio" /></label>
+      <label>Nombre <input name="name" value="${v("name")}" placeholder="Reynolds medio" /></label>
+      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="" /></label>
+      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="(Re_max + Re_min) / 2" /></label>
+      <div class="detail-actions">
+        <button type="submit">${agg ? "Guardar" : "Agregar"}</button>
+        ${agg ? `<button type="button" data-cancel-aggregate>Cancelar</button>` : ""}
+      </div>
+    </form>
+  `;
+}
+
+function renderAggregatesList(def, practiceId) {
+  const items = def?.aggregates ?? [];
+  if (items.length === 0) return `<p class="submission-meta">Sin mensurandos agregados.</p>`;
+  const rows = items.flatMap((agg) => {
+    const baseRow = `
+      <tr>
+        <td class="directory-primary"><strong>${escapeHtml(agg.symbol)}</strong> <span class="submission-meta">${escapeHtml(agg.name)} (${escapeHtml(agg.unit)})</span></td>
+        <td><code>${escapeHtml(agg.formula)}</code></td>
+        <td class="directory-actions">
+          <button type="button" data-edit-aggregate data-aid="${escapeHtml(agg.id)}">${state.editingAggregateId === agg.id ? "Cerrar" : "Editar"}</button>
+          <button type="button" data-delete-aggregate data-aid="${escapeHtml(agg.id)}">Eliminar</button>
+        </td>
+      </tr>`;
+    const editRow = state.editingAggregateId === agg.id
+      ? `<tr><td colspan="3" class="scale-edit-cell">${renderAggregateForm(agg, practiceId)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
@@ -870,6 +949,53 @@ async function deletePracticePointResult(pid, practiceId) {
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingPointResultId = null;
     state.practiceActionStatus = "Derivada por punto eliminada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function saveNewAggregate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  try {
+    await postJson(`/api/practices/${practiceId}/aggregates`, intermediatePayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingAggregateId = null;
+    state.practiceActionStatus = "Mensurando agregado agregado";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function saveEditAggregate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  const aid = form.querySelector('[name="aid"]').value;
+  try {
+    await postJson(`/api/practices/${practiceId}/aggregates/${aid}`, intermediatePayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingAggregateId = null;
+    state.practiceActionStatus = "Mensurando agregado actualizado";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function deletePracticeAggregate(aid, practiceId) {
+  if (!window.confirm("¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.")) return;
+  try {
+    await deleteJson(`/api/practices/${practiceId}/aggregates/${aid}`);
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingAggregateId = null;
+    state.practiceActionStatus = "Mensurando agregado eliminado";
     renderPracticesPage();
   } catch (error) {
     state.practiceActionStatus = error.message;

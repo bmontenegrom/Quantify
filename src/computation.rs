@@ -8,7 +8,7 @@
 
 use crate::analysis;
 use crate::db::{self, AuthUser, InstrumentScale, PracticeQuantity, PracticeResult};
-use crate::practices::{PracticeIntermediate, PracticePointResult};
+use crate::practices::{PracticeAggregate, PracticeIntermediate, PracticePointResult};
 use crate::uncertainty::{self, BModel, QuantityResult, ScaleSpec};
 use chrono::Utc;
 use evalexpr::{build_operator_tree, ContextWithMutableVariables, HashMapContext, Node, Value};
@@ -157,6 +157,15 @@ pub struct PointResultComputation {
     pub values: Vec<f64>,
 }
 
+/// Mensurando **agregado** escalar (Motor F): un único valor post-ajuste, sin incertidumbre.
+#[derive(Debug, Serialize)]
+pub struct AggregateComputation {
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    pub value: f64,
+}
+
 /// Resultado completo del cálculo de una entrega por formulario. Según el `analysis_kind` se
 /// llena un camino: `quantities` (estadístico), `regression` (ajuste lineal) o `scatters` (curva:
 /// una o varias curvas sobre el mismo barrido). `derived` y `warnings` aplican a los caminos que
@@ -177,6 +186,9 @@ pub struct FormAnalysis {
     /// Solo regresión (Motor E): magnitudes derivadas por punto (tabla por corrida, p. ej. Reynolds).
     #[serde(default)]
     pub point_results: Vec<PointResultComputation>,
+    /// Solo regresión (Motor F): mensurandos agregados escalares post-ajuste (p. ej. Reynolds medio).
+    #[serde(default)]
+    pub aggregates: Vec<AggregateComputation>,
     pub warnings: Vec<String>,
 }
 
@@ -391,6 +403,7 @@ pub fn compute(
             derived,
             operators: Vec::new(),
             point_results: Vec::new(),
+            aggregates: Vec::new(),
             warnings,
         });
     }
@@ -446,6 +459,7 @@ pub fn compute(
         derived: Vec::new(),
         operators,
         point_results: Vec::new(),
+        aggregates: Vec::new(),
         warnings,
     })
 }
@@ -732,12 +746,18 @@ fn point_intermediate(
 /// μ = slope·(π·ρ·g·R⁴)/(8·L). Las magnitudes derivadas **por punto** (`point_results`, Motor E) se
 /// evalúan tras el ajuste con el contexto de cada punto + slope/intercept + los mensurandos
 /// (p. ej. el número de Reynolds por corrida).
+///
+/// Los mensurandos **agregados** (`aggregates`, Motor F) se evalúan una vez tras el ajuste, en orden
+/// (encadenables), con acceso a los escalares compartidos, slope/intercept, los mensurandos, los
+/// agregados anteriores y los **extremos** de cada magnitud/intermedia por punto: `{sym}_first`,
+/// `{sym}_first2`, `{sym}_last`, `{sym}_last2` (p. ej. Reynolds máx/mín con el primer/último par).
 #[allow(clippy::too_many_arguments)]
 pub fn compute_regresion(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
     results: &[PracticeResult],
     point_results: &[PracticePointResult],
+    aggregates: &[PracticeAggregate],
     scales: &HashMap<String, InstrumentScale>,
     x_formula: &str,
     y_formula: &str,
@@ -816,6 +836,43 @@ pub fn compute_regresion(
         });
     }
 
+    // Mensurandos agregados (Motor F): un valor escalar post-ajuste. Símbolos disponibles: escalares
+    // compartidos (en `means`) + slope/intercept + los mensurandos derivados + los extremos de cada
+    // magnitud/intermedia por punto + los agregados anteriores (encadenable).
+    let mut agg_values: HashMap<String, f64> = means.clone();
+    for d in &derived {
+        agg_values.insert(d.symbol.clone(), d.value);
+    }
+    let last = contexts.len() - 1; // >= 1: build_points garantiza al menos 2 puntos.
+    let endpoint_syms: Vec<String> = quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .map(|q| q.symbol.clone())
+        .chain(intermediates.iter().map(|it| it.symbol.clone()))
+        .collect();
+    for sym in &endpoint_syms {
+        let at = |i: usize| contexts[i].get(sym).copied().unwrap_or(f64::NAN);
+        agg_values.insert(format!("{sym}_first"), at(0));
+        agg_values.insert(format!("{sym}_first2"), at(1));
+        agg_values.insert(format!("{sym}_last"), at(last));
+        agg_values.insert(format!("{sym}_last2"), at(last - 1));
+    }
+    let mut agg_allowed: Vec<String> = agg_values.keys().cloned().collect();
+    let mut aggregates_out = Vec::with_capacity(aggregates.len());
+    for agg in aggregates {
+        let tree = compile_formula(&agg.formula, &agg_allowed)?;
+        let bound: HashMap<&str, f64> = agg_values.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+        let value = eval_compiled(&tree, &bound);
+        agg_values.insert(agg.symbol.clone(), value);
+        agg_allowed.push(agg.symbol.clone());
+        aggregates_out.push(AggregateComputation {
+            symbol: agg.symbol.clone(),
+            name: agg.name.clone(),
+            unit: agg.unit.clone(),
+            value,
+        });
+    }
+
     Ok(FormAnalysis {
         quantities: Vec::new(),
         regression: Some(RegressionResult {
@@ -832,6 +889,7 @@ pub fn compute_regresion(
         derived,
         operators: Vec::new(),
         point_results: point_results_out,
+        aggregates: aggregates_out,
         warnings,
     })
 }
@@ -884,6 +942,7 @@ pub fn compute_curva(
         derived: Vec::new(),
         operators: Vec::new(),
         point_results: Vec::new(),
+        aggregates: Vec::new(),
         warnings,
     })
 }
@@ -1003,6 +1062,7 @@ pub async fn analyze(
             &definition.intermediates,
             &definition.results,
             &definition.point_results,
+            &definition.aggregates,
             &scales,
             x_formula,
             y_formula,
@@ -1434,7 +1494,7 @@ mod tests {
         }
     }
 
-    /// Atajo de test: `compute_regresion` sin derivadas por punto ni escalas (firma previa).
+    /// Atajo de test: `compute_regresion` sin derivadas por punto, agregados ni escalas (firma previa).
     fn reg(
         quantities: &[PracticeQuantity],
         intermediates: &[PracticeIntermediate],
@@ -1447,6 +1507,7 @@ mod tests {
             quantities,
             intermediates,
             results,
+            &[],
             &[],
             &HashMap::new(),
             x,
@@ -2411,6 +2472,7 @@ mod tests {
             &[],
             &results,
             &[],
+            &[],
             &HashMap::new(),
             "2*pi*f",
             "math::sqrt(a)",
@@ -2462,6 +2524,7 @@ mod tests {
             &[],
             &results,
             &point_results,
+            &[],
             &HashMap::new(),
             "px",
             "py",
@@ -2479,6 +2542,62 @@ mod tests {
         assert_eq!(re.values.len(), 2);
         assert!(close(re.values[0], 20.0, 1e-9));
         assert!(close(re.values[1], 40.0, 1e-9));
+    }
+
+    #[test]
+    fn compute_regresion_aggregates_use_endpoints_measurands_and_chain() {
+        // Motor F: px por punto = [1,2,3], py = [2,4,6] → slope=2. c escalar compartido = 10.
+        // Mensurando m = slope*c = 20. Agregados escalares (un valor) que usan:
+        //  - extremos por punto: ep = px_first + px_last = 1 + 3 = 4; mid = px_first2 + px_last2 = 2+2 = 4
+        //  - un mensurando + slope: g = m + slope = 22
+        //  - un agregado anterior (encadenable): chained = ep + g = 26
+        let mut c = quantity("c");
+        c.per_point = false;
+        let quantities = vec![quantity("px"), quantity("py"), c];
+        let results = vec![result("m", "slope * c")];
+        let agg = |symbol: &str, formula: &str| PracticeAggregate {
+            id: format!("a-{symbol}"),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "".into(),
+            formula: formula.into(),
+        };
+        let aggregates = vec![
+            agg("ep", "px_first + px_last"),
+            agg("mid", "px_first2 + px_last2"),
+            agg("g", "m + slope"),
+            agg("chained", "ep + g"),
+        ];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[2.0, 4.0, 6.0]),
+            measurement("c", &[10.0]),
+        ];
+        let a = compute_regresion(
+            &quantities,
+            &[],
+            &results,
+            &[],
+            &aggregates,
+            &HashMap::new(),
+            "px",
+            "py",
+            &measurements,
+        )
+        .unwrap();
+        let val = |sym: &str| {
+            a.aggregates
+                .iter()
+                .find(|x| x.symbol == sym)
+                .unwrap_or_else(|| panic!("falta agregado {sym}"))
+                .value
+        };
+        assert!(close(val("ep"), 4.0, 1e-9));
+        assert!(close(val("mid"), 4.0, 1e-9));
+        assert!(close(val("g"), 22.0, 1e-9));
+        assert!(close(val("chained"), 26.0, 1e-9));
     }
 
     #[test]
@@ -2505,6 +2624,7 @@ mod tests {
         let a = compute_regresion(
             &quantities,
             &intermediates,
+            &[],
             &[],
             &[],
             &HashMap::new(),
@@ -2540,6 +2660,7 @@ mod tests {
         let pts = compute_regresion(
             &quantities,
             &intermediates,
+            &[],
             &[],
             &[],
             &HashMap::new(),

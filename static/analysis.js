@@ -231,6 +231,26 @@ function pointResultsMarkup(pointResults) {
     </div>`;
 }
 
+/// Lista de mensurandos agregados (Motor F): un valor escalar por agregado. Vacío si no hay ninguno.
+function aggregatesMarkup(aggregates) {
+  if (!aggregates.length) return "";
+  const rows = aggregates
+    .map(
+      (a) =>
+        `<tr><td>${escapeHtml(a.symbol)}</td><td>${escapeHtml(a.name)}</td>` +
+        `<td>${format(a.value)} <span class="submission-meta">${escapeHtml(a.unit)}</span></td></tr>`,
+    )
+    .join("");
+  return `
+    <h3>Mensurandos agregados</h3>
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead><tr><th>Símbolo</th><th>Nombre</th><th>Valor</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
 function formAnalysisMarkup(analysis) {
   const quantities = analysis.quantities ?? [];
   const derived = analysis.derived ?? [];
@@ -243,6 +263,7 @@ function formAnalysisMarkup(analysis) {
       ${regressionMarkup(analysis.regression)}
       ${derivedBlock}
       ${pointResultsMarkup(analysis.point_results ?? [])}
+      ${aggregatesMarkup(analysis.aggregates ?? [])}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
   }
