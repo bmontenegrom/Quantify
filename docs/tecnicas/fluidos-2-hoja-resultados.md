@@ -16,19 +16,29 @@
 Por punto: Altura `h` (m) y Tiempo `t` (s). El reloj arranca en la altura máxima → **t₁ = 0**.
 Columnas derivadas: Δt = t_i − t₁ (= t_i) y (√h₁ − √h_i), con h₁ = altura inicial (máxima).
 
-## Ajuste lineal
+## Ecuación de balance (reconstruida del PDF)
 
-Gráfico **Δt vs (√h₁ − √h_i)**:
-- Ordenada al origen (*)
-- Pendiente (*)
-- **M medio** (*) — de la pendiente, por propagación.
-- **M teórico** = K + 4·(L_capilar/D_capilar)·(16/Re_medio), con K = 0.78.
+```
+t = 2 · (R²_recip / R²_capilar) · √((2 + M_medio) / (2g)) · (√h_inicial − √h_final)
+```
 
-## Reynolds (agregado, sin incertidumbre)
+Con `t₁ = 0` ⇒ `y = t` (tiempo crudo) y `x = √h_max − √h`. La pendiente del ajuste es
+`2·(R²_recip/R²_cap)·√((2+M)/(2g))`, de donde:
 
-- Re_max = 2ρ·((h₁−h₂)/(t₂−t₁))·(R²_recip/(μ_agua·R_capilar))  — usa los **dos primeros** puntos.
-- Re_min = 2ρ·((h_{n−1}−h_n)/(t_n−t_{n−1}))·(R²_recip/(μ_agua·R_capilar)) — usa los **dos últimos**.
-- Re_medio = media(Re_max, Re_min).
+```
+M_medio = 2·g·(slope·R_cap² / (2·R_recip²))² − 2
+```
+
+## Reynolds y M teórico (agregados; referencian primer/último punto; sin incertidumbre)
+
+```
+Re_max = 2ρ · ((h₁−h₂)/(t₂−t₁)) · (R²_recip / (μ_agua·R_capilar))   (dos primeros puntos)
+Re_min = 2ρ · ((h_{n−1}−h_n)/(t_n−t_{n−1})) · (R²_recip / (μ_agua·R_capilar))   (dos últimos)
+Re_medio = (Re_max + Re_min) / 2
+M_teórico = 0.78 + 4·(L_cap/(2·R_cap))·(16/Re_medio)
+```
+
+donde μ_agua (viscosidad del agua) sale de tabla según la temperatura (la carga el alumno).
 
 > Nota de modelado: Re_max/Re_min y M_teórico **referencian puntos específicos** (primero/último)
 > y agregados — no se expresan con los motores actuales (regresión + escalares + derivadas por
