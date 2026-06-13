@@ -514,6 +514,25 @@ test("validateMeasurements: estadistico reporta mensurando sin lecturas", () => 
   assert.equal(ok, null);
 });
 
+test("validateMeasurements: operadores exigen una serie por operador", () => {
+  const meta = { T: { name: "Periodo", isGiven: false, isChrono: false } };
+  // Operador 2 sin lecturas -> error que lo identifica.
+  const err = validateMeasurements(
+    [{ quantity_id: "T", values: [], given_u: null, operator_replicas: [[1, 1.1], []] }],
+    "estadistico",
+    meta,
+  );
+  assert.ok(typeof err === "string");
+  assert.ok(err.includes("operador 2"));
+  // Todos los operadores con lecturas -> ok.
+  const ok = validateMeasurements(
+    [{ quantity_id: "T", values: [], given_u: null, operator_replicas: [[1, 1.1], [2, 2.1]] }],
+    "estadistico",
+    meta,
+  );
+  assert.equal(ok, null);
+});
+
 test("validateMeasurements: isGiven exige valor e incertidumbre", () => {
   const meta = { g1: { name: "Dato", isGiven: true, isChrono: false } };
   // Sin valor -> error.

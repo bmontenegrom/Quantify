@@ -236,7 +236,18 @@ export function renderMeasurementFields() {
     return;
   }
 
-  const quantityRowHtml = (q) => {
+  // Motor D: en el estadístico, una práctica puede declarar N operadores. Las magnitudes repetidas
+  // (tipo A) se cargan por operador; las dadas o de medida única se comparten.
+  const operatorCount =
+    definition.analysis_kind == null || definition.analysis_kind === "estadistico"
+      ? definition.operator_count ?? 0
+      : 0;
+  const useOperators = operatorCount >= 2;
+  const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
+
+  // `opIndex` (número) marca el bloque de un operador; `null` para magnitudes compartidas.
+  const measurementRowHtml = (q, opIndex) => {
+    const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
     if (q.is_given) {
       return `
         <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
@@ -273,7 +284,7 @@ export function renderMeasurementFields() {
         .join("");
       return `
         <fieldset class="measurement-row measurement-row--chrono"
-                  data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1">
+                  data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
           <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
           <div class="measure-selectors" style="margin-bottom:8px;">
             <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${chronoInstrumentOptions}</select>
@@ -307,7 +318,7 @@ export function renderMeasurementFields() {
       .concat(options.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`))
       .join("");
     return `
-      <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
+      <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
         <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
           <div class="measure-selectors">
@@ -323,6 +334,22 @@ export function renderMeasurementFields() {
           </div>
         </div>
       </fieldset>
+    `;
+  };
+
+  // Render de una magnitud: por-operador (N bloques etiquetados) o una sola fila compartida.
+  const quantityRowHtml = (q) => {
+    if (!isPerOperator(q)) return measurementRowHtml(q, null);
+    const blocks = Array.from(
+      { length: operatorCount },
+      (_, i) =>
+        `<div class="operator-block"><h5 class="operator-label">Operador ${i + 1}</h5>${measurementRowHtml(q, i)}</div>`
+    ).join("");
+    return `
+      <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
+        <h4 class="measurement-section-title">${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)}) — por operador</span></h4>
+        ${blocks}
+      </div>
     `;
   };
 
@@ -353,7 +380,7 @@ export function renderMeasurementFields() {
         chronoInstrument.addEventListener("change", () => populateScaleOptions(row));
         populateScaleOptions(row);
       }
-      wireChronometerWidget(row, row.dataset.quantityId);
+      wireChronometerWidget(row, chronoKeyFor(row));
       return;
     }
     if (row.dataset.isGiven === "1") return;
@@ -373,6 +400,12 @@ function prefixSelectHtml() {
     (p) => `<option value="${escapeHtml(p.label)}" ${p.label === "" ? "selected" : ""}>${p.label || "—"}</option>`
   ).join("");
   return `<select class="prefix-select" title="Prefijo SI">${opts}</select>`;
+}
+
+/** Clave del cronómetro de una fila: por operador (`qid#i`) si tiene `data-operator-index`. */
+function chronoKeyFor(row) {
+  const op = row.dataset.operatorIndex;
+  return op != null ? `${row.dataset.quantityId}#${op}` : row.dataset.quantityId;
 }
 
 export function renderReplicaInput(unit) {
@@ -455,7 +488,26 @@ export function collectMeasurements() {
     );
   }
 
-  return [...measurementFields.querySelectorAll(".measurement-row")].map((row) => {
+  // Motor D: magnitudes por operador → operator_replicas (una serie por bloque de operador).
+  const out = [...measurementFields.querySelectorAll(".operator-quantity")].map((container) => {
+    const rows = [...container.querySelectorAll(".measurement-row")].sort(
+      (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
+    );
+    return {
+      quantity_id: container.dataset.quantityId,
+      instrument_id: null,
+      scale_id: null,
+      values: [],
+      given_u: null,
+      operator_replicas: rows.map(rowSeriesValues),
+    };
+  });
+
+  // Filas sueltas (compartidas o sin operadores): no están dentro de un contenedor por operador.
+  const standalone = [...measurementFields.querySelectorAll(".measurement-row")].filter(
+    (row) => !row.closest(".operator-quantity")
+  );
+  for (const row of standalone) {
     if (row.dataset.isGiven === "1") {
       const valInput = row.querySelector(".measure-given-value");
       const uInput = row.querySelector(".measure-given-u");
@@ -464,60 +516,59 @@ export function collectMeasurements() {
       const rawU = uInput.value.trim();
       const value = rawVal === "" ? null : Number(rawVal) * prefixFactor(valPrefix);
       const given_u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
-      return {
+      out.push({
         quantity_id: row.dataset.quantityId,
         instrument_id: null,
         scale_id: null,
         values: value != null && Number.isFinite(value) ? [value] : [],
         given_u: given_u != null && Number.isFinite(given_u) ? given_u : null,
-      };
+      });
+      continue;
     }
-
-    if (row.dataset.isChrono === "1") {
-      const mode = row.querySelector(".chrono-mode")?.value ?? "consecutivo";
-      const chrono = state.chronometers.get(row.dataset.quantityId);
-      const all = chrono ? chrono.readings(mode) : [];
-      const dbg = state.seriesDebug.get(row.dataset.quantityId);
-      const values = dbg ? all.filter((_, i) => !dbg.discarded.has(i)) : all;
-      return {
-        quantity_id: row.dataset.quantityId,
-        instrument_id: row.querySelector(".measure-instrument")?.value || null,
-        scale_id: row.querySelector(".measure-scale")?.value || null,
-        values,
-        given_u: null,
-      };
-    }
-
-    const values = [...row.querySelectorAll(".replica")].reduce((acc, replica) => {
-      const raw = replica.querySelector(".measure-value").value.trim();
-      if (raw === "") return acc;
-      const factor = prefixFactor(replica.querySelector(".prefix-select").value);
-      const n = Number(raw) * factor;
-      if (Number.isFinite(n)) acc.push(n);
-      return acc;
-    }, []);
-    return {
+    out.push({
       quantity_id: row.dataset.quantityId,
-      instrument_id: row.querySelector(".measure-instrument").value || null,
-      scale_id: row.querySelector(".measure-scale").value || null,
-      values,
+      instrument_id: row.querySelector(".measure-instrument")?.value || null,
+      scale_id: row.querySelector(".measure-scale")?.value || null,
+      values: rowSeriesValues(row),
       given_u: null,
-    };
-  });
+    });
+  }
+  return out;
+}
+
+/** Lecturas numéricas de una fila de medición (cronómetro con descartes, o inputs de réplica). */
+function rowSeriesValues(row) {
+  if (row.dataset.isChrono === "1") {
+    const mode = row.querySelector(".chrono-mode")?.value ?? "consecutivo";
+    const key = chronoKeyFor(row);
+    const chrono = state.chronometers.get(key);
+    const all = chrono ? chrono.readings(mode) : [];
+    const dbg = state.seriesDebug.get(key);
+    return dbg ? all.filter((_, i) => !dbg.discarded.has(i)) : all;
+  }
+  return [...row.querySelectorAll(".replica")].reduce((acc, replica) => {
+    const raw = replica.querySelector(".measure-value").value.trim();
+    if (raw === "") return acc;
+    const factor = prefixFactor(replica.querySelector(".prefix-select").value);
+    const n = Number(raw) * factor;
+    if (Number.isFinite(n)) acc.push(n);
+    return acc;
+  }, []);
 }
 
 function collectMeta() {
   const meta = {};
   measurementFields.querySelectorAll('.measurement-row[data-is-chrono="1"]').forEach((row) => {
-    const qid = row.dataset.quantityId;
-    const dbg = state.seriesDebug.get(qid);
+    // Por operador, la clave de cronómetro/depuración es `qid#i` (ver chronoKeyFor).
+    const key = chronoKeyFor(row);
+    const dbg = state.seriesDebug.get(key);
     if (!dbg) return;
     const mode = row.querySelector(".chrono-mode")?.value ?? "consecutivo";
-    const chrono = state.chronometers.get(qid);
+    const chrono = state.chronometers.get(key);
     const all = chrono ? chrono.readings(mode) : [];
     const discarded = [...dbg.discarded].filter((i) => i < all.length).map((i) => all[i]);
     if (discarded.length > 0 || (dbg.bins && dbg.bins > 0)) {
-      meta[qid] = { bins: dbg.bins || null, discarded };
+      meta[key] = { bins: dbg.bins || null, discarded };
     }
   });
   return Object.keys(meta).length ? meta : null;
@@ -610,21 +661,33 @@ function editPrefillByQuantity() {
   for (const m of state.editPrefill ?? []) {
     let e = map.get(m.quantity_id);
     if (!e) {
-      e = { points: new Map(), instrument_id: m.instrument_id, scale_id: m.scale_id, value_u: m.value_u };
+      e = {
+        points: new Map(),
+        operators: new Map(),
+        instrument_id: m.instrument_id,
+        scale_id: m.scale_id,
+        value_u: m.value_u,
+      };
       map.set(m.quantity_id, e);
     }
     const pidx = m.point_index ?? 0;
     if (!e.points.has(pidx)) e.points.set(pidx, []);
     e.points.get(pidx).push(m.value);
+    const oidx = m.operator_index ?? 0;
+    if (!e.operators.has(oidx)) e.operators.set(oidx, []);
+    e.operators.get(oidx).push(m.value);
     if (m.value_u != null) e.value_u = m.value_u;
   }
-  // Normaliza a `pointGroups` (réplicas por punto, ordenadas por índice de punto) y `values`
-  // (lista plana, para el modo estadístico de un solo punto y para un valor por punto).
+  // Normaliza a `pointGroups` (réplicas por punto) y `operatorGroups` (réplicas por operador),
+  // ambas ordenadas por índice; `values` es la lista plana (estadístico de una sola serie).
   for (const e of map.values()) {
-    const indices = [...e.points.keys()].sort((a, b) => a - b);
-    e.pointGroups = indices.map((i) => e.points.get(i));
+    const pIdx = [...e.points.keys()].sort((a, b) => a - b);
+    e.pointGroups = pIdx.map((i) => e.points.get(i));
+    const oIdx = [...e.operators.keys()].sort((a, b) => a - b);
+    e.operatorGroups = oIdx.map((i) => e.operators.get(i));
     e.values = e.pointGroups.flat();
     delete e.points;
+    delete e.operators;
   }
   return map;
 }
@@ -668,33 +731,52 @@ export function applyPrefill() {
     return;
   }
 
-  measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
-    const e = byQ.get(row.dataset.quantityId);
+  // Motor D: magnitudes por operador → rellena cada bloque con la serie de ese operador.
+  measurementFields.querySelectorAll(".operator-quantity").forEach((groupEl) => {
+    const e = byQ.get(groupEl.dataset.quantityId);
     if (!e) return;
+    const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(
+      (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
+    );
+    blocks.forEach((row, i) => fillReplicaRow(row, e, e.operatorGroups[i] ?? []));
+  });
+
+  // Filas sueltas (compartidas o sin operadores).
+  const standalone = [...measurementFields.querySelectorAll(".measurement-row")].filter(
+    (row) => !row.closest(".operator-quantity")
+  );
+  for (const row of standalone) {
+    const e = byQ.get(row.dataset.quantityId);
+    if (!e) continue;
     if (row.dataset.isGiven === "1") {
       const v = row.querySelector(".measure-given-value");
       const u = row.querySelector(".measure-given-u");
       if (v) v.value = e.values[0] ?? "";
       if (u && e.value_u != null) u.value = e.value_u;
-      return;
+      continue;
     }
-    const inst = row.querySelector(".measure-instrument");
-    if (inst && e.instrument_id) {
-      inst.value = e.instrument_id;
-      populateScaleOptions(row);
-    }
-    const scale = row.querySelector(".measure-scale");
-    if (scale && e.scale_id) scale.value = e.scale_id;
-    const container = row.querySelector(".measure-values");
-    if (!container) return;
-    const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
-    while (container.querySelectorAll(".replica").length < e.values.length) {
-      container.insertAdjacentHTML("beforeend", renderReplicaInput(unit));
-    }
-    wireRemoveReplica(row);
-    container.querySelectorAll(".measure-value").forEach((input, i) => {
-      if (e.values[i] != null) input.value = e.values[i];
-    });
+    fillReplicaRow(row, e, e.values);
+  }
+}
+
+/** Rellena una fila de réplicas con `values`, restaurando instrumento/escala desde el prefill. */
+function fillReplicaRow(row, e, values) {
+  const inst = row.querySelector(".measure-instrument");
+  if (inst && e.instrument_id) {
+    inst.value = e.instrument_id;
+    populateScaleOptions(row);
+  }
+  const scale = row.querySelector(".measure-scale");
+  if (scale && e.scale_id) scale.value = e.scale_id;
+  const container = row.querySelector(".measure-values");
+  if (!container) return;
+  const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
+  while (container.querySelectorAll(".replica").length < values.length) {
+    container.insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+  }
+  wireRemoveReplica(row);
+  container.querySelectorAll(".measure-value").forEach((input, i) => {
+    if (values[i] != null) input.value = values[i];
   });
 }
 
