@@ -1270,7 +1270,7 @@ mod tests {
         for (i, m) in t_rows.iter().enumerate() {
             assert_eq!(m.point_index, i as i64);
             assert_eq!(m.replicate_index, 0);
-            assert_eq!(m.value, (i + 1) as f64);
+            assert!(close(m.value, (i + 1) as f64, 1e-9));
         }
 
         // t_med: réplicas por punto → point_index = punto, replicate_index = réplica.
@@ -1281,10 +1281,10 @@ mod tests {
         assert_eq!(tmed_rows.len(), 6); // 3 puntos x 2 réplicas
         assert!(tmed_rows
             .iter()
-            .any(|m| m.point_index == 0 && m.replicate_index == 1 && m.value == 4.2));
+            .any(|m| m.point_index == 0 && m.replicate_index == 1 && close(m.value, 4.2, 1e-9)));
         assert!(tmed_rows
             .iter()
-            .any(|m| m.point_index == 2 && m.replicate_index == 0 && m.value == 6.0));
+            .any(|m| m.point_index == 2 && m.replicate_index == 0 && close(m.value, 6.0, 1e-9)));
     }
 
     #[tokio::test]
