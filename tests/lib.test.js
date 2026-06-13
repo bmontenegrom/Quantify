@@ -413,13 +413,11 @@ test("histogram: null con vacío o bins<1; un valor -> bins=1; distribución uni
   assert.equal(one.counts[0], 1);
   assert.equal(one.width, 0);
 
-  // [0,1,2,3] en 2 bins: bin0=[0,1] -> 2, bin1=[2,3] -> 2.
+  // [0,1,2,3] en 2 bins: bin0=[0,2) → {0,1}=2, bin1=[2,4] → {2,3}=2.
   const h = histogram([0, 1, 2, 3], 2);
   assert.equal(h.bins, 2);
-  assert.equal(h.counts[0] + h.counts[1], 4);
+  assert.deepEqual(h.counts, [2, 2]);
   assert.equal(h.edges.length, 3);
-  // El máximo (3) debe caer en el último bin.
-  assert.equal(h.counts[1] >= 1, true);
 });
 
 test("normalCurve: vacía con std<=0 o rango nulo; steps+1 puntos si válida", () => {

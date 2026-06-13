@@ -32,6 +32,9 @@ pub struct ResultInput {
     pub unit: String,
     /// Expresión matemática usando los símbolos de las magnitudes de la práctica.
     pub formula: String,
+    /// Tolerancia máxima aceptable como |Δ%|. `None` = sin veredicto.
+    #[serde(default)]
+    pub tolerance: Option<f64>,
 }
 
 /// Definición completa de una práctica: tipo de análisis, magnitudes y mensurandos.
@@ -152,7 +155,7 @@ pub async fn update_result(
 ) -> anyhow::Result<Option<PracticeResult>> {
     let res = sqlx::query(
         "UPDATE practice_results \
-         SET symbol = ?2, name = ?3, unit = ?4, formula = ?5 \
+         SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6 \
          WHERE id = ?1",
     )
     .bind(result_id)
@@ -160,6 +163,7 @@ pub async fn update_result(
     .bind(input.name.trim())
     .bind(input.unit.trim())
     .bind(input.formula.trim())
+    .bind(input.tolerance)
     .execute(pool)
     .await?;
     if res.rows_affected() == 0 {
@@ -283,6 +287,7 @@ fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
         name: name.into(),
         unit: unit.into(),
         formula: formula.into(),
+        tolerance: None,
     }
 }
 
@@ -499,17 +504,22 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 /// Fija (o borra) la tolerancia porcentual de un mensurando derivado.
-/// `None` elimina el veredicto para ese mensurando. Devuelve `true` si existía.
+/// `None` elimina el veredicto para ese mensurando. Devuelve `true` si el mensurando
+/// existe y pertenece a `practice_id`.
 pub async fn set_result_tolerance(
     pool: &SqlitePool,
     result_id: &str,
+    practice_id: &str,
     tolerance: Option<f64>,
 ) -> anyhow::Result<bool> {
-    let result = sqlx::query("UPDATE practice_results SET tolerance = ?2 WHERE id = ?1")
-        .bind(result_id)
-        .bind(tolerance)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        "UPDATE practice_results SET tolerance = ?2 WHERE id = ?1 AND practice_id = ?3",
+    )
+    .bind(result_id)
+    .bind(tolerance)
+    .bind(practice_id)
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -599,8 +609,8 @@ async fn insert_result(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_results \
-         (id, practice_id, symbol, name, unit, formula, position) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         (id, practice_id, symbol, name, unit, formula, position, tolerance) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -609,6 +619,7 @@ async fn insert_result(
     .bind(input.unit.trim())
     .bind(input.formula.trim())
     .bind(position)
+    .bind(input.tolerance)
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -657,6 +668,7 @@ mod tests {
             name: "Area".into(),
             unit: "mm2".into(),
             formula: "l*a".into(),
+            tolerance: None,
         }
     }
 

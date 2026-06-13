@@ -273,7 +273,7 @@ function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
     if (!hasVerdicts) return "";
     if (r.verdict === "pass") return `<td class="verdict-pass">✓</td>`;
     if (r.verdict === "fail") return `<td class="verdict-fail">✗</td>`;
-    return `<td class="submission-meta">—</td>`;
+    return `<td class="verdict-none">—</td>`;
   };
   return `
     <h3>Comparación: tus cálculos vs automático</h3>

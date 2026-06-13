@@ -561,6 +561,7 @@ fn gate_analysis(
 ) -> db::SubmissionDetail {
     if analysis_hidden_for(&user.role, submission.results_visible_to_student) {
         submission.analysis = serde_json::Value::Null;
+        submission.result_tolerances.clear();
     }
     submission
 }
@@ -1359,7 +1360,7 @@ async fn set_result_tolerance(
             ))
         }
     };
-    if !practices::set_result_tolerance(&state.pool, &rid, tolerance).await? {
+    if !practices::set_result_tolerance(&state.pool, &rid, &_id, tolerance).await? {
         return Err(AppError::not_found("mensurando no encontrado"));
     }
     Ok(Json(Health { status: "ok" }))
@@ -1417,7 +1418,8 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Valida los campos de un mensurando derivado: símbolo, nombre, unidad y fórmula no vacíos.
+/// Valida los campos de un mensurando derivado: símbolo, nombre, unidad y fórmula no vacíos,
+/// y tolerancia no negativa si se proporciona.
 fn validate_result(input: &ResultInput) -> Result<(), AppError> {
     if input.symbol.trim().is_empty()
         || input.name.trim().is_empty()
@@ -1425,6 +1427,11 @@ fn validate_result(input: &ResultInput) -> Result<(), AppError> {
         || input.formula.trim().is_empty()
     {
         return Err(AppError::bad_request("datos de mensurando invalidos"));
+    }
+    if let Some(t) = input.tolerance {
+        if t < 0.0 {
+            return Err(AppError::bad_request("tolerancia no puede ser negativa"));
+        }
     }
     Ok(())
 }

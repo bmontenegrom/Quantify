@@ -425,10 +425,10 @@ async function deletePracticeQuantity(qid, practiceId) {
   }
 }
 
-/** Parsea el campo tolerancia del formulario: número positivo o null si vacío. */
+/** Parsea el campo tolerancia del formulario: número ≥ 0 o null si vacío/negativo. */
 function parseTolerance(raw) {
   const v = parseFloat(raw);
-  return isNaN(v) || raw.trim() === "" ? null : v;
+  return isNaN(v) || raw.trim() === "" || v < 0 ? null : v;
 }
 
 async function saveNewResult(event) {
@@ -437,13 +437,11 @@ async function saveNewResult(event) {
   const practiceId = form.querySelector('[name="practice_id"]').value;
   const raw = Object.fromEntries(new FormData(form).entries());
   try {
-    const created = await postJson(`/api/practices/${practiceId}/results`, {
+    await postJson(`/api/practices/${practiceId}/results`, {
       symbol: raw.symbol,
       name: raw.name,
       unit: raw.unit,
       formula: raw.formula,
-    });
-    await postJson(`/api/practices/${practiceId}/results/${created.id}/tolerance`, {
       tolerance: parseTolerance(raw.tolerance ?? ""),
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
@@ -468,8 +466,6 @@ async function saveEditResult(event) {
       name: raw.name,
       unit: raw.unit,
       formula: raw.formula,
-    });
-    await postJson(`/api/practices/${practiceId}/results/${rid}/tolerance`, {
       tolerance: parseTolerance(raw.tolerance ?? ""),
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);

@@ -1071,6 +1071,7 @@ textarea {
 
 .verdict-pass { color: var(--success, #2e7d32); font-weight: 600; }
 .verdict-fail { color: var(--danger);           font-weight: 600; }
+.verdict-none { color: var(--text-muted, #888); }
 
 .student-results-form input {
   width: 100%;
