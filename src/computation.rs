@@ -295,8 +295,23 @@ fn build_points(
         .map(|m| (m.quantity_id.as_str(), m))
         .collect();
 
-    // Cantidad de puntos = mínimo de réplicas entre las magnitudes (deben venir parejas).
-    let lengths: Vec<usize> = quantities
+    let x_tree = compile_formula(x_formula, &symbols)?;
+    let y_tree = compile_formula(y_formula, &symbols)?;
+
+    // Solo las magnitudes que aparecen en las fórmulas de eje condicionan los puntos. Las
+    // auxiliares (p. ej. un dato de cátedra usado en otra parte de la práctica, o una magnitud
+    // que no se grafica) se ignoran: no exigen mediciones ni arrastran el conteo de puntos.
+    let referenced: std::collections::HashSet<&str> = x_tree
+        .iter_variable_identifiers()
+        .chain(y_tree.iter_variable_identifiers())
+        .collect();
+    let axis_quantities: Vec<&PracticeQuantity> = quantities
+        .iter()
+        .filter(|q| referenced.contains(q.symbol.as_str()))
+        .collect();
+
+    // Cantidad de puntos = mínimo de réplicas entre las magnitudes de eje (deben venir parejas).
+    let lengths: Vec<usize> = axis_quantities
         .iter()
         .map(|q| by_quantity.get(q.id.as_str()).map_or(0, |m| m.values.len()))
         .collect();
@@ -311,12 +326,9 @@ fn build_points(
         anyhow::bail!("{too_few_msg}");
     }
 
-    let x_tree = compile_formula(x_formula, &symbols)?;
-    let y_tree = compile_formula(y_formula, &symbols)?;
-
     let mut points = Vec::with_capacity(n_points);
     for i in 0..n_points {
-        let bound: HashMap<&str, f64> = quantities
+        let bound: HashMap<&str, f64> = axis_quantities
             .iter()
             .filter_map(|q| {
                 by_quantity
@@ -1386,6 +1398,23 @@ mod tests {
         assert!(compute_curva(&quantities, "px", "py", true, &measurements).is_err());
     }
 
+    #[test]
+    fn build_points_ignores_quantities_not_in_axes() {
+        // 'aux' no aparece en las fórmulas de eje y no tiene mediciones: no debe bloquear ni
+        // arrastrar el conteo de puntos (regresión: antes el mínimo común la incluía y daba 0).
+        let quantities = vec![quantity("px"), quantity("py"), quantity("aux")];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[4.0, 5.0, 6.0]),
+            // 'aux' sin mediciones a propósito.
+        ];
+        let a = compute_curva(&quantities, "px", "py", false, &measurements).unwrap();
+        assert_eq!(
+            a.scatter.unwrap().points,
+            vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
+        );
+    }
+
     /// Mediciones reales para una magnitud sembrada, buscando su id por símbolo en la definición.
     fn measurement_for(
         def: &crate::practices::PracticeDefinition,
@@ -1422,11 +1451,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        // Todas las magnitudes deben traer la misma cantidad de puntos (build_points usa el
-        // mínimo común); L no se usa en los ejes pero igual necesita valores parejos.
+        // L es magnitud auxiliar (no está en los ejes T vs t_med): se omite a propósito y
+        // build_points debe ignorarla sin exigirle mediciones.
         let measurements = vec![
             measurement_for(&def, "T", &[1.0, 2.0, 3.0]),
-            measurement_for(&def, "L", &[1.0, 1.0, 1.0]),
             measurement_for(&def, "t_med", &[4.0, 5.0, 6.0]),
         ];
         let analysis = analyze(&pool, "p1-estadistica", &measurements)
