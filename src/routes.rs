@@ -4,7 +4,7 @@ use crate::{
     db::{self, AppState, NewSubmission, ReviewSubmission},
     error::AppError,
     instruments::{self, CatalogExport, CreateInstrument, ScaleInput, UpdateInstrument},
-    practices::{self, QuantityInput, ResultInput},
+    practices::{self, CurveInput, QuantityInput, ResultInput},
 };
 use axum::{
     extract::{Multipart, Path, Query, Request, State},
@@ -170,6 +170,12 @@ pub fn api_router(state: SharedState) -> Router {
             "/practices/{id}/results/{rid}",
             post(update_result).delete(delete_result),
         )
+        .route("/practices/{id}/curves", post(create_curve))
+        .route(
+            "/practices/{id}/curves/{cid}",
+            post(update_curve).delete(delete_curve),
+        )
+        .route("/practices/{id}/curves/{cid}/move", post(move_curve))
         .route(
             "/practices/{id}/results/{rid}/tolerance",
             post(set_result_tolerance),
@@ -1349,18 +1355,15 @@ async fn set_practice_analysis_kind(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// Cuerpo para definir las fórmulas de eje de una práctica de regresión o curva.
+/// Cuerpo para definir las fórmulas de eje del ajuste lineal de una práctica `regresion_lineal`.
 #[derive(Debug, Deserialize)]
 struct RegressionFormulasBody {
     x_formula: String,
     y_formula: String,
-    /// Eje x logarítmico en el gráfico (solo aplica a `curva`); por defecto `false`.
-    #[serde(default)]
-    x_log: bool,
 }
 
-/// `POST /api/practices/{id}/regression-formulas`: define las fórmulas de eje `x`/`y` y el flag
-/// `x_log` de una práctica de regresión o curva (docente/admin).
+/// `POST /api/practices/{id}/regression-formulas`: define las fórmulas de eje `x`/`y` del ajuste
+/// lineal de una práctica de regresión (docente/admin).
 async fn set_practice_regression_formulas(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -1368,14 +1371,8 @@ async fn set_practice_regression_formulas(
     Json(body): Json<RegressionFormulasBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    if !practices::set_regression_formulas(
-        &state.pool,
-        &id,
-        &body.x_formula,
-        &body.y_formula,
-        body.x_log,
-    )
-    .await?
+    if !practices::set_regression_formulas(&state.pool, &id, &body.x_formula, &body.y_formula)
+        .await?
     {
         return Err(AppError::not_found("practica no encontrada"));
     }
@@ -1438,6 +1435,81 @@ async fn delete_quantity(
     require_teacher(&state, &headers).await?;
     if !practices::delete_quantity(&state.pool, &qid).await? {
         return Err(AppError::not_found("magnitud no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// `POST /api/practices/{id}/curves`: agrega una curva a una práctica `curva` (docente/admin).
+async fn create_curve(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<CurveInput>,
+) -> Result<Json<practices::PracticeCurve>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_curve(&input)?;
+    Ok(Json(
+        practices::create_curve(&state.pool, &id, input).await?,
+    ))
+}
+
+/// `POST /api/practices/{id}/curves/{cid}`: actualiza una curva (docente/admin).
+async fn update_curve(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, cid)): Path<(String, String)>,
+    Json(input): Json<CurveInput>,
+) -> Result<Json<practices::PracticeCurve>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_curve(&input)?;
+    let updated = practices::update_curve(&state.pool, &id, &cid, input)
+        .await?
+        .ok_or_else(|| AppError::not_found("curva no encontrada"))?;
+    Ok(Json(updated))
+}
+
+/// Cuerpo para reordenar una curva: dirección del movimiento.
+#[derive(Debug, Deserialize)]
+struct MoveCurveBody {
+    /// `true` mueve la curva una posición hacia arriba; `false` (o ausente), hacia abajo.
+    #[serde(default)]
+    up: bool,
+}
+
+/// `POST /api/practices/{id}/curves/{cid}/move`: reordena una curva intercambiándola con la vecina
+/// (docente/admin). Si ya está en el extremo, no cambia nada.
+async fn move_curve(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, cid)): Path<(String, String)>,
+    Json(body): Json<MoveCurveBody>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::move_curve(&state.pool, &id, &cid, body.up).await? {
+        return Err(AppError::not_found("curva no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// Una curva necesita ambas fórmulas de eje (sin ellas no se puede graficar). Error 400 amigable.
+fn validate_curve(input: &CurveInput) -> Result<(), AppError> {
+    if input.x_formula.trim().is_empty() || input.y_formula.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "La curva necesita las formulas de ambos ejes (x e y).",
+        ));
+    }
+    Ok(())
+}
+
+/// `DELETE /api/practices/{id}/curves/{cid}`: elimina una curva (docente/admin).
+async fn delete_curve(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, cid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_curve(&state.pool, &id, &cid).await? {
+        return Err(AppError::not_found("curva no encontrada"));
     }
     Ok(Json(Health { status: "ok" }))
 }

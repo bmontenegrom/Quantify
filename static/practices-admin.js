@@ -63,7 +63,8 @@ export function renderPracticesPage() {
       <section class="panel workspace-panel">
         <h3>Tipo de análisis</h3>
         ${renderAnalysisKindForm(practice, def)}
-        ${def?.analysis_kind === "regresion_lineal" || def?.analysis_kind === "curva" ? renderRegressionFormulasForm(practice, def) : ""}
+        ${def?.analysis_kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
+        ${def?.analysis_kind === "curva" ? renderCurvesSection(practice, def) : ""}
       </section>
       <section class="panel workspace-panel">
         <h3>Nueva magnitud</h3>
@@ -90,6 +91,26 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("#practice-regression-form")?.addEventListener("submit", savePracticeRegressionFormulas);
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
+  practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
+
+  practiceWorkspace.querySelectorAll("[data-edit-curve]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingCurveId = state.editingCurveId === btn.dataset.cid ? null : btn.dataset.cid;
+      renderPracticesPage();
+    });
+  });
+  practiceWorkspace.querySelectorAll("[data-delete-curve]").forEach((btn) => {
+    btn.addEventListener("click", () => deletePracticeCurve(btn.dataset.cid, practice.id));
+  });
+  practiceWorkspace.querySelectorAll("[data-move-curve]").forEach((btn) => {
+    btn.addEventListener("click", () => movePracticeCurve(btn.dataset.cid, practice.id, btn.dataset.dir));
+  });
+  practiceWorkspace.querySelectorAll("[data-cancel-curve]").forEach((btn) => {
+    btn.addEventListener("click", () => { state.editingCurveId = null; renderPracticesPage(); });
+  });
+  practiceWorkspace.querySelectorAll("[data-edit-curve-form]").forEach((form) => {
+    form.addEventListener("submit", saveEditCurve);
+  });
 
   practiceWorkspace.querySelectorAll("[data-edit-quantity]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -184,27 +205,86 @@ function renderAnalysisKindForm(practice, def) {
 function renderRegressionFormulasForm(practice, def) {
   const x = escapeHtml(def?.x_formula ?? "");
   const y = escapeHtml(def?.y_formula ?? "");
-  const isCurva = def?.analysis_kind === "curva";
-  const slopeHint = isCurva
-    ? "Se grafican los puntos sin ajuste ni mensurandos derivados."
-    : "La pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code> en los mensurandos.";
-  const xLogField = isCurva
-    ? `<label class="detail-form-checkbox">
-        <input type="checkbox" name="x_log" ${def?.x_log ? "checked" : ""} />
-        Eje X logarítmico (barridos en frecuencia)
-      </label>`
-    : "";
   return `
     <form id="practice-regression-form" class="detail-form detail-form-grid">
       <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
       <label>Fórmula eje X <input name="x_formula" value="${x}" placeholder="2*pi*f" /></label>
       <label>Fórmula eje Y <input name="y_formula" value="${y}" placeholder="b / math::sqrt(a*a - b*b)" /></label>
-      ${xLogField}
-      <p class="submission-meta">Usá los símbolos de las magnitudes. Disponibles: <code>pi</code>, <code>e</code> y funciones <code>math::*</code> (p. ej. <code>math::sqrt</code>). ${slopeHint}</p>
+      <p class="submission-meta">Usá los símbolos de las magnitudes. Disponibles: <code>pi</code>, <code>e</code> y funciones <code>math::*</code> (p. ej. <code>math::sqrt</code>). La pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code> en los mensurandos.</p>
       <div class="detail-actions">
         <button type="submit">Guardar fórmulas</button>
       </div>
     </form>
+  `;
+}
+
+/// Gestión de curvas de una práctica `curva`: lista editable + alta. Una práctica de curva grafica
+/// las curvas de esta lista; sin curvas no hay nada para graficar.
+function renderCurvesSection(practice, def) {
+  return `
+    <h4>Curvas</h4>
+    <p class="submission-meta">Una práctica de curva grafica una o varias series sobre el mismo barrido (p. ej. dos curvas en Filtros). Se grafican los puntos sin ajuste ni mensurandos derivados.</p>
+    ${renderCurvesList(def, practice.id)}
+    <h4>Nueva curva</h4>
+    ${renderCurveForm(null, practice.id)}
+  `;
+}
+
+function renderCurveForm(curve, practiceId) {
+  const formId = curve ? "edit-curve-form" : "new-curve-form";
+  const formAttr = curve ? `data-edit-curve-form data-cid="${escapeHtml(curve.id)}"` : "";
+  const x = escapeHtml(curve?.x_formula ?? "");
+  const y = escapeHtml(curve?.y_formula ?? "");
+  return `
+    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
+      <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
+      ${curve ? `<input name="cid" type="hidden" value="${escapeHtml(curve.id)}" />` : ""}
+      <label>Fórmula eje X <input name="x_formula" value="${x}" required placeholder="math::log10(2*pi*f)" /></label>
+      <label>Fórmula eje Y <input name="y_formula" value="${y}" required placeholder="VR / Vg" /></label>
+      <label class="detail-form-checkbox">
+        <input type="checkbox" name="x_log" ${curve?.x_log ? "checked" : ""} />
+        Eje X logarítmico (barridos en frecuencia)
+      </label>
+      <div class="detail-actions">
+        <button type="submit">${curve ? "Guardar" : "Agregar"}</button>
+        ${curve ? `<button type="button" data-cancel-curve>Cancelar</button>` : ""}
+      </div>
+    </form>
+  `;
+}
+
+function renderCurvesList(def, practiceId) {
+  const curves = def?.curves ?? [];
+  if (curves.length === 0) return `<p class="submission-meta">Sin curvas en la lista.</p>`;
+
+  const rows = curves.flatMap((c, i) => {
+    const baseRow = `
+      <tr>
+        <td class="directory-primary"><strong>${i + 1}</strong></td>
+        <td><code>${escapeHtml(c.x_formula)}</code>${c.x_log ? ' <span class="submission-meta">(log)</span>' : ""}</td>
+        <td><code>${escapeHtml(c.y_formula)}</code></td>
+        <td class="directory-actions">
+          <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="up" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
+          <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="down" title="Bajar" ${i === curves.length - 1 ? "disabled" : ""}>▼</button>
+          <button type="button" data-edit-curve data-cid="${escapeHtml(c.id)}">${state.editingCurveId === c.id ? "Cerrar" : "Editar"}</button>
+          <button type="button" data-delete-curve data-cid="${escapeHtml(c.id)}">Eliminar</button>
+        </td>
+      </tr>`;
+    const editRow = state.editingCurveId === c.id
+      ? `<tr><td colspan="4" class="scale-edit-cell">${renderCurveForm(c, practiceId)}</td></tr>`
+      : "";
+    return [baseRow, editRow];
+  });
+
+  return `
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table">
+        <thead>
+          <tr><th>#</th><th>Eje X</th><th>Eje Y</th><th>Acciones</th></tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -336,6 +416,7 @@ export async function openPracticeWorkspace(practiceId) {
   state.practiceActionStatus = "";
   state.editingQuantityId = null;
   state.editingResultId = null;
+  state.editingCurveId = null;
   state.practiceDefinition = null;
   renderPracticesPage();
   selectView("practices");
@@ -353,6 +434,7 @@ export function closePracticeWorkspace() {
   state.practiceActionStatus = "";
   state.editingQuantityId = null;
   state.editingResultId = null;
+  state.editingCurveId = null;
   renderPracticesPage();
 }
 
@@ -376,12 +458,10 @@ async function savePracticeKind(event) {
 async function savePracticeRegressionFormulas(event) {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
-  const xLog = event.currentTarget.querySelector('[name="x_log"]')?.checked ?? false;
   try {
     await postJson(`/api/practices/${payload.practice_id}/regression-formulas`, {
       x_formula: payload.x_formula ?? "",
       y_formula: payload.y_formula ?? "",
-      x_log: xLog,
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
     state.practiceActionStatus = "Fórmulas de ajuste guardadas";
@@ -448,6 +528,73 @@ async function deletePracticeQuantity(qid, practiceId) {
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingQuantityId = null;
     state.practiceActionStatus = "Magnitud eliminada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+function curvePayloadFromForm(form) {
+  const raw = Object.fromEntries(new FormData(form).entries());
+  return {
+    x_formula: raw.x_formula ?? "",
+    y_formula: raw.y_formula ?? "",
+    x_log: "x_log" in raw,
+  };
+}
+
+async function saveNewCurve(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  try {
+    await postJson(`/api/practices/${practiceId}/curves`, curvePayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingCurveId = null;
+    state.practiceActionStatus = "Curva agregada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function saveEditCurve(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  const cid = form.querySelector('[name="cid"]').value;
+  try {
+    await postJson(`/api/practices/${practiceId}/curves/${cid}`, curvePayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingCurveId = null;
+    state.practiceActionStatus = "Curva actualizada";
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function movePracticeCurve(cid, practiceId, dir) {
+  try {
+    await postJson(`/api/practices/${practiceId}/curves/${cid}/move`, { up: dir === "up" });
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function deletePracticeCurve(cid, practiceId) {
+  if (!window.confirm("¿Eliminar esta curva? Esta accion no se puede deshacer.")) return;
+  try {
+    await deleteJson(`/api/practices/${practiceId}/curves/${cid}`);
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editingCurveId = null;
+    state.practiceActionStatus = "Curva eliminada";
     renderPracticesPage();
   } catch (error) {
     state.practiceActionStatus = error.message;

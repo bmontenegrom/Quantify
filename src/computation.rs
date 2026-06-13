@@ -121,15 +121,23 @@ pub struct ScatterResult {
 }
 
 /// Resultado completo del cálculo de una entrega por formulario. Según el `analysis_kind` se
-/// llena un camino: `quantities` (estadístico), `regression` (ajuste lineal) o `scatter` (curva).
-/// `derived` y `warnings` aplican a los caminos que correspondan.
+/// llena un camino: `quantities` (estadístico), `regression` (ajuste lineal) o `scatters` (curva:
+/// una o varias curvas sobre el mismo barrido). `derived` y `warnings` aplican a los caminos que
+/// correspondan.
 #[derive(Debug, Serialize)]
 pub struct FormAnalysis {
     pub quantities: Vec<QuantityComputation>,
     pub regression: Option<RegressionResult>,
-    pub scatter: Option<ScatterResult>,
+    pub scatters: Vec<ScatterResult>,
     pub derived: Vec<DerivedComputation>,
     pub warnings: Vec<String>,
+}
+
+/// Especificación de una curva a graficar: par de fórmulas de eje y eje x logarítmico opcional.
+pub struct CurveSpec<'a> {
+    pub x_formula: &'a str,
+    pub y_formula: &'a str,
+    pub x_log: bool,
 }
 
 /// Convierte una escala del catálogo ([`InstrumentScale`]) en la especificación que entiende
@@ -295,7 +303,7 @@ pub fn compute(
     Ok(FormAnalysis {
         quantities: computed,
         regression: None,
-        scatter: None,
+        scatters: Vec::new(),
         derived,
         warnings,
     })
@@ -423,43 +431,55 @@ pub fn compute_regresion(
             x_label: x_formula.to_string(),
             y_label: y_formula.to_string(),
         }),
-        scatter: None,
+        scatters: Vec::new(),
         derived,
         warnings,
     })
 }
 
-/// Calcula el [`FormAnalysis`] de una práctica `curva`: empareja las mediciones por punto y
-/// evalúa las fórmulas de eje `x_formula`/`y_formula`, produciendo una serie de puntos **sin
-/// ajuste** (scatter + tabla). No deriva mensurandos. `x_log` marca eje x logarítmico.
+/// Calcula el [`FormAnalysis`] de una práctica `curva`: para cada curva empareja las mediciones
+/// por punto y evalúa su par de fórmulas de eje, produciendo una serie de puntos **sin ajuste**
+/// (scatter + tabla) en `scatters`. No deriva mensurandos. Todas las curvas comparten el mismo
+/// barrido de mediciones; una `x_log` marca eje x logarítmico en esa curva.
 pub fn compute_curva(
     quantities: &[PracticeQuantity],
-    x_formula: &str,
-    y_formula: &str,
-    x_log: bool,
+    curves: &[CurveSpec],
     measurements: &[MeasurementInput],
 ) -> anyhow::Result<FormAnalysis> {
-    let (points, warnings) = build_points(
-        quantities,
-        x_formula,
-        y_formula,
-        measurements,
-        "se necesitan al menos 2 puntos para graficar la curva",
-    )?;
+    let mut scatters = Vec::with_capacity(curves.len());
+    let mut warnings = Vec::new();
+    for curve in curves {
+        let (points, mut curve_warnings) = build_points(
+            quantities,
+            curve.x_formula,
+            curve.y_formula,
+            measurements,
+            "se necesitan al menos 2 puntos para graficar la curva",
+        )?;
 
-    if x_log && points.iter().any(|(x, _)| *x <= 0.0) {
-        anyhow::bail!("el eje x es logaritmico pero un punto tiene x <= 0");
+        if curve.x_log && points.iter().any(|(x, _)| *x <= 0.0) {
+            anyhow::bail!("el eje x es logaritmico pero un punto tiene x <= 0");
+        }
+
+        scatters.push(ScatterResult {
+            points,
+            x_label: curve.x_formula.to_string(),
+            y_label: curve.y_formula.to_string(),
+            x_log: curve.x_log,
+        });
+        // Varias curvas comparten el mismo barrido: evita repetir el mismo aviso (p. ej. el mismo
+        // punto no finito) una vez por curva.
+        for w in curve_warnings.drain(..) {
+            if !warnings.contains(&w) {
+                warnings.push(w);
+            }
+        }
     }
 
     Ok(FormAnalysis {
         quantities: Vec::new(),
         regression: None,
-        scatter: Some(ScatterResult {
-            points,
-            x_label: x_formula.to_string(),
-            y_label: y_formula.to_string(),
-            x_log,
-        }),
+        scatters,
         derived: Vec::new(),
         warnings,
     })
@@ -584,23 +604,21 @@ pub async fn analyze(
         );
     }
 
-    // Camino de curva (scatter sin ajuste): también requiere las fórmulas de eje.
+    // Camino de curva (scatter sin ajuste): una o varias curvas sobre el mismo barrido (Motor B).
     if definition.analysis_kind.as_deref() == Some("curva") {
-        let (Some(x_formula), Some(y_formula)) = (
-            definition.x_formula.as_deref(),
-            definition.y_formula.as_deref(),
-        ) else {
-            anyhow::bail!(
-                "la practica es de curva pero no tiene definidas las formulas de los ejes"
-            );
-        };
-        return compute_curva(
-            &definition.quantities,
-            x_formula,
-            y_formula,
-            definition.x_log,
-            measurements,
-        );
+        if definition.curves.is_empty() {
+            anyhow::bail!("la practica es de curva pero no tiene curvas definidas");
+        }
+        let curves: Vec<CurveSpec> = definition
+            .curves
+            .iter()
+            .map(|c| CurveSpec {
+                x_formula: &c.x_formula,
+                y_formula: &c.y_formula,
+                x_log: c.x_log,
+            })
+            .collect();
+        return compute_curva(&definition.quantities, &curves, measurements);
     }
 
     compute(
@@ -989,6 +1007,14 @@ mod tests {
         }
     }
 
+    fn curve<'a>(x_formula: &'a str, y_formula: &'a str, x_log: bool) -> CurveSpec<'a> {
+        CurveSpec {
+            x_formula,
+            y_formula,
+            x_log,
+        }
+    }
+
     fn fab_scale() -> InstrumentScale {
         InstrumentScale {
             id: "s1".into(),
@@ -1241,9 +1267,17 @@ mod tests {
         crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
             .await
             .unwrap();
-        crate::practices::set_regression_formulas(&pool, "p1-estadistica", "T", "t_med", false)
-            .await
-            .unwrap();
+        crate::practices::create_curve(
+            &pool,
+            "p1-estadistica",
+            crate::practices::CurveInput {
+                x_formula: "T".into(),
+                y_formula: "t_med".into(),
+                x_log: false,
+            },
+        )
+        .await
+        .unwrap();
         let def = crate::practices::definition(&pool, "p1-estadistica")
             .await
             .unwrap()
@@ -1343,9 +1377,17 @@ mod tests {
         crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
             .await
             .unwrap();
-        crate::practices::set_regression_formulas(&pool, "p1-estadistica", "T", "t_med", false)
-            .await
-            .unwrap();
+        crate::practices::create_curve(
+            &pool,
+            "p1-estadistica",
+            crate::practices::CurveInput {
+                x_formula: "T".into(),
+                y_formula: "t_med".into(),
+                x_log: false,
+            },
+        )
+        .await
+        .unwrap();
         let def = crate::practices::definition(&pool, "p1-estadistica")
             .await
             .unwrap()
@@ -1406,7 +1448,7 @@ mod tests {
         }
 
         // El motor promedia con el n real de cada punto: la curva usa (T, media de réplicas).
-        let points = detail.analysis["scatter"]["points"].as_array().unwrap();
+        let points = detail.analysis["scatters"][0]["points"].as_array().unwrap();
         assert_eq!(points.len(), 3);
         let y = |i: usize| points[i][1].as_f64().unwrap();
         assert!(close(y(0), 4.0, 1e-9));
@@ -1649,10 +1691,11 @@ mod tests {
             measurement("px", &[1.0, 2.0, 3.0]),
             measurement("py", &[4.0, 9.0, 16.0]),
         ];
-        let a = compute_curva(&quantities, "px", "py", false, &measurements).unwrap();
+        let a = compute_curva(&quantities, &[curve("px", "py", false)], &measurements).unwrap();
         assert!(a.regression.is_none());
         assert!(a.derived.is_empty());
-        let scatter = a.scatter.unwrap();
+        assert_eq!(a.scatters.len(), 1);
+        let scatter = &a.scatters[0];
         assert_eq!(scatter.points, vec![(1.0, 4.0), (2.0, 9.0), (3.0, 16.0)]);
         assert_eq!(scatter.x_label, "px");
         assert_eq!(scatter.y_label, "py");
@@ -1660,10 +1703,37 @@ mod tests {
     }
 
     #[test]
+    fn compute_curva_builds_one_scatter_per_curve() {
+        // Motor B: varias curvas sobre el mismo barrido producen una entrada en `scatters` cada una.
+        let quantities = vec![quantity("px"), quantity("py")];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[4.0, 9.0, 16.0]),
+        ];
+        let a = compute_curva(
+            &quantities,
+            &[curve("px", "py", false), curve("py", "px", false)],
+            &measurements,
+        )
+        .unwrap();
+        assert_eq!(a.scatters.len(), 2);
+        assert_eq!(
+            a.scatters[0].points,
+            vec![(1.0, 4.0), (2.0, 9.0), (3.0, 16.0)]
+        );
+        assert_eq!(a.scatters[0].x_label, "px");
+        assert_eq!(
+            a.scatters[1].points,
+            vec![(4.0, 1.0), (9.0, 2.0), (16.0, 3.0)]
+        );
+        assert_eq!(a.scatters[1].x_label, "py");
+    }
+
+    #[test]
     fn compute_curva_needs_at_least_two_points() {
         let quantities = vec![quantity("px"), quantity("py")];
         let measurements = vec![measurement("px", &[1.0]), measurement("py", &[2.0])];
-        assert!(compute_curva(&quantities, "px", "py", false, &measurements).is_err());
+        assert!(compute_curva(&quantities, &[curve("px", "py", false)], &measurements).is_err());
     }
 
     #[test]
@@ -1674,7 +1744,7 @@ mod tests {
             measurement("px", &[0.0, 10.0]),
             measurement("py", &[1.0, 2.0]),
         ];
-        assert!(compute_curva(&quantities, "px", "py", true, &measurements).is_err());
+        assert!(compute_curva(&quantities, &[curve("px", "py", true)], &measurements).is_err());
     }
 
     #[test]
@@ -1687,9 +1757,9 @@ mod tests {
             measurement("py", &[4.0, 5.0, 6.0]),
             // 'aux' sin mediciones a propósito.
         ];
-        let a = compute_curva(&quantities, "px", "py", false, &measurements).unwrap();
+        let a = compute_curva(&quantities, &[curve("px", "py", false)], &measurements).unwrap();
         assert_eq!(
-            a.scatter.unwrap().points,
+            a.scatters[0].points,
             vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
         );
     }
@@ -1747,9 +1817,17 @@ mod tests {
         crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
             .await
             .unwrap();
-        crate::practices::set_regression_formulas(&pool, "p1-estadistica", "T", "t_med", false)
-            .await
-            .unwrap();
+        crate::practices::create_curve(
+            &pool,
+            "p1-estadistica",
+            crate::practices::CurveInput {
+                x_formula: "T".into(),
+                y_formula: "t_med".into(),
+                x_log: false,
+            },
+        )
+        .await
+        .unwrap();
         let def = crate::practices::definition(&pool, "p1-estadistica")
             .await
             .unwrap()
@@ -1765,17 +1843,75 @@ mod tests {
             .unwrap();
         assert!(analysis.regression.is_none());
         assert!(analysis.derived.is_empty());
-        let scatter = analysis.scatter.expect("la curva debe producir scatter");
-        assert_eq!(scatter.points, vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]);
+        // Una única curva en la lista → un scatter sin ajuste ni mensurandos.
+        assert_eq!(analysis.scatters.len(), 1);
+        assert_eq!(
+            analysis.scatters[0].points,
+            vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
+        );
     }
 
     #[tokio::test]
-    async fn analyze_curva_without_formulas_errors() {
+    async fn analyze_curva_graphs_each_curve_in_the_list() {
+        // Una práctica `curva` grafica una entrada en `scatters` por cada curva de la lista.
         let (pool, _dir) = setup().await;
         crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
             .await
             .unwrap();
-        // Sin fórmulas de eje, el dispatcher debe fallar con un error claro (no entrar al cálculo).
+        crate::practices::create_curve(
+            &pool,
+            "p1-estadistica",
+            crate::practices::CurveInput {
+                x_formula: "T".into(),
+                y_formula: "t_med".into(),
+                x_log: false,
+            },
+        )
+        .await
+        .unwrap();
+        crate::practices::create_curve(
+            &pool,
+            "p1-estadistica",
+            crate::practices::CurveInput {
+                x_formula: "t_med".into(),
+                y_formula: "T".into(),
+                x_log: false,
+            },
+        )
+        .await
+        .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let measurements = vec![
+            measurement_for(&def, "T", &[1.0, 2.0, 3.0]),
+            measurement_for(&def, "t_med", &[4.0, 5.0, 6.0]),
+        ];
+        let analysis = analyze(&pool, "p1-estadistica", &measurements)
+            .await
+            .unwrap();
+        assert_eq!(analysis.scatters.len(), 2);
+        assert_eq!(analysis.scatters[0].x_label, "T");
+        assert_eq!(analysis.scatters[0].y_label, "t_med");
+        assert_eq!(
+            analysis.scatters[0].points,
+            vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
+        );
+        assert_eq!(analysis.scatters[1].x_label, "t_med");
+        assert_eq!(
+            analysis.scatters[1].points,
+            vec![(4.0, 1.0), (5.0, 2.0), (6.0, 3.0)]
+        );
+    }
+
+    #[tokio::test]
+    async fn analyze_curva_without_curves_errors() {
+        let (pool, _dir) = setup().await;
+        crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+            .await
+            .unwrap();
+        // Sin curvas definidas, el dispatcher debe fallar con un error claro (no entrar al cálculo).
         let result = analyze(&pool, "p1-estadistica", &[]).await;
         assert!(result.is_err());
     }

@@ -480,11 +480,26 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
     add_column_if_missing(pool, "users", "default_group_id", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
-    // Fórmulas de eje (x, y) por punto, para prácticas `regresion_lineal` y `curva`.
+    // Fórmulas de eje (x, y) del ajuste lineal, para prácticas `regresion_lineal`.
     add_column_if_missing(pool, "practices", "x_formula", "TEXT").await?;
     add_column_if_missing(pool, "practices", "y_formula", "TEXT").await?;
-    // Eje x logarítmico en el gráfico de dispersión (solo `curva`; útil para barridos en frecuencia).
-    add_column_if_missing(pool, "practices", "x_log", "INTEGER").await?;
+
+    // Motor B (Fase 15): una práctica `curva` define una o varias curvas sobre el mismo barrido,
+    // cada una con su par de fórmulas de eje y su flag de eje x logarítmico (p. ej. dos en Filtros).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_curves (
+            id TEXT PRIMARY KEY,
+            practice_id TEXT NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL DEFAULT 0,
+            x_formula TEXT NOT NULL,
+            y_formula TEXT NOT NULL,
+            x_log INTEGER NOT NULL DEFAULT 0
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         r#"
