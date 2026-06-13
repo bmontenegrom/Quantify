@@ -16,10 +16,16 @@ Del balance de fuerzas sobre la esfera realizado a través de la Ley de Stokes s
 ecuación de velocidad en función del tiempo, la cual se utiliza para calcular el tiempo en
 que demora la esfera en alcanzar la velocidad límite según:
 
-𝑣(cid:3039)(cid:3036)(cid:3040)(cid:3036)(cid:3047)(cid:3032) = (cid:3435)𝜌(cid:3032)(cid:3046)(cid:3033)(cid:3032)(cid:3045)(cid:3028) − 𝜌(cid:3033)(cid:3039)(cid:3048)(cid:3036)(cid:3031)(cid:3042)(cid:3439)
+<!-- Ecuación de Stokes (limpiada a mano; el PDF original la exportó con artefactos `(cid:...)`). -->
 
-2𝑔𝑅(cid:2870)
-9𝜇
+```
+v_lím = (ρ_esfera − ρ_fluido) · 2·g·R² / (9·μ)
+```
+
+donde `v_lím` es la velocidad límite, `R` el radio de la esfera, `g` la gravedad, `ρ_esfera` y
+`ρ_fluido` las densidades de la esfera y del fluido, y `μ` la viscosidad. De aquí, graficando
+`v_lím` vs `R²` la pendiente es `(ρ_esfera − ρ_fluido)·2·g/(9·μ)`, de donde `μ = (ρ_esfera −
+ρ_fluido)·2·g / (9·pendiente)`.
 
 Esta ecuación permite relacionar parámetros fácilmente medibles (vlím, Resfera, ρfluido, ρesfera
 y g) con la viscosidad, mediante una determinación con esferas de radio único o varios
