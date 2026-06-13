@@ -1,6 +1,6 @@
 import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
-import { fetchJson, postJson, errorText } from "./api.js";
+import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
 import { escapeHtml, analysisKindLabel } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -413,8 +413,7 @@ async function saveEditQuantity(event) {
 async function deletePracticeQuantity(qid, practiceId) {
   if (!window.confirm("¿Eliminar esta magnitud? Esta accion no se puede deshacer.")) return;
   try {
-    const response = await fetch(`/api/practices/${practiceId}/quantities/${qid}`, { method: "DELETE" });
-    if (!response.ok) throw new Error(await errorText(response));
+    await deleteJson(`/api/practices/${practiceId}/quantities/${qid}`);
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingQuantityId = null;
     state.practiceActionStatus = "Magnitud eliminada";
@@ -481,8 +480,7 @@ async function saveEditResult(event) {
 async function deletePracticeResult(rid, practiceId) {
   if (!window.confirm("¿Eliminar este mensurando? Esta accion no se puede deshacer.")) return;
   try {
-    const response = await fetch(`/api/practices/${practiceId}/results/${rid}`, { method: "DELETE" });
-    if (!response.ok) throw new Error(await errorText(response));
+    await deleteJson(`/api/practices/${practiceId}/results/${rid}`);
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingResultId = null;
     state.practiceActionStatus = "Mensurando eliminado";

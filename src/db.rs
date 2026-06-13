@@ -2,12 +2,12 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rand_core::OsRng;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Row, SqlitePool};
-use std::{env, path::PathBuf};
+use std::{collections::HashMap, env, path::PathBuf, sync::Mutex};
 use uuid::Uuid;
 
 pub use crate::courses::*;
@@ -15,10 +15,27 @@ pub use crate::sessions::*;
 pub use crate::submissions::*;
 pub use crate::users::*;
 
+/// Registro de intentos fallidos de login por email (para rate-limiting).
+#[derive(Debug, Default)]
+pub struct AttemptInfo {
+    /// Número de intentos fallidos consecutivos desde el último éxito.
+    pub count: u8,
+    /// Si está seteado, no se permiten logins hasta este instante.
+    pub blocked_until: Option<DateTime<Utc>>,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub upload_dir: PathBuf,
+    /// Clave secreta para derivar los tokens CSRF (SHA-256 del token de sesión).
+    /// Se lee de `APP_SECRET_KEY` o se genera aleatoriamente al arranque.
+    pub secret_key: String,
+    /// Si es `true`, la cookie de sesión incluye el flag `Secure` (requerido con TLS).
+    /// Se activa con `APP_SECURE_COOKIES=true`.
+    pub secure_cookies: bool,
+    /// Mapa email → intentos de login fallidos (rate-limiting en memoria).
+    pub login_attempts: std::sync::Arc<Mutex<HashMap<String, AttemptInfo>>>,
 }
 
 #[derive(Debug, Serialize, FromRow)]

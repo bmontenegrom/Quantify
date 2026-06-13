@@ -7,16 +7,82 @@ use crate::{
     practices::{self, QuantityInput, ResultInput},
 };
 use axum::{
-    extract::{Multipart, Path, Query, State},
-    http::{header, HeaderMap, HeaderValue},
-    response::IntoResponse,
+    extract::{Multipart, Path, Query, Request, State},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 type SharedState = Arc<AppState>;
+
+// ── CSRF ──────────────────────────────────────────────────────────────────────
+
+/// Deriva el token CSRF de un token de sesión usando SHA-256(secret + ":" + session_token).
+/// Stateless: no requiere consulta a la base de datos.
+pub fn compute_csrf(session_token: &str, secret_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(secret_key.as_bytes());
+    hasher.update(b":");
+    hasher.update(session_token.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// Middleware que valida el token CSRF en todas las solicitudes mutantes (POST/PUT/PATCH/DELETE)
+/// excepto `POST /api/auth/login` (que no tiene sesión aún) y `POST /api/auth/logout`
+/// (que no necesita protección: el daño de un logout forzado es mínimo y reversible).
+pub async fn csrf_middleware(
+    State(state): State<SharedState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = request.method();
+    let path = request.uri().path();
+
+    let needs_csrf = matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    ) && path != "/api/auth/login"
+        && path != "/api/auth/logout";
+
+    if !needs_csrf {
+        return next.run(request).await;
+    }
+
+    let session_tok = request
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| {
+            s.split(';')
+                .filter_map(|c| c.trim().split_once('='))
+                .find_map(|(k, v)| (k == "quantify_session").then(|| v.to_string()))
+        });
+
+    let csrf_header = request
+        .headers()
+        .get("x-csrf-token")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+
+    match (session_tok, csrf_header) {
+        (Some(tok), Some(csrf)) if csrf == compute_csrf(&tok, &state.secret_key) => {
+            next.run(request).await
+        }
+        _ => (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "token CSRF inválido o ausente" })),
+        )
+            .into_response(),
+    }
+}
+
+// ── Router ────────────────────────────────────────────────────────────────────
 
 /// Construye el router de la API bajo `/api`, registrando todas las rutas y el estado compartido.
 pub fn api_router(state: SharedState) -> Router {
@@ -119,6 +185,10 @@ pub fn api_router(state: SharedState) -> Router {
             post(remove_submission_member),
         )
         .route("/submissions/{id}/report", post(update_report_meta))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            csrf_middleware,
+        ))
         .with_state(state)
 }
 
@@ -133,20 +203,72 @@ async fn health() -> Json<Health> {
 }
 
 /// `POST /api/auth/login`: valida credenciales y, si son correctas, setea la cookie de sesión.
+/// Aplica rate-limiting: bloquea 15 minutos tras 5 intentos fallidos consecutivos por email.
 async fn login(
     State(state): State<SharedState>,
     Json(request): Json<db::LoginRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let Some((token, auth_user)) = db::login(&state.pool, request).await? else {
+    let email_key = request
+        .email
+        .as_deref()
+        .or(request.username.as_deref())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+
+    // Verificar rate-limit antes de consultar la BD.
+    {
+        let attempts = state
+            .login_attempts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(info) = attempts.get(&email_key) {
+            if let Some(until) = info.blocked_until {
+                if until > Utc::now() {
+                    return Err(AppError::bad_request(
+                        "demasiados intentos fallidos, esperá 15 minutos",
+                    ));
+                }
+            }
+        }
+    }
+
+    let result = db::login(&state.pool, request).await?;
+
+    // Actualizar contadores según el resultado.
+    {
+        let mut attempts = state
+            .login_attempts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match &result {
+            Some(_) => {
+                attempts.remove(&email_key);
+            }
+            None => {
+                let info = attempts.entry(email_key.clone()).or_default();
+                info.count = info.count.saturating_add(1);
+                if info.count >= 5 {
+                    info.blocked_until = Some(Utc::now() + chrono::Duration::minutes(15));
+                }
+            }
+        }
+    }
+
+    let Some((token, auth_user)) = result else {
         return Err(AppError::unauthorized("email o contrasena invalidos"));
     };
     let user = db::me_user(&state.pool, &auth_user.id)
         .await?
         .ok_or_else(|| AppError::not_found("usuario no encontrado"))?;
 
+    let csrf_token = compute_csrf(&token, &state.secret_key);
     let mut headers = HeaderMap::new();
-    headers.insert(header::SET_COOKIE, session_cookie(&token, 12 * 60 * 60));
-    Ok((headers, Json(db::LoginResponse { user })))
+    headers.insert(
+        header::SET_COOKIE,
+        session_cookie(&token, 12 * 60 * 60, state.secure_cookies),
+    );
+    Ok((headers, Json(db::LoginResponse { user, csrf_token })))
 }
 
 /// `POST /api/auth/logout`: elimina la sesión actual y limpia la cookie.
@@ -159,20 +281,26 @@ async fn logout(
     }
 
     let mut response_headers = HeaderMap::new();
-    response_headers.insert(header::SET_COOKIE, session_cookie("", 0));
+    response_headers.insert(
+        header::SET_COOKIE,
+        session_cookie("", 0, state.secure_cookies),
+    );
     Ok((response_headers, Json(Health { status: "ok" })))
 }
 
 /// `GET /api/auth/me`: devuelve el usuario autenticado con sus defaults de perfil.
+/// Incluye `csrf_token` para que el frontend pueda reconstituirlo tras un reload sin re-login.
 async fn me(
     State(state): State<SharedState>,
     headers: HeaderMap,
 ) -> Result<Json<db::LoginResponse>, AppError> {
     let auth_user = current_user(&state, &headers).await?;
+    let token = session_token(&headers).unwrap_or_default();
     let user = db::me_user(&state.pool, &auth_user.id)
         .await?
         .ok_or_else(|| AppError::not_found("usuario no encontrado"))?;
-    Ok(Json(db::LoginResponse { user }))
+    let csrf_token = compute_csrf(&token, &state.secret_key);
+    Ok(Json(db::LoginResponse { user, csrf_token }))
 }
 
 /// `POST /api/auth/password`: cambia la contraseña del usuario actual validando la actual.
@@ -1557,9 +1685,11 @@ fn session_token(headers: &HeaderMap) -> Option<String> {
 }
 
 /// Construye el header `Set-Cookie` de sesión (HttpOnly, SameSite=Lax) con el token y su vigencia.
-fn session_cookie(token: &str, max_age_seconds: i64) -> HeaderValue {
+/// El flag `Secure` se agrega solo cuando `secure` es `true` (deploy con TLS).
+fn session_cookie(token: &str, max_age_seconds: i64, secure: bool) -> HeaderValue {
+    let secure_flag = if secure { "; Secure" } else { "" };
     let value = format!(
-        "quantify_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_seconds}"
+        "quantify_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_seconds}{secure_flag}"
     );
     HeaderValue::from_str(&value).expect("valid cookie header")
 }
@@ -1680,5 +1810,34 @@ mod tests {
         assert!(validate_symbol_not_reserved("T").is_ok());
         assert!(validate_symbol_not_reserved("tau").is_ok());
         assert!(validate_symbol_not_reserved("V_g").is_ok());
+    }
+
+    #[test]
+    fn compute_csrf_is_deterministic() {
+        let t1 = compute_csrf("token-abc", "secreto");
+        let t2 = compute_csrf("token-abc", "secreto");
+        assert_eq!(t1, t2);
+    }
+
+    #[test]
+    fn compute_csrf_changes_with_different_secret() {
+        let t1 = compute_csrf("token-abc", "secreto-a");
+        let t2 = compute_csrf("token-abc", "secreto-b");
+        assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn compute_csrf_changes_with_different_session_token() {
+        let t1 = compute_csrf("token-abc", "secreto");
+        let t2 = compute_csrf("token-xyz", "secreto");
+        assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn compute_csrf_output_is_valid_hex() {
+        let token = compute_csrf("cualquier-sesion", "clave-secreta");
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+        // SHA-256 produce 32 bytes = 64 caracteres hexadecimales.
+        assert_eq!(token.len(), 64);
     }
 }
