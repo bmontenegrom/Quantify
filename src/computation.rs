@@ -863,6 +863,12 @@ pub fn compute_regresion(
         let tree = compile_formula(&agg.formula, &agg_allowed)?;
         let bound: HashMap<&str, f64> = agg_values.iter().map(|(k, v)| (k.as_str(), *v)).collect();
         let value = eval_compiled(&tree, &bound);
+        if !value.is_finite() {
+            warnings.push(format!(
+                "El mensurando agregado \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
+                agg.name, agg.symbol, agg.formula
+            ));
+        }
         agg_values.insert(agg.symbol.clone(), value);
         agg_allowed.push(agg.symbol.clone());
         aggregates_out.push(AggregateComputation {
@@ -2598,6 +2604,46 @@ mod tests {
         assert!(close(val("mid"), 4.0, 1e-9));
         assert!(close(val("g"), 22.0, 1e-9));
         assert!(close(val("chained"), 26.0, 1e-9));
+    }
+
+    #[test]
+    fn compute_regresion_aggregate_non_finite_warns() {
+        // Motor F: un agregado con división por cero (px_first - px_first = 0) da no finito y debe
+        // avisar (sin abortar el resto del análisis), igual que los mensurandos derivados.
+        let quantities = vec![quantity("px"), quantity("py")];
+        let aggregates = vec![PracticeAggregate {
+            id: "a-bad".into(),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: "bad".into(),
+            name: "Agregado roto".into(),
+            unit: "".into(),
+            formula: "1 / (px_first - px_first)".into(),
+        }];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0]),
+            measurement("py", &[2.0, 4.0]),
+        ];
+        let a = compute_regresion(
+            &quantities,
+            &[],
+            &[],
+            &[],
+            &aggregates,
+            &HashMap::new(),
+            "px",
+            "py",
+            &measurements,
+        )
+        .unwrap();
+        assert!(!a.aggregates[0].value.is_finite());
+        assert!(
+            a.warnings
+                .iter()
+                .any(|w| w.contains("bad") && w.contains("no dio un valor finito")),
+            "debe avisar del agregado no finito: {:?}",
+            a.warnings
+        );
     }
 
     #[test]

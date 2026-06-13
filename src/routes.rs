@@ -2065,17 +2065,32 @@ fn validate_symbol_format(symbol: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Sufijos reservados para los **alias de extremo** que el Motor F genera por cada magnitud por
+/// punto e intermedia (`{base}_first`, `{base}_first2`, `{base}_last`, `{base}_last2`). Reservarlos
+/// globalmente evita que un símbolo real (escalar compartido, mensurando, agregado) colisione con un
+/// alias generado y termine ligándose al valor equivocado en las fórmulas de agregados.
+const ENDPOINT_SUFFIXES: [&str; 4] = ["_first", "_first2", "_last", "_last2"];
+
 /// Verifica que el símbolo no sea una constante o variable reservada del motor de fórmulas.
 ///
 /// `pi` y `e` son constantes matemáticas siempre presentes en evalexpr. `slope` e `intercept`
 /// son variables inyectadas por el motor en prácticas de regresión. Los cuatro están reservados
 /// globalmente para evitar colisiones independientemente del tipo de análisis de la práctica.
+///
+/// Además, ningún símbolo puede terminar en un sufijo de extremo del Motor F
+/// ([`ENDPOINT_SUFFIXES`]): esos nombres se reservan para los alias generados (`h_first`, etc.).
 fn validate_symbol_not_reserved(symbol: &str) -> Result<(), AppError> {
     let s = symbol.trim();
     if matches!(s, "pi" | "e" | "slope" | "intercept") {
         return Err(AppError::bad_request(format!(
             "El simbolo \"{}\" es una constante o variable reservada del motor. Elegi otro simbolo.",
             s
+        )));
+    }
+    if let Some(suffix) = ENDPOINT_SUFFIXES.iter().find(|suf| s.ends_with(**suf)) {
+        return Err(AppError::bad_request(format!(
+            "El simbolo \"{s}\" termina en \"{suffix}\", un sufijo reservado para los valores de \
+             extremo por punto (p. ej. \"h_first\"). Elegi otro simbolo.",
         )));
     }
     Ok(())
@@ -2500,10 +2515,17 @@ mod tests {
         // Variables inyectadas por el motor de regresion; reservadas globalmente.
         assert!(validate_symbol_not_reserved("slope").is_err());
         assert!(validate_symbol_not_reserved("intercept").is_err());
-        // Identificadores comunes validos.
+        // Sufijos de extremo del Motor F: reservados para los alias generados (`h_first`, etc.).
+        assert!(validate_symbol_not_reserved("h_first").is_err());
+        assert!(validate_symbol_not_reserved("v_first2").is_err());
+        assert!(validate_symbol_not_reserved("Q_last").is_err());
+        assert!(validate_symbol_not_reserved("x_last2").is_err());
+        // Identificadores comunes validos (incluido uno que contiene "first" sin ser sufijo).
         assert!(validate_symbol_not_reserved("T").is_ok());
         assert!(validate_symbol_not_reserved("tau").is_ok());
         assert!(validate_symbol_not_reserved("V_g").is_ok());
+        assert!(validate_symbol_not_reserved("first_h").is_ok());
+        assert!(validate_symbol_not_reserved("h_max").is_ok());
     }
 
     #[test]
