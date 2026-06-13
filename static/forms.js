@@ -871,6 +871,13 @@ function renderSeriesTable(definition) {
     updateSeriesMeans();
     schedulePreview();
   });
+  // Los escalares compartidos también entran en las fórmulas de eje: refrescá la vista previa al
+  // editarlos (sus filas viven fuera de la tabla de la serie).
+  const sharedEl = measurementFields.querySelector(".shared-quantities");
+  if (sharedEl) {
+    sharedEl.addEventListener("input", schedulePreview);
+    sharedEl.addEventListener("change", schedulePreview);
+  }
   updateSeriesMeans();
 }
 

@@ -634,10 +634,12 @@ fn point_intermediate(
     i: usize,
 ) -> f64 {
     let id_of = |sym: &str| symbol_to_id.get(sym).copied();
+    // Réplicas de la magnitud en el punto `i`. Un escalar compartido tiene una sola fila: se
+    // difunde a todos los puntos cayendo a la última fila (su único valor) para `i` fuera de rango.
     let reps_at = |sym: &str| -> &[f64] {
         id_of(sym)
             .and_then(|id| point_matrix.get(id))
-            .and_then(|m| m.get(i))
+            .and_then(|m| m.get(i).or_else(|| m.last()))
             .map_or(&[][..], |v| v.as_slice())
     };
     let is_broadcastable = |sym: &str| id_of(sym).is_some_and(|id| broadcastable.contains(id));
@@ -2433,6 +2435,41 @@ mod tests {
         assert_eq!(re.values.len(), 2);
         assert!(close(re.values[0], 20.0, 1e-9));
         assert!(close(re.values[1], 40.0, 1e-9));
+    }
+
+    #[test]
+    fn intermediate_can_use_shared_scalar_across_points() {
+        // Motor E: una intermedia usa un escalar compartido (c, per_point=false), que se difunde a
+        // todos los puntos. D = px/c con px=[1,2], c=10 → D=[0.1,0.2]. (Antes daba NaN en el 2º punto.)
+        let mut c = quantity("c");
+        c.per_point = false;
+        let quantities = vec![quantity("px"), quantity("py"), c];
+        let intermediates = vec![PracticeIntermediate {
+            id: "i1".into(),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: "D".into(),
+            name: "D".into(),
+            unit: "u".into(),
+            formula: "px/c".into(),
+        }];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0]),
+            measurement("py", &[1.0, 2.0]),
+            measurement("c", &[10.0]),
+        ];
+        let a = compute_regresion(
+            &quantities,
+            &intermediates,
+            &[],
+            &[],
+            &HashMap::new(),
+            "D",
+            "py",
+            &measurements,
+        )
+        .unwrap();
+        assert_eq!(a.regression.unwrap().points, vec![(0.1, 1.0), (0.2, 2.0)]);
     }
 
     #[test]
