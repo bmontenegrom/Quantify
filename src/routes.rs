@@ -1977,6 +1977,7 @@ mod tests {
             position: 0,
             is_given: false,
             replicas_per_point: None,
+            per_point: true,
         };
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),

@@ -174,6 +174,10 @@ pub struct PracticeQuantity {
     /// Solo `repeated` en regresión/curva: cuántas réplicas por punto muestra la grilla de carga.
     /// `None` = medida única por punto (sin grilla de réplicas).
     pub replicas_per_point: Option<i64>,
+    /// En regresión/curva: `true` si la magnitud se mide **por punto** (va en la tabla de la serie);
+    /// `false` si es un **escalar compartido** que se carga una sola vez (Motor E). Los `is_given`
+    /// son siempre compartidos. En el estadístico no aplica.
+    pub per_point: bool,
 }
 
 /// Mensurando derivado de una práctica (determinación indirecta).
@@ -523,6 +527,25 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Motor E (Fase 15): magnitud derivada **por punto, post-ajuste** en regresión. Su `formula` se
+    // evalúa en cada punto con las magnitudes/intermedias del punto + slope/intercept + los
+    // mensurandos derivados, produciendo una columna por corrida (p. ej. el número de Reynolds).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_point_results (
+            id TEXT PRIMARY KEY,
+            practice_id TEXT NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL DEFAULT 0,
+            symbol TEXT NOT NULL,
+            name TEXT NOT NULL,
+            unit TEXT NOT NULL,
+            formula TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS grade_components (
@@ -643,6 +666,16 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "submission_measurements", "value_u", "REAL").await?;
     // Réplicas esperadas por punto (solo magnitudes `repeated` en regresión/curva con grilla).
     add_column_if_missing(pool, "practice_quantities", "replicas_per_point", "INTEGER").await?;
+    // Motor E (Fase 15): en regresión/curva, si `per_point` es true la magnitud se carga en la
+    // tabla de la serie (un valor o réplicas por punto); si es false (o es `is_given`) es un escalar
+    // compartido que se carga una sola vez. Default true = comportamiento previo (todo en la serie).
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "per_point",
+        "INTEGER NOT NULL DEFAULT 1",
+    )
+    .await?;
     // Índice de punto en análisis por puntos (regresión/curva). En estadístico/CSV queda 0;
     // `replicate_index` pasa a ser la réplica dentro del punto.
     add_column_if_missing(

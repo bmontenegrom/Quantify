@@ -41,6 +41,15 @@ pub struct QuantityInput {
     /// Réplicas por punto (grilla) para magnitudes `repeated` en regresión/curva. `None` = sin grilla.
     #[serde(default)]
     pub replicas_per_point: Option<i64>,
+    /// En regresión/curva: `true` = se mide por punto (tabla de la serie); `false` = escalar
+    /// compartido (Motor E). Default `true` (comportamiento previo).
+    #[serde(default = "default_true")]
+    pub per_point: bool,
+}
+
+/// Default `true` para campos booleanos opcionales (p. ej. `per_point`).
+fn default_true() -> bool {
+    true
 }
 
 /// Datos para crear o actualizar un mensurando derivado de una práctica.
@@ -442,7 +451,7 @@ pub async fn update_quantity(
     let result = sqlx::query(
         "UPDATE practice_quantities \
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
-             replicas_per_point = ?8 \
+             replicas_per_point = ?8, per_point = ?9 \
          WHERE id = ?1",
     )
     .bind(quantity_id)
@@ -453,6 +462,7 @@ pub async fn update_quantity(
     .bind(input.quantity.as_deref())
     .bind(input.is_given)
     .bind(input.replicas_per_point)
+    .bind(input.per_point)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -641,6 +651,7 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
         quantity: Some(quantity.into()),
         is_given: false,
         replicas_per_point: None,
+        per_point: true,
     }
 }
 
@@ -654,6 +665,7 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
         quantity: Some(quantity.into()),
         is_given: true,
         replicas_per_point: None,
+        per_point: false,
     }
 }
 
@@ -909,7 +921,7 @@ async fn quantities_for(
 ) -> anyhow::Result<Vec<PracticeQuantity>> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point \
+         replicas_per_point, per_point \
          FROM practice_quantities WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -932,7 +944,7 @@ async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec
 async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQuantity> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point \
+         replicas_per_point, per_point \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -962,8 +974,8 @@ async fn insert_quantity(
     sqlx::query(
         "INSERT INTO practice_quantities \
          (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-          replicas_per_point) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+          replicas_per_point, per_point) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -975,6 +987,7 @@ async fn insert_quantity(
     .bind(position)
     .bind(input.is_given)
     .bind(input.replicas_per_point)
+    .bind(input.per_point)
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -1041,6 +1054,7 @@ mod tests {
             quantity: Some("longitud".into()),
             is_given: false,
             replicas_per_point: None,
+            per_point: true,
         }
     }
 
@@ -1092,6 +1106,7 @@ mod tests {
                 quantity: None,
                 is_given: false,
                 replicas_per_point: None,
+                per_point: true,
             },
         )
         .await
