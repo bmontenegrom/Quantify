@@ -2769,6 +2769,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
+        // Viscosidad (Stokes): ajuste v_lim (= dx/t medio) vs R^2; μ de la pendiente; Re por esfera.
+        // Sin intermedia: y = dx/t usa la media de las réplicas de t (Motor A).
+        let (pool, _dir) = setup().await;
+        let def = crate::practices::definition(&pool, "viscosidad")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(def.analysis_kind.as_deref(), Some("regresion_lineal"));
+        assert!(
+            def.intermediates.is_empty(),
+            "viscosidad no usa intermedias"
+        );
+        assert_eq!(def.point_results.len(), 1, "Re");
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let mk = |sym: &str,
+                  values: Vec<f64>,
+                  given_u: Option<f64>,
+                  point_replicas: Option<Vec<Vec<f64>>>| {
+            MeasurementInput {
+                quantity_id: id(sym),
+                instrument_id: None,
+                scale_id: None,
+                values,
+                given_u,
+                point_replicas,
+                operator_replicas: None,
+            }
+        };
+        // 2 esferas (puntos): radios distintos, 3 tiempos c/u; dx, densidades, g compartidos.
+        let measurements = vec![
+            mk("R", vec![1e-3, 2e-3], None, None),
+            mk(
+                "t",
+                vec![],
+                None,
+                Some(vec![vec![20.0, 20.0, 20.0], vec![5.0, 5.0, 5.0]]),
+            ),
+            mk("dx", vec![0.20], Some(1e-3), None),
+            mk("rho_e", vec![7800.0], None, None),
+            mk("rho_f", vec![1260.0], None, None),
+            mk("g", vec![9.8], Some(0.01), None),
+            mk("Temp", vec![20.0], None, None),
+        ];
+        let a = analyze(&pool, "viscosidad", &measurements).await.unwrap();
+        let reg = a.regression.expect("hay ajuste");
+        assert_eq!(reg.points.len(), 2);
+        // Punto: x = R^2, y = dx/t (t medio). Esfera 1: (1e-6, 0.20/20=0.01).
+        assert!(close(reg.points[0].0, 1e-6, 1e-12));
+        assert!(close(reg.points[0].1, 0.01, 1e-9));
+        let mu = a.derived.iter().find(|d| d.symbol == "mu").expect("mu");
+        assert!(mu.value.is_finite());
+        let re = a
+            .point_results
+            .iter()
+            .find(|p| p.symbol == "Re")
+            .expect("Re");
+        assert_eq!(re.values.len(), 2);
+        assert!(re.values.iter().all(|v| v.is_finite()));
+    }
+
+    #[tokio::test]
     async fn analyze_routes_curva_to_scatter() {
         let (pool, _dir) = setup().await;
         // Configuramos P1 como curva con ejes sobre sus propias magnitudes (T vs t_med).

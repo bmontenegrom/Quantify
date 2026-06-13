@@ -932,6 +932,18 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             Some("1/Q"),
             Some("h/(Q*Q)"),
         ),
+        // Viscosidad (Stokes): por esfera se mide R y los tiempos (replicas); v_lim = dx/T_medio.
+        // Ajuste v_lim vs R^2 -> la viscosidad de la glicerina sale de la pendiente. dx, rho_e,
+        // rho_f, g son escalares compartidos; Reynolds es una derivada por corrida. Sin intermedia
+        // (v_lim usa la MEDIA de los tiempos, que ya da Motor A al promediar las replicas por punto).
+        (
+            "viscosidad",
+            "Viscosidad",
+            "Viscosidad de la glicerina por la ley de Stokes: ajuste lineal de v_lim contra R^2 (v_lim = dx / tiempo medio por esfera).",
+            "regresion_lineal",
+            Some("R^2"),
+            Some("dx/t"),
+        ),
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
@@ -1048,6 +1060,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "p3-relajacion",
         "p3-relajacion-desfasaje",
         "fluidos-1",
+        "viscosidad",
     ] {
         sqlx::query(
             r#"
@@ -1451,7 +1464,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 6);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 7);
     }
 
     #[test]
