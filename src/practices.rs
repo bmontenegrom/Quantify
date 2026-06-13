@@ -87,6 +87,9 @@ pub struct PracticeDefinition {
     /// Solo regresión/curva (Motor C): magnitudes intermedias por punto (promedio del derivado por
     /// réplica), disponibles como símbolos en las fórmulas de eje.
     pub intermediates: Vec<PracticeIntermediate>,
+    /// Solo `regresion_lineal` (Motor E): magnitudes derivadas por punto, post-ajuste (tabla por
+    /// corrida, p. ej. Reynolds).
+    pub point_results: Vec<PracticePointResult>,
 }
 
 /// Una curva de una práctica `curva`: un par de fórmulas de eje sobre el barrido común, con eje x
@@ -132,6 +135,29 @@ pub struct IntermediateInput {
     pub formula: String,
 }
 
+/// Magnitud derivada **por punto, post-ajuste** (Motor E) de una práctica `regresion_lineal`: su
+/// `formula` se evalúa en cada punto con las magnitudes/intermedias del punto + `slope`/`intercept`
+/// + los mensurandos derivados, produciendo una columna por corrida (p. ej. Reynolds).
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PracticePointResult {
+    pub id: String,
+    pub practice_id: String,
+    pub position: i64,
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    pub formula: String,
+}
+
+/// Datos para crear o actualizar una magnitud derivada por punto.
+#[derive(Debug, Deserialize)]
+pub struct PointResultInput {
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    pub formula: String,
+}
+
 /// Fila cruda con la configuración de análisis de una práctica.
 #[derive(sqlx::FromRow)]
 struct PracticeConfigRow {
@@ -159,6 +185,7 @@ pub async fn definition(
     let results = results_for(pool, practice_id).await?;
     let curves = curves_for(pool, practice_id).await?;
     let intermediates = intermediates_for(pool, practice_id).await?;
+    let point_results = point_results_for(pool, practice_id).await?;
     Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
         analysis_kind: row.analysis_kind,
@@ -169,7 +196,112 @@ pub async fn definition(
         curves,
         operator_count: row.operator_count,
         intermediates,
+        point_results,
     }))
+}
+
+/// Lee las magnitudes derivadas por punto de una práctica (Motor E), ordenadas por posición.
+pub async fn point_results_for(
+    pool: &SqlitePool,
+    practice_id: &str,
+) -> anyhow::Result<Vec<PracticePointResult>> {
+    Ok(sqlx::query_as::<_, PracticePointResult>(
+        "SELECT id, practice_id, position, symbol, name, unit, formula \
+         FROM practice_point_results WHERE practice_id = ?1 ORDER BY position, id",
+    )
+    .bind(practice_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Crea una magnitud derivada por punto; asigna la siguiente posición. Símbolo y fórmula obligatorios.
+pub async fn create_point_result(
+    pool: &SqlitePool,
+    practice_id: &str,
+    input: PointResultInput,
+) -> anyhow::Result<PracticePointResult> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
+        anyhow::bail!("la magnitud derivada por punto necesita símbolo y fórmula");
+    }
+    let position: (i64,) = sqlx::query_as(
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_point_results WHERE practice_id = ?1",
+    )
+    .bind(practice_id)
+    .fetch_one(pool)
+    .await?;
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO practice_point_results (id, practice_id, position, symbol, name, unit, formula) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )
+    .bind(&id)
+    .bind(practice_id)
+    .bind(position.0)
+    .bind(symbol)
+    .bind(input.name.trim())
+    .bind(input.unit.trim())
+    .bind(formula)
+    .execute(pool)
+    .await?;
+    fetch_point_result(pool, &id).await
+}
+
+/// Actualiza una magnitud derivada por punto de esa práctica. Devuelve `None` si no existe.
+pub async fn update_point_result(
+    pool: &SqlitePool,
+    practice_id: &str,
+    point_result_id: &str,
+    input: PointResultInput,
+) -> anyhow::Result<Option<PracticePointResult>> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
+        anyhow::bail!("la magnitud derivada por punto necesita símbolo y fórmula");
+    }
+    let result = sqlx::query(
+        "UPDATE practice_point_results SET symbol = ?3, name = ?4, unit = ?5, formula = ?6 \
+         WHERE id = ?1 AND practice_id = ?2",
+    )
+    .bind(point_result_id)
+    .bind(practice_id)
+    .bind(symbol)
+    .bind(input.name.trim())
+    .bind(input.unit.trim())
+    .bind(formula)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+    Ok(Some(fetch_point_result(pool, point_result_id).await?))
+}
+
+/// Elimina una magnitud derivada por punto de esa práctica por id. Devuelve `true` si existía.
+pub async fn delete_point_result(
+    pool: &SqlitePool,
+    practice_id: &str,
+    point_result_id: &str,
+) -> anyhow::Result<bool> {
+    let result =
+        sqlx::query("DELETE FROM practice_point_results WHERE id = ?1 AND practice_id = ?2")
+            .bind(point_result_id)
+            .bind(practice_id)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Lee una magnitud derivada por punto por su id.
+async fn fetch_point_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticePointResult> {
+    Ok(sqlx::query_as::<_, PracticePointResult>(
+        "SELECT id, practice_id, position, symbol, name, unit, formula \
+         FROM practice_point_results WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?)
 }
 
 /// Lee las magnitudes intermedias por punto de una práctica (Motor C), ordenadas por posición.
