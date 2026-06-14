@@ -1297,6 +1297,87 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
+    // Fluidos II — descarga de un recipiente por un capilar. Por punto: h (altura) y t (tiempo, con
+    // t=0 en la altura maxima). Ejes (en seed_practices): x = sqrt(h_max) - sqrt(h), y = t. La
+    // pendiente da M_medio = 2*g*(slope*R_cap^2/(2*R_recip^2))^2 - 2 (coef. medio de perdidas).
+    // Escalares compartidos: R_cap, L_cap, R_recip (medidos con regla, con incertidumbre), g
+    // (catedra), rho (densimetro al final), mu_agua (viscosidad del agua de tabla segun T), kp
+    // (factor geometrico K, def. 0.78, editable) y h_max (altura inicial). Temp es referencia.
+    // Mensurandos agregados (Motor F): Reynolds max/min usan el primer/ultimo par de puntos,
+    // Reynolds medio los promedia y M_teorico cierra con la formula de la cuaderneta.
+    let fresh_f2 = seed_practice(
+        pool,
+        "fluidos-2",
+        &[
+            qty("h", "Altura de la columna", "m", false, "longitud"),
+            qty("t", "Tiempo de escurrimiento", "s", false, "tiempo"),
+            qty_shared("h_max", "Altura inicial (maxima)", "m", "longitud"),
+            qty_shared("R_cap", "Radio del capilar", "m", "longitud"),
+            qty_shared("L_cap", "Longitud del capilar", "m", "longitud"),
+            qty_shared("R_recip", "Radio del recipiente", "m", "longitud"),
+            qty_given("g", "Aceleracion de la gravedad", "m/s2", "aceleracion"),
+            qty_shared("rho", "Densidad del agua", "kg/m3", "densidad"),
+            qty_shared(
+                "mu_agua",
+                "Viscosidad del agua (de tabla segun T)",
+                "Pa.s",
+                "viscosidad",
+            ),
+            qty_shared("kp", "Factor geometrico K (def. 0.78)", "", "adimensional"),
+            qty_shared(
+                "Temp",
+                "Temperatura del agua (referencia)",
+                "C",
+                "temperatura",
+            ),
+        ],
+        &[res(
+            "M_medio",
+            "Coeficiente medio de perdidas",
+            "",
+            "2*g*(slope*R_cap^2/(2*R_recip^2))^2 - 2",
+        )],
+    )
+    .await?;
+    // Mensurandos agregados (Motor F): se crean en orden porque se encadenan (Re_medio usa
+    // Re_max/Re_min; M_teorico usa Re_medio). Solo en el alta fresca, para no re-crearlos si el
+    // docente los edita/borra luego. Reynolds max/min referencian el primer/ultimo par de puntos
+    // (h_first/h_first2/t_first/t_first2 y h_last/h_last2/t_last/t_last2, alias del Motor F).
+    if fresh_f2 {
+        for input in [
+            AggregateInput {
+                symbol: "Re_max".into(),
+                name: "Numero de Reynolds maximo".into(),
+                unit: "".into(),
+                formula:
+                    "2*rho*((h_first - h_first2)/(t_first2 - t_first))*(R_recip^2/(mu_agua*R_cap))"
+                        .into(),
+            },
+            AggregateInput {
+                symbol: "Re_min".into(),
+                name: "Numero de Reynolds minimo".into(),
+                unit: "".into(),
+                formula:
+                    "2*rho*((h_last2 - h_last)/(t_last - t_last2))*(R_recip^2/(mu_agua*R_cap))"
+                        .into(),
+            },
+            AggregateInput {
+                symbol: "Re_medio".into(),
+                name: "Numero de Reynolds medio".into(),
+                unit: "".into(),
+                formula: "(Re_max + Re_min)/2".into(),
+            },
+            AggregateInput {
+                symbol: "M_teorico".into(),
+                name: "Coeficiente de perdidas teorico".into(),
+                unit: "".into(),
+                formula: "kp + 4*(L_cap/(2*R_cap))*(16/Re_medio)".into(),
+            },
+        ] {
+            create_aggregate(pool, "fluidos-2", input).await?;
+        }
+    }
+
     Ok(())
 }
 
@@ -2335,6 +2416,124 @@ mod tests {
         assert!(reg.intercept.abs() < 1e-9);
         let tau_d = analysis.derived.iter().find(|d| d.symbol == "tau").unwrap();
         assert!((tau_d.value - tau).abs() < 1e-9);
+    }
+
+    /// La definición sembrada de Fluidos II se puebla (magnitudes + M_medio + 4 agregados) y
+    /// computa de extremo a extremo. Caso construido: t = slope*(sqrt(h_max)-sqrt(h)) con slope=100
+    /// e intercepto 0, así el ajuste recupera la pendiente y M_medio / los agregados dan los valores
+    /// calculados a mano (Re_max=55000, Re_min=25000, Re_medio=40000, M_teorico=0.86).
+    #[tokio::test]
+    async fn seeded_fluidos2_populates_and_computes() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "fluidos-2").await.unwrap().unwrap();
+
+        // Definición: 11 magnitudes, 1 mensurando (M_medio), 4 agregados en orden.
+        assert_eq!(def.quantities.len(), 11);
+        assert_eq!(def.results.len(), 1);
+        assert_eq!(def.results[0].symbol, "M_medio");
+        assert_eq!(
+            def.aggregates
+                .iter()
+                .map(|a| a.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["Re_max", "Re_min", "Re_medio", "M_teorico"],
+        );
+
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap_or_else(|| panic!("falta la magnitud {sym}"))
+                .id
+                .clone()
+        };
+        // x = sqrt(0.36) - sqrt(h) = [0, .1, .2, .3, .4]; con slope=100 -> t = [0,10,20,30,40].
+        let h_vals = vec![0.36_f64, 0.25, 0.16, 0.09, 0.04];
+        let t_vals = vec![0.0_f64, 10.0, 20.0, 30.0, 40.0];
+        let per_point = |sym: &str, values: Vec<f64>| crate::computation::MeasurementInput {
+            quantity_id: id(sym),
+            instrument_id: None,
+            scale_id: None,
+            values,
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        };
+        let scalar = |sym: &str, value: f64| per_point(sym, vec![value]);
+        let measurements = vec![
+            per_point("h", h_vals),
+            per_point("t", t_vals),
+            scalar("h_max", 0.36),
+            scalar("R_cap", 0.001),
+            scalar("L_cap", 0.1),
+            scalar("R_recip", 0.05),
+            scalar("g", 9.8),
+            scalar("rho", 1000.0),
+            scalar("mu_agua", 1e-3),
+            scalar("kp", 0.78),
+            scalar("Temp", 20.0),
+        ];
+
+        let analysis = crate::computation::compute_regresion(
+            &def.quantities,
+            &def.intermediates,
+            &def.results,
+            &def.point_results,
+            &def.aggregates,
+            &Default::default(),
+            def.x_formula.as_deref().unwrap(),
+            def.y_formula.as_deref().unwrap(),
+            &measurements,
+        )
+        .unwrap();
+
+        let reg = analysis.regression.unwrap();
+        assert!((reg.slope - 100.0).abs() < 1e-6, "slope {}", reg.slope);
+        assert!(reg.intercept.abs() < 1e-6, "intercept {}", reg.intercept);
+
+        // M_medio = 2*g*(slope*R_cap^2/(2*R_recip^2))^2 - 2.
+        let m = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == "M_medio")
+            .unwrap();
+        assert!((m.value - (-1.99216)).abs() < 1e-5, "M_medio {}", m.value);
+
+        let agg = |sym: &str| {
+            analysis
+                .aggregates
+                .iter()
+                .find(|a| a.symbol == sym)
+                .unwrap_or_else(|| panic!("falta agregado {sym}"))
+                .value
+        };
+        assert!(
+            (agg("Re_max") - 55000.0).abs() < 1e-3,
+            "Re_max {}",
+            agg("Re_max")
+        );
+        assert!(
+            (agg("Re_min") - 25000.0).abs() < 1e-3,
+            "Re_min {}",
+            agg("Re_min")
+        );
+        assert!(
+            (agg("Re_medio") - 40000.0).abs() < 1e-3,
+            "Re_medio {}",
+            agg("Re_medio")
+        );
+        assert!(
+            (agg("M_teorico") - 0.86).abs() < 1e-9,
+            "M_teorico {}",
+            agg("M_teorico")
+        );
+        // No debe haber avisos de desalineamiento ni de valores no finitos.
+        assert!(
+            analysis.warnings.is_empty(),
+            "warnings: {:?}",
+            analysis.warnings
+        );
     }
 
     /// Verifica que `double_option` distingue las tres variantes de `tolerance` en JSON:
