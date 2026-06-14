@@ -1383,8 +1383,8 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     // Lissajous). Componentes dados por la catedra: R, C1, C2, L. Intermedias: omega=2*pi*f
     // (rad/s), razon=VRpp/Vgpp (adimensional), phi=asin(b/a) (rad). Dos curvas (Motor B):
     // razon vs omega (amplitud) y phi vs omega (desfasaje), ambas con eje x logaritmico.
-    // Mensurandos teoricos (fpasaje, fbloqueo): pendientes de confirmar topologia del circuito
-    // con el docente; pueden agregarse despues desde el admin.
+    // Mensurandos teoricos: fpasaje=1/(2*pi*sqrt(L*(C1+C2))) y fbloqueo=1/(2*pi*sqrt(L*C2)).
+    // Topologia confirmada: C2||L en serie con C1 y R.
     let fresh_filtros = seed_practice(
         pool,
         "filtros",
