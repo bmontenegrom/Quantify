@@ -2104,26 +2104,28 @@ fn duplicate_symbol_error(symbol: &str) -> AppError {
     ))
 }
 
-/// Valida los campos de una magnitud: símbolo, nombre y unidad no vacíos.
+/// Valida los campos de una magnitud: símbolo y nombre no vacíos. La unidad **puede** ir vacía:
+/// representa una magnitud adimensional (p. ej. un factor o coeficiente como `kp` en Fluidos II).
 fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
-    if input.symbol.trim().is_empty()
-        || input.name.trim().is_empty()
-        || input.unit.trim().is_empty()
-    {
-        return Err(AppError::bad_request("datos de magnitud invalidos"));
+    if input.symbol.trim().is_empty() || input.name.trim().is_empty() {
+        return Err(AppError::bad_request(
+            "La magnitud necesita un simbolo y un nombre. La unidad puede quedar vacia (adimensional).",
+        ));
     }
     Ok(())
 }
 
-/// Valida los campos de un mensurando derivado: símbolo, nombre, unidad y fórmula no vacíos,
-/// y tolerancia no negativa si se proporciona.
+/// Valida los campos de un mensurando derivado: símbolo, nombre y fórmula no vacíos, y tolerancia
+/// no negativa si se proporciona. La unidad **puede** ir vacía: mensurando adimensional (p. ej. un
+/// coeficiente como `M_medio` en Fluidos II).
 fn validate_result(input: &ResultInput) -> Result<(), AppError> {
     if input.symbol.trim().is_empty()
         || input.name.trim().is_empty()
-        || input.unit.trim().is_empty()
         || input.formula.trim().is_empty()
     {
-        return Err(AppError::bad_request("datos de mensurando invalidos"));
+        return Err(AppError::bad_request(
+            "El mensurando necesita un simbolo, un nombre y una formula. La unidad puede quedar vacia (adimensional).",
+        ));
     }
     if let Some(Some(t)) = input.tolerance {
         if t < 0.0 {
@@ -2505,6 +2507,56 @@ mod tests {
         assert!(validate_symbol_format("a b").is_err());
         assert!(validate_symbol_format("a+b").is_err());
         assert!(validate_symbol_format("a.b").is_err());
+    }
+
+    #[test]
+    fn validate_quantity_allows_dimensionless_unit() {
+        let q = |unit: &str| QuantityInput {
+            symbol: "kp".into(),
+            name: "Factor geometrico".into(),
+            unit: unit.into(),
+            repeated: false,
+            quantity: Some("adimensional".into()),
+            is_given: false,
+            replicas_per_point: None,
+            per_point: false,
+        };
+        // Unidad vacía (o solo espacios) → magnitud adimensional, válida.
+        assert!(validate_quantity(&q("")).is_ok());
+        assert!(validate_quantity(&q("   ")).is_ok());
+        assert!(validate_quantity(&q("m")).is_ok());
+        // Símbolo o nombre vacíos siguen siendo inválidos.
+        assert!(validate_quantity(&QuantityInput {
+            symbol: "".into(),
+            ..q("")
+        })
+        .is_err());
+        assert!(validate_quantity(&QuantityInput {
+            name: "  ".into(),
+            ..q("")
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn validate_result_allows_dimensionless_unit() {
+        let r = |unit: &str| ResultInput {
+            symbol: "M_medio".into(),
+            name: "Coeficiente medio".into(),
+            unit: unit.into(),
+            formula: "slope".into(),
+            tolerance: None,
+        };
+        // Unidad vacía → mensurando adimensional, válido.
+        assert!(validate_result(&r("")).is_ok());
+        assert!(validate_result(&r("   ")).is_ok());
+        assert!(validate_result(&r("Pa.s")).is_ok());
+        // Fórmula vacía sigue siendo inválida.
+        assert!(validate_result(&ResultInput {
+            formula: "".into(),
+            ..r("")
+        })
+        .is_err());
     }
 
     #[test]

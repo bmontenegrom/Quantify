@@ -423,7 +423,37 @@ derivados por medida es aceptable vs derivar del promedio de entradas.
 Orden de ejecución de Fase 15: motor A (réplicas/punto) → motor B (lista de curvas) → motor D
 (operadores en estadística) → siembra de las 6 prácticas + P2-parte2.
 
+## Fase 17 (P2) — Cobertura E2E (Playwright) ampliada
+
+Retoma y reemplaza la mejora #4 ("E2E de navegador en CI") con un plan acotado.
+Insumo: hoy `npm run test:e2e` corre **solo** `tests/e2e/run.mjs` (flujo P1); el
+`tests/e2e/smoke-fluidos2.mjs` (entrega regresión + análisis con M_medio/agregados +
+alta de magnitud adimensional desde el admin) existe pero **quedó huérfano** (CI no lo corre).
+
+**Criterio**: no automatizar "toda la app" (sería redundante con los unit tests y caro de
+mantener). Apuntar a las **costuras** que ningún unit test cubre: el gating servidor, el render
+del formulario por tipo de análisis, auth/CSRF/ruteo por rol, y que el pipeline de cálculo llegue
+a la pantalla. El grueso de la cobertura sigue en los tests rápidos (Rust + `node --test`).
+
+Pasos por orden de valor:
+1. **Harness compartido + wire a CI**: extraer `tests/e2e/lib.mjs` con bootstrap/login/server
+   (hoy `run.mjs` y `smoke-fluidos2.mjs` lo duplican ~70 líneas c/u) y hacer que `test:e2e`
+   corra **todos** los `tests/e2e/*.mjs` (rescata fluidos-2 en CI). Baja el costo de cada flujo
+   nuevo a ~20 líneas.
+2. **Un flujo por tipo de análisis**: estadístico (ya: P1), regresión (ya: fluidos-2),
+   **curva (falta)**.
+3. **Auth + ruteo por rol**: login falla/bloqueo, logout, el alumno no ve vistas de docente.
+4. **CRUD admin round-trip**: crear magnitud/mensurando/agregado y verlo — 1 flujo, no uno por
+   entidad.
+
+**No automatizar en E2E** (más mantenimiento que valor): matemática de fórmulas/incertidumbre
+(unit Rust), funciones JS puras (`node --test`), cada permutación de CRUD. Costos a vigilar:
+flakiness (usar `waitFor*`, nunca sleep fijo), selectores frágiles (evaluar `data-testid`),
+mantenimiento continuo.
+
+**Aceptación**: `test:e2e` corre todos los smokes en CI; los 4 journeys críticos quedan cubiertos.
+
 ## Orden propuesto
 
 13 (seguridad, P0: van a operar multi-PC) → 14 (kind curva, bloquea prácticas) →
-15 (prácticas nuevas, con el docente) → 16 (rediseño UI).
+15 (prácticas nuevas, con el docente) → 16 (rediseño UI) → 17 (cobertura E2E).

@@ -964,6 +964,19 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             Some("R^2"),
             Some("dx/t"),
         ),
+        // Fluidos II (descarga de un recipiente por capilar): por punto se miden h (altura) y t
+        // (tiempo, con t=0 en la altura maxima). Ajuste de t contra (sqrt(h_max) - sqrt(h)); de la
+        // pendiente sale M_medio (coef. medio de perdidas). h_max es un escalar compartido (altura
+        // inicial). Reynolds max/min, Reynolds medio y M teorico son mensurandos agregados (Motor F)
+        // que referencian el primer/ultimo par de puntos.
+        (
+            "fluidos-2",
+            "Fluidos II",
+            "Perdidas energeticas en la descarga de un recipiente por un capilar: ajuste lineal de t contra (sqrt(h_max) - sqrt(h)). M_medio sale de la pendiente; Reynolds max/min y M teorico son mensurandos agregados.",
+            "regresion_lineal",
+            Some("math::sqrt(h_max) - math::sqrt(h)"),
+            Some("t"),
+        ),
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
@@ -1081,6 +1094,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "p3-relajacion-desfasaje",
         "fluidos-1",
         "viscosidad",
+        "fluidos-2",
     ] {
         sqlx::query(
             r#"
@@ -1484,7 +1498,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 7);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 8);
     }
 
     #[test]
