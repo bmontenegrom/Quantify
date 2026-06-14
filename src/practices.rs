@@ -2938,6 +2938,93 @@ mod tests {
         );
     }
 
+    /// Integración: `analyze()` para filtros deriva fpasaje y fbloqueo correctamente.
+    ///
+    /// Topología: C2||L en serie con C1 y R. Fórmulas teóricas:
+    ///   fpasaje  = 1/(2π√(L(C1+C2)))   (resonancia serie)
+    ///   fbloqueo = 1/(2π√(LC2))         (resonancia paralelo del tanque)
+    #[tokio::test]
+    async fn analyze_filtros_derives_fpasaje_fbloqueo() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "filtros").await.unwrap().unwrap();
+
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let pt = |sym: &str, vals: Vec<f64>| crate::computation::MeasurementInput {
+            quantity_id: id(sym),
+            instrument_id: None,
+            scale_id: None,
+            values: vals,
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        };
+
+        // Valores de componentes: R=1kΩ, C1=C2=10nF, L=10mH.
+        let r = 1000.0_f64;
+        let c1 = 10e-9_f64;
+        let c2 = 10e-9_f64;
+        let l = 10e-3_f64;
+        let fp_expected = 1.0 / (2.0 * std::f64::consts::PI * (l * (c1 + c2)).sqrt());
+        let fb_expected = 1.0 / (2.0 * std::f64::consts::PI * (l * c2).sqrt());
+
+        // 3 puntos de barrido (valores arbitrarios; los escalares no dependen de ellos).
+        let measurements = vec![
+            pt("f", vec![1000.0, 5000.0, 10000.0]),
+            pt("VRpp", vec![0.5, 1.0, 0.5]),
+            pt("Vgpp", vec![1.0, 1.0, 1.0]),
+            pt("a", vec![1.0, 1.0, 1.0]),
+            pt("b", vec![0.5, 0.5, 0.5]),
+            pt("R", vec![r]),
+            pt("C1", vec![c1]),
+            pt("C2", vec![c2]),
+            pt("L", vec![l]),
+        ];
+
+        let analysis = crate::computation::analyze(&pool, "filtros", &measurements)
+            .await
+            .unwrap();
+
+        assert!(
+            !analysis.derived.is_empty(),
+            "derived debe contener fpasaje y fbloqueo"
+        );
+        let fp = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == "fpasaje")
+            .expect("fpasaje debe estar en derived");
+        assert!(
+            (fp.value - fp_expected).abs() < 1.0,
+            "fpasaje esperado {fp_expected:.2} Hz, obtenido {:.2}",
+            fp.value
+        );
+        let fb = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == "fbloqueo")
+            .expect("fbloqueo debe estar en derived");
+        assert!(
+            (fb.value - fb_expected).abs() < 1.0,
+            "fbloqueo esperado {fb_expected:.2} Hz, obtenido {:.2}",
+            fb.value
+        );
+        // fbloqueo > fpasaje (C1+C2 > C2 ⟹ √(L(C1+C2)) > √(LC2)).
+        assert!(
+            fb.value > fp.value,
+            "fbloqueo ({}) debe ser mayor que fpasaje ({})",
+            fb.value,
+            fp.value
+        );
+    }
+
     /// Verifica que `double_option` distingue las tres variantes de `tolerance` en JSON:
     /// campo ausente (no modificar), `null` explícito (borrar) y valor numérico (fijar).
     #[test]

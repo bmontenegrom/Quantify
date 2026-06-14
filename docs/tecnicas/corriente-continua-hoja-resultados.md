@@ -4,24 +4,24 @@
 
 |  |  |  |  |  |  |  |  |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-|  | | |  |  | **TE�RICO** | **E** | **EXPERIMENTAL** |
-| Vg = � | | | **I** | � |  | � |
-| **Escala Amper�metro =** | | | **VR1** | � |  | � |
-| **RA = �** | | | **VR2** | � |  | � |
-|  | | | **VR3** | � |  | � |
-| **R1** | � |  | | | | | |
-| **R2** | � |  | | | | | |
-| **R3** | � |  | | | | | |
+|  | | |  |  | **TEÓRICO** | **E** | **EXPERIMENTAL** |
+| Vg = … | | | **I** | … |  | … |
+| **Escala Amperímetro =** | | | **VR1** | … |  | … |
+| **RA = …** | | | **VR2** | … |  | … |
+|  | | | **VR3** | … |  | … |
+| **R1** | … |  | | | | | |
+| **R2** | … |  | | | | | |
+| **R3** | … |  | | | | | |
 
 Circuito Paralelo
 
 |  |  |  |  |  |  |
 | --- | --- | --- | --- | --- | --- |
-|  |  |  | **TE�RICO** | **E** | **EXPERIMENTAL** |
-| Vg = � |  | **I** | � |  | � |
-| **Escala Amper�metro =** |  | **VR1** | � |  | � |
-| **RA =** � |  | **VR2** | � |  | � |
-|  |  | **VR3** | � |  | � |
+|  |  |  | **TEÓRICO** | **E** | **EXPERIMENTAL** |
+| Vg = … |  | **I** | … |  | … |
+| **Escala Amperímetro =** |  | **VR1** | … |  | … |
+| **RA =** … |  | **VR2** | … |  | … |
+|  |  | **VR3** | … |  | … |
 
 |  |
 | --- |
@@ -33,7 +33,7 @@ Curva de Potencia
 
 |  |  |  |  |  |  |  |
 | --- | --- | --- | --- | --- | --- | --- |
-| **I** (�A) | **R**(k?) | **P** (W) |  | **I** | **R** | **P** |
+| **I** (μA) | **R**(kΩ) | **P** (W) |  | **I** | **R** | **P** |
 |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |
@@ -41,13 +41,13 @@ Curva de Potencia
 |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |
-|  |  |  |  |  | **TE�RICO** | **EXPERIMENTAL** |
-|  |  |  |  | **RP M�XIMA** |  |  |
-|  |  |  |  | **Pm�xima** |  |  |
+|  |  |  |  |  | **TEÓRICO** | **EXPERIMENTAL** |
+|  |  |  |  | **RP MÁXIMA** |  |  |
+|  |  |  |  | **Pmáxima** |  |  |
 
 Observaciones o Comentarios:
 
-Nota: Exprese sus resultados incluyendo las unidades. Utilice el n�mero de cifras significativas que considere adecuado para cada resultado.
+Nota: Exprese sus resultados incluyendo las unidades. Utilice el número de cifras significativas que considere adecuado para cada resultado.
 
 Grupo: \_\_\_\_\_\_\_\_\_\_ Mesa: \_\_\_\_\_\_\_
 

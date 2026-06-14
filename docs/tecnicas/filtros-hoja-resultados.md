@@ -6,14 +6,14 @@
 
 |  |  |  |
 | --- | --- | --- |
-| **fpasaje te�rica = �** | **R = �** | **C1 = �** |
-| **fbloqueo te�rica = �** | **L = �** | **C2 = �** |
-| **fpasaje experimental =** | **VR pp= �** | **Vg pp= �** |
-| **fbloqueo experimental =** | **VR pp= �** | **Vg pp= �** |
+| **fpasaje teórica = …** | **R = …** | **C1 = …** |
+| **fbloqueo teórica = …** | **L = …** | **C2 = …** |
+| **fpasaje experimental =** | **VR pp= …** | **Vg pp= …** |
+| **fbloqueo experimental =** | **VR pp= …** | **Vg pp= …** |
 
 |  |  |  |  |  |  |  |  |  |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **f** | **?** | **log(?)** | **VR pp** | **Vg pp** | **(VR pp/Vg pp)** | **a** | **b** | **?VR�Vg** |
+| **f** | **ω** | **log(ω)** | **VR pp** | **Vg pp** | **(VR pp/Vg pp)** | **a** | **b** | **φVR∧Vg** |
 |  |  |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |  |  |
@@ -37,10 +37,10 @@
 |  |  |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |  |  |
 
-Nota: Exprese sus resultados incluyendo las unidades y la incertidumbre en caso de corresponder. Utilice el n�mero de cifras significativas que considere adecuado para cada resultado.
+Nota: Exprese sus resultados incluyendo las unidades y la incertidumbre en caso de corresponder. Utilice el número de cifras significativas que considere adecuado para cada resultado.
 
-Gr�ficos
+Gráficos
 
-Vr/Vg vs. log(?):
+Vr/Vg vs. log(ω):
 
-?**VR�Vg** vs. log(?):
+φVR∧Vg vs. log(ω):
