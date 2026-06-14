@@ -1,5 +1,3 @@
-C:\Python312\Lib\site-packages\pydub\utils.py:170: RuntimeWarning: Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work
-  warn("Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work", RuntimeWarning)
 ## Hoja de resultados
 
 **COMPLETE ESTA HOJA DE RESULTADOS PARA USO PERSONAL**
@@ -8,14 +6,14 @@ C:\Python312\Lib\site-packages\pydub\utils.py:170: RuntimeWarning: Couldn't find
 
 |  |  |  |
 | --- | --- | --- |
-| **fpasaje teórica = ±** | **R = ±** | **C1 = ±** |
-| **fbloqueo teórica = ±** | **L = ±** | **C2 = ±** |
-| **fpasaje experimental =** | **VR pp= ±** | **Vg pp= ±** |
-| **fbloqueo experimental =** | **VR pp= ±** | **Vg pp= ±** |
+| **fpasaje teï¿½rica = ï¿½** | **R = ï¿½** | **C1 = ï¿½** |
+| **fbloqueo teï¿½rica = ï¿½** | **L = ï¿½** | **C2 = ï¿½** |
+| **fpasaje experimental =** | **VR pp= ï¿½** | **Vg pp= ï¿½** |
+| **fbloqueo experimental =** | **VR pp= ï¿½** | **Vg pp= ï¿½** |
 
 |  |  |  |  |  |  |  |  |  |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **f** | **?** | **log(?)** | **VR pp** | **Vg pp** | **(VR pp/Vg pp)** | **a** | **b** | **?VR–Vg** |
+| **f** | **?** | **log(?)** | **VR pp** | **Vg pp** | **(VR pp/Vg pp)** | **a** | **b** | **?VRï¿½Vg** |
 |  |  |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |  |  |
@@ -39,10 +37,10 @@ C:\Python312\Lib\site-packages\pydub\utils.py:170: RuntimeWarning: Couldn't find
 |  |  |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |  |  |
 
-Nota: Exprese sus resultados incluyendo las unidades y la incertidumbre en caso de corresponder. Utilice el número de cifras significativas que considere adecuado para cada resultado.
+Nota: Exprese sus resultados incluyendo las unidades y la incertidumbre en caso de corresponder. Utilice el nï¿½mero de cifras significativas que considere adecuado para cada resultado.
 
-Gráficos
+Grï¿½ficos
 
 Vr/Vg vs. log(?):
 
-?**VR–Vg** vs. log(?):
+?**VRï¿½Vg** vs. log(?):

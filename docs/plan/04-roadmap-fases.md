@@ -392,13 +392,13 @@ Decisión pendiente con el docente: operadores múltiples en Estadística.
 | Viscosidad (Stokes) | #37 | A + E | ✓ Sembrada, probada |
 | Fluidos I (Hagen-Poiseuille) | #36 | A + C + E | ✓ Sembrada, probada |
 | Fluidos II (descarga capilar) | #39 | E + F | ✓ Sembrada, ecuaciones confirmadas por docente |
+| Filtros (barrido RLC) | #40 | B (2 curvas, x_log) | ✓ Sembrada |
+| P2-parte2 (curva de potencia) | #40 | B + E (curva + escalares) | ✓ Sembrada |
 
 **Pendientes de sembrar:**
 
 | Práctica | Motor | Notas |
 |---|---|---|
-| P2-parte2 (curva de potencia) | B (curva) | Depende de Motor B ✓ — falta hoja de resultados |
-| Filtros | B (2 curvas, x_log) | Depende de Motor B ✓ — falta hoja de resultados |
 | Hidrostática y TS | D (estadístico) | Decisión de modelado pendiente con docente |
 | CA (RLC) | estadístico | Teórico vs experimental; `asin` verificado en `evalexpr` |
 

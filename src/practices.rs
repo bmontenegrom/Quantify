@@ -1405,7 +1405,23 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_given("C2", "Capacitor 2", "F", "capacitancia"),
             qty_given("L", "Inductor", "H", "inductancia"),
         ],
-        &[],
+        &[
+            // Topología: C2||L en serie con C1 y R.
+            // Resonancia serie (pasaje): f = 1/(2π√(L(C1+C2)))
+            // Resonancia paralelo del tanque (bloqueo): f = 1/(2π√(LC2))
+            res(
+                "fpasaje",
+                "Frecuencia de pasaje teorica",
+                "Hz",
+                "1/(2*pi*math::sqrt(L*(C1+C2)))",
+            ),
+            res(
+                "fbloqueo",
+                "Frecuencia de bloqueo teorica",
+                "Hz",
+                "1/(2*pi*math::sqrt(L*C2))",
+            ),
+        ],
     )
     .await?;
     if fresh_filtros {
@@ -2666,7 +2682,8 @@ mod tests {
         );
     }
 
-    /// La definición sembrada de Filtros tiene 9 magnitudes, 3 intermedias y 2 curvas con x_log.
+    /// La definición sembrada de Filtros tiene 9 magnitudes, 2 mensurandos escalares
+    /// (fpasaje, fbloqueo), 3 intermedias y 2 curvas con x_log.
     #[tokio::test]
     async fn seeded_filtros_populates_and_computes() {
         let (pool, _dir) = setup().await;
@@ -2675,9 +2692,11 @@ mod tests {
 
         assert_eq!(def.quantities.len(), 9);
         assert_eq!(
-            def.results.len(),
-            0,
-            "sin mensurandos escalares hasta confirmar topologia"
+            def.results
+                .iter()
+                .map(|r| r.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["fpasaje", "fbloqueo"],
         );
         assert_eq!(
             def.intermediates
@@ -2756,8 +2775,8 @@ mod tests {
         assert!(ph.x_log);
     }
 
-    /// La definición sembrada de P2-potencia tiene 4 magnitudes, 1 intermedia (P=I^2*R), 1 curva
-    /// y 2 mensurandos escalares (RP_max, P_max). El análisis computa P_max = Vg^2/(4*RA).
+    /// La definición sembrada de P2-potencia tiene 6 magnitudes, 1 intermedia (P=I^2*R), 1 curva
+    /// y 2 mensurandos escalares (RP_max, P_max). El análisis computa P_max = Vg^2/(4*Rth).
     #[tokio::test]
     async fn seeded_p2_potencia_populates_and_computes() {
         let (pool, _dir) = setup().await;
@@ -2841,6 +2860,82 @@ mod tests {
         assert!((p_curve_max - p_at_rth).abs() < 1e-9);
         // Los mensurandos RP_max y P_max los calcula el camino `analyze` (no compute_curva puro).
         // Aquí solo verificamos la estructura; el test de integración cubre el análisis completo.
+    }
+
+    /// Integración: `analyze()` para p2-potencia deriva RP_max y P_max correctamente.
+    ///
+    /// Verifica que el camino curva + escalares en `analyze()` llena `derived` con
+    /// RP_max = Rth = 200 Ω y P_max = Vg²/(4·Rth) = 0.125 W.
+    #[tokio::test]
+    async fn analyze_p2_potencia_derives_rp_max_and_p_max() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "p2-potencia").await.unwrap().unwrap();
+
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let pt = |sym: &str, vals: Vec<f64>| crate::computation::MeasurementInput {
+            quantity_id: id(sym),
+            instrument_id: None,
+            scale_id: None,
+            values: vals,
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        };
+
+        let vg = 10.0_f64;
+        let ra = 100.0_f64;
+        let r2 = 200.0_f64;
+        let r3 = 200.0_f64;
+        let rth = ra + r2 * r3 / (r2 + r3); // = 200.0
+        let rs = vec![100.0_f64, 200.0, 400.0];
+        let is: Vec<f64> = rs.iter().map(|r| vg / (rth + r)).collect();
+        let measurements = vec![
+            pt("R", rs),
+            pt("I", is),
+            pt("Vg", vec![vg]),
+            pt("RA", vec![ra]),
+            pt("R2", vec![r2]),
+            pt("R3", vec![r3]),
+        ];
+
+        let analysis = crate::computation::analyze(&pool, "p2-potencia", &measurements)
+            .await
+            .unwrap();
+
+        // El camino curva escalar debe poblar `derived`.
+        assert!(
+            !analysis.derived.is_empty(),
+            "derived debe contener al menos RP_max y P_max"
+        );
+        let rp = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == "RP_max")
+            .expect("RP_max debe estar en derived");
+        assert!(
+            (rp.value - rth).abs() < 1e-9,
+            "RP_max esperado {rth}, obtenido {}",
+            rp.value
+        );
+        let p_max_expected = vg * vg / (4.0 * rth); // 0.125 W
+        let pm = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == "P_max")
+            .expect("P_max debe estar en derived");
+        assert!(
+            (pm.value - p_max_expected).abs() < 1e-9,
+            "P_max esperado {p_max_expected}, obtenido {}",
+            pm.value
+        );
     }
 
     /// Verifica que `double_option` distingue las tres variantes de `tolerance` en JSON:
