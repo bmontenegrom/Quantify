@@ -905,7 +905,7 @@ async function updateRegressionPreview() {
     }
     const scatters = analysis.scatters ?? [];
     if (scatters.length) {
-      const { scatterMarkup } = await import("./analysis.js");
+      const { scatterMarkup, derivedBlockMarkup } = await import("./analysis.js");
       const blocks = scatters
         .map((s) => {
           const heading = scatters.length > 1
@@ -915,7 +915,8 @@ async function updateRegressionPreview() {
         })
         .join("");
       const title = scatters.length > 1 ? "Vista previa de las curvas" : "Vista previa de la curva";
-      container.innerHTML = `<h4>${title}</h4>${blocks}`;
+      const derivedHtml = derivedBlockMarkup(analysis.derived ?? []);
+      container.innerHTML = `<h4>${title}</h4>${blocks}${derivedHtml}`;
     } else {
       container.innerHTML = "";
     }

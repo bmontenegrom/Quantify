@@ -191,7 +191,7 @@ function quantitiesTableMarkup(quantities) {
 }
 
 /** Bloque de mensurandos derivados (valor ± U + fórmula). `heading` controla el título opcional. */
-function derivedBlockMarkup(derived, heading = "Mensurandos") {
+export function derivedBlockMarkup(derived, heading = "Mensurandos") {
   if (!derived.length) return "";
   return `
     ${heading ? `<h3>${escapeHtml(heading)}</h3>` : ""}
@@ -283,6 +283,7 @@ function formAnalysisMarkup(analysis) {
     return `
       <h3>${title}</h3>
       ${blocks}
+      ${derivedBlock}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
   }

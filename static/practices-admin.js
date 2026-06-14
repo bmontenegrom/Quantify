@@ -17,7 +17,7 @@ export function renderPracticesPage() {
   }
 
   const def = state.practiceDefinition;
-  // Las curvas (scatter sin ajuste) no derivan mensurandos: se grafican los puntos y nada más.
+  // Las curvas pueden tener mensurandos escalares (p. ej. fpasaje, RP_max); el editor los muestra.
   const isCurva = def?.analysis_kind === "curva";
   const resultsBlock = isCurva
     ? `
