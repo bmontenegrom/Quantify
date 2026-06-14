@@ -1132,6 +1132,8 @@ pub async fn analyze(
     }
 
     // Camino de curva (scatter sin ajuste): una o varias curvas sobre el mismo barrido (Motor B).
+    // Los mensurandos derivados escalares (de magnitudes no-por-punto) se calculan igual que en el
+    // camino estadístico: reduce las escalares, propaga incertidumbres, agrega a `derived`.
     if definition.analysis_kind.as_deref() == Some("curva") {
         if definition.curves.is_empty() {
             anyhow::bail!("la practica es de curva pero no tiene curvas definidas");
@@ -1145,12 +1147,54 @@ pub async fn analyze(
                 x_log: c.x_log,
             })
             .collect();
-        return compute_curva(
+        let mut analysis = compute_curva(
             &definition.quantities,
             &definition.intermediates,
             &curves,
             measurements,
-        );
+        )?;
+        if !definition.results.is_empty() {
+            let scalar_qtys: Vec<&PracticeQuantity> = definition
+                .quantities
+                .iter()
+                .filter(|q| !q.per_point)
+                .collect();
+            if !scalar_qtys.is_empty() {
+                let symbols: Vec<String> = scalar_qtys.iter().map(|q| q.symbol.clone()).collect();
+                // Pre-validación: si algún mensurando referencia un símbolo por-punto (p. ej.
+                // una práctica estadística reutilizada como `curva`), no hay contexto escalar
+                // para derivarlos → se omite silenciosamente toda la derivación.
+                let all_valid = definition
+                    .results
+                    .iter()
+                    .all(|r| compile_formula(r.formula.trim(), &symbols).is_ok());
+                if all_valid {
+                    let by_quantity: HashMap<&str, &MeasurementInput> = measurements
+                        .iter()
+                        .map(|m| (m.quantity_id.as_str(), m))
+                        .collect();
+                    let mut means = HashMap::new();
+                    let mut us = HashMap::new();
+                    compute_quantities(
+                        &scalar_qtys,
+                        &by_quantity,
+                        &scales,
+                        None,
+                        &mut means,
+                        &mut us,
+                        &mut analysis.warnings,
+                    )?;
+                    analysis.derived = derive_results(
+                        &definition.results,
+                        &symbols,
+                        &means,
+                        &us,
+                        &mut analysis.warnings,
+                    )?;
+                }
+            }
+        }
+        return Ok(analysis);
     }
 
     compute(

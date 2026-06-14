@@ -372,6 +372,36 @@ Con el docente, validando fórmulas contra las hojas reales (sección Hallazgos)
 4. Filtros (depende de Fase 14, eje log).
 Decisión pendiente con el docente: operadores múltiples en Estadística.
 
+### Estado al 2026-06-13
+
+**Motores completados** (todos en `main`):
+
+| Motor | PR | Descripción |
+|---|---|---|
+| A | #31 | Réplicas por punto en regresión/curva (`replicas_per_point`, grilla) |
+| B | #32 | Lista de curvas por práctica `curva` (`practice_curves`, x/y/x_log) |
+| C | #34 | Magnitud intermedia por punto (`practice_intermediates`): fórmula por réplica, promediada |
+| D | #33 | Operadores en estadística (`operator_count`): serie por operador, mensurandos sin promediar |
+| E | #35 | Regresión completa: escalares compartidos (`per_point=false`), derivadas por punto post-ajuste |
+| F | #38 | Mensurandos agregados escalares en regresión (`practice_aggregates`): referencian extremos de serie |
+
+**Prácticas sembradas** (todas en `main`):
+
+| Práctica | PR | Motores | Estado |
+|---|---|---|---|
+| Viscosidad (Stokes) | #37 | A + E | ✓ Sembrada, probada |
+| Fluidos I (Hagen-Poiseuille) | #36 | A + C + E | ✓ Sembrada, probada |
+| Fluidos II (descarga capilar) | #39 | E + F | ✓ Sembrada, ecuaciones confirmadas por docente |
+
+**Pendientes de sembrar:**
+
+| Práctica | Motor | Notas |
+|---|---|---|
+| P2-parte2 (curva de potencia) | B (curva) | Depende de Motor B ✓ — falta hoja de resultados |
+| Filtros | B (2 curvas, x_log) | Depende de Motor B ✓ — falta hoja de resultados |
+| Hidrostática y TS | D (estadístico) | Decisión de modelado pendiente con docente |
+| CA (RLC) | estadístico | Teórico vs experimental; `asin` verificado en `evalexpr` |
+
 ## Fase 16 (P2) — Rediseño visual (moderno, vistoso, eficiente)
 
 Mantener vanilla JS/CSS (sin framework). Candidatos, a validar con screenshots Playwright:

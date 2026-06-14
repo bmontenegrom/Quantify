@@ -977,6 +977,30 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             Some("math::sqrt(h_max) - math::sqrt(h)"),
             Some("t"),
         ),
+        // Filtros — barrido en frecuencia de un circuito RLC. Por punto: f (frecuencia fijada),
+        // VRpp y Vgpp (tensiones pico a pico), a y b (Lissajous). Intermedias: omega=2*pi*f,
+        // razon=VRpp/Vgpp, phi=asin(b/a). Componentes compartidos (catedra): R, C1, C2, L.
+        // Dos curvas (Motor B): razon vs omega y phi vs omega, eje x logaritmico.
+        (
+            "filtros",
+            "Filtros",
+            "Barrido en frecuencia de un circuito RLC: respuesta en amplitud VR/Vg y desfasaje phi = asin(b/a) contra la frecuencia angular omega = 2*pi*f (eje log).",
+            "curva",
+            None,
+            None,
+        ),
+        // P2-parte2 — curva de potencia. Por punto: R (resistencia externa set) e I (medida con
+        // amperimetro). Potencia por punto P = I^2*R (intermedia). Escalares: Vg, RA, R2, R3.
+        // Rth = RA + R2||R3 (resistencia de Thevenin del circuito paralelo de parte 1).
+        // Mensurandos teoricos: RP_max = Rth, P_max = Vg^2/(4*Rth).
+        (
+            "p2-potencia",
+            "CC - Curva de Potencia",
+            "Curva de potencia P = I^2*R al variar la resistencia externa R. Rth = RA + R2||R3 (Thevenin del circuito paralelo); RP_max = Rth; P_max = Vg^2/(4*Rth).",
+            "curva",
+            None,
+            None,
+        ),
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
@@ -1095,6 +1119,8 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "fluidos-1",
         "viscosidad",
         "fluidos-2",
+        "filtros",
+        "p2-potencia",
     ] {
         sqlx::query(
             r#"
@@ -1498,7 +1524,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 8);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
     }
 
     #[test]
