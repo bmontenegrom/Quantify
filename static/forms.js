@@ -915,7 +915,9 @@ async function updateRegressionPreview() {
         })
         .join("");
       const title = scatters.length > 1 ? "Vista previa de las curvas" : "Vista previa de la curva";
-      const derivedHtml = derivedBlockMarkup(analysis.derived ?? []);
+      // Solo docentes ven los mensurandos derivados en la vista previa; los alumnos los
+      // descubren tras la entrega, cuando el docente habilita results_visible_to_student.
+      const derivedHtml = canReview(state.user) ? derivedBlockMarkup(analysis.derived ?? []) : "";
       container.innerHTML = `<h4>${title}</h4>${blocks}${derivedHtml}`;
     } else {
       container.innerHTML = "";
