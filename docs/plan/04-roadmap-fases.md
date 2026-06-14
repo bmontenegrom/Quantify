@@ -402,6 +402,25 @@ Decisión pendiente con el docente: operadores múltiples en Estadística.
 | Hidrostática y TS | D (estadístico) | Decisión de modelado pendiente con docente |
 | CA (RLC) | estadístico | Teórico vs experimental; `asin` verificado en `evalexpr` |
 
+## Fase 16 (P1) — Refactor de módulos grandes
+
+Tres módulos superan las 2 400 líneas (estado al 2026-06-13). No es bloqueante hoy, pero
+agregar código nuevo ya se siente incómodo. Orden sugerido por retorno/riesgo:
+
+1. **`practices.rs` (≈2 900 líneas)** — el módulo `#[cfg(test)]` representa ≈1 500 líneas.
+   Extraer los tests a `tests/practices_integration.rs` (o `src/practices/tests.rs`).
+   Bajo riesgo: no toca lógica productiva.
+
+2. **`routes.rs` (≈2 400 líneas)** — router monolítico con handlers de todos los recursos.
+   Split natural por dominio: `routes/practices.rs`, `routes/submissions.rs`,
+   `routes/courses.rs`, `routes/instruments.rs`; un `routes/mod.rs` reexporta el router.
+
+3. **`computation.rs` (≈3 200 líneas)** — posponer hasta que se agregue un motor nuevo
+   (regresión no-lineal, exportación). En ese momento extraer
+   `computation/curva.rs` y `computation/statistics.rs`.
+
+**Aceptación**: `cargo test` verde, `cargo clippy` limpio, ningún comportamiento cambia.
+
 ## Fase 16 (P2) — Rediseño visual (moderno, vistoso, eficiente)
 
 Mantener vanilla JS/CSS (sin framework). Candidatos, a validar con screenshots Playwright:
