@@ -917,7 +917,10 @@ pub fn compute_regresion(
     // serie tiene distinta cantidad de puntos que el ajuste. El extremo se toma de la serie
     // completa de esa magnitud (no del último punto ajustado), así que conviene revisar la carga.
     // Cubre el caso que `build_points` no avisa: una magnitud por punto que no entra a los ejes.
-    for (sym, &n) in &series_len {
+    // Se recorre `quantities` en orden (no el `HashMap`) para que los avisos salgan determinísticos.
+    for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
+        let sym = q.symbol.as_str();
+        let n = series_len.get(sym).copied().unwrap_or(0);
         if n == n_points {
             continue;
         }
