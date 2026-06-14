@@ -1132,6 +1132,8 @@ pub async fn analyze(
     }
 
     // Camino de curva (scatter sin ajuste): una o varias curvas sobre el mismo barrido (Motor B).
+    // Los mensurandos derivados escalares (de magnitudes no-por-punto) se calculan igual que en el
+    // camino estadístico: reduce las escalares, propaga incertidumbres, agrega a `derived`.
     if definition.analysis_kind.as_deref() == Some("curva") {
         if definition.curves.is_empty() {
             anyhow::bail!("la practica es de curva pero no tiene curvas definidas");
@@ -1145,12 +1147,63 @@ pub async fn analyze(
                 x_log: c.x_log,
             })
             .collect();
-        return compute_curva(
+        let mut analysis = compute_curva(
             &definition.quantities,
             &definition.intermediates,
             &curves,
             measurements,
-        );
+        )?;
+        if !definition.results.is_empty() {
+            let scalar_qtys: Vec<&PracticeQuantity> = definition
+                .quantities
+                .iter()
+                .filter(|q| !q.per_point || q.is_given)
+                .collect();
+            let symbols: Vec<String> = scalar_qtys.iter().map(|q| q.symbol.clone()).collect();
+            // Filtra result por result: los que no compilan con las magnitudes escalares
+            // disponibles emiten un warning individual en lugar de silenciar todo el bloque.
+            let scalar_results: Vec<PracticeResult> = definition
+                .results
+                .iter()
+                .filter(|r| {
+                    if compile_formula(r.formula.trim(), &symbols).is_ok() {
+                        true
+                    } else {
+                        analysis.warnings.push(format!(
+                            "mensurando '{}': la fórmula no puede evaluarse con las magnitudes escalares disponibles",
+                            r.symbol
+                        ));
+                        false
+                    }
+                })
+                .cloned()
+                .collect();
+            if !scalar_results.is_empty() {
+                let by_quantity: HashMap<&str, &MeasurementInput> = measurements
+                    .iter()
+                    .map(|m| (m.quantity_id.as_str(), m))
+                    .collect();
+                let mut means = HashMap::new();
+                let mut us = HashMap::new();
+                compute_quantities(
+                    &scalar_qtys,
+                    &by_quantity,
+                    &scales,
+                    None,
+                    &mut means,
+                    &mut us,
+                    &mut analysis.warnings,
+                )?;
+                analysis.derived = derive_results(
+                    &scalar_results,
+                    &symbols,
+                    &means,
+                    &us,
+                    &mut analysis.warnings,
+                )?;
+            }
+        }
+        return Ok(analysis);
     }
 
     compute(

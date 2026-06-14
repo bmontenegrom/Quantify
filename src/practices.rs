@@ -1378,6 +1378,152 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         }
     }
 
+    // Filtros — barrido en frecuencia de un circuito RLC. Por punto: f (frecuencia fijada por el
+    // alumno), VRpp y Vgpp (tensiones pico a pico medidas), a y b (semiejes de la figura de
+    // Lissajous). Componentes dados por la catedra: R, C1, C2, L. Intermedias: omega=2*pi*f
+    // (rad/s), razon=VRpp/Vgpp (adimensional), phi=asin(b/a) (rad). Dos curvas (Motor B):
+    // razon vs omega (amplitud) y phi vs omega (desfasaje), ambas con eje x logaritmico.
+    // Mensurandos teoricos: fpasaje=1/(2*pi*sqrt(L*(C1+C2))) y fbloqueo=1/(2*pi*sqrt(L*C2)).
+    // Topologia confirmada: C2||L en serie con C1 y R.
+    let fresh_filtros = seed_practice(
+        pool,
+        "filtros",
+        &[
+            qty("f", "Frecuencia", "Hz", false, "frecuencia"),
+            qty("VRpp", "Tension pico a pico en R", "V", false, "tension"),
+            qty(
+                "Vgpp",
+                "Tension pico a pico del generador",
+                "V",
+                false,
+                "tension",
+            ),
+            qty("a", "Semieje mayor de Lissajous", "V", false, "tension"),
+            qty("b", "Semieje menor de Lissajous", "V", false, "tension"),
+            qty_given("R", "Resistencia", "ohm", "resistencia"),
+            qty_given("C1", "Capacitor 1", "F", "capacitancia"),
+            qty_given("C2", "Capacitor 2", "F", "capacitancia"),
+            qty_given("L", "Inductor", "H", "inductancia"),
+        ],
+        &[
+            // Topología: C2||L en serie con C1 y R.
+            // Resonancia serie (pasaje): f = 1/(2π√(L(C1+C2)))
+            // Resonancia paralelo del tanque (bloqueo): f = 1/(2π√(LC2))
+            res(
+                "fpasaje",
+                "Frecuencia de pasaje teorica",
+                "Hz",
+                "1/(2*pi*math::sqrt(L*(C1+C2)))",
+            ),
+            res(
+                "fbloqueo",
+                "Frecuencia de bloqueo teorica",
+                "Hz",
+                "1/(2*pi*math::sqrt(L*C2))",
+            ),
+        ],
+    )
+    .await?;
+    if fresh_filtros {
+        for (sym, name, unit, formula) in [
+            ("omega", "Frecuencia angular", "rad/s", "2*pi*f"),
+            ("razon", "Razon de amplitud VR/Vg", "", "VRpp/Vgpp"),
+            ("phi", "Desfasaje", "rad", "math::asin(b/a)"),
+        ] {
+            create_intermediate(
+                pool,
+                "filtros",
+                IntermediateInput {
+                    symbol: sym.into(),
+                    name: name.into(),
+                    unit: unit.into(),
+                    formula: formula.into(),
+                },
+            )
+            .await?;
+        }
+        for (x, y, x_log) in [("omega", "razon", true), ("omega", "phi", true)] {
+            create_curve(
+                pool,
+                "filtros",
+                CurveInput {
+                    x_formula: x.into(),
+                    y_formula: y.into(),
+                    x_log,
+                },
+            )
+            .await?;
+        }
+    }
+
+    // P2-parte2 — curva de potencia. Por punto: R (resistencia externa, set con caja de
+    // resistencias) e I (corriente, medida con amperimetro). Escalares: Vg (tension del
+    // generador, medida), RA (resistencia interna del amperimetro, catedra), R2 y R3 (del
+    // circuito paralelo de parte 1, dados). Intermedia P = I^2*R (W). Una curva: P vs R.
+    // Mensurandos: Rth = RA + R2||R3 (resistencia de Thevenin del circuito) y
+    // RP_max = Rth, P_max = Vg^2/(4*Rth).
+    let fresh_p2pot = seed_practice(
+        pool,
+        "p2-potencia",
+        &[
+            qty(
+                "R",
+                "Resistencia externa (carga variable)",
+                "ohm",
+                false,
+                "resistencia",
+            ),
+            qty("I", "Corriente", "A", false, "corriente"),
+            qty_shared("Vg", "Tension del generador", "V", "tension"),
+            qty_given(
+                "RA",
+                "Resistencia interna del amperimetro",
+                "ohm",
+                "resistencia",
+            ),
+            qty_given("R2", "Resistencia R2", "ohm", "resistencia"),
+            qty_given("R3", "Resistencia R3", "ohm", "resistencia"),
+        ],
+        &[
+            res(
+                "RP_max",
+                "Resistencia de maxima transferencia de potencia (Rth)",
+                "ohm",
+                "RA + R2*R3/(R2+R3)",
+            ),
+            res(
+                "P_max",
+                "Potencia maxima (teorica)",
+                "W",
+                "Vg*Vg/(4*(RA + R2*R3/(R2+R3)))",
+            ),
+        ],
+    )
+    .await?;
+    if fresh_p2pot {
+        create_intermediate(
+            pool,
+            "p2-potencia",
+            IntermediateInput {
+                symbol: "P".into(),
+                name: "Potencia disipada en R".into(),
+                unit: "W".into(),
+                formula: "I*I*R".into(),
+            },
+        )
+        .await?;
+        create_curve(
+            pool,
+            "p2-potencia",
+            CurveInput {
+                x_formula: "R".into(),
+                y_formula: "P".into(),
+                x_log: false,
+            },
+        )
+        .await?;
+    }
+
     Ok(())
 }
 
@@ -2533,6 +2679,349 @@ mod tests {
             analysis.warnings.is_empty(),
             "warnings: {:?}",
             analysis.warnings
+        );
+    }
+
+    /// La definición sembrada de Filtros tiene 9 magnitudes, 2 mensurandos escalares
+    /// (fpasaje, fbloqueo), 3 intermedias y 2 curvas con x_log.
+    #[tokio::test]
+    async fn seeded_filtros_populates_and_computes() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "filtros").await.unwrap().unwrap();
+
+        assert_eq!(def.quantities.len(), 9);
+        assert_eq!(
+            def.results
+                .iter()
+                .map(|r| r.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["fpasaje", "fbloqueo"],
+        );
+        assert_eq!(
+            def.intermediates
+                .iter()
+                .map(|i| i.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["omega", "razon", "phi"],
+        );
+        assert_eq!(def.curves.len(), 2);
+        assert!(
+            def.curves[0].x_log,
+            "curva 1 (amplitud) debe tener x_log=true"
+        );
+        assert_eq!(def.curves[0].x_formula, "omega");
+        assert_eq!(def.curves[0].y_formula, "razon");
+        assert!(
+            def.curves[1].x_log,
+            "curva 2 (desfasaje) debe tener x_log=true"
+        );
+        assert_eq!(def.curves[1].y_formula, "phi");
+
+        // Computo end-to-end: 3 puntos, omega=2*pi*f, razon=VRpp/Vgpp, phi=asin(b/a).
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let pt = |sym: &str, vals: Vec<f64>| crate::computation::MeasurementInput {
+            quantity_id: id(sym),
+            instrument_id: None,
+            scale_id: None,
+            values: vals,
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        };
+        // b/a = 0.5 → phi = asin(0.5) ≈ 0.5236 rad; VRpp/Vgpp = 0.8.
+        let measurements = vec![
+            pt("f", vec![100.0, 1000.0, 10000.0]),
+            pt("VRpp", vec![0.8, 0.8, 0.8]),
+            pt("Vgpp", vec![1.0, 1.0, 1.0]),
+            pt("a", vec![1.0, 1.0, 1.0]),
+            pt("b", vec![0.5, 0.5, 0.5]),
+            pt("R", vec![100.0]),
+            pt("C1", vec![1e-6]),
+            pt("C2", vec![1e-6]),
+            pt("L", vec![1e-3]),
+        ];
+        let curves: Vec<crate::computation::CurveSpec> = def
+            .curves
+            .iter()
+            .map(|c| crate::computation::CurveSpec {
+                x_formula: &c.x_formula,
+                y_formula: &c.y_formula,
+                x_log: c.x_log,
+            })
+            .collect();
+        let analysis = crate::computation::compute_curva(
+            &def.quantities,
+            &def.intermediates,
+            &curves,
+            &measurements,
+        )
+        .unwrap();
+        assert_eq!(analysis.scatters.len(), 2);
+        // Curva 1 (amplitud): x = omega = 2*pi*f; y = razon = 0.8.
+        let amp = &analysis.scatters[0];
+        assert!((amp.points[0].0 - 2.0 * std::f64::consts::PI * 100.0).abs() < 1e-6);
+        assert!((amp.points[0].1 - 0.8).abs() < 1e-9);
+        // Curva 2 (desfasaje): y = phi = asin(0.5) ≈ 0.5236.
+        let ph = &analysis.scatters[1];
+        assert!((ph.points[0].1 - (0.5_f64).asin()).abs() < 1e-9);
+        assert!(ph.x_log);
+    }
+
+    /// La definición sembrada de P2-potencia tiene 6 magnitudes, 1 intermedia (P=I^2*R), 1 curva
+    /// y 2 mensurandos escalares (RP_max, P_max). El análisis computa P_max = Vg^2/(4*Rth).
+    #[tokio::test]
+    async fn seeded_p2_potencia_populates_and_computes() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "p2-potencia").await.unwrap().unwrap();
+
+        assert_eq!(def.quantities.len(), 6);
+        assert_eq!(
+            def.results
+                .iter()
+                .map(|r| r.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["RP_max", "P_max"]
+        );
+        assert_eq!(def.intermediates.len(), 1);
+        assert_eq!(def.intermediates[0].symbol, "P");
+        assert_eq!(def.curves.len(), 1);
+        assert!(!def.curves[0].x_log);
+        assert_eq!(def.curves[0].x_formula, "R");
+        assert_eq!(def.curves[0].y_formula, "P");
+
+        // Computo end-to-end: Vg=10V, RA=100ohm, R2=200ohm, R3=200ohm → Rth=RA+R2||R3=200ohm.
+        // RP_max = 200 ohm, P_max = 100/(4*200) = 0.125 W.
+        // 3 puntos con R=[100,200,400] e I=Vg/(Rth+R).
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let pt = |sym: &str, vals: Vec<f64>| crate::computation::MeasurementInput {
+            quantity_id: id(sym),
+            instrument_id: None,
+            scale_id: None,
+            values: vals,
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        };
+        let vg = 10.0_f64;
+        let ra = 100.0_f64;
+        let r2 = 200.0_f64;
+        let r3 = 200.0_f64;
+        let rth = ra + r2 * r3 / (r2 + r3); // = 200.0
+        let rs = vec![100.0_f64, 200.0, 400.0];
+        let is: Vec<f64> = rs.iter().map(|r| vg / (rth + r)).collect();
+        let measurements = vec![
+            pt("R", rs.clone()),
+            pt("I", is.clone()),
+            pt("Vg", vec![vg]),
+            pt("RA", vec![ra]),
+            pt("R2", vec![r2]),
+            pt("R3", vec![r3]),
+        ];
+        let curves: Vec<crate::computation::CurveSpec> = def
+            .curves
+            .iter()
+            .map(|c| crate::computation::CurveSpec {
+                x_formula: &c.x_formula,
+                y_formula: &c.y_formula,
+                x_log: c.x_log,
+            })
+            .collect();
+        let analysis = crate::computation::compute_curva(
+            &def.quantities,
+            &def.intermediates,
+            &curves,
+            &measurements,
+        )
+        .unwrap();
+        // La curva tiene 3 puntos: x=R, y=P=I^2*R. El punto central (R=Rth=200) maximiza P.
+        assert_eq!(analysis.scatters[0].points.len(), 3);
+        let p_at_rth = (vg / (rth + rth)).powi(2) * rth; // P_max = Vg^2/(4*Rth)
+        let p_curve_max = analysis.scatters[0]
+            .points
+            .iter()
+            .map(|(_, p)| *p)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!((p_curve_max - p_at_rth).abs() < 1e-9);
+        // Los mensurandos RP_max y P_max los calcula el camino `analyze` (no compute_curva puro).
+        // Aquí solo verificamos la estructura; el test de integración cubre el análisis completo.
+    }
+
+    /// Integración: `analyze()` para p2-potencia deriva RP_max y P_max correctamente.
+    ///
+    /// Verifica que el camino curva + escalares en `analyze()` llena `derived` con
+    /// RP_max = Rth = 200 Ω y P_max = Vg²/(4·Rth) = 0.125 W.
+    #[tokio::test]
+    async fn analyze_p2_potencia_derives_rp_max_and_p_max() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "p2-potencia").await.unwrap().unwrap();
+
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let pt = |sym: &str, vals: Vec<f64>| crate::computation::MeasurementInput {
+            quantity_id: id(sym),
+            instrument_id: None,
+            scale_id: None,
+            values: vals,
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        };
+
+        let vg = 10.0_f64;
+        let ra = 100.0_f64;
+        let r2 = 200.0_f64;
+        let r3 = 200.0_f64;
+        let rth = ra + r2 * r3 / (r2 + r3); // = 200.0
+        let rs = vec![100.0_f64, 200.0, 400.0];
+        let is: Vec<f64> = rs.iter().map(|r| vg / (rth + r)).collect();
+        let measurements = vec![
+            pt("R", rs),
+            pt("I", is),
+            pt("Vg", vec![vg]),
+            pt("RA", vec![ra]),
+            pt("R2", vec![r2]),
+            pt("R3", vec![r3]),
+        ];
+
+        let analysis = crate::computation::analyze(&pool, "p2-potencia", &measurements)
+            .await
+            .unwrap();
+
+        // El camino curva escalar debe poblar `derived`.
+        assert!(
+            !analysis.derived.is_empty(),
+            "derived debe contener al menos RP_max y P_max"
+        );
+        let rp = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == "RP_max")
+            .expect("RP_max debe estar en derived");
+        assert!(
+            (rp.value - rth).abs() < 1e-9,
+            "RP_max esperado {rth}, obtenido {}",
+            rp.value
+        );
+        let p_max_expected = vg * vg / (4.0 * rth); // 0.125 W
+        let pm = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == "P_max")
+            .expect("P_max debe estar en derived");
+        assert!(
+            (pm.value - p_max_expected).abs() < 1e-9,
+            "P_max esperado {p_max_expected}, obtenido {}",
+            pm.value
+        );
+    }
+
+    /// Integración: `analyze()` para filtros deriva fpasaje y fbloqueo correctamente.
+    ///
+    /// Topología: C2||L en serie con C1 y R. Fórmulas teóricas:
+    ///   fpasaje  = 1/(2π√(L(C1+C2)))   (resonancia serie)
+    ///   fbloqueo = 1/(2π√(LC2))         (resonancia paralelo del tanque)
+    #[tokio::test]
+    async fn analyze_filtros_derives_fpasaje_fbloqueo() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "filtros").await.unwrap().unwrap();
+
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let pt = |sym: &str, vals: Vec<f64>| crate::computation::MeasurementInput {
+            quantity_id: id(sym),
+            instrument_id: None,
+            scale_id: None,
+            values: vals,
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        };
+
+        // Valores de componentes: R=1kΩ, C1=C2=10nF, L=10mH.
+        let r = 1000.0_f64;
+        let c1 = 10e-9_f64;
+        let c2 = 10e-9_f64;
+        let l = 10e-3_f64;
+        let fp_expected = 1.0 / (2.0 * std::f64::consts::PI * (l * (c1 + c2)).sqrt());
+        let fb_expected = 1.0 / (2.0 * std::f64::consts::PI * (l * c2).sqrt());
+
+        // 3 puntos de barrido (valores arbitrarios; los escalares no dependen de ellos).
+        let measurements = vec![
+            pt("f", vec![1000.0, 5000.0, 10000.0]),
+            pt("VRpp", vec![0.5, 1.0, 0.5]),
+            pt("Vgpp", vec![1.0, 1.0, 1.0]),
+            pt("a", vec![1.0, 1.0, 1.0]),
+            pt("b", vec![0.5, 0.5, 0.5]),
+            pt("R", vec![r]),
+            pt("C1", vec![c1]),
+            pt("C2", vec![c2]),
+            pt("L", vec![l]),
+        ];
+
+        let analysis = crate::computation::analyze(&pool, "filtros", &measurements)
+            .await
+            .unwrap();
+
+        assert!(
+            !analysis.derived.is_empty(),
+            "derived debe contener fpasaje y fbloqueo"
+        );
+        let fp = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == "fpasaje")
+            .expect("fpasaje debe estar en derived");
+        assert!(
+            (fp.value - fp_expected).abs() < 1.0,
+            "fpasaje esperado {fp_expected:.2} Hz, obtenido {:.2}",
+            fp.value
+        );
+        let fb = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == "fbloqueo")
+            .expect("fbloqueo debe estar en derived");
+        assert!(
+            (fb.value - fb_expected).abs() < 1.0,
+            "fbloqueo esperado {fb_expected:.2} Hz, obtenido {:.2}",
+            fb.value
+        );
+        // fbloqueo > fpasaje (C1+C2 > C2 ⟹ √(L(C1+C2)) > √(LC2)).
+        assert!(
+            fb.value > fp.value,
+            "fbloqueo ({}) debe ser mayor que fpasaje ({})",
+            fb.value,
+            fp.value
         );
     }
 

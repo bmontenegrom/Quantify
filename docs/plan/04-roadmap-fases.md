@@ -372,6 +372,55 @@ Con el docente, validando fórmulas contra las hojas reales (sección Hallazgos)
 4. Filtros (depende de Fase 14, eje log).
 Decisión pendiente con el docente: operadores múltiples en Estadística.
 
+### Estado al 2026-06-13
+
+**Motores completados** (todos en `main`):
+
+| Motor | PR | Descripción |
+|---|---|---|
+| A | #31 | Réplicas por punto en regresión/curva (`replicas_per_point`, grilla) |
+| B | #32 | Lista de curvas por práctica `curva` (`practice_curves`, x/y/x_log) |
+| C | #34 | Magnitud intermedia por punto (`practice_intermediates`): fórmula por réplica, promediada |
+| D | #33 | Operadores en estadística (`operator_count`): serie por operador, mensurandos sin promediar |
+| E | #35 | Regresión completa: escalares compartidos (`per_point=false`), derivadas por punto post-ajuste |
+| F | #38 | Mensurandos agregados escalares en regresión (`practice_aggregates`): referencian extremos de serie |
+
+**Prácticas sembradas** (todas en `main`):
+
+| Práctica | PR | Motores | Estado |
+|---|---|---|---|
+| Viscosidad (Stokes) | #37 | A + E | ✓ Sembrada, probada |
+| Fluidos I (Hagen-Poiseuille) | #36 | A + C + E | ✓ Sembrada, probada |
+| Fluidos II (descarga capilar) | #39 | E + F | ✓ Sembrada, ecuaciones confirmadas por docente |
+| Filtros (barrido RLC) | #40 | B (2 curvas, x_log) | ✓ Sembrada |
+| P2-parte2 (curva de potencia) | #40 | B + E (curva + escalares) | ✓ Sembrada |
+
+**Pendientes de sembrar:**
+
+| Práctica | Motor | Notas |
+|---|---|---|
+| Hidrostática y TS | D (estadístico) | Decisión de modelado pendiente con docente |
+| CA (RLC) | estadístico | Teórico vs experimental; `asin` verificado en `evalexpr` |
+
+## Fase 16 (P1) — Refactor de módulos grandes
+
+Tres módulos superan las 2 400 líneas (estado al 2026-06-13). No es bloqueante hoy, pero
+agregar código nuevo ya se siente incómodo. Orden sugerido por retorno/riesgo:
+
+1. **`practices.rs` (≈2 900 líneas)** — el módulo `#[cfg(test)]` representa ≈1 500 líneas.
+   Extraer los tests a `tests/practices_integration.rs` (o `src/practices/tests.rs`).
+   Bajo riesgo: no toca lógica productiva.
+
+2. **`routes.rs` (≈2 400 líneas)** — router monolítico con handlers de todos los recursos.
+   Split natural por dominio: `routes/practices.rs`, `routes/submissions.rs`,
+   `routes/courses.rs`, `routes/instruments.rs`; un `routes/mod.rs` reexporta el router.
+
+3. **`computation.rs` (≈3 200 líneas)** — posponer hasta que se agregue un motor nuevo
+   (regresión no-lineal, exportación). En ese momento extraer
+   `computation/curva.rs` y `computation/statistics.rs`.
+
+**Aceptación**: `cargo test` verde, `cargo clippy` limpio, ningún comportamiento cambia.
+
 ## Fase 16 (P2) — Rediseño visual (moderno, vistoso, eficiente)
 
 Mantener vanilla JS/CSS (sin framework). Candidatos, a validar con screenshots Playwright:
