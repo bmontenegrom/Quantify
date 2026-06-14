@@ -90,6 +90,9 @@ pub struct PracticeDefinition {
     /// Solo `regresion_lineal` (Motor E): magnitudes derivadas por punto, post-ajuste (tabla por
     /// corrida, p. ej. Reynolds).
     pub point_results: Vec<PracticePointResult>,
+    /// Solo `regresion_lineal` (Motor F): mensurandos agregados escalares, post-ajuste (un valor,
+    /// con acceso a los extremos de cada magnitud por punto: `X_first`/`X_first2`/`X_last`/`X_last2`).
+    pub aggregates: Vec<PracticeAggregate>,
 }
 
 /// Una curva de una práctica `curva`: un par de fórmulas de eje sobre el barrido común, con eje x
@@ -158,6 +161,30 @@ pub struct PointResultInput {
     pub formula: String,
 }
 
+/// Mensurando **agregado** escalar (Motor F) de una práctica `regresion_lineal`: su `formula` se
+/// evalúa una vez tras el ajuste y puede usar escalares compartidos, `slope`/`intercept`, los
+/// mensurandos, los agregados anteriores, y los extremos de cada magnitud por punto (`X_first`,
+/// `X_first2`, `X_last`, `X_last2`). Un valor, sin incertidumbre.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PracticeAggregate {
+    pub id: String,
+    pub practice_id: String,
+    pub position: i64,
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    pub formula: String,
+}
+
+/// Datos para crear o actualizar un mensurando agregado.
+#[derive(Debug, Deserialize)]
+pub struct AggregateInput {
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    pub formula: String,
+}
+
 /// Fila cruda con la configuración de análisis de una práctica.
 #[derive(sqlx::FromRow)]
 struct PracticeConfigRow {
@@ -186,6 +213,7 @@ pub async fn definition(
     let curves = curves_for(pool, practice_id).await?;
     let intermediates = intermediates_for(pool, practice_id).await?;
     let point_results = point_results_for(pool, practice_id).await?;
+    let aggregates = aggregates_for(pool, practice_id).await?;
     Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
         analysis_kind: row.analysis_kind,
@@ -197,6 +225,7 @@ pub async fn definition(
         operator_count: row.operator_count,
         intermediates,
         point_results,
+        aggregates,
     }))
 }
 
@@ -298,6 +327,109 @@ async fn fetch_point_result(pool: &SqlitePool, id: &str) -> anyhow::Result<Pract
     Ok(sqlx::query_as::<_, PracticePointResult>(
         "SELECT id, practice_id, position, symbol, name, unit, formula \
          FROM practice_point_results WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?)
+}
+
+/// Lee los mensurandos agregados de una práctica (Motor F), ordenados por posición.
+pub async fn aggregates_for(
+    pool: &SqlitePool,
+    practice_id: &str,
+) -> anyhow::Result<Vec<PracticeAggregate>> {
+    Ok(sqlx::query_as::<_, PracticeAggregate>(
+        "SELECT id, practice_id, position, symbol, name, unit, formula \
+         FROM practice_aggregates WHERE practice_id = ?1 ORDER BY position, id",
+    )
+    .bind(practice_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Crea un mensurando agregado; asigna la siguiente posición. Símbolo y fórmula obligatorios.
+pub async fn create_aggregate(
+    pool: &SqlitePool,
+    practice_id: &str,
+    input: AggregateInput,
+) -> anyhow::Result<PracticeAggregate> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
+        anyhow::bail!("el mensurando agregado necesita símbolo y fórmula");
+    }
+    let position: (i64,) = sqlx::query_as(
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_aggregates WHERE practice_id = ?1",
+    )
+    .bind(practice_id)
+    .fetch_one(pool)
+    .await?;
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO practice_aggregates (id, practice_id, position, symbol, name, unit, formula) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )
+    .bind(&id)
+    .bind(practice_id)
+    .bind(position.0)
+    .bind(symbol)
+    .bind(input.name.trim())
+    .bind(input.unit.trim())
+    .bind(formula)
+    .execute(pool)
+    .await?;
+    fetch_aggregate(pool, &id).await
+}
+
+/// Actualiza un mensurando agregado de esa práctica. Devuelve `None` si no existe.
+pub async fn update_aggregate(
+    pool: &SqlitePool,
+    practice_id: &str,
+    aggregate_id: &str,
+    input: AggregateInput,
+) -> anyhow::Result<Option<PracticeAggregate>> {
+    let symbol = input.symbol.trim();
+    let formula = input.formula.trim();
+    if symbol.is_empty() || formula.is_empty() {
+        anyhow::bail!("el mensurando agregado necesita símbolo y fórmula");
+    }
+    let result = sqlx::query(
+        "UPDATE practice_aggregates SET symbol = ?3, name = ?4, unit = ?5, formula = ?6 \
+         WHERE id = ?1 AND practice_id = ?2",
+    )
+    .bind(aggregate_id)
+    .bind(practice_id)
+    .bind(symbol)
+    .bind(input.name.trim())
+    .bind(input.unit.trim())
+    .bind(formula)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+    Ok(Some(fetch_aggregate(pool, aggregate_id).await?))
+}
+
+/// Elimina un mensurando agregado de esa práctica por id. Devuelve `true` si existía.
+pub async fn delete_aggregate(
+    pool: &SqlitePool,
+    practice_id: &str,
+    aggregate_id: &str,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query("DELETE FROM practice_aggregates WHERE id = ?1 AND practice_id = ?2")
+        .bind(aggregate_id)
+        .bind(practice_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Lee un mensurando agregado por su id.
+async fn fetch_aggregate(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeAggregate> {
+    Ok(sqlx::query_as::<_, PracticeAggregate>(
+        "SELECT id, practice_id, position, symbol, name, unit, formula \
+         FROM practice_aggregates WHERE id = ?1",
     )
     .bind(id)
     .fetch_one(pool)
@@ -687,6 +819,7 @@ pub async fn delete_result(pool: &SqlitePool, result_id: &str) -> anyhow::Result
 ///
 /// `exclude_*_id` permiten ignorar la fila que se está editando (para que renombrar a su propio
 /// símbolo no falle).
+#[allow(clippy::too_many_arguments)]
 pub async fn symbol_taken_in_practice(
     pool: &SqlitePool,
     practice_id: &str,
@@ -695,6 +828,7 @@ pub async fn symbol_taken_in_practice(
     exclude_result_id: Option<&str>,
     exclude_intermediate_id: Option<&str>,
     exclude_point_result_id: Option<&str>,
+    exclude_aggregate_id: Option<&str>,
 ) -> anyhow::Result<bool> {
     let sym = symbol.trim();
     let count = |table: &str, exclude: Option<&str>| {
@@ -717,7 +851,8 @@ pub async fn symbol_taken_in_practice(
     Ok(count("practice_quantities", exclude_quantity_id).await?
         || count("practice_results", exclude_result_id).await?
         || count("practice_intermediates", exclude_intermediate_id).await?
-        || count("practice_point_results", exclude_point_result_id).await?)
+        || count("practice_point_results", exclude_point_result_id).await?
+        || count("practice_aggregates", exclude_aggregate_id).await?)
 }
 
 /// Actualiza el tipo de análisis de una práctica. Devuelve `true` si existía.
@@ -1425,17 +1560,25 @@ mod tests {
             .unwrap();
 
         // symbol_taken_in_practice lo detecta buscando en quantities.
-        assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, None, None, None)
-                .await
-                .unwrap()
-        );
+        assert!(symbol_taken_in_practice(
+            &pool,
+            "p1-estadistica",
+            "l",
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+        .await
+        .unwrap());
         // Excluir la misma magnitud (al renombrar) no debe reportar colisión.
         assert!(!symbol_taken_in_practice(
             &pool,
             "p1-estadistica",
             "l",
             Some(&q.id),
+            None,
             None,
             None,
             None
@@ -1456,6 +1599,7 @@ mod tests {
             None,
             Some(&r.id),
             None,
+            None,
             None
         )
         .await
@@ -1466,6 +1610,7 @@ mod tests {
             "p1-estadistica",
             "Q",
             Some(&q.id),
+            None,
             None,
             None,
             None
@@ -1486,11 +1631,18 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "Iv", None, None, None, None)
-                .await
-                .unwrap()
-        );
+        assert!(symbol_taken_in_practice(
+            &pool,
+            "p1-estadistica",
+            "Iv",
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+        .await
+        .unwrap());
 
         // Una magnitud derivada por punto con símbolo "Re": el resto debe colisionar con ella.
         create_point_result(
@@ -1505,11 +1657,44 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(
-            symbol_taken_in_practice(&pool, "p1-estadistica", "Re", None, None, None, None)
-                .await
-                .unwrap()
-        );
+        assert!(symbol_taken_in_practice(
+            &pool,
+            "p1-estadistica",
+            "Re",
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+        .await
+        .unwrap());
+
+        // Un mensurando agregado (Motor F) con símbolo "Ma": el resto debe colisionar con él.
+        create_aggregate(
+            &pool,
+            "p1-estadistica",
+            AggregateInput {
+                symbol: "Ma".into(),
+                name: "Ma".into(),
+                unit: "".into(),
+                formula: "slope".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(symbol_taken_in_practice(
+            &pool,
+            "p1-estadistica",
+            "Ma",
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+        .await
+        .unwrap());
 
         // Símbolo inexistente no colisiona.
         assert!(!symbol_taken_in_practice(
@@ -1519,10 +1704,55 @@ mod tests {
             None,
             None,
             None,
+            None,
             None
         )
         .await
         .unwrap());
+    }
+
+    /// CRUD de mensurandos agregados (Motor F): alta asigna posición, lectura ordena, edición cambia
+    /// campos, baja elimina y devuelve `true`/`false` según existiera.
+    #[tokio::test]
+    async fn aggregate_crud_roundtrip() {
+        let (pool, _dir) = setup().await;
+        let mk = |symbol: &str, formula: &str| AggregateInput {
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "".into(),
+            formula: formula.into(),
+        };
+        let a = create_aggregate(&pool, "p1-estadistica", mk("Re_max", "slope"))
+            .await
+            .unwrap();
+        let b = create_aggregate(&pool, "p1-estadistica", mk("Re_min", "intercept"))
+            .await
+            .unwrap();
+        assert!(b.position > a.position, "la 2da toma la siguiente posición");
+
+        let listed = aggregates_for(&pool, "p1-estadistica").await.unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].symbol, "Re_max", "ordenado por posición");
+
+        let updated = update_aggregate(&pool, "p1-estadistica", &a.id, mk("Re_max", "slope * 2"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.formula, "slope * 2");
+
+        assert!(delete_aggregate(&pool, "p1-estadistica", &a.id)
+            .await
+            .unwrap());
+        assert!(
+            !delete_aggregate(&pool, "p1-estadistica", &a.id)
+                .await
+                .unwrap(),
+            "borrar de nuevo devuelve false"
+        );
+        assert_eq!(
+            aggregates_for(&pool, "p1-estadistica").await.unwrap().len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -2089,6 +2319,7 @@ mod tests {
             &def.intermediates,
             &def.results,
             &def.point_results,
+            &def.aggregates,
             &Default::default(),
             def.x_formula.as_deref().unwrap(),
             def.y_formula.as_deref().unwrap(),

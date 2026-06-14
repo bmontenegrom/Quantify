@@ -8,7 +8,7 @@
 
 use crate::analysis;
 use crate::db::{self, AuthUser, InstrumentScale, PracticeQuantity, PracticeResult};
-use crate::practices::{PracticeIntermediate, PracticePointResult};
+use crate::practices::{PracticeAggregate, PracticeIntermediate, PracticePointResult};
 use crate::uncertainty::{self, BModel, QuantityResult, ScaleSpec};
 use chrono::Utc;
 use evalexpr::{build_operator_tree, ContextWithMutableVariables, HashMapContext, Node, Value};
@@ -157,6 +157,15 @@ pub struct PointResultComputation {
     pub values: Vec<f64>,
 }
 
+/// Mensurando **agregado** escalar (Motor F): un único valor post-ajuste, sin incertidumbre.
+#[derive(Debug, Serialize)]
+pub struct AggregateComputation {
+    pub symbol: String,
+    pub name: String,
+    pub unit: String,
+    pub value: f64,
+}
+
 /// Resultado completo del cálculo de una entrega por formulario. Según el `analysis_kind` se
 /// llena un camino: `quantities` (estadístico), `regression` (ajuste lineal) o `scatters` (curva:
 /// una o varias curvas sobre el mismo barrido). `derived` y `warnings` aplican a los caminos que
@@ -177,6 +186,9 @@ pub struct FormAnalysis {
     /// Solo regresión (Motor E): magnitudes derivadas por punto (tabla por corrida, p. ej. Reynolds).
     #[serde(default)]
     pub point_results: Vec<PointResultComputation>,
+    /// Solo regresión (Motor F): mensurandos agregados escalares post-ajuste (p. ej. Reynolds medio).
+    #[serde(default)]
+    pub aggregates: Vec<AggregateComputation>,
     pub warnings: Vec<String>,
 }
 
@@ -391,6 +403,7 @@ pub fn compute(
             derived,
             operators: Vec::new(),
             point_results: Vec::new(),
+            aggregates: Vec::new(),
             warnings,
         });
     }
@@ -446,6 +459,7 @@ pub fn compute(
         derived: Vec::new(),
         operators,
         point_results: Vec::new(),
+        aggregates: Vec::new(),
         warnings,
     })
 }
@@ -732,12 +746,20 @@ fn point_intermediate(
 /// μ = slope·(π·ρ·g·R⁴)/(8·L). Las magnitudes derivadas **por punto** (`point_results`, Motor E) se
 /// evalúan tras el ajuste con el contexto de cada punto + slope/intercept + los mensurandos
 /// (p. ej. el número de Reynolds por corrida).
+///
+/// Los mensurandos **agregados** (`aggregates`, Motor F) se evalúan una vez tras el ajuste, en orden
+/// (encadenables), con acceso a los escalares compartidos, slope/intercept, los mensurandos, los
+/// agregados anteriores y los **extremos** de cada magnitud/intermedia por punto: `{sym}_first`,
+/// `{sym}_first2`, `{sym}_last`, `{sym}_last2` (p. ej. Reynolds máx/mín con el primer/último par).
+/// Para las magnitudes por punto el extremo se toma de su **serie medida completa** (no del último
+/// punto ajustado); si esa serie tiene distinta cantidad de puntos que el ajuste, se agrega un aviso.
 #[allow(clippy::too_many_arguments)]
 pub fn compute_regresion(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
     results: &[PracticeResult],
     point_results: &[PracticePointResult],
+    aggregates: &[PracticeAggregate],
     scales: &HashMap<String, InstrumentScale>,
     x_formula: &str,
     y_formula: &str,
@@ -816,6 +838,102 @@ pub fn compute_regresion(
         });
     }
 
+    // Mensurandos agregados (Motor F): un valor escalar post-ajuste. Símbolos disponibles: escalares
+    // compartidos (en `means`) + slope/intercept + los mensurandos derivados + los extremos de cada
+    // magnitud/intermedia por punto + los agregados anteriores (encadenable).
+    let mut agg_values: HashMap<String, f64> = means.clone();
+    for d in &derived {
+        agg_values.insert(d.symbol.clone(), d.value);
+    }
+    let n_points = contexts.len(); // >= 2: build_points garantiza al menos 2 puntos.
+    let last = n_points - 1;
+    const ENDPOINT_SUFFIXES: [&str; 4] = ["_first", "_first2", "_last", "_last2"];
+
+    // Alias de extremos para magnitudes por punto: se leen desde la serie cruda de cada
+    // magnitud (no desde `contexts`, que puede repetir el último valor o truncar si la
+    // magnitud no está en el conjunto de condicionamiento de los ejes). Guardamos el largo de
+    // cada serie para avisar después si un extremo referenciado proviene de una serie
+    // desalineada con el ajuste.
+    let mut series_len: HashMap<&str, usize> = HashMap::new();
+    for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
+        let sym = &q.symbol;
+        let series = by_quantity
+            .get(q.id.as_str())
+            .map(|m| m.point_values())
+            .unwrap_or_default();
+        let n = series.len();
+        series_len.insert(sym.as_str(), n);
+        let at = |i: usize| series.get(i).copied().unwrap_or(f64::NAN);
+        agg_values.insert(format!("{sym}_first"), at(0));
+        agg_values.insert(format!("{sym}_first2"), at(1));
+        agg_values.insert(
+            format!("{sym}_last"),
+            if n == 0 { f64::NAN } else { series[n - 1] },
+        );
+        agg_values.insert(
+            format!("{sym}_last2"),
+            if n < 2 { f64::NAN } else { series[n - 2] },
+        );
+    }
+    // Intermedias: no tienen serie independiente; se usan los contextos de la regresión (siempre
+    // alineados con el ajuste, así que no condicionan el aviso de desalineamiento).
+    for it in intermediates {
+        let sym = &it.symbol;
+        let at = |i: usize| contexts[i].get(sym).copied().unwrap_or(f64::NAN);
+        agg_values.insert(format!("{sym}_first"), at(0));
+        agg_values.insert(format!("{sym}_first2"), at(1));
+        agg_values.insert(format!("{sym}_last"), at(last));
+        agg_values.insert(format!("{sym}_last2"), at(last - 1));
+    }
+    let mut agg_allowed: Vec<String> = agg_values.keys().cloned().collect();
+    let mut aggregates_out = Vec::with_capacity(aggregates.len());
+    // Alias de extremo realmente usados por alguna fórmula de agregado: solo sobre estos avisamos
+    // un eventual desalineamiento de puntos (así no metemos ruido por magnitudes no referenciadas).
+    let mut referenced_endpoints: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for agg in aggregates {
+        let tree = compile_formula(&agg.formula, &agg_allowed)?;
+        for v in tree.iter_variable_identifiers() {
+            referenced_endpoints.insert(v.to_string());
+        }
+        let bound: HashMap<&str, f64> = agg_values.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+        let value = eval_compiled(&tree, &bound);
+        if !value.is_finite() {
+            warnings.push(format!(
+                "El mensurando agregado \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
+                agg.name, agg.symbol, agg.formula
+            ));
+        }
+        agg_values.insert(agg.symbol.clone(), value);
+        agg_allowed.push(agg.symbol.clone());
+        aggregates_out.push(AggregateComputation {
+            symbol: agg.symbol.clone(),
+            name: agg.name.clone(),
+            unit: agg.unit.clone(),
+            value,
+        });
+    }
+    // Aviso: un agregado usa un extremo (`X_first`/`X_last`/...) de una magnitud por punto cuya
+    // serie tiene distinta cantidad de puntos que el ajuste. El extremo se toma de la serie
+    // completa de esa magnitud (no del último punto ajustado), así que conviene revisar la carga.
+    // Cubre el caso que `build_points` no avisa: una magnitud por punto que no entra a los ejes.
+    // Se recorre `quantities` en orden (no el `HashMap`) para que los avisos salgan determinísticos.
+    for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
+        let sym = q.symbol.as_str();
+        let n = series_len.get(sym).copied().unwrap_or(0);
+        if n == n_points {
+            continue;
+        }
+        let used = ENDPOINT_SUFFIXES
+            .iter()
+            .any(|suf| referenced_endpoints.contains(&format!("{sym}{suf}")));
+        if used {
+            warnings.push(format!(
+                "Un mensurando agregado usa un extremo de \"{sym}\", que tiene {n} punto(s) frente a {n_points} del ajuste; el extremo se toma de la serie completa de \"{sym}\". Revisa que las cantidades de puntos coincidan."
+            ));
+        }
+    }
+
     Ok(FormAnalysis {
         quantities: Vec::new(),
         regression: Some(RegressionResult {
@@ -832,6 +950,7 @@ pub fn compute_regresion(
         derived,
         operators: Vec::new(),
         point_results: point_results_out,
+        aggregates: aggregates_out,
         warnings,
     })
 }
@@ -884,6 +1003,7 @@ pub fn compute_curva(
         derived: Vec::new(),
         operators: Vec::new(),
         point_results: Vec::new(),
+        aggregates: Vec::new(),
         warnings,
     })
 }
@@ -1003,6 +1123,7 @@ pub async fn analyze(
             &definition.intermediates,
             &definition.results,
             &definition.point_results,
+            &definition.aggregates,
             &scales,
             x_formula,
             y_formula,
@@ -1434,7 +1555,7 @@ mod tests {
         }
     }
 
-    /// Atajo de test: `compute_regresion` sin derivadas por punto ni escalas (firma previa).
+    /// Atajo de test: `compute_regresion` sin derivadas por punto, agregados ni escalas (firma previa).
     fn reg(
         quantities: &[PracticeQuantity],
         intermediates: &[PracticeIntermediate],
@@ -1447,6 +1568,7 @@ mod tests {
             quantities,
             intermediates,
             results,
+            &[],
             &[],
             &HashMap::new(),
             x,
@@ -2411,6 +2533,7 @@ mod tests {
             &[],
             &results,
             &[],
+            &[],
             &HashMap::new(),
             "2*pi*f",
             "math::sqrt(a)",
@@ -2462,6 +2585,7 @@ mod tests {
             &[],
             &results,
             &point_results,
+            &[],
             &HashMap::new(),
             "px",
             "py",
@@ -2479,6 +2603,206 @@ mod tests {
         assert_eq!(re.values.len(), 2);
         assert!(close(re.values[0], 20.0, 1e-9));
         assert!(close(re.values[1], 40.0, 1e-9));
+    }
+
+    #[test]
+    fn compute_regresion_aggregates_use_endpoints_measurands_and_chain() {
+        // Motor F: px por punto = [1,2,3], py = [2,4,6] → slope=2. c escalar compartido = 10.
+        // Mensurando m = slope*c = 20. Agregados escalares (un valor) que usan:
+        //  - extremos por punto: ep = px_first + px_last = 1 + 3 = 4; mid = px_first2 + px_last2 = 2+2 = 4
+        //  - un mensurando + slope: g = m + slope = 22
+        //  - un agregado anterior (encadenable): chained = ep + g = 26
+        let mut c = quantity("c");
+        c.per_point = false;
+        let quantities = vec![quantity("px"), quantity("py"), c];
+        let results = vec![result("m", "slope * c")];
+        let agg = |symbol: &str, formula: &str| PracticeAggregate {
+            id: format!("a-{symbol}"),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "".into(),
+            formula: formula.into(),
+        };
+        let aggregates = vec![
+            agg("ep", "px_first + px_last"),
+            agg("mid", "px_first2 + px_last2"),
+            agg("g", "m + slope"),
+            agg("chained", "ep + g"),
+        ];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[2.0, 4.0, 6.0]),
+            measurement("c", &[10.0]),
+        ];
+        let a = compute_regresion(
+            &quantities,
+            &[],
+            &results,
+            &[],
+            &aggregates,
+            &HashMap::new(),
+            "px",
+            "py",
+            &measurements,
+        )
+        .unwrap();
+        let val = |sym: &str| {
+            a.aggregates
+                .iter()
+                .find(|x| x.symbol == sym)
+                .unwrap_or_else(|| panic!("falta agregado {sym}"))
+                .value
+        };
+        assert!(close(val("ep"), 4.0, 1e-9));
+        assert!(close(val("mid"), 4.0, 1e-9));
+        assert!(close(val("g"), 22.0, 1e-9));
+        assert!(close(val("chained"), 26.0, 1e-9));
+    }
+
+    #[test]
+    fn compute_regresion_aggregate_non_finite_warns() {
+        // Motor F: un agregado con división por cero (px_first - px_first = 0) da no finito y debe
+        // avisar (sin abortar el resto del análisis), igual que los mensurandos derivados.
+        let quantities = vec![quantity("px"), quantity("py")];
+        let aggregates = vec![PracticeAggregate {
+            id: "a-bad".into(),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: "bad".into(),
+            name: "Agregado roto".into(),
+            unit: "".into(),
+            formula: "1 / (px_first - px_first)".into(),
+        }];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0]),
+            measurement("py", &[2.0, 4.0]),
+        ];
+        let a = compute_regresion(
+            &quantities,
+            &[],
+            &[],
+            &[],
+            &aggregates,
+            &HashMap::new(),
+            "px",
+            "py",
+            &measurements,
+        )
+        .unwrap();
+        assert!(!a.aggregates[0].value.is_finite());
+        assert!(
+            a.warnings
+                .iter()
+                .any(|w| w.contains("bad") && w.contains("no dio un valor finito")),
+            "debe avisar del agregado no finito: {:?}",
+            a.warnings
+        );
+    }
+
+    #[test]
+    fn compute_regresion_aggregate_endpoints_use_own_series_not_contexts() {
+        // z es magnitud por punto que NO aparece en los ejes (x=px, y=py): build_points la omite
+        // del conditioning set y n_points = 3 (de px/py). Con la lógica anterior z_last leía
+        // contexts[2]["z"] = z[2] = 30 aunque z tiene 4 filas (z[3]=40 es el extremo correcto).
+        // Con la corrección se usa la serie propia de z, no contexts.
+        let quantities = vec![quantity("px"), quantity("py"), quantity("z")];
+        let agg = |symbol: &str, formula: &str| PracticeAggregate {
+            id: format!("a-{symbol}"),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "".into(),
+            formula: formula.into(),
+        };
+        let aggregates = vec![
+            agg("z_end", "z_last"),
+            agg("z_end2", "z_last2"),
+            agg("z_beg", "z_first"),
+            agg("z_beg2", "z_first2"),
+        ];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[2.0, 4.0, 6.0]),
+            measurement("z", &[10.0, 20.0, 30.0, 40.0]),
+        ];
+        let a = compute_regresion(
+            &quantities,
+            &[],
+            &[],
+            &[],
+            &aggregates,
+            &HashMap::new(),
+            "px",
+            "py",
+            &measurements,
+        )
+        .unwrap();
+        let val = |sym: &str| {
+            a.aggregates
+                .iter()
+                .find(|x| x.symbol == sym)
+                .unwrap_or_else(|| panic!("falta agregado {sym}"))
+                .value
+        };
+        assert!(
+            close(val("z_end"), 40.0, 1e-9),
+            "z_last debe ser el último de la serie de z"
+        );
+        assert!(
+            close(val("z_end2"), 30.0, 1e-9),
+            "z_last2 debe ser el penúltimo de la serie de z"
+        );
+        assert!(close(val("z_beg"), 10.0, 1e-9));
+        assert!(close(val("z_beg2"), 20.0, 1e-9));
+        // El extremo de z (4 puntos) sale de su serie propia, pero el ajuste tiene 3: debe avisar.
+        assert!(
+            a.warnings.iter().any(|w| w.contains("\"z\"")
+                && w.contains("4 punto")
+                && w.contains("3 del ajuste")),
+            "debe avisar del desalineamiento de z: {:?}",
+            a.warnings
+        );
+    }
+
+    #[test]
+    fn compute_regresion_aggregate_endpoint_misalignment_warns_only_if_referenced() {
+        // z (por punto) tiene 4 filas vs 3 del ajuste, pero NINGÚN agregado usa un extremo de z:
+        // no debe avisar (sin ruido por magnitudes no referenciadas en extremos).
+        let quantities = vec![quantity("px"), quantity("py"), quantity("z")];
+        let aggregates = vec![PracticeAggregate {
+            id: "a-s".into(),
+            practice_id: "p".into(),
+            position: 0,
+            symbol: "s".into(),
+            name: "s".into(),
+            unit: "".into(),
+            formula: "slope".into(), // no toca z_first/z_last/...
+        }];
+        let measurements = vec![
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[2.0, 4.0, 6.0]),
+            measurement("z", &[10.0, 20.0, 30.0, 40.0]),
+        ];
+        let a = compute_regresion(
+            &quantities,
+            &[],
+            &[],
+            &[],
+            &aggregates,
+            &HashMap::new(),
+            "px",
+            "py",
+            &measurements,
+        )
+        .unwrap();
+        assert!(
+            !a.warnings.iter().any(|w| w.contains("\"z\"")),
+            "no debe avisar de z si ningún extremo de z se usa: {:?}",
+            a.warnings
+        );
     }
 
     #[test]
@@ -2505,6 +2829,7 @@ mod tests {
         let a = compute_regresion(
             &quantities,
             &intermediates,
+            &[],
             &[],
             &[],
             &HashMap::new(),
@@ -2540,6 +2865,7 @@ mod tests {
         let pts = compute_regresion(
             &quantities,
             &intermediates,
+            &[],
             &[],
             &[],
             &HashMap::new(),
