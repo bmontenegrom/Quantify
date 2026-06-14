@@ -1157,7 +1157,7 @@ pub async fn analyze(
             let scalar_qtys: Vec<&PracticeQuantity> = definition
                 .quantities
                 .iter()
-                .filter(|q| !q.per_point)
+                .filter(|q| !q.per_point || q.is_given)
                 .collect();
             if !scalar_qtys.is_empty() {
                 let symbols: Vec<String> = scalar_qtys.iter().map(|q| q.symbol.clone()).collect();
