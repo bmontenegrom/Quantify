@@ -194,8 +194,36 @@ async function run() {
     }
     await tPage.screenshot({ path: join(ARTIFACTS, "fluidos2-analisis.png"), fullPage: true });
 
+    // ── 3) Docente agrega una magnitud ADIMENSIONAL desde el admin ───────────
+    step("docente: abre Fluidos II en el admin de prácticas");
+    await tPage.click('.tab.teacher-only[data-view="practices"]');
+    await tPage.click('[data-practice-open][data-practice-id="fluidos-2"]');
+    await tPage.waitForSelector("#new-quantity-form");
+
+    step("docente: agrega una magnitud sin unidad (adimensional)");
+    const qForm = tPage.locator("#new-quantity-form");
+    await qForm.locator('input[name="symbol"]').fill("factor_test");
+    await qForm.locator('input[name="name"]').fill("Factor de prueba adimensional");
+    // Unidad: la dejamos vacía a propósito.
+    await qForm.locator('input[name="unit"]').fill("");
+    await qForm.locator('button[type="submit"]').click();
+
+    step("verifica que la magnitud adimensional se guardó y se muestra como tal");
+    await tPage.waitForFunction(
+      () => document.querySelector("#practice-workspace")?.textContent?.includes("Magnitud agregada"),
+      { timeout: 10_000 },
+    );
+    const adminText = (await tPage.locator("#practice-workspace").textContent()) ?? "";
+    assert(adminText.includes("factor_test"), "la magnitud adimensional debía aparecer en la lista");
+    assert(adminText.includes("adimensional"), 'la unidad vacía debía mostrarse como "adimensional"');
+    assert(
+      !adminText.includes("datos de magnitud invalidos"),
+      "no debía rechazar la magnitud por unidad vacía",
+    );
+    await tPage.screenshot({ path: join(ARTIFACTS, "fluidos2-admin-adimensional.png"), fullPage: true });
+
     assert(pageErrors.length === 0, `hubo errores JS en consola:\n${pageErrors.join("\n")}`);
-    console.log("\n✅ Smoke Fluidos II OK — form + vista previa (estudiante) y análisis con M_medio + agregados (docente), sin errores JS.");
+    console.log("\n✅ Smoke Fluidos II OK — entrega+análisis (M_medio/agregados) y alta de magnitud adimensional desde el admin, sin errores JS.");
   } catch (error) {
     console.error(`\n❌ Smoke falló en paso "${currentStep}": ${error.message}`);
     if (pageErrors.length) console.error(`Errores JS:\n${pageErrors.join("\n")}`);

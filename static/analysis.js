@@ -200,7 +200,7 @@ function derivedBlockMarkup(derived, heading = "Mensurandos") {
         .map(
           (d) => `
           <div class="metric">
-            <div class="metric-label">${escapeHtml(d.symbol)} (${escapeHtml(d.unit)})</div>
+            <div class="metric-label">${escapeHtml(d.symbol)}${d.unit ? ` (${escapeHtml(d.unit)})` : ""}</div>
             <div class="metric-value metric-text">${escapeHtml(measureText(d.value, d.u_expanded))}</div>
             <div class="submission-meta">${escapeHtml(d.formula)}</div>
           </div>`,
@@ -469,7 +469,7 @@ function studentResultsFormMarkup(submission, definition) {
       const dis = locked ? "disabled" : "";
       return `
         <tr>
-          <td class="directory-primary"><strong>${escapeHtml(m.symbol)}</strong> <span class="submission-meta">${escapeHtml(m.name)} (${escapeHtml(m.unit)})</span></td>
+          <td class="directory-primary"><strong>${escapeHtml(m.symbol)}</strong> <span class="submission-meta">${escapeHtml(m.name)}${m.unit ? ` (${escapeHtml(m.unit)})` : ""}</span></td>
           <td><input class="student-value" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${v}" ${dis} placeholder="valor" /></td>
           <td><input class="student-u" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${u}" ${dis} placeholder="U" /></td>
         </tr>`;

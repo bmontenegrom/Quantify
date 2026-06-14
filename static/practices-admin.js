@@ -313,7 +313,7 @@ function renderPointResultForm(pr, practiceId) {
       ${pr ? `<input name="pid" type="hidden" value="${escapeHtml(pr.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Re" /></label>
       <label>Nombre <input name="name" value="${v("name")}" placeholder="Número de Reynolds" /></label>
-      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="" /></label>
+      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="2*rho*Q / (pi*mu*R)" /></label>
       <div class="detail-actions">
         <button type="submit">${pr ? "Guardar" : "Agregar"}</button>
@@ -329,7 +329,7 @@ function renderPointResultsList(def, practiceId) {
   const rows = items.flatMap((pr) => {
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${escapeHtml(pr.symbol)}</strong> <span class="submission-meta">${escapeHtml(pr.name)} (${escapeHtml(pr.unit)})</span></td>
+        <td class="directory-primary"><strong>${escapeHtml(pr.symbol)}</strong> <span class="submission-meta">${escapeHtml(pr.name)}${pr.unit ? ` (${escapeHtml(pr.unit)})` : " (adimensional)"}</span></td>
         <td><code>${escapeHtml(pr.formula)}</code></td>
         <td class="directory-actions">
           <button type="button" data-edit-point-result data-pid="${escapeHtml(pr.id)}">${state.editingPointResultId === pr.id ? "Cerrar" : "Editar"}</button>
@@ -374,7 +374,7 @@ function renderAggregateForm(agg, practiceId) {
       ${agg ? `<input name="aid" type="hidden" value="${escapeHtml(agg.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Re_medio" /></label>
       <label>Nombre <input name="name" value="${v("name")}" placeholder="Reynolds medio" /></label>
-      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="" /></label>
+      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="(Re_max + Re_min) / 2" /></label>
       <div class="detail-actions">
         <button type="submit">${agg ? "Guardar" : "Agregar"}</button>
@@ -390,7 +390,7 @@ function renderAggregatesList(def, practiceId) {
   const rows = items.flatMap((agg) => {
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${escapeHtml(agg.symbol)}</strong> <span class="submission-meta">${escapeHtml(agg.name)} (${escapeHtml(agg.unit)})</span></td>
+        <td class="directory-primary"><strong>${escapeHtml(agg.symbol)}</strong> <span class="submission-meta">${escapeHtml(agg.name)}${agg.unit ? ` (${escapeHtml(agg.unit)})` : " (adimensional)"}</span></td>
         <td><code>${escapeHtml(agg.formula)}</code></td>
         <td class="directory-actions">
           <button type="button" data-edit-aggregate data-aid="${escapeHtml(agg.id)}">${state.editingAggregateId === agg.id ? "Cerrar" : "Editar"}</button>
@@ -450,7 +450,7 @@ function renderIntermediatesList(def, practiceId) {
   const rows = items.flatMap((it) => {
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${escapeHtml(it.symbol)}</strong> <span class="submission-meta">${escapeHtml(it.name)} (${escapeHtml(it.unit)})</span></td>
+        <td class="directory-primary"><strong>${escapeHtml(it.symbol)}</strong> <span class="submission-meta">${escapeHtml(it.name)}${it.unit ? ` (${escapeHtml(it.unit)})` : " (adimensional)"}</span></td>
         <td><code>${escapeHtml(it.formula)}</code></td>
         <td class="directory-actions">
           <button type="button" data-edit-intermediate data-iid="${escapeHtml(it.id)}">${state.editingIntermediateId === it.id ? "Cerrar" : "Editar"}</button>
@@ -552,7 +552,7 @@ function renderQuantityForm(qty, practiceId) {
       ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="l" /></label>
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Longitud del cordón" /></label>
-      <label>Unidad <input name="unit" value="${v("unit")}" required placeholder="mm" /></label>
+      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm (vacío = adimensional)" /></label>
       <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" /></label>
       <label class="detail-form-checkbox">
         <input type="checkbox" name="repeated" ${qty ? (qty.repeated ? "checked" : "") : "checked"} />
@@ -582,7 +582,7 @@ function renderQuantitiesList(def, practiceId) {
       <tr>
         <td class="directory-primary"><strong>${escapeHtml(q.symbol)}</strong></td>
         <td>${escapeHtml(q.name)}</td>
-        <td>${escapeHtml(q.unit)}</td>
+        <td>${q.unit ? escapeHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
         <td>${q.repeated ? "Sí" : "No"}</td>
         <td class="directory-actions">
@@ -618,7 +618,7 @@ function renderResultForm(res, practiceId) {
       ${res ? `<input name="rid" type="hidden" value="${escapeHtml(res.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Q" /></label>
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
-      <label>Unidad <input name="unit" value="${v("unit")}" required placeholder="mm2" /></label>
+      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" /></label>
       <label>Tolerancia (%)
         <input name="tolerance" type="number" min="0" step="any"
@@ -643,7 +643,7 @@ function renderResultsList(def, practiceId) {
       <tr>
         <td class="directory-primary"><strong>${escapeHtml(r.symbol)}</strong></td>
         <td>${escapeHtml(r.name)}</td>
-        <td>${escapeHtml(r.unit)}</td>
+        <td>${r.unit ? escapeHtml(r.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td><code>${escapeHtml(r.formula)}</code></td>
         <td>${tolLabel}</td>
         <td class="directory-actions">
