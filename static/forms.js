@@ -6,13 +6,25 @@ import {
 } from "./dom.js";
 import { fetchJson, postJson } from "./api.js";
 import {
-  escapeHtml, canReview, format,
+  escapeHtml, symbolHtml, inlineMathHtml, unitHtml, canReview, format,
   compatibleInstruments, SI_PREFIXES, prefixFactor,
   seriesStats, histogram, normalCurve, validateMeasurements,
 } from "./lib.js";
 import { PRACTICE_GROUPS, PRACTICE_SECTIONS } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
+
+function quantityNameHtml(q) {
+  const base = inlineMathHtml(q.name);
+  if (q.symbol === "T_oc" && !/T_?oc/i.test(q.name)) {
+    return `${base} ${symbolHtml(q.symbol)}`;
+  }
+  return base;
+}
+
+function formatSeriesStat(value) {
+  return Number(value).toLocaleString("es-UY", { maximumSignificantDigits: 10 });
+}
 
 export function renderStudentSelectors() {
   const courses = state.academic.courses;
@@ -248,6 +260,7 @@ export function renderMeasurementFields() {
       : 0;
   const useOperators = operatorCount >= 2;
   const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
+  const legendHtml = (q) => quantityNameHtml(q);
 
   // `opIndex` (número) marca el bloque de un operador; `null` para magnitudes compartidas.
   const measurementRowHtml = (q, opIndex) => {
@@ -255,20 +268,20 @@ export function renderMeasurementFields() {
     if (q.is_given) {
       return `
         <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
-          <legend>${escapeHtml(q.name)} <span class="submission-meta">(dato — ${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+          <legend>${legendHtml(q)}</legend>
           <div class="form-grid">
             <label>Valor
               <div class="replica-input-wrap">
                 ${prefixSelectHtml()}
                 <input class="measure-given-value" type="number" step="any" placeholder="valor" />
-                <span class="replica-unit">${escapeHtml(q.unit)}</span>
+                <span class="replica-unit">${unitHtml(q.unit)}</span>
               </div>
             </label>
             <label>Incertidumbre U (expandida)
               <div class="replica-input-wrap">
                 ${prefixSelectHtml()}
                 <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
-                <span class="replica-unit">${escapeHtml(q.unit)}</span>
+                <span class="replica-unit">${unitHtml(q.unit)}</span>
               </div>
             </label>
           </div>
@@ -289,7 +302,7 @@ export function renderMeasurementFields() {
       return `
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
-          <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+          <legend>${legendHtml(q)}</legend>
           <div class="measure-selectors" style="margin-bottom:8px;">
             <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${chronoInstrumentOptions}</select>
             <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
@@ -323,7 +336,7 @@ export function renderMeasurementFields() {
       .join("");
     return `
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
-        <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+        <legend>${legendHtml(q)}</legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
           <div class="measure-selectors">
             <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
@@ -351,7 +364,7 @@ export function renderMeasurementFields() {
     ).join("");
     return `
       <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
-        <h4 class="measurement-section-title">${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)}) — por operador</span></h4>
+        <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por operador</span></h4>
         ${blocks}
       </div>
     `;
@@ -416,8 +429,8 @@ export function renderReplicaInput(unit) {
   return `
     <div class="replica">
       ${prefixSelectHtml()}
-      <input class="measure-value" type="number" step="any" placeholder="lectura" data-unit="${escapeHtml(unit)}" />
-      <span class="replica-unit">${escapeHtml(unit)}</span>
+      <input class="measure-value" type="number" step="any" placeholder="valor" data-unit="${escapeHtml(unit)}" />
+      <span class="replica-unit">${unitHtml(unit)}</span>
       <button type="button" class="remove-replica" title="Quitar">✕</button>
     </div>
   `;
@@ -815,7 +828,7 @@ function renderSeriesTable(definition) {
   const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
   const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
   const header = cols
-    .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${escapeHtml(q.symbol)} <span class="submission-meta">(${escapeHtml(q.unit)})</span></th>`)
+    .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${symbolHtml(q.symbol)}${q.unit ? ` <span class="submission-meta">(${unitHtml(q.unit)})</span>` : ""}</th>`)
     .join("");
   const INITIAL_ROWS = 3;
   const body = Array.from({ length: INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
@@ -933,9 +946,9 @@ function seriesRowHtml(cols) {
       const n = q.repeated ? Number(q.replicas_per_point) || 0 : 0;
       if (n > 0) {
         const inputs = Array.from({ length: n }, (_, k) => replicaInputHtml(q.id, k)).join("");
-        return `<td class="series-cell series-cell--replicas">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div><span class="series-mean submission-meta">x̄ —</span></td>`;
+        return `<td class="series-cell series-cell--replicas"><div class="series-input-wrap">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div></div><span class="series-mean submission-meta">x̄ —</span></td>`;
       }
-      return `<td class="series-cell">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`;
+      return `<td class="series-cell"><div class="series-input-wrap">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" /></div></td>`;
     })
     .join("");
   return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
@@ -947,13 +960,13 @@ function sharedRowHtml(q) {
   if (q.is_given) {
     return `
       <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
-        <legend>${escapeHtml(q.name)} <span class="submission-meta">(dato — ${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+        <legend>${quantityNameHtml(q)}</legend>
         <div class="form-grid">
           <label>Valor
-            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-value" type="number" step="any" placeholder="valor" /><span class="replica-unit">${escapeHtml(q.unit)}</span></div>
+            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-value" type="number" step="any" placeholder="valor" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
           </label>
           <label>Incertidumbre U (expandida)
-            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${escapeHtml(q.unit)}</span></div>
+            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
           </label>
         </div>
       </fieldset>`;
@@ -965,7 +978,7 @@ function sharedRowHtml(q) {
     .join("");
   return `
     <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
-      <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)}, medida única)</span></legend>
+      <legend>${quantityNameHtml(q)}</legend>
       <div class="measure-body">
         <div class="measure-selectors">
           <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
@@ -981,7 +994,7 @@ function sharedRowHtml(q) {
 
 /** HTML de un input de réplica (índice 0-based `k`) para la magnitud `quantityId`. */
 function replicaInputHtml(quantityId, k) {
-  return `<input class="series-replica" type="number" step="any" data-quantity-id="${escapeHtml(quantityId)}" placeholder="t${k + 1}" />`;
+  return `<input class="series-replica" type="number" step="any" data-quantity-id="${escapeHtml(quantityId)}" placeholder="valor ${k + 1}" />`;
 }
 
 /** Lee las réplicas no vacías de una celda de réplicas, aplicando el prefijo SI de la celda. */
@@ -1180,7 +1193,7 @@ function renderSeriesDebug(row, quantityId, readings) {
   container.innerHTML = `
     <div class="series-debug-head">
       <strong>Depuración de la serie</strong>
-      <span class="submission-meta">n=${stats.n} · x̄=${Number.isFinite(stats.mean) ? stats.mean.toFixed(4) : "—"} s · s=${Number.isFinite(stats.std) ? stats.std.toFixed(4) : "—"} s · s/√n=${Number.isFinite(stats.stdMean) ? stats.stdMean.toFixed(4) : "—"} s</span>
+      <span class="submission-meta">n=${stats.n} · x̄=${Number.isFinite(stats.mean) ? formatSeriesStat(stats.mean) : "—"} s · s=${Number.isFinite(stats.std) ? formatSeriesStat(stats.std) : "—"} s · s/√n=${Number.isFinite(stats.stdMean) ? formatSeriesStat(stats.stdMean) : "—"} s</span>
     </div>
     <div class="series-debug-grid">
       <div class="series-hist">

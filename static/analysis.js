@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, cssEscape, allStudents } from "./lib.js";
+import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, cssEscape, allStudents } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -135,10 +135,10 @@ function measurementMetaMarkup(submission, definition) {
   if (!meta || typeof meta !== "object") return "";
   const labelFor = (qid) => {
     const fromAnalysis = (submission.analysis?.quantities ?? []).find((q) => q.quantity_id === qid);
-    if (fromAnalysis) return `${fromAnalysis.name} (${fromAnalysis.symbol})`;
+    if (fromAnalysis) return `${inlineMathHtml(fromAnalysis.name)} (${symbolHtml(fromAnalysis.symbol)})`;
     const fromDef = (definition?.quantities ?? []).find((q) => q.id === qid);
-    if (fromDef) return `${fromDef.name} (${fromDef.symbol})`;
-    return qid;
+    if (fromDef) return `${inlineMathHtml(fromDef.name)} (${symbolHtml(fromDef.symbol)})`;
+    return escapeHtml(qid);
   };
   const blocks = Object.entries(meta)
     .map(([qid, m]) => {
@@ -146,7 +146,7 @@ function measurementMetaMarkup(submission, definition) {
       const bins = m?.bins;
       if (!discarded.length && !bins) return "";
       return `<div class="meta-block">
-        <strong>${escapeHtml(labelFor(qid))}</strong>${bins ? ` <span class="submission-meta">· ${escapeHtml(String(bins))} intervalos</span>` : ""}
+        <strong>${labelFor(qid)}</strong>${bins ? ` <span class="submission-meta">· ${escapeHtml(String(bins))} intervalos</span>` : ""}
         ${
           discarded.length
             ? `<div class="submission-meta">Puntos descartados (${discarded.length}): ${discarded.map((v) => Number(v).toFixed(3)).join(", ")}</div>`
@@ -174,7 +174,7 @@ function quantitiesTableMarkup(quantities) {
             .map(
               (q) => `
               <tr>
-                <td class="directory-primary"><strong>${escapeHtml(q.symbol)}</strong> <span class="submission-meta">${escapeHtml(q.unit)}</span></td>
+                <td class="directory-primary"><strong>${symbolHtml(q.symbol)}</strong> <span class="submission-meta">${unitHtml(q.unit)}</span></td>
                 <td>${q.result.n}</td>
                 <td>${format(q.result.mean)}</td>
                 <td>${format(q.result.s)}</td>
@@ -200,7 +200,7 @@ export function derivedBlockMarkup(derived, heading = "Mensurandos") {
         .map(
           (d) => `
           <div class="metric">
-            <div class="metric-label">${escapeHtml(d.symbol)}${d.unit ? ` (${escapeHtml(d.unit)})` : ""}</div>
+            <div class="metric-label">${symbolHtml(d.symbol)}${d.unit ? ` (${unitHtml(d.unit)})` : ""}</div>
             <div class="metric-value metric-text">${escapeHtml(measureText(d.value, d.u_expanded))}</div>
             <div class="submission-meta">${escapeHtml(d.formula)}</div>
           </div>`,
@@ -215,7 +215,7 @@ function pointResultsMarkup(pointResults) {
   if (!pointResults.length) return "";
   const n = Math.max(0, ...pointResults.map((p) => p.values.length));
   const headers = pointResults
-    .map((p) => `<th>${escapeHtml(p.symbol)} <span class="submission-meta">${escapeHtml(p.unit)}</span></th>`)
+    .map((p) => `<th>${symbolHtml(p.symbol)} <span class="submission-meta">${unitHtml(p.unit)}</span></th>`)
     .join("");
   const rows = Array.from({ length: n }, (_, i) => {
     const cells = pointResults.map((p) => `<td>${p.values[i] != null ? format(p.values[i]) : ""}</td>`).join("");
@@ -237,8 +237,8 @@ function aggregatesMarkup(aggregates) {
   const rows = aggregates
     .map(
       (a) =>
-        `<tr><td>${escapeHtml(a.symbol)}</td><td>${escapeHtml(a.name)}</td>` +
-        `<td>${Number.isFinite(a.value) ? format(a.value) : '<span class="error-inline">—</span>'} <span class="submission-meta">${escapeHtml(a.unit)}</span></td></tr>`,
+        `<tr><td>${symbolHtml(a.symbol)}</td><td>${inlineMathHtml(a.name)}</td>` +
+        `<td>${Number.isFinite(a.value) ? format(a.value) : '<span class="error-inline">—</span>'} <span class="submission-meta">${unitHtml(a.unit)}</span></td></tr>`,
     )
     .join("");
   return `
@@ -440,7 +440,7 @@ function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
             .map(
               (r) => `
             <tr>
-              <td class="directory-primary"><strong>${escapeHtml(r.symbol)}</strong> <span class="submission-meta">${escapeHtml(r.unit)}</span></td>
+              <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong> <span class="submission-meta">${unitHtml(r.unit)}</span></td>
               <td>${escapeHtml(measureText(r.auto.value, r.auto.u))}</td>
               <td>${r.student ? escapeHtml(measureText(r.student.value, r.student.u)) : "—"}</td>
               <td>${num(r.dValue)}</td>
@@ -470,7 +470,7 @@ function studentResultsFormMarkup(submission, definition) {
       const dis = locked ? "disabled" : "";
       return `
         <tr>
-          <td class="directory-primary"><strong>${escapeHtml(m.symbol)}</strong> <span class="submission-meta">${escapeHtml(m.name)}${m.unit ? ` (${escapeHtml(m.unit)})` : ""}</span></td>
+          <td class="directory-primary"><strong>${symbolHtml(m.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(m.name)}${m.unit ? ` (${unitHtml(m.unit)})` : ""}</span></td>
           <td><input class="student-value" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${v}" ${dis} placeholder="valor" /></td>
           <td><input class="student-u" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${u}" ${dis} placeholder="U" /></td>
         </tr>`;

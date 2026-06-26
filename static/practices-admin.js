@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
-import { escapeHtml, analysisKindLabel } from "./lib.js";
+import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel } from "./lib.js";
 import { selectView } from "./navigation.js";
 
 export function renderPracticesPage() {
@@ -322,7 +322,7 @@ function renderPointResultsList(def, practiceId) {
   const rows = items.flatMap((pr) => {
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${escapeHtml(pr.symbol)}</strong> <span class="submission-meta">${escapeHtml(pr.name)}${pr.unit ? ` (${escapeHtml(pr.unit)})` : " (adimensional)"}</span></td>
+        <td class="directory-primary"><strong>${symbolHtml(pr.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(pr.name)}${pr.unit ? ` (${unitHtml(pr.unit)})` : " (adimensional)"}</span></td>
         <td><code>${escapeHtml(pr.formula)}</code></td>
         <td class="directory-actions">
           <button type="button" data-edit-point-result data-pid="${escapeHtml(pr.id)}">${state.editingPointResultId === pr.id ? "Cerrar" : "Editar"}</button>
@@ -383,7 +383,7 @@ function renderAggregatesList(def, practiceId) {
   const rows = items.flatMap((agg) => {
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${escapeHtml(agg.symbol)}</strong> <span class="submission-meta">${escapeHtml(agg.name)}${agg.unit ? ` (${escapeHtml(agg.unit)})` : " (adimensional)"}</span></td>
+        <td class="directory-primary"><strong>${symbolHtml(agg.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(agg.name)}${agg.unit ? ` (${unitHtml(agg.unit)})` : " (adimensional)"}</span></td>
         <td><code>${escapeHtml(agg.formula)}</code></td>
         <td class="directory-actions">
           <button type="button" data-edit-aggregate data-aid="${escapeHtml(agg.id)}">${state.editingAggregateId === agg.id ? "Cerrar" : "Editar"}</button>
@@ -443,7 +443,7 @@ function renderIntermediatesList(def, practiceId) {
   const rows = items.flatMap((it) => {
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${escapeHtml(it.symbol)}</strong> <span class="submission-meta">${escapeHtml(it.name)}${it.unit ? ` (${escapeHtml(it.unit)})` : " (adimensional)"}</span></td>
+        <td class="directory-primary"><strong>${symbolHtml(it.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(it.name)}${it.unit ? ` (${unitHtml(it.unit)})` : " (adimensional)"}</span></td>
         <td><code>${escapeHtml(it.formula)}</code></td>
         <td class="directory-actions">
           <button type="button" data-edit-intermediate data-iid="${escapeHtml(it.id)}">${state.editingIntermediateId === it.id ? "Cerrar" : "Editar"}</button>
@@ -573,9 +573,9 @@ function renderQuantitiesList(def, practiceId) {
   const rows = quantities.flatMap((q) => {
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${escapeHtml(q.symbol)}</strong></td>
-        <td>${escapeHtml(q.name)}</td>
-        <td>${q.unit ? escapeHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
+        <td class="directory-primary"><strong>${symbolHtml(q.symbol)}</strong></td>
+        <td>${inlineMathHtml(q.name)}</td>
+        <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
         <td>${q.repeated ? "Sí" : "No"}</td>
         <td class="directory-actions">
@@ -634,9 +634,9 @@ function renderResultsList(def, practiceId) {
     const tolLabel = r.tolerance != null ? `${escapeHtml(String(r.tolerance))} %` : `<span class="submission-meta">—</span>`;
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${escapeHtml(r.symbol)}</strong></td>
-        <td>${escapeHtml(r.name)}</td>
-        <td>${r.unit ? escapeHtml(r.unit) : '<span class="submission-meta">adimensional</span>'}</td>
+        <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong></td>
+        <td>${inlineMathHtml(r.name)}</td>
+        <td>${r.unit ? unitHtml(r.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td><code>${escapeHtml(r.formula)}</code></td>
         <td>${tolLabel}</td>
         <td class="directory-actions">

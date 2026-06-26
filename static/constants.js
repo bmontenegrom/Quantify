@@ -9,7 +9,7 @@ export const PRACTICE_GROUPS = {
 export const PRACTICE_SECTIONS = {
   "p1-estadistica": [
     { title: "1) Determinación de períodos", symbols: ["T"] },
-    { title: "2) Amortiguamiento (δ, Q)", symbols: ["t_med"] },
+    { title: "2) Amortiguamiento (γ, Q)", symbols: ["t_med"] },
     { title: "3) Determinación de g", symbols: ["L"] },
   ],
 };

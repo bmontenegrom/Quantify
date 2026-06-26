@@ -13,6 +13,41 @@ export function escapeHtml(value) {
 }
 
 /**
+ * Escapa un símbolo y muestra como subíndice los dígitos pegados a letras:
+ * `R1` → `R<sub>1</sub>`, `C12` → `C<sub>12</sub>`. No altera guiones bajos ni nombres largos.
+ */
+export function symbolHtml(value) {
+  const specials = {
+    tmedio: "t<sub>1/2</sub>",
+    T_oc: "T<sub>OC</sub>",
+    T_OC: "T<sub>OC</sub>",
+  };
+  const raw = String(value);
+  if (specials[raw]) return specials[raw];
+  return escapeHtml(raw)
+    .replace(/([A-Za-z])_([A-Za-z0-9/]{1,2})\b/g, (_, base, sub) => `${base}<sub>${sub.toUpperCase()}</sub>`)
+    .replace(/([A-Za-z])(\d+(?:\/\d+)?)/g, "$1<sub>$2</sub>");
+}
+
+/**
+ * Escapa texto visible y aplica convenciones tipográficas chicas para símbolos en nombres:
+ * subíndices (`R1`, `t1/2`, `T_oc`) y potencias escritas con `^`.
+ */
+export function inlineMathHtml(value) {
+  return escapeHtml(value)
+    .replace(/([A-Za-z])_([A-Za-z0-9/]{1,2})\b/g, (_, base, sub) => `${base}<sub>${sub.toUpperCase()}</sub>`)
+    .replace(/([A-Za-z])(\d+(?:\/\d+)?)/g, "$1<sub>$2</sub>")
+    .replace(/\^(-?\d+)/g, "<sup>$1</sup>");
+}
+
+/** Escapa y formatea unidades simples: `m3`, `m/s2`, `kg/m3`, `R^2`. */
+export function unitHtml(value) {
+  return escapeHtml(value)
+    .replace(/\^(-?\d+)/g, "<sup>$1</sup>")
+    .replace(/([A-Za-zµΩ]+)(-?\d+)/g, "$1<sup>$2</sup>");
+}
+
+/**
  * Escapa un valor para usarlo dentro de un selector CSS; usa `CSS.escape` si está
  * disponible (browser) y cae a un escape mínimo de comillas en su ausencia (Node/tests).
  */
