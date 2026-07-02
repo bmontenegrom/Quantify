@@ -86,6 +86,10 @@ pub struct FormSubmissionInput {
     /// del alumno. Para docentes/admin es opcional (puede entregar sin mesa asignada).
     #[serde(default)]
     pub table_number: Option<i64>,
+    /// Resultado(s) final(es) que el alumno entrega junto con la medición (opcional, p. ej. `g`).
+    /// Se valida y persiste igual que `POST /submissions/{id}/student-results`.
+    #[serde(default)]
+    pub student_results: Vec<crate::db::StudentResultInput>,
 }
 
 /// Incertidumbre calculada de una magnitud medida directamente.
@@ -1404,6 +1408,8 @@ pub async fn create_form_submission(
         }
     }
 
+    validate_student_results(pool, &input.practice_id, &input.student_results).await?;
+
     let analysis = analyze(pool, &input.practice_id, &input.measurements).await?;
     let point_based = is_point_based_practice(pool, &input.practice_id).await?;
     let analysis_json = serde_json::to_string(&analysis)?;
@@ -1489,6 +1495,10 @@ pub async fn create_form_submission(
     insert_measurements(&mut tx, &id, &input.measurements, point_based).await?;
     tx.commit().await?;
 
+    if !input.student_results.is_empty() {
+        db::save_student_results(pool, &id, &input.student_results).await?;
+    }
+
     // Invitar a los demás alumnos de la mesa (fuera de la tx para no bloquear).
     if let Some(t) = table_number {
         let _ = db::invite_table_members(
@@ -1508,16 +1518,52 @@ pub async fn create_form_submission(
         .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
 }
 
+/// Valida que cada símbolo entregado por el alumno corresponda a un mensurando de la práctica.
+/// Usada tanto al crear/editar una entrega por formulario como en `POST .../student-results`.
+pub async fn validate_student_results(
+    pool: &sqlx::SqlitePool,
+    practice_id: &str,
+    results: &[db::StudentResultInput],
+) -> anyhow::Result<()> {
+    if results.is_empty() {
+        return Ok(());
+    }
+    let definition = crate::practices::definition(pool, practice_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("practica no encontrada"))?;
+    let valid: std::collections::HashSet<&str> = definition
+        .results
+        .iter()
+        .map(|r| r.symbol.as_str())
+        .collect();
+    for result in results {
+        if !valid.contains(result.symbol.trim()) {
+            anyhow::bail!(
+                "el simbolo \"{}\" no es un mensurando de esta practica",
+                result.symbol.trim()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Reemplaza las lecturas y recalcula el análisis de una entrega por formulario existente
 /// (edición dentro de la ventana permitida). No cambia `submitted_at` ni la práctica: la
 /// validación de propiedad/ventana ocurre en la capa de rutas. Transaccional.
+/// `student_results`: `None` = no tocar los cálculos del alumno ya guardados; `Some(vec)`
+/// (incluso vacío) reemplaza por completo, igual que `POST .../student-results`.
 pub async fn update_form_submission(
     pool: &sqlx::SqlitePool,
     submission_id: &str,
     practice_id: &str,
     measurements: &[MeasurementInput],
     meta: Option<&serde_json::Value>,
+    student_results: Option<&[db::StudentResultInput]>,
 ) -> anyhow::Result<db::SubmissionDetail> {
+    if let Some(results) = student_results {
+        validate_student_results(pool, practice_id, results).await?;
+    }
+
     let analysis = analyze(pool, practice_id, measurements).await?;
     let point_based = is_point_based_practice(pool, practice_id).await?;
     let analysis_json = serde_json::to_string(&analysis)?;
@@ -1542,6 +1588,10 @@ pub async fn update_form_submission(
 
     insert_measurements(&mut tx, submission_id, measurements, point_based).await?;
     tx.commit().await?;
+
+    if let Some(results) = student_results {
+        db::save_student_results(pool, submission_id, results).await?;
+    }
 
     db::submission_detail(pool, submission_id)
         .await?
@@ -1695,6 +1745,7 @@ mod tests {
             formula: "l*a + l*b".into(),
             position: 0,
             tolerance: None,
+            is_final: false,
         }];
         let measurements = vec![
             measurement("l", &[2.0]),
@@ -1729,6 +1780,7 @@ mod tests {
             formula: "l*a + l*b".into(),
             position: 0,
             tolerance: None,
+            is_final: false,
         }];
         let measurements = vec![
             measurement("l", &[9.0, 11.0]),
@@ -1770,6 +1822,7 @@ mod tests {
             formula: "T + L".into(),
             position: 0,
             tolerance: None,
+            is_final: false,
         }];
         let measurements = vec![
             MeasurementInput {
@@ -1901,6 +1954,7 @@ mod tests {
             }],
             meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
             table_number: None,
+            student_results: vec![],
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         assert_eq!(detail.entry_mode, "form");
@@ -1910,6 +1964,143 @@ mod tests {
         let meta = detail.measurement_meta.expect("meta persistida");
         assert_eq!(meta["q1"]["bins"], 8);
         assert_eq!(meta["q1"]["discarded"][0], 9.9);
+    }
+
+    /// El alumno puede entregar opcionalmente su resultado final (p. ej. `g`) junto con la
+    /// medición; queda persistido igual que si lo hubiese cargado luego por separado.
+    #[tokio::test]
+    async fn create_form_submission_persists_optional_student_result() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
+        let input = FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: t_id,
+                instrument_id: None,
+                scale_id: None,
+                values: vec![5.0, 5.2, 4.9],
+                given_u: None,
+                point_replicas: None,
+                operator_replicas: None,
+            }],
+            meta: None,
+            table_number: None,
+            student_results: vec![db::StudentResultInput {
+                symbol: "g".into(),
+                value: 9.8,
+                u_expanded: Some(0.1),
+            }],
+        };
+        let detail = create_form_submission(&pool, &user, input).await.unwrap();
+        assert_eq!(detail.student_results.len(), 1);
+        assert_eq!(detail.student_results[0].symbol, "g");
+        assert_eq!(detail.student_results[0].value, 9.8);
+    }
+
+    /// Un símbolo que no es mensurando de la práctica se rechaza antes de crear la entrega.
+    #[tokio::test]
+    async fn create_form_submission_rejects_unknown_student_result_symbol() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
+        let input = FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: t_id,
+                instrument_id: None,
+                scale_id: None,
+                values: vec![5.0, 5.2, 4.9],
+                given_u: None,
+                point_replicas: None,
+                operator_replicas: None,
+            }],
+            meta: None,
+            table_number: None,
+            student_results: vec![db::StudentResultInput {
+                symbol: "no-existe".into(),
+                value: 1.0,
+                u_expanded: None,
+            }],
+        };
+        let err = create_form_submission(&pool, &user, input)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no-existe"));
     }
 
     #[tokio::test]
@@ -1974,6 +2165,7 @@ mod tests {
             }],
             meta: None,
             table_number: None,
+            student_results: vec![],
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
@@ -2082,6 +2274,7 @@ mod tests {
             ],
             meta: None,
             table_number: None,
+            student_results: vec![],
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
@@ -2195,6 +2388,7 @@ mod tests {
             ],
             meta: None,
             table_number: None,
+            student_results: vec![],
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
@@ -2281,6 +2475,7 @@ mod tests {
             }],
             meta: None,
             table_number: None,
+            student_results: vec![],
         };
         let created = create_form_submission(&pool, &user, mk(vec![5.0, 5.2, 4.9]))
             .await
@@ -2294,6 +2489,7 @@ mod tests {
             &created.id,
             "p1-estadistica",
             &mk(vec![10.0, 12.0, 11.0]).measurements,
+            None,
             None,
         )
         .await
@@ -2362,6 +2558,7 @@ mod tests {
             }],
             meta: None,
             table_number: None,
+            student_results: vec![],
         };
         assert!(create_form_submission(&pool, &user, input).await.is_err());
         // Rollback: no debe quedar ninguna entrega ni medición.
@@ -2382,6 +2579,7 @@ mod tests {
             formula: formula.into(),
             position: 0,
             tolerance: None,
+            is_final: false,
         }
     }
 

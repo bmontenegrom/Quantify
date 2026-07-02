@@ -27,10 +27,12 @@ export function renderAnalysis(target, submission, includeReview = false, defini
       body += `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
     }
     body += measurementMetaMarkup(submission, definition);
-    if (!isTeacher) {
-      body += hasOperators
-        ? `<p class="submission-meta">Los mensurandos se calculan por operador para comparar las determinaciones; no hay carga de cálculos propios en esta práctica.</p>`
-        : studentResultsFormMarkup(submission, definition);
+    if (hasOperators) {
+      if (!isTeacher) {
+        body += `<p class="submission-meta">Los mensurandos se calculan por operador para comparar las determinaciones; no hay carga de cálculos propios en esta práctica.</p>`;
+      }
+    } else {
+      body += studentResultsFormMarkup(submission, definition, isTeacher);
     }
     target.innerHTML = `
       ${submissionHeader(submission)}
@@ -48,7 +50,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     const reviewForm = target.querySelector(".review-form");
     if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
     const studentForm = target.querySelector(".student-results-form");
-    if (studentForm && !submission.results_visible_to_student) {
+    if (studentForm && (isTeacher || !submission.results_visible_to_student)) {
       studentForm.addEventListener("submit", (event) => saveStudentResults(event, submission.id));
     }
     wireMembersEditor(target, submission.id);
@@ -457,10 +459,10 @@ function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
   `;
 }
 
-function studentResultsFormMarkup(submission, definition) {
-  const measurands = definition?.results ?? [];
+function studentResultsFormMarkup(submission, definition, isTeacher = false) {
+  const measurands = (definition?.results ?? []).filter((r) => r.is_final);
   if (!measurands.length) return "";
-  const locked = submission.results_visible_to_student;
+  const locked = submission.results_visible_to_student && !isTeacher;
   const saved = new Map((submission.student_results ?? []).map((s) => [s.symbol, s]));
   const rows = measurands
     .map((m) => {
@@ -476,14 +478,16 @@ function studentResultsFormMarkup(submission, definition) {
         </tr>`;
     })
     .join("");
+  const title = isTeacher ? "Resultado final entregado" : "Resultado final";
+  const helpText = isTeacher
+    ? "Cargá o corregí el valor final que el alumno entregó (por ejemplo, en papel la semana siguiente)."
+    : locked
+      ? "El docente habilitó los resultados; tu resultado final quedó congelado."
+      : "Opcional: ingresá tu valor y tu U (podés hacerlo ahora o el docente lo carga más adelante). Editable hasta que el docente habilite los resultados.";
   return `
     <form class="student-results-form detail-form">
-      <h3>Mis cálculos</h3>
-      <p class="submission-meta">${
-        locked
-          ? "El docente habilitó los resultados; tus cálculos quedaron congelados."
-          : "Ingresá tu valor y tu U para cada mensurando (calculados por tu cuenta). Podés editarlos hasta que el docente habilite los resultados."
-      }</p>
+      <h3>${title}</h3>
+      <p class="submission-meta">${helpText}</p>
       <div class="directory-table-wrap">
         <table class="grade-table directory-data-table">
           <thead><tr><th>Mensurando</th><th>Valor</th><th>U</th></tr></thead>
@@ -491,7 +495,7 @@ function studentResultsFormMarkup(submission, definition) {
         </table>
       </div>
       <span class="student-results-status submission-meta"></span>
-      ${locked ? "" : `<div class="detail-actions"><button type="submit">Guardar mis cálculos</button></div>`}
+      ${locked ? "" : `<div class="detail-actions"><button type="submit">Guardar</button></div>`}
     </form>
   `;
 }

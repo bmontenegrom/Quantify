@@ -618,6 +618,10 @@ function renderResultForm(res, practiceId) {
           value="${res?.tolerance != null ? escapeHtml(String(res.tolerance)) : ""}"
           placeholder="sin veredicto" />
       </label>
+      <label>
+        <input name="is_final" type="checkbox" ${res?.is_final ? "checked" : ""} />
+        Resultado final (el alumno lo entrega para comparar)
+      </label>
       <div class="detail-actions">
         <button type="submit">${res ? "Guardar" : "Agregar"}</button>
         ${res ? `<button type="button" data-cancel-result>Cancelar</button>` : ""}
@@ -632,6 +636,7 @@ function renderResultsList(def, practiceId) {
 
   const rows = results.flatMap((r) => {
     const tolLabel = r.tolerance != null ? `${escapeHtml(String(r.tolerance))} %` : `<span class="submission-meta">—</span>`;
+    const finalLabel = r.is_final ? "Sí" : "";
     const baseRow = `
       <tr>
         <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong></td>
@@ -639,13 +644,14 @@ function renderResultsList(def, practiceId) {
         <td>${r.unit ? unitHtml(r.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td><code>${escapeHtml(r.formula)}</code></td>
         <td>${tolLabel}</td>
+        <td>${finalLabel}</td>
         <td class="directory-actions">
           <button type="button" data-edit-result data-rid="${escapeHtml(r.id)}">${state.editingResultId === r.id ? "Cerrar" : "Editar"}</button>
           <button type="button" data-delete-result data-rid="${escapeHtml(r.id)}">Eliminar</button>
         </td>
       </tr>`;
     const editRow = state.editingResultId === r.id
-      ? `<tr><td colspan="6" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
+      ? `<tr><td colspan="7" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
@@ -654,7 +660,7 @@ function renderResultsList(def, practiceId) {
     <div class="directory-table-wrap">
       <table class="grade-table directory-data-table">
         <thead>
-          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Fórmula</th><th>Tolerancia (%)</th><th>Acciones</th></tr>
+          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Fórmula</th><th>Tolerancia (%)</th><th>Final</th><th>Acciones</th></tr>
         </thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -1053,6 +1059,7 @@ async function saveNewResult(event) {
       unit: raw.unit,
       formula: raw.formula,
       tolerance: parseTolerance(raw.tolerance ?? ""),
+      is_final: raw.is_final === "on",
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingResultId = null;
@@ -1077,6 +1084,7 @@ async function saveEditResult(event) {
       unit: raw.unit,
       formula: raw.formula,
       tolerance: parseTolerance(raw.tolerance ?? ""),
+      is_final: raw.is_final === "on",
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingResultId = null;

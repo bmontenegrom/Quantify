@@ -67,6 +67,9 @@ pub struct ResultInput {
     /// `Some(Some(v))` = fijar la tolerancia a `v`.
     #[serde(default, deserialize_with = "double_option")]
     pub tolerance: Option<Option<f64>>,
+    /// `true` si es el resultado central que el alumno debe entregar para esta práctica.
+    #[serde(default)]
+    pub is_final: bool,
 }
 
 /// Definición completa de una práctica: tipo de análisis, magnitudes y mensurandos.
@@ -773,7 +776,7 @@ pub async fn update_result(
     let rows = match input.tolerance {
         None => sqlx::query(
             "UPDATE practice_results \
-                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5 \
+                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, is_final = ?6 \
                  WHERE id = ?1",
         )
         .bind(result_id)
@@ -781,12 +784,13 @@ pub async fn update_result(
         .bind(input.name.trim())
         .bind(input.unit.trim())
         .bind(input.formula.trim())
+        .bind(input.is_final)
         .execute(pool)
         .await?
         .rows_affected(),
         Some(tol) => sqlx::query(
             "UPDATE practice_results \
-                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6 \
+                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6, is_final = ?7 \
                  WHERE id = ?1",
         )
         .bind(result_id)
@@ -795,6 +799,7 @@ pub async fn update_result(
         .bind(input.unit.trim())
         .bind(input.formula.trim())
         .bind(tol)
+        .bind(input.is_final)
         .execute(pool)
         .await?
         .rows_affected(),
@@ -981,6 +986,15 @@ fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
         unit: unit.into(),
         formula: formula.into(),
         tolerance: None,
+        is_final: false,
+    }
+}
+
+/// Igual que [`res`], pero marcado como resultado central que el alumno debe entregar.
+fn res_final(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
+    ResultInput {
+        is_final: true,
+        ..res(symbol, name, unit, formula)
     }
 }
 
@@ -1042,16 +1056,25 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "1/s",
                 "math::ln(2)/t_med",
             ),
-            res(
+            res_final(
                 "gamma",
                 "Coeficiente de amortiguamiento",
                 "1/s",
                 "2*math::ln(2)/t_med",
             ),
-            res("Q", "Factor de calidad", "", "pi*t_med/(T*math::ln(2))"),
-            res("g", "Aceleracion de gravedad", "m/s2", "4*pi^2*L/T^2"),
+            res_final("Q", "Factor de calidad", "", "pi*t_med/(T*math::ln(2))"),
+            res_final("g", "Aceleracion de gravedad", "m/s2", "4*pi^2*L/T^2"),
         ],
     )
+    .await?;
+    // Backfill: gamma y Q pasaron a ser resultado final despues del alta inicial de la practica;
+    // seed_practice es idempotente y no re-siembra, asi que las bases ya sembradas necesitan este
+    // update puntual para que el alumno pueda entregarlos.
+    sqlx::query(
+        "UPDATE practice_results SET is_final = 1 \
+         WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q') AND is_final = 0",
+    )
+    .execute(pool)
     .await?;
 
     // P3 — Relajación exponencial (parte 1, determinación directa de tau en un RC serie).
@@ -1089,7 +1112,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "s",
                 "(R + Rint) * C",
             ),
-            res(
+            res_final(
                 "tau_exp",
                 "Tiempo de relajacion experimental",
                 "s",
@@ -1119,7 +1142,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             ),
         ],
         &[
-            res(
+            res_final(
                 "I",
                 "Intensidad de corriente",
                 "A",
@@ -1157,7 +1180,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "ohm",
                 "R1 + RA + R2*R3/(R2+R3)",
             ),
-            res(
+            res_final(
                 "I",
                 "Intensidad de corriente teorica",
                 "A",
@@ -1191,7 +1214,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "longitud",
             ),
         ],
-        &[res("tau", "Constante de tiempo RC", "s", "slope")],
+        &[res_final("tau", "Constante de tiempo RC", "s", "slope")],
     )
     .await?;
 
@@ -1218,7 +1241,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "temperatura",
             ),
         ],
-        &[res(
+        &[res_final(
             "mu",
             "Viscosidad del agua",
             "Pa.s",
@@ -1275,7 +1298,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "temperatura",
             ),
         ],
-        &[res(
+        &[res_final(
             "mu",
             "Viscosidad de la glicerina",
             "Pa.s",
@@ -1331,7 +1354,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "temperatura",
             ),
         ],
-        &[res(
+        &[res_final(
             "M_medio",
             "Coeficiente medio de perdidas",
             "",
@@ -1491,7 +1514,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "ohm",
                 "RA + R2*R3/(R2+R3)",
             ),
-            res(
+            res_final(
                 "P_max",
                 "Potencia maxima (teorica)",
                 "W",
@@ -1567,7 +1590,7 @@ async fn quantities_for(
 /// Lee los mensurandos derivados de una práctica, ordenados por posición y símbolo.
 async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticeResult>> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance \
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final \
          FROM practice_results WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -1590,7 +1613,7 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
 /// Lee un mensurando derivado por su id.
 async fn fetch_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeResult> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance \
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final \
          FROM practice_results WHERE id = ?1",
     )
     .bind(id)
@@ -1638,8 +1661,8 @@ async fn insert_result(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_results \
-         (id, practice_id, symbol, name, unit, formula, position, tolerance) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         (id, practice_id, symbol, name, unit, formula, position, tolerance, is_final) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -1649,6 +1672,7 @@ async fn insert_result(
     .bind(input.formula.trim())
     .bind(position)
     .bind(input.tolerance.flatten())
+    .bind(input.is_final)
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -1700,6 +1724,7 @@ mod tests {
             unit: "mm2".into(),
             formula: "l*a".into(),
             tolerance: None,
+            is_final: false,
         }
     }
 
@@ -1765,6 +1790,36 @@ mod tests {
 
         assert!(delete_result(&pool, &r.id).await.unwrap());
         assert!(!delete_result(&pool, &r.id).await.unwrap());
+    }
+
+    /// `is_final` se persiste al crear y se puede togglear al actualizar (checkbox docente en UI).
+    #[tokio::test]
+    async fn create_and_update_result_toggles_is_final() {
+        let (pool, _dir) = setup().await;
+        let r = create_result(
+            &pool,
+            "p1-estadistica",
+            ResultInput {
+                is_final: true,
+                ..sample_result()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(r.is_final);
+
+        let updated = update_result(
+            &pool,
+            &r.id,
+            ResultInput {
+                is_final: false,
+                ..sample_result()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(!updated.is_final);
     }
 
     #[tokio::test]
@@ -2281,12 +2336,44 @@ mod tests {
                 "falta el resultado {symbol}"
             );
         }
+        // g, gamma y Q son los resultados centrales que el alumno debe entregar; los demás no.
+        for symbol in ["g", "gamma", "Q"] {
+            let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
+            assert!(r.is_final, "{symbol} deberia ser final");
+        }
+        for symbol in ["Tmedio", "delta"] {
+            let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
+            assert!(!r.is_final, "{symbol} no deberia ser final");
+        }
 
         // Segunda pasada: no debe duplicar.
         seed_definitions(&pool).await.unwrap();
         let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
         assert_eq!(def2.quantities.len(), 3);
         assert_eq!(def2.results.len(), 5);
+    }
+
+    /// gamma/Q pasaron a ser resultado final despues del alta inicial; una base ya sembrada con
+    /// el esquema viejo (is_final=0) debe actualizarse via backfill, no requiere resembrar.
+    #[tokio::test]
+    async fn seed_definitions_backfills_gamma_and_q_as_final() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        sqlx::query(
+            "UPDATE practice_results SET is_final = 0 \
+             WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        seed_definitions(&pool).await.unwrap();
+
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        for symbol in ["gamma", "Q"] {
+            let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
+            assert!(r.is_final, "{symbol} deberia quedar final tras el backfill");
+        }
     }
 
     #[tokio::test]
