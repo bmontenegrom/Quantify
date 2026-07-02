@@ -308,25 +308,7 @@ export function renderMeasurementFields() {
             <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${chronoInstrumentOptions}</select>
             <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
           </div>
-          <div class="chrono-widget">
-            <div class="chrono-display">0.000 s</div>
-            <div class="chrono-info"><span class="chrono-count">0 marcas</span></div>
-            <div class="chrono-controls">
-              <button type="button" class="chrono-start">▶ Iniciar</button>
-              <button type="button" class="chrono-mark" disabled>● Marcar</button>
-              <button type="button" class="chrono-stop" disabled>■ Detener</button>
-              <button type="button" class="chrono-reset">↺ Reiniciar</button>
-            </div>
-            <label class="chrono-mode-label">Modo:
-              <select class="chrono-mode">
-                <option value="periodo">Período (pares t₂-t₁, t₄-t₃… → técnica de Estadística)</option>
-                <option value="consecutivo">Consecutivo (una marca por período)</option>
-                <option value="pares">Pares solapados (marca cada T/2)</option>
-                <option value="absoluto">Absoluto (tiempos desde inicio)</option>
-              </select>
-            </label>
-            <div class="chrono-readings-preview"></div>
-          </div>
+          ${chronoWidgetInnerHtml()}
           <div class="series-debug"></div>
         </fieldset>
       `;
@@ -380,17 +362,21 @@ export function renderMeasurementFields() {
         .filter(Boolean);
       rows.forEach((q) => used.add(q.id));
       if (rows.length === 0) return "";
+      const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       return `<div class="measurement-section">
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
           ${rows.map(quantityRowHtml).join("")}
+          ${helper}
         </div>`;
     });
     const rest = definition.quantities.filter((q) => !used.has(q.id));
     measurementFields.innerHTML = blocks.join("") + rest.map(quantityRowHtml).join("");
   } else {
-    measurementFields.innerHTML = definition.quantities.map(quantityRowHtml).join("");
+    const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
+    measurementFields.innerHTML = definition.quantities.map(quantityRowHtml).join("") + helper;
   }
   measurementFields.insertAdjacentHTML("beforeend", finalResultSectionHtml(definition));
+  wireChronoHelpers();
 
   measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
     if (row.dataset.isChrono === "1") {
@@ -412,6 +398,57 @@ export function renderMeasurementFields() {
     });
     wireRemoveReplica(row);
   });
+}
+
+/** Markup interno (sin fieldset) del widget de cronómetro: display, controles y modo. */
+function chronoWidgetInnerHtml() {
+  return `
+    <div class="chrono-widget">
+      <div class="chrono-display">0.000 s</div>
+      <div class="chrono-info"><span class="chrono-count">0 marcas</span></div>
+      <div class="chrono-controls">
+        <button type="button" class="chrono-start">▶ Iniciar</button>
+        <button type="button" class="chrono-mark" disabled>● Marcar</button>
+        <button type="button" class="chrono-stop" disabled>■ Detener</button>
+        <button type="button" class="chrono-reset">↺ Reiniciar</button>
+      </div>
+      <label class="chrono-mode-label">Modo:
+        <select class="chrono-mode">
+          <option value="periodo">Período (pares t₂-t₁, t₄-t₃… → técnica de Estadística)</option>
+          <option value="consecutivo">Consecutivo (una marca por período)</option>
+          <option value="pares">Pares solapados (marca cada T/2)</option>
+          <option value="absoluto">Absoluto (tiempos desde inicio)</option>
+        </select>
+      </label>
+      <div class="chrono-readings-preview"></div>
+    </div>
+  `;
+}
+
+/**
+ * Cronómetro suelto de apoyo (no atado a ninguna magnitud): ayuda a tomar el tiempo para
+ * después tipearlo a mano en el input que corresponda. No entra en `collectMeasurements`
+ * (usa `.measurement-section`, no `.measurement-row`).
+ */
+function chronoHelperSectionHtml() {
+  return `
+    <div class="measurement-section chrono-helper" data-chrono-helper="1">
+      <h4 class="measurement-section-title">Cronómetro <span class="submission-meta">— ayuda para tomar tiempos</span></h4>
+      ${chronoWidgetInnerHtml()}
+    </div>
+  `;
+}
+
+/** Cablea todos los `.chrono-helper` presentes en el form con una clave única por instancia. */
+function wireChronoHelpers() {
+  measurementFields.querySelectorAll(".chrono-helper").forEach((el, i) => {
+    wireChronometerWidget(el, `__chrono_helper__${i}`);
+  });
+}
+
+/** `true` si esta magnitud se mide a mano (sin cronómetro propio) pero es un tiempo. */
+function needsChronoHelper(q) {
+  return q.quantity === "tiempo" && !q.repeated && !q.is_given;
 }
 
 /** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`. */
@@ -905,7 +942,12 @@ function renderSeriesTable(definition) {
   const sharedSection = shared.length
     ? `<div class="shared-quantities"><h4>Datos compartidos</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`
     : "";
+  // Si alguna columna es una serie de tiempos con réplicas (p. ej. tiempo de caída en
+  // viscosidad), ofrecemos un cronómetro de apoyo suelto arriba de la tabla.
+  const hasReplicatedTime = [...cols, ...shared].some((q) => q.repeated && q.quantity === "tiempo");
+  const chronoHelper = hasReplicatedTime ? chronoHelperSectionHtml() : "";
   measurementFields.innerHTML = `
+    ${chronoHelper}
     ${sharedSection}
     <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
     <div class="directory-table-wrap">
@@ -962,6 +1004,7 @@ function renderSeriesTable(definition) {
     sharedEl.addEventListener("change", schedulePreview);
   }
   updateSeriesMeans();
+  wireChronoHelpers();
 }
 
 async function updateRegressionPreview() {

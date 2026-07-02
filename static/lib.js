@@ -21,6 +21,8 @@ export function symbolHtml(value) {
     tmedio: "t<sub>1/2</sub>",
     T_oc: "T<sub>OC</sub>",
     T_OC: "T<sub>OC</sub>",
+    gamma: "γ",
+    mu: "μ",
   };
   const raw = String(value);
   if (specials[raw]) return specials[raw];

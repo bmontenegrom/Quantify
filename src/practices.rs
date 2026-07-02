@@ -1056,16 +1056,25 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
                 "1/s",
                 "math::ln(2)/t_med",
             ),
-            res(
+            res_final(
                 "gamma",
                 "Coeficiente de amortiguamiento",
                 "1/s",
                 "2*math::ln(2)/t_med",
             ),
-            res("Q", "Factor de calidad", "", "pi*t_med/(T*math::ln(2))"),
+            res_final("Q", "Factor de calidad", "", "pi*t_med/(T*math::ln(2))"),
             res_final("g", "Aceleracion de gravedad", "m/s2", "4*pi^2*L/T^2"),
         ],
     )
+    .await?;
+    // Backfill: gamma y Q pasaron a ser resultado final despues del alta inicial de la practica;
+    // seed_practice es idempotente y no re-siembra, asi que las bases ya sembradas necesitan este
+    // update puntual para que el alumno pueda entregarlos.
+    sqlx::query(
+        "UPDATE practice_results SET is_final = 1 \
+         WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q') AND is_final = 0",
+    )
+    .execute(pool)
     .await?;
 
     // P3 — Relajación exponencial (parte 1, determinación directa de tau en un RC serie).
@@ -2327,10 +2336,12 @@ mod tests {
                 "falta el resultado {symbol}"
             );
         }
-        // g es el resultado central que el alumno debe entregar; los demás no.
-        let g = def.results.iter().find(|r| r.symbol == "g").unwrap();
-        assert!(g.is_final);
-        for symbol in ["Tmedio", "delta", "gamma", "Q"] {
+        // g, gamma y Q son los resultados centrales que el alumno debe entregar; los demás no.
+        for symbol in ["g", "gamma", "Q"] {
+            let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
+            assert!(r.is_final, "{symbol} deberia ser final");
+        }
+        for symbol in ["Tmedio", "delta"] {
             let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
             assert!(!r.is_final, "{symbol} no deberia ser final");
         }
@@ -2340,6 +2351,29 @@ mod tests {
         let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
         assert_eq!(def2.quantities.len(), 3);
         assert_eq!(def2.results.len(), 5);
+    }
+
+    /// gamma/Q pasaron a ser resultado final despues del alta inicial; una base ya sembrada con
+    /// el esquema viejo (is_final=0) debe actualizarse via backfill, no requiere resembrar.
+    #[tokio::test]
+    async fn seed_definitions_backfills_gamma_and_q_as_final() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        sqlx::query(
+            "UPDATE practice_results SET is_final = 0 \
+             WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        seed_definitions(&pool).await.unwrap();
+
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        for symbol in ["gamma", "Q"] {
+            let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
+            assert!(r.is_final, "{symbol} deberia quedar final tras el backfill");
+        }
     }
 
     #[tokio::test]
