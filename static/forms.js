@@ -249,6 +249,7 @@ export function renderMeasurementFields() {
 
   if (definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva") {
     renderSeriesTable(definition);
+    measurementFields.insertAdjacentHTML("beforeend", finalResultSectionHtml(definition));
     return;
   }
 
@@ -389,8 +390,9 @@ export function renderMeasurementFields() {
   } else {
     measurementFields.innerHTML = definition.quantities.map(quantityRowHtml).join("");
   }
+  measurementFields.insertAdjacentHTML("beforeend", finalResultSectionHtml(definition));
 
-  measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
+  measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
     if (row.dataset.isChrono === "1") {
       const chronoInstrument = row.querySelector(".measure-instrument");
       if (chronoInstrument) {
@@ -410,6 +412,58 @@ export function renderMeasurementFields() {
     });
     wireRemoveReplica(row);
   });
+}
+
+/** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`. */
+function finalResultSectionHtml(definition) {
+  const finals = (definition.results ?? []).filter((r) => r.is_final);
+  if (!finals.length) return "";
+  const rows = finals
+    .map(
+      (r) => `
+        <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}">
+          <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
+          <div class="form-grid">
+            <label>Valor
+              <div class="replica-input-wrap">
+                ${prefixSelectHtml()}
+                <input class="final-result-value" type="number" step="any" placeholder="valor" />
+                <span class="replica-unit">${unitHtml(r.unit)}</span>
+              </div>
+            </label>
+            <label>Incertidumbre U (expandida)
+              <div class="replica-input-wrap">
+                ${prefixSelectHtml()}
+                <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
+                <span class="replica-unit">${unitHtml(r.unit)}</span>
+              </div>
+            </label>
+          </div>
+        </fieldset>`,
+    )
+    .join("");
+  return `
+    <div class="measurement-section final-results-section">
+      <h4 class="measurement-section-title">Resultado final <span class="submission-meta">— opcional</span></h4>
+      <p class="submission-meta">Si ya calculaste tu resultado, cargalo acá. Podés dejarlo para más adelante; el docente puede cargarlo después.</p>
+      ${rows}
+    </div>
+  `;
+}
+
+/** Recolecta los resultados finales cargados por el alumno junto con la entrega (si los hay). */
+function collectFinalResults() {
+  return [...measurementFields.querySelectorAll('[data-final-result="1"]')].reduce((acc, row) => {
+    const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
+    const rawVal = row.querySelector(".final-result-value").value.trim();
+    if (rawVal === "") return acc;
+    const value = Number(rawVal) * prefixFactor(valPrefix);
+    if (!Number.isFinite(value)) return acc;
+    const rawU = row.querySelector(".final-result-u").value.trim();
+    const u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
+    acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
+    return acc;
+  }, []);
 }
 
 function prefixSelectHtml() {
@@ -505,7 +559,7 @@ export function collectMeasurements() {
     );
     // Motor E: escalares compartidos (datos de cátedra / medida única), cargados una vez fuera de
     // la serie. Se recolectan como filas sueltas y se suman a las magnitudes por punto.
-    const shared = [...measurementFields.querySelectorAll(".measurement-row")].map(collectStandaloneRow);
+    const shared = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].map(collectStandaloneRow);
     return [...series, ...shared];
   }
 
@@ -525,7 +579,7 @@ export function collectMeasurements() {
   });
 
   // Filas sueltas (compartidas o sin operadores): no están dentro de un contenedor por operador.
-  const standalone = [...measurementFields.querySelectorAll(".measurement-row")].filter(
+  const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
     (row) => !row.closest(".operator-quantity")
   );
   for (const row of standalone) {
@@ -644,6 +698,7 @@ export async function submitFormSubmission() {
       await postJson(`/api/submissions/${editingId}/edit`, {
         measurements,
         meta: collectMeta(),
+        student_results: collectFinalResults(),
       });
       submitStatus.textContent = "Cambios guardados";
       exitEditMode();
@@ -664,6 +719,7 @@ export async function submitFormSubmission() {
       practice_id: practiceSelect.value,
       measurements,
       meta: collectMeta(),
+      student_results: collectFinalResults(),
     });
     submitStatus.textContent = "Entrega guardada";
     const { renderAnalysis } = await import("./analysis.js");
@@ -680,12 +736,14 @@ export async function submitFormSubmission() {
 export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
   state.editPrefill = submission.measurements ?? [];
+  state.editPrefillStudentResults = submission.student_results ?? [];
   import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id));
 }
 
 export function exitEditMode() {
   state.editingSubmissionId = null;
   state.editPrefill = null;
+  state.editPrefillStudentResults = null;
 }
 
 function editPrefillByQuantity() {
@@ -724,8 +782,20 @@ function editPrefillByQuantity() {
   return map;
 }
 
+/** Prellena el bloque opcional "Resultado final" con lo que ya se había entregado, si lo hay. */
+function applyFinalResultsPrefill() {
+  const saved = new Map((state.editPrefillStudentResults ?? []).map((s) => [s.symbol, s]));
+  measurementFields.querySelectorAll('[data-final-result="1"]').forEach((row) => {
+    const s = saved.get(row.dataset.symbol);
+    if (!s) return;
+    row.querySelector(".final-result-value").value = s.value;
+    if (s.u_expanded != null) row.querySelector(".final-result-u").value = s.u_expanded;
+  });
+}
+
 export function applyPrefill() {
   if (!state.editingSubmissionId) return;
+  applyFinalResultsPrefill();
   const byQ = editPrefillByQuantity();
 
   const seriesTable = measurementFields.querySelector(".series-table");
@@ -779,7 +849,7 @@ export function applyPrefill() {
   });
 
   // Filas sueltas (compartidas o sin operadores).
-  const standalone = [...measurementFields.querySelectorAll(".measurement-row")].filter(
+  const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
     (row) => !row.closest(".operator-quantity")
   );
   for (const row of standalone) {

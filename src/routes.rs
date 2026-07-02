@@ -860,6 +860,9 @@ struct EditFormBody {
     measurements: Vec<computation::MeasurementInput>,
     #[serde(default)]
     meta: Option<serde_json::Value>,
+    /// `None` = no tocar los cálculos del alumno ya guardados; `Some(vec)` los reemplaza.
+    #[serde(default)]
+    student_results: Option<Vec<db::StudentResultInput>>,
 }
 
 /// `POST /api/submissions/{id}/edit`: el alumno dueño reemplaza sus lecturas dentro de la
@@ -903,6 +906,7 @@ async fn edit_form_submission(
         &detail.practice_id,
         &input.measurements,
         input.meta.as_ref(),
+        input.student_results.as_deref(),
     )
     .await
     .map_err(analysis_error)?;
@@ -957,7 +961,8 @@ async fn set_student_results(
     let submission = db::submission_detail(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
-    if submission.results_visible_to_student {
+    let is_teacher = matches!(user.role.as_str(), "docente" | "admin");
+    if submission.results_visible_to_student && !is_teacher {
         return Err(AppError::bad_request(
             "no podes modificar tus calculos una vez que el docente habilito los resultados",
         ));
@@ -2377,6 +2382,7 @@ mod tests {
                 unit: "u".into(),
                 formula: "slope".into(),
                 tolerance: None,
+                is_final: false,
             }],
             curves: vec![],
             operator_count: None,
@@ -2546,6 +2552,7 @@ mod tests {
             unit: unit.into(),
             formula: "slope".into(),
             tolerance: None,
+            is_final: false,
         };
         // Unidad vacía → mensurando adimensional, válido.
         assert!(validate_result(&r("")).is_ok());

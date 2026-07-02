@@ -207,7 +207,7 @@ export async function openSubmissionWorkspace(id) {
   state.activeSubmission = submission;
 
   let definition = null;
-  if (submission.entry_mode === "form" && !canReview(state.user)) {
+  if (submission.entry_mode === "form") {
     try {
       definition = await fetchJson(`/api/practices/${encodeURIComponent(submission.practice_id)}/definition`);
     } catch {
