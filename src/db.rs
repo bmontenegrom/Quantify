@@ -195,6 +195,9 @@ pub struct PracticeResult {
     /// Tolerancia máxima aceptable como diferencia porcentual |Δ%| entre el valor del alumno y
     /// el automático. `None` = sin veredicto. Configurable por el docente por mensurando.
     pub tolerance: Option<f64>,
+    /// `true` si es el resultado central que el alumno debe entregar (valor ± U) para esta
+    /// práctica, p. ej. `g` en el péndulo. Habilita la sección "Resultado final" en la entrega.
+    pub is_final: bool,
 }
 
 /// Instrumento de medida del catálogo de un curso. El `kind` (`analogico`/`digital`) es
@@ -813,6 +816,36 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 
     // Tolerancia porcentual configurable por el docente para el veredicto de comparación.
     add_column_if_missing(pool, "practice_results", "tolerance", "REAL").await?;
+
+    // Resultado central que el alumno debe entregar (valor ± U), p. ej. `g` en el péndulo.
+    // Editable por el docente desde la UI; acá solo se backfillea el obvio de cada práctica
+    // sembrada (no-op para instalaciones nuevas, que ya siembran el flag en `seed_definitions`).
+    add_column_if_missing(
+        pool,
+        "practice_results",
+        "is_final",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+    for (practice_id, symbol) in [
+        ("p1-estadistica", "g"),
+        ("p3-relajacion", "tau_exp"),
+        ("p3-relajacion-desfasaje", "tau"),
+        ("p2-serie", "I"),
+        ("p2-corriente-continua", "I"),
+        ("fluidos-1", "mu"),
+        ("viscosidad", "mu"),
+        ("fluidos-2", "M_medio"),
+        ("p2-potencia", "P_max"),
+    ] {
+        sqlx::query(
+            "UPDATE practice_results SET is_final = 1 WHERE practice_id = ?1 AND symbol = ?2",
+        )
+        .bind(practice_id)
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
 
     Ok(())
 }

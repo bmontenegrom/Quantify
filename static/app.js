@@ -18,6 +18,7 @@ import "./analysis.js";
 import "./forms.js";
 import "./instruments.js";
 import "./practices-admin.js";
+import "./theme.js";
 
 async function init() {
   try {

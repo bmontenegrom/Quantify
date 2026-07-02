@@ -54,4 +54,6 @@ export const practiceNavChildren = document.querySelector("#practice-nav-childre
 export const practicaTitle = document.querySelector("#practica-title");
 export const sidebar = document.querySelector("#sidebar");
 export const navToggle = document.querySelector("#nav-toggle");
+export const themeToggle = document.querySelector("#theme-toggle");
+export const themeToggleLabel = document.querySelector("#theme-toggle-label");
 export const invitationBanner = document.querySelector("#invitation-banner");

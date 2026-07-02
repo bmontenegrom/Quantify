@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   escapeHtml,
+  symbolHtml,
+  inlineMathHtml,
+  unitHtml,
   cssEscape,
   format,
   formatDate,
@@ -89,6 +92,24 @@ test("escapeHtml escapa todos los caracteres especiales", () => {
     "&lt;img src=x onerror=&quot;alert(&#039;x&#039;)&quot;&gt;",
   );
   assert.equal(escapeHtml("sin especiales"), "sin especiales");
+});
+
+test("symbolHtml escapa HTML y convierte dígitos pegados a letras en subíndices", () => {
+  assert.equal(symbolHtml("R1"), "R<sub>1</sub>");
+  assert.equal(symbolHtml("C12"), "C<sub>12</sub>");
+  assert.equal(symbolHtml("tmedio"), "t<sub>1/2</sub>");
+  assert.equal(symbolHtml("T_oc"), "T<sub>OC</sub>");
+  assert.equal(symbolHtml("R_cap"), "R_cap");
+  assert.equal(symbolHtml("<R1>"), "&lt;R<sub>1</sub>&gt;");
+});
+
+test("inlineMathHtml y unitHtml formatean subíndices y superíndices visibles", () => {
+  assert.equal(inlineMathHtml("Resistencia R3"), "Resistencia R<sub>3</sub>");
+  assert.equal(inlineMathHtml("Tiempo t1/2 y T_oc"), "Tiempo t<sub>1/2</sub> y T<sub>OC</sub>");
+  assert.equal(unitHtml("m3"), "m<sup>3</sup>");
+  assert.equal(unitHtml("kg/m3"), "kg/m<sup>3</sup>");
+  assert.equal(unitHtml("m/s2"), "m/s<sup>2</sup>");
+  assert.equal(unitHtml("R^2"), "R<sup>2</sup>");
 });
 
 test("cssEscape cae al escape de comillas sin window (Node)", () => {

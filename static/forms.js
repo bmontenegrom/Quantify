@@ -6,13 +6,25 @@ import {
 } from "./dom.js";
 import { fetchJson, postJson } from "./api.js";
 import {
-  escapeHtml, canReview, format,
+  escapeHtml, symbolHtml, inlineMathHtml, unitHtml, canReview, format,
   compatibleInstruments, SI_PREFIXES, prefixFactor,
   seriesStats, histogram, normalCurve, validateMeasurements,
 } from "./lib.js";
 import { PRACTICE_GROUPS, PRACTICE_SECTIONS } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
+
+function quantityNameHtml(q) {
+  const base = inlineMathHtml(q.name);
+  if (q.symbol === "T_oc" && !/T_?oc/i.test(q.name)) {
+    return `${base} ${symbolHtml(q.symbol)}`;
+  }
+  return base;
+}
+
+function formatSeriesStat(value) {
+  return Number(value).toLocaleString("es-UY", { maximumSignificantDigits: 10 });
+}
 
 export function renderStudentSelectors() {
   const courses = state.academic.courses;
@@ -237,6 +249,7 @@ export function renderMeasurementFields() {
 
   if (definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva") {
     renderSeriesTable(definition);
+    measurementFields.insertAdjacentHTML("beforeend", finalResultSectionHtml(definition));
     return;
   }
 
@@ -248,6 +261,7 @@ export function renderMeasurementFields() {
       : 0;
   const useOperators = operatorCount >= 2;
   const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
+  const legendHtml = (q) => quantityNameHtml(q);
 
   // `opIndex` (número) marca el bloque de un operador; `null` para magnitudes compartidas.
   const measurementRowHtml = (q, opIndex) => {
@@ -255,20 +269,20 @@ export function renderMeasurementFields() {
     if (q.is_given) {
       return `
         <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
-          <legend>${escapeHtml(q.name)} <span class="submission-meta">(dato — ${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+          <legend>${legendHtml(q)}</legend>
           <div class="form-grid">
             <label>Valor
               <div class="replica-input-wrap">
                 ${prefixSelectHtml()}
                 <input class="measure-given-value" type="number" step="any" placeholder="valor" />
-                <span class="replica-unit">${escapeHtml(q.unit)}</span>
+                <span class="replica-unit">${unitHtml(q.unit)}</span>
               </div>
             </label>
             <label>Incertidumbre U (expandida)
               <div class="replica-input-wrap">
                 ${prefixSelectHtml()}
                 <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
-                <span class="replica-unit">${escapeHtml(q.unit)}</span>
+                <span class="replica-unit">${unitHtml(q.unit)}</span>
               </div>
             </label>
           </div>
@@ -289,30 +303,12 @@ export function renderMeasurementFields() {
       return `
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
-          <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+          <legend>${legendHtml(q)}</legend>
           <div class="measure-selectors" style="margin-bottom:8px;">
             <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${chronoInstrumentOptions}</select>
             <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
           </div>
-          <div class="chrono-widget">
-            <div class="chrono-display">0.000 s</div>
-            <div class="chrono-info"><span class="chrono-count">0 marcas</span></div>
-            <div class="chrono-controls">
-              <button type="button" class="chrono-start">▶ Iniciar</button>
-              <button type="button" class="chrono-mark" disabled>● Marcar</button>
-              <button type="button" class="chrono-stop" disabled>■ Detener</button>
-              <button type="button" class="chrono-reset">↺ Reiniciar</button>
-            </div>
-            <label class="chrono-mode-label">Modo:
-              <select class="chrono-mode">
-                <option value="periodo">Período (pares t₂-t₁, t₄-t₃… → técnica de Estadística)</option>
-                <option value="consecutivo">Consecutivo (una marca por período)</option>
-                <option value="pares">Pares solapados (marca cada T/2)</option>
-                <option value="absoluto">Absoluto (tiempos desde inicio)</option>
-              </select>
-            </label>
-            <div class="chrono-readings-preview"></div>
-          </div>
+          ${chronoWidgetInnerHtml()}
           <div class="series-debug"></div>
         </fieldset>
       `;
@@ -323,7 +319,7 @@ export function renderMeasurementFields() {
       .join("");
     return `
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
-        <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+        <legend>${legendHtml(q)}</legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
           <div class="measure-selectors">
             <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
@@ -351,7 +347,7 @@ export function renderMeasurementFields() {
     ).join("");
     return `
       <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
-        <h4 class="measurement-section-title">${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)}) — por operador</span></h4>
+        <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por operador</span></h4>
         ${blocks}
       </div>
     `;
@@ -366,18 +362,23 @@ export function renderMeasurementFields() {
         .filter(Boolean);
       rows.forEach((q) => used.add(q.id));
       if (rows.length === 0) return "";
+      const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       return `<div class="measurement-section">
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
           ${rows.map(quantityRowHtml).join("")}
+          ${helper}
         </div>`;
     });
     const rest = definition.quantities.filter((q) => !used.has(q.id));
     measurementFields.innerHTML = blocks.join("") + rest.map(quantityRowHtml).join("");
   } else {
-    measurementFields.innerHTML = definition.quantities.map(quantityRowHtml).join("");
+    const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
+    measurementFields.innerHTML = definition.quantities.map(quantityRowHtml).join("") + helper;
   }
+  measurementFields.insertAdjacentHTML("beforeend", finalResultSectionHtml(definition));
+  wireChronoHelpers();
 
-  measurementFields.querySelectorAll(".measurement-row").forEach((row) => {
+  measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
     if (row.dataset.isChrono === "1") {
       const chronoInstrument = row.querySelector(".measure-instrument");
       if (chronoInstrument) {
@@ -399,6 +400,109 @@ export function renderMeasurementFields() {
   });
 }
 
+/** Markup interno (sin fieldset) del widget de cronómetro: display, controles y modo. */
+function chronoWidgetInnerHtml() {
+  return `
+    <div class="chrono-widget">
+      <div class="chrono-display">0.000 s</div>
+      <div class="chrono-info"><span class="chrono-count">0 marcas</span></div>
+      <div class="chrono-controls">
+        <button type="button" class="chrono-start">▶ Iniciar</button>
+        <button type="button" class="chrono-mark" disabled>● Marcar</button>
+        <button type="button" class="chrono-stop" disabled>■ Detener</button>
+        <button type="button" class="chrono-reset">↺ Reiniciar</button>
+      </div>
+      <label class="chrono-mode-label">Modo:
+        <select class="chrono-mode">
+          <option value="periodo">Período (pares t₂-t₁, t₄-t₃… → técnica de Estadística)</option>
+          <option value="consecutivo">Consecutivo (una marca por período)</option>
+          <option value="pares">Pares solapados (marca cada T/2)</option>
+          <option value="absoluto">Absoluto (tiempos desde inicio)</option>
+        </select>
+      </label>
+      <div class="chrono-readings-preview"></div>
+    </div>
+  `;
+}
+
+/**
+ * Cronómetro suelto de apoyo (no atado a ninguna magnitud): ayuda a tomar el tiempo para
+ * después tipearlo a mano en el input que corresponda. No entra en `collectMeasurements`
+ * (usa `.measurement-section`, no `.measurement-row`).
+ */
+function chronoHelperSectionHtml() {
+  return `
+    <div class="measurement-section chrono-helper" data-chrono-helper="1">
+      <h4 class="measurement-section-title">Cronómetro <span class="submission-meta">— ayuda para tomar tiempos</span></h4>
+      ${chronoWidgetInnerHtml()}
+    </div>
+  `;
+}
+
+/** Cablea todos los `.chrono-helper` presentes en el form con una clave única por instancia. */
+function wireChronoHelpers() {
+  measurementFields.querySelectorAll(".chrono-helper").forEach((el, i) => {
+    wireChronometerWidget(el, `__chrono_helper__${i}`);
+  });
+}
+
+/** `true` si esta magnitud se mide a mano (sin cronómetro propio) pero es un tiempo. */
+function needsChronoHelper(q) {
+  return q.quantity === "tiempo" && !q.repeated && !q.is_given;
+}
+
+/** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`. */
+function finalResultSectionHtml(definition) {
+  const finals = (definition.results ?? []).filter((r) => r.is_final);
+  if (!finals.length) return "";
+  const rows = finals
+    .map(
+      (r) => `
+        <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}">
+          <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
+          <div class="form-grid">
+            <label>Valor
+              <div class="replica-input-wrap">
+                ${prefixSelectHtml()}
+                <input class="final-result-value" type="number" step="any" placeholder="valor" />
+                <span class="replica-unit">${unitHtml(r.unit)}</span>
+              </div>
+            </label>
+            <label>Incertidumbre U (expandida)
+              <div class="replica-input-wrap">
+                ${prefixSelectHtml()}
+                <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
+                <span class="replica-unit">${unitHtml(r.unit)}</span>
+              </div>
+            </label>
+          </div>
+        </fieldset>`,
+    )
+    .join("");
+  return `
+    <div class="measurement-section final-results-section">
+      <h4 class="measurement-section-title">Resultado final <span class="submission-meta">— opcional</span></h4>
+      <p class="submission-meta">Si ya calculaste tu resultado, cargalo acá. Podés dejarlo para más adelante; el docente puede cargarlo después.</p>
+      ${rows}
+    </div>
+  `;
+}
+
+/** Recolecta los resultados finales cargados por el alumno junto con la entrega (si los hay). */
+function collectFinalResults() {
+  return [...measurementFields.querySelectorAll('[data-final-result="1"]')].reduce((acc, row) => {
+    const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
+    const rawVal = row.querySelector(".final-result-value").value.trim();
+    if (rawVal === "") return acc;
+    const value = Number(rawVal) * prefixFactor(valPrefix);
+    if (!Number.isFinite(value)) return acc;
+    const rawU = row.querySelector(".final-result-u").value.trim();
+    const u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
+    acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
+    return acc;
+  }, []);
+}
+
 function prefixSelectHtml() {
   const opts = SI_PREFIXES.map(
     (p) => `<option value="${escapeHtml(p.label)}" ${p.label === "" ? "selected" : ""}>${p.label || "—"}</option>`
@@ -416,8 +520,8 @@ export function renderReplicaInput(unit) {
   return `
     <div class="replica">
       ${prefixSelectHtml()}
-      <input class="measure-value" type="number" step="any" placeholder="lectura" data-unit="${escapeHtml(unit)}" />
-      <span class="replica-unit">${escapeHtml(unit)}</span>
+      <input class="measure-value" type="number" step="any" placeholder="valor" data-unit="${escapeHtml(unit)}" />
+      <span class="replica-unit">${unitHtml(unit)}</span>
       <button type="button" class="remove-replica" title="Quitar">✕</button>
     </div>
   `;
@@ -492,7 +596,7 @@ export function collectMeasurements() {
     );
     // Motor E: escalares compartidos (datos de cátedra / medida única), cargados una vez fuera de
     // la serie. Se recolectan como filas sueltas y se suman a las magnitudes por punto.
-    const shared = [...measurementFields.querySelectorAll(".measurement-row")].map(collectStandaloneRow);
+    const shared = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].map(collectStandaloneRow);
     return [...series, ...shared];
   }
 
@@ -512,7 +616,7 @@ export function collectMeasurements() {
   });
 
   // Filas sueltas (compartidas o sin operadores): no están dentro de un contenedor por operador.
-  const standalone = [...measurementFields.querySelectorAll(".measurement-row")].filter(
+  const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
     (row) => !row.closest(".operator-quantity")
   );
   for (const row of standalone) {
@@ -631,6 +735,7 @@ export async function submitFormSubmission() {
       await postJson(`/api/submissions/${editingId}/edit`, {
         measurements,
         meta: collectMeta(),
+        student_results: collectFinalResults(),
       });
       submitStatus.textContent = "Cambios guardados";
       exitEditMode();
@@ -651,6 +756,7 @@ export async function submitFormSubmission() {
       practice_id: practiceSelect.value,
       measurements,
       meta: collectMeta(),
+      student_results: collectFinalResults(),
     });
     submitStatus.textContent = "Entrega guardada";
     const { renderAnalysis } = await import("./analysis.js");
@@ -667,12 +773,14 @@ export async function submitFormSubmission() {
 export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
   state.editPrefill = submission.measurements ?? [];
+  state.editPrefillStudentResults = submission.student_results ?? [];
   import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id));
 }
 
 export function exitEditMode() {
   state.editingSubmissionId = null;
   state.editPrefill = null;
+  state.editPrefillStudentResults = null;
 }
 
 function editPrefillByQuantity() {
@@ -711,8 +819,20 @@ function editPrefillByQuantity() {
   return map;
 }
 
+/** Prellena el bloque opcional "Resultado final" con lo que ya se había entregado, si lo hay. */
+function applyFinalResultsPrefill() {
+  const saved = new Map((state.editPrefillStudentResults ?? []).map((s) => [s.symbol, s]));
+  measurementFields.querySelectorAll('[data-final-result="1"]').forEach((row) => {
+    const s = saved.get(row.dataset.symbol);
+    if (!s) return;
+    row.querySelector(".final-result-value").value = s.value;
+    if (s.u_expanded != null) row.querySelector(".final-result-u").value = s.u_expanded;
+  });
+}
+
 export function applyPrefill() {
   if (!state.editingSubmissionId) return;
+  applyFinalResultsPrefill();
   const byQ = editPrefillByQuantity();
 
   const seriesTable = measurementFields.querySelector(".series-table");
@@ -766,7 +886,7 @@ export function applyPrefill() {
   });
 
   // Filas sueltas (compartidas o sin operadores).
-  const standalone = [...measurementFields.querySelectorAll(".measurement-row")].filter(
+  const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
     (row) => !row.closest(".operator-quantity")
   );
   for (const row of standalone) {
@@ -815,14 +935,19 @@ function renderSeriesTable(definition) {
   const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
   const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
   const header = cols
-    .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${escapeHtml(q.symbol)} <span class="submission-meta">(${escapeHtml(q.unit)})</span></th>`)
+    .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${symbolHtml(q.symbol)}${q.unit ? ` <span class="submission-meta">(${unitHtml(q.unit)})</span>` : ""}</th>`)
     .join("");
   const INITIAL_ROWS = 3;
   const body = Array.from({ length: INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
   const sharedSection = shared.length
     ? `<div class="shared-quantities"><h4>Datos compartidos</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`
     : "";
+  // Si alguna columna es una serie de tiempos con réplicas (p. ej. tiempo de caída en
+  // viscosidad), ofrecemos un cronómetro de apoyo suelto arriba de la tabla.
+  const hasReplicatedTime = [...cols, ...shared].some((q) => q.repeated && q.quantity === "tiempo");
+  const chronoHelper = hasReplicatedTime ? chronoHelperSectionHtml() : "";
   measurementFields.innerHTML = `
+    ${chronoHelper}
     ${sharedSection}
     <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
     <div class="directory-table-wrap">
@@ -879,6 +1004,7 @@ function renderSeriesTable(definition) {
     sharedEl.addEventListener("change", schedulePreview);
   }
   updateSeriesMeans();
+  wireChronoHelpers();
 }
 
 async function updateRegressionPreview() {
@@ -933,9 +1059,9 @@ function seriesRowHtml(cols) {
       const n = q.repeated ? Number(q.replicas_per_point) || 0 : 0;
       if (n > 0) {
         const inputs = Array.from({ length: n }, (_, k) => replicaInputHtml(q.id, k)).join("");
-        return `<td class="series-cell series-cell--replicas">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div><span class="series-mean submission-meta">x̄ —</span></td>`;
+        return `<td class="series-cell series-cell--replicas"><div class="series-input-wrap">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div></div><span class="series-mean submission-meta">x̄ —</span></td>`;
       }
-      return `<td class="series-cell">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="${escapeHtml(q.symbol)}" /></td>`;
+      return `<td class="series-cell"><div class="series-input-wrap">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" /></div></td>`;
     })
     .join("");
   return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
@@ -947,13 +1073,13 @@ function sharedRowHtml(q) {
   if (q.is_given) {
     return `
       <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
-        <legend>${escapeHtml(q.name)} <span class="submission-meta">(dato — ${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)})</span></legend>
+        <legend>${quantityNameHtml(q)}</legend>
         <div class="form-grid">
           <label>Valor
-            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-value" type="number" step="any" placeholder="valor" /><span class="replica-unit">${escapeHtml(q.unit)}</span></div>
+            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-value" type="number" step="any" placeholder="valor" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
           </label>
           <label>Incertidumbre U (expandida)
-            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${escapeHtml(q.unit)}</span></div>
+            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
           </label>
         </div>
       </fieldset>`;
@@ -965,7 +1091,7 @@ function sharedRowHtml(q) {
     .join("");
   return `
     <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
-      <legend>${escapeHtml(q.name)} <span class="submission-meta">(${escapeHtml(q.symbol)}, ${escapeHtml(q.unit)}, medida única)</span></legend>
+      <legend>${quantityNameHtml(q)}</legend>
       <div class="measure-body">
         <div class="measure-selectors">
           <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
@@ -981,7 +1107,7 @@ function sharedRowHtml(q) {
 
 /** HTML de un input de réplica (índice 0-based `k`) para la magnitud `quantityId`. */
 function replicaInputHtml(quantityId, k) {
-  return `<input class="series-replica" type="number" step="any" data-quantity-id="${escapeHtml(quantityId)}" placeholder="t${k + 1}" />`;
+  return `<input class="series-replica" type="number" step="any" data-quantity-id="${escapeHtml(quantityId)}" placeholder="valor ${k + 1}" />`;
 }
 
 /** Lee las réplicas no vacías de una celda de réplicas, aplicando el prefijo SI de la celda. */
@@ -1180,7 +1306,7 @@ function renderSeriesDebug(row, quantityId, readings) {
   container.innerHTML = `
     <div class="series-debug-head">
       <strong>Depuración de la serie</strong>
-      <span class="submission-meta">n=${stats.n} · x̄=${Number.isFinite(stats.mean) ? stats.mean.toFixed(4) : "—"} s · s=${Number.isFinite(stats.std) ? stats.std.toFixed(4) : "—"} s · s/√n=${Number.isFinite(stats.stdMean) ? stats.stdMean.toFixed(4) : "—"} s</span>
+      <span class="submission-meta">n=${stats.n} · x̄=${Number.isFinite(stats.mean) ? formatSeriesStat(stats.mean) : "—"} s · s=${Number.isFinite(stats.std) ? formatSeriesStat(stats.std) : "—"} s · s/√n=${Number.isFinite(stats.stdMean) ? formatSeriesStat(stats.stdMean) : "—"} s</span>
     </div>
     <div class="series-debug-grid">
       <div class="series-hist">

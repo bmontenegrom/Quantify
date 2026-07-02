@@ -1,15 +1,49 @@
 :root {
   color-scheme: light;
-  --bg: #f6f7f9;
+  --bg: #f4f7fb;
+  --bg-soft: #edf3f8;
   --panel: #ffffff;
+  --panel-raised: #ffffff;
   --ink: #17202a;
-  --muted: #657184;
-  --line: #d8dee8;
+  --muted: #647084;
+  --line: #d8e0ea;
+  --line-strong: #bcc9d8;
   --accent: #0f766e;
   --accent-strong: #115e59;
+  --accent-soft: #dff5f1;
+  --on-accent: #ffffff;
+  --primary: var(--accent);
+  --success: #15803d;
   --warn: #a16207;
+  --warn-strong: #92400e;
   --danger: #b42318;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 16px 40px rgba(15, 23, 42, 0.10);
+  --radius: 8px;
+  --radius-sm: 6px;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111827;
+  --bg-soft: #162032;
+  --panel: #1c2533;
+  --panel-raised: #222d3d;
+  --ink: #eef3f8;
+  --muted: #a8b3c2;
+  --line: #354255;
+  --line-strong: #4b5c72;
+  --accent: #2dd4bf;
+  --accent-strong: #7dd3fc;
+  --accent-soft: #123c3c;
+  --on-accent: #06211f;
+  --success: #86efac;
+  --warn: #fbbf24;
+  --warn-strong: #fde68a;
+  --danger: #f87171;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-md: 0 18px 48px rgba(0, 0, 0, 0.34);
 }
 
 * {
@@ -18,8 +52,11 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at top left, rgba(45, 212, 191, 0.12), transparent 34rem),
+    linear-gradient(180deg, var(--bg-soft), var(--bg) 24rem);
   color: var(--ink);
+  min-height: 100vh;
 }
 
 .login-screen {
@@ -33,7 +70,8 @@ body {
 .login-card {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
   display: grid;
   gap: 16px;
   max-width: 380px;
@@ -63,8 +101,9 @@ body {
 }
 
 .sidebar {
-  background: #ffffff;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
   border-right: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -76,8 +115,13 @@ body {
 }
 
 .sidebar-brand {
-  padding: 4px 8px 12px;
   border-bottom: 1px solid var(--line);
+  padding: 4px 8px 14px;
+}
+
+.sidebar-brand h1 {
+  font-size: 1.55rem;
+  letter-spacing: 0;
 }
 
 .session-box {
@@ -99,12 +143,36 @@ body {
   top: 12px;
   left: 12px;
   z-index: 30;
-  background: #ffffff;
+  background: var(--panel-raised);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   font-size: 1.1rem;
   min-height: 40px;
   width: 44px;
+}
+
+.theme-toggle {
+  align-items: center;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 38px;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.theme-toggle-dot {
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  display: inline-block;
+  height: 10px;
+  width: 10px;
 }
 
 .inline-form {
@@ -179,7 +247,7 @@ main {
 
 .tab,
 button {
-  background: #ffffff;
+  background: var(--panel);
   border: 0;
   color: var(--ink);
   cursor: pointer;
@@ -191,7 +259,7 @@ button {
 
 /* Cada ítem de nav ocupa el ancho completo y se alinea a la izquierda. */
 .nav .tab {
-  border-radius: 8px;
+  border-radius: var(--radius);
   text-align: left;
   width: 100%;
 }
@@ -207,11 +275,19 @@ button {
 button[type="submit"],
 #refresh-submissions {
   background: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 button:hover {
   filter: brightness(0.96);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  outline-offset: 2px;
 }
 
 .view {
@@ -238,7 +314,8 @@ button:hover {
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   padding: 18px;
 }
 
@@ -266,13 +343,25 @@ label {
 input,
 select,
 textarea {
+  background: var(--panel-raised);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--ink);
   font: inherit;
   min-height: 40px;
   padding: 8px 10px;
   width: 100%;
+}
+
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 textarea {
@@ -386,7 +475,7 @@ textarea {
 
 .student-grade-card {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -417,7 +506,7 @@ textarea {
 
 .grade-field {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 10px;
 }
 
@@ -453,15 +542,16 @@ textarea {
 
 .measurement-fields {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin: 10px 0;
-  max-width: 700px;
+  max-width: none;
 }
 
 .measurement-row {
+  background: var(--panel-raised);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 12px 8px;
+  border-radius: var(--radius);
+  padding: 8px 12px 10px;
 }
 
 .measurement-row legend {
@@ -472,9 +562,10 @@ textarea {
 
 /* Una sola fila: [instrumento] [escala] | [prefijo] [valor] [unidad] */
 .measure-body {
-  display: flex;
   align-items: center;
-  gap: 6px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(300px, 360px) 1px minmax(300px, max-content);
   margin-top: 4px;
 }
 
@@ -488,7 +579,8 @@ textarea {
 
 /* Magnitudes con réplicas: selectores arriba, valores apilados abajo */
 .measure-body--stacked {
-  flex-wrap: wrap;
+  align-items: stretch;
+  grid-template-columns: 1fr;
 }
 
 .measure-body--stacked .measure-sep {
@@ -496,14 +588,14 @@ textarea {
 }
 
 .measure-body--stacked .measure-right {
-  flex-basis: 100%;
+  width: 100%;
 }
 
 .measure-selectors {
-  display: flex;
+  display: grid;
   gap: 4px;
-  flex: 0 0 auto;
-  align-items: center;
+  grid-template-columns: minmax(160px, 1fr) minmax(120px, 0.8fr);
+  min-width: 0;
 }
 
 /* Selects de instrumento/escala: sin label encima, compactos */
@@ -511,8 +603,8 @@ textarea {
   font-size: 0.8rem;
   padding: 5px 4px;
   height: 32px;
-  min-width: 130px;
-  max-width: 170px;
+  min-width: 0;
+  max-width: none;
 }
 
 .measure-right {
@@ -530,33 +622,52 @@ textarea {
 
 .replica {
   align-items: center;
-  display: flex;
+  display: grid;
   gap: 4px;
+  grid-template-columns: 52px minmax(140px, 220px) minmax(22px, max-content) 30px;
+  justify-content: start;
+}
+
+.replica-input-wrap {
+  align-items: center;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 52px minmax(140px, 220px) minmax(22px, max-content);
+}
+
+.measurement-row--given .form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, max-content));
 }
 
 /* Selector de prefijo SI: ancho fijo, justo para "µ" "k" "m" */
 .prefix-select {
-  flex: 0 0 52px;
-  width: 52px;
   font-size: 0.82rem;
   padding: 5px 2px;
   height: 32px;
+  max-width: 52px;
+  min-width: 52px;
   text-align: center;
+  width: 52px;
 }
 
-.replica .measure-value {
-  flex: 1;
+.replica .measure-value,
+.measure-given-value,
+.measure-given-u {
+  background: var(--panel);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
   font-size: 1rem;
-  padding: 5px 10px;
   height: 32px;
   min-width: 80px;
-  border: 1.5px solid var(--line);
-  border-radius: 6px;
-  background: #fff;
-  box-sizing: border-box;
+  padding: 5px 10px;
 }
 
-.replica .measure-value:focus {
+.replica .measure-value:focus,
+.measure-given-value:focus,
+.measure-given-u:focus,
+.series-table input.series-value:focus,
+.series-table input.series-replica:focus {
   border-color: var(--primary);
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
@@ -571,16 +682,67 @@ textarea {
 }
 
 .remove-replica {
-  flex: 0 0 auto;
   font-size: 0.75rem;
+  min-height: 30px;
   padding: 2px 6px;
   line-height: 1;
+  width: 30px;
 }
 
 .add-replica {
   align-self: flex-start;
   font-size: 0.8rem;
   padding: 3px 8px;
+}
+
+.measurement-row--chrono .measure-selectors {
+  grid-template-columns: minmax(150px, 220px) minmax(110px, 160px);
+  width: fit-content;
+}
+
+.chrono-mode-label {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.chrono-mode {
+  max-width: min(100%, 460px);
+  min-width: 260px;
+  width: auto;
+}
+
+.chrono-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chrono-controls button {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.chrono-controls .chrono-start,
+.chrono-controls .chrono-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.chrono-controls button:disabled {
+  background: var(--bg-soft);
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 .instrument-toolbar {
@@ -654,9 +816,9 @@ textarea {
 }
 
 .part-tab {
-  background: #eef2f7;
+  background: var(--bg-soft);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-weight: 600;
   min-height: 36px;
   padding: 0 14px;
@@ -664,7 +826,7 @@ textarea {
 
 .part-tab.active {
   background: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -673,8 +835,8 @@ textarea {
   margin: 16px 0;
   padding: 14px 16px;
   border-left: 4px solid var(--accent);
-  background: #ecfdf5;
-  border-radius: 8px;
+  background: var(--accent-soft);
+  border-radius: var(--radius);
 }
 
 .teacher-comment-head {
@@ -696,15 +858,16 @@ textarea {
 }
 
 .directory-table-wrap {
+  max-width: 100%;
   overflow-x: auto;
 }
 
 .directory-data-table {
-  min-width: 980px;
+  min-width: min(760px, 100%);
 }
 
 .directory-detail-row {
-  background: #fbfcfe;
+  background: var(--bg-soft);
 }
 
 .directory-detail-cell {
@@ -743,7 +906,7 @@ textarea {
 
 .inline-pill {
   align-items: center;
-  background: #eef2f7;
+  background: var(--bg-soft);
   border-radius: 999px;
   display: inline-flex;
   gap: 6px;
@@ -814,7 +977,8 @@ textarea {
 
 .course-card {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  background: var(--panel-raised);
   padding: 14px;
 }
 
@@ -831,7 +995,7 @@ textarea {
 }
 
 .chip {
-  background: #eef2f7;
+  background: var(--bg-soft);
   border-radius: 999px;
   color: var(--ink);
   font-size: 0.78rem;
@@ -860,7 +1024,7 @@ textarea {
 
 .submission-course-group {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   display: grid;
   gap: 8px;
   padding: 10px;
@@ -872,14 +1036,18 @@ textarea {
 
 .submission-item {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
   padding: 12px;
+  background: var(--panel-raised);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
 
 .submission-item:hover,
 .submission-item.active {
   border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .submission-meta,
@@ -898,18 +1066,18 @@ textarea {
 }
 
 .status.pendiente {
-  background: #fef3c7;
-  color: #92400e;
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn-strong);
 }
 
 .status.observada {
-  background: #fee2e2;
-  color: #991b1b;
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
 }
 
 .status.aprobada {
-  background: #dcfce7;
-  color: #166534;
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
 }
 
 .metrics {
@@ -921,7 +1089,8 @@ textarea {
 
 .metric {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  background: var(--panel-raised);
   padding: 12px;
 }
 
@@ -1020,6 +1189,42 @@ textarea {
   .compact-metrics {
     min-width: 0;
   }
+
+  .measure-body {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .measure-body .measure-sep {
+    display: none;
+  }
+
+  .measure-selectors {
+    grid-template-columns: 1fr;
+  }
+
+  .measure-selectors select {
+    max-width: none;
+  }
+
+  .measurement-row--chrono .measure-selectors {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .chrono-mode {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .replica,
+  .replica-input-wrap {
+    grid-template-columns: 52px minmax(0, 1fr) minmax(22px, max-content) 30px;
+  }
+
+  .replica-input-wrap {
+    grid-template-columns: 52px minmax(0, 1fr) minmax(22px, max-content);
+  }
 }
 
 /* Gráfico SVG del ajuste lineal (entregas por formulario, modo regresión). */
@@ -1030,7 +1235,7 @@ textarea {
   margin-top: 12px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .reg-axis {
@@ -1053,9 +1258,42 @@ textarea {
 }
 
 /* Tabla de serie para cargar puntos (modo regresión). */
+.series-table.directory-data-table {
+  min-width: 0;
+  table-layout: auto;
+}
+
+.series-table th,
+.series-table td {
+  padding: 6px;
+}
+
+.series-cell {
+  min-width: 124px;
+  vertical-align: top;
+}
+
+.series-cell--replicas {
+  min-width: min(520px, 70vw);
+}
+
+.series-input-wrap {
+  align-items: start;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 52px minmax(92px, 220px);
+  justify-content: start;
+}
+
+.series-cell--replicas .series-input-wrap {
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+
 .series-table input.series-value {
+  background: var(--panel);
+  height: 32px;
+  min-width: 0;
   width: 100%;
-  min-width: 72px;
 }
 
 /* Magnitud por operador (Motor D): agrupa los bloques de cada operador. */
@@ -1085,10 +1323,15 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  min-width: 0;
 }
 
 .series-table input.series-replica {
-  width: 60px;
+  background: var(--panel);
+  flex: 0 0 92px;
+  height: 32px;
+  min-width: 0;
+  width: 92px;
 }
 
 .series-mean {
@@ -1100,6 +1343,11 @@ textarea {
 .remove-series-row,
 .add-series-row {
   cursor: pointer;
+}
+
+.remove-series-row {
+  min-height: 32px;
+  padding: 0 10px;
 }
 
 /* Comparación alumno vs automático y formulario "Mis cálculos". */
@@ -1124,10 +1372,10 @@ textarea {
 /* Secciones temáticas dentro del formulario de entrega (p. ej. el péndulo). */
 .measurement-section {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 14px;
-  background: #fbfdff;
+  background: var(--panel);
 }
 
 .measurement-section-title {
@@ -1201,7 +1449,7 @@ textarea {
   max-height: 280px;
   overflow-y: auto;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .series-point {
@@ -1241,8 +1489,8 @@ textarea {
   margin: 12px 0;
   padding: 12px 14px;
   border: 1px solid var(--accent);
-  border-radius: 8px;
-  background: #ecfeff;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
 }
 
 .edit-submission-btn,
@@ -1250,8 +1498,8 @@ textarea {
 .accept-existing-btn,
 .view-existing-btn {
   background: var(--accent);
-  color: #ffffff;
-  border-radius: 8px;
+  color: var(--on-accent);
+  border-radius: var(--radius);
   min-height: 38px;
   padding: 0 16px;
   font-weight: 650;
@@ -1310,7 +1558,7 @@ textarea {
   background: transparent;
   color: var(--danger, #dc2626);
   border: 1px solid var(--danger, #dc2626);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px 10px;
   font-size: 0.82rem;
   cursor: pointer;
