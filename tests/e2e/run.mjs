@@ -181,7 +181,7 @@ async function studentSeesResults(page) {
   assert((detail ?? "").includes("u_A"), "el estudiante debía ver la tabla de incertidumbres");
   assert((detail ?? "").includes(REVIEW_COMMENT), "el estudiante debía ver el comentario del docente");
   assert(
-    (detail ?? "").includes("quedaron congelados"),
+    (detail ?? "").includes("quedó congelado"),
     "el formulario de cálculos propios debía quedar bloqueado",
   );
   const statusBadge = await page.locator("#submission-detail-body .status").first().textContent();
