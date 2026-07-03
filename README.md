@@ -113,10 +113,13 @@ para **compararlos** con el cálculo automático (tabla de diferencias absolutas
 | id | Nombre | Tipo de análisis |
 |----|--------|------------------|
 | `p1-estadistica` | Tratamiento Estadístico — Péndulo Simple | estadístico |
-| `p2-serie` | CC — Circuito en Serie | estadístico |
-| `p2-corriente-continua` | CC — Circuito en Paralelo | estadístico |
+| `p2-cc` | Corriente continua (serie + paralelo + curva de potencia, una sola entrega) | curva |
 | `p3-relajacion` | Relajación Exponencial (parte 1 — medida directa de τ) | estadístico |
 | `p3-relajacion-desfasaje` | Relajación Exponencial (parte 2 — desfasaje) | regresión lineal |
+
+> **Migración**: las prácticas viejas `p2-serie`, `p2-corriente-continua` y `p2-potencia` ya no se
+> siembran (las reemplaza `p2-cc`). En una base de desarrollo existente, borrá `data/quantify.db`
+> antes de arrancar para re-seedear limpio.
 
 ### P1 — Tratamiento estadístico
 
@@ -130,36 +133,40 @@ Magnitudes medidas (con réplicas):
 
 Mensurando derivado: `Q = l·a + l·b` (área de la sección transversal, m²).
 
-### P2 — Corriente continua (serie y paralelo)
+### P2 — Corriente continua (`p2-cc`, una sola entrega)
 
-Ambas variantes usan las mismas magnitudes de entrada (todas medida única):
+Una sola práctica real con tres partes temáticas (tabs **Serie**, **Paralelo** y **Curva de
+potencia** que alternan secciones del mismo formulario, sin cambiar de entrega):
 
-| símbolo | nombre | unidad |
-|---------|--------|--------|
-| `Vg` | Tensión de la fuente | V |
-| `R1` | Resistencia R1 | Ω |
-| `R2` | Resistencia R2 | Ω |
-| `R3` | Resistencia R3 | Ω |
-| `RA` | Resistencia interna del amperímetro | Ω |
+- **Compartidas** (medidas UNA vez con el óhmetro, valen para las tres partes): `R1`, `R2`, `R3`.
+- **Por parte** (la fuente y el amperímetro pueden cambiar entre armados): `Vg_s`/`RA_s` (serie),
+  `Vg_p`/`RA_p` (paralelo), `Vg_c`/`RA_c` (curva de potencia).
+- **Tensiones experimentales** medidas con multímetro en cada circuito: `VR1_s`…`VR3_s` y
+  `VR1_p`…`VR3_p`. El análisis las compara contra las teóricas automáticas en la tabla
+  **"Medido vs teórico"** (valor ± U del instrumento vs valor ± U propagada).
+- **Curva de potencia** (por punto): `R` (carga variable) e `I`, con la columna **P = I²·R**
+  calculada en vivo al tipear y la curva P vs R.
 
-El amperímetro está en serie con el circuito completo; sus bornes se miden con el tester en
-función ohmímetro antes del ensayo.
-
-**p2-serie** (R1, R2, R3 y RA en serie):
-
-```
-I    = Vg / (R1 + R2 + R3 + RA)
-VR1  = Vg · R1 / (R1 + R2 + R3 + RA)
-VR2  = Vg · R2 / (R1 + R2 + R3 + RA)
-VR3  = Vg · R3 / (R1 + R2 + R3 + RA)
-```
-
-**p2-corriente-continua** (R2 ‖ R3 en paralelo, en serie con R1 y RA):
+Mensurandos (los `*_t` teóricos y los finales los entrega también el alumno como resultado final):
 
 ```
-Req  = R1 + RA + R2·R3 / (R2 + R3)
-I    = Vg / Req
+Serie:     I_s     = Vg_s / (R1 + R2 + R3 + RA_s)
+           VRi_s_t = Vg_s · Ri / (R1 + R2 + R3 + RA_s)          (i = 1, 2, 3)
+Paralelo:  Req     = R1 + RA_p + R2·R3 / (R2 + R3)
+           I_p     = Vg_p / Req
+           VR1_p_t = Vg_p · R1 / Req
+           VR2_p_t = VR3_p_t = Vg_p · (R2·R3/(R2+R3)) / Req
+Potencia:  RP_max_t = RA_c + R2·R3 / (R2 + R3)                  (Rth)
+           P_max_t  = Vg_c² / (4·Rth)
+           P_max_e  = máx(P) de la tabla                        (alias P_max)
+           RP_max_e = R en el punto de máx(P)                   (alias R_at_P_max)
 ```
+
+`P_max_e`, `P_max_t`, `RP_max_e` y `RP_max_t` se entregan y muestran **sin incertidumbre**
+(`RESULTS_WITHOUT_U` en `static/constants.js`). Los alias de extremos (`{S}_max`,
+`{T}_at_{S}_max`) los inyecta el camino `curva` del motor con U = 0; como `check_formula` de la
+UI admin no los conoce, las fórmulas de `P_max_e`/`RP_max_e` no son editables desde la pestaña
+Prácticas.
 
 ### P3 — Relajación exponencial
 
@@ -220,7 +227,7 @@ Para desarrollo se siembra automáticamente:
 - Curso: `Física Experimental I` (2026)
 - Grupo: `Grupo 1` (4 mesas)
 - Estudiante: `estudiante@quantify.local`, inscripto en el curso y el grupo
-- Prácticas habilitadas: las cuatro de la tabla anterior
+- Prácticas habilitadas: las de la tabla anterior
 
 El docente o admin administra todo esto desde las pestañas **Cursos**, **Grupos**, **Estudiantes** y
 **Usuarios**: crear usuarios, asignar estudiantes a grupos, asignar mesas por práctica y resetear

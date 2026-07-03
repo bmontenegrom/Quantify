@@ -7,10 +7,13 @@ import {
 import { fetchJson, postJson } from "./api.js";
 import {
   escapeHtml, symbolHtml, inlineMathHtml, unitHtml, canReview, format,
-  compatibleInstruments, SI_PREFIXES, prefixFactor,
+  compatibleInstruments, SI_PREFIXES, prefixFactor, pointPower,
   seriesStats, histogram, normalCurve, validateMeasurements,
 } from "./lib.js";
-import { PRACTICE_GROUPS, PRACTICE_SECTIONS } from "./constants.js";
+import {
+  PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS,
+  RESULTS_WITHOUT_U, SERIES_LIVE_COLUMNS,
+} from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 
@@ -136,6 +139,7 @@ export async function loadSubmissionForm() {
     state.seriesDebug.clear();
     renderMeasurementFields();
     applyPrefill();
+    applyPartVisibility();
   } catch (error) {
     state.practiceForm = null;
     measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
@@ -162,8 +166,10 @@ async function checkExistingReport(practiceId) {
           <button type="button" class="view-existing-btn" data-id="${escapeHtml(submission_id)}">Ver informe</button>
         </div>`;
       measurementFields.querySelector(".view-existing-btn")?.addEventListener("click", (e) => {
+        // Capturar el id ANTES del import(): currentTarget es null una vez despachado el evento.
+        const id = e.currentTarget.dataset.id;
         import("./submissions.js").then(({ openSubmissionWorkspace }) =>
-          openSubmissionWorkspace(e.currentTarget.dataset.id),
+          openSubmissionWorkspace(id),
         );
       });
       return true;
@@ -176,8 +182,9 @@ async function checkExistingReport(practiceId) {
           <button type="button" class="accept-existing-btn" data-id="${escapeHtml(submission_id)}">Aceptar invitación</button>
         </div>`;
       measurementFields.querySelector(".accept-existing-btn")?.addEventListener("click", async (e) => {
+        const id = e.currentTarget.dataset.id;
         const { acceptInvitation } = await import("./invitations.js");
-        await acceptInvitation(e.currentTarget.dataset.id);
+        await acceptInvitation(id);
         await loadSubmissionForm();
       });
       return true;
@@ -194,8 +201,36 @@ async function checkExistingReport(practiceId) {
   }
 }
 
+// Parte temática activa de una práctica con PRACTICE_PARTS (tabs que solo alternan secciones
+// de la misma definición, sin cambiar de práctica ni de entrega).
+let activePart = null;
+
 export function renderPartTabs(practiceId) {
   if (!practicePartTabs) return;
+
+  // Partes internas de UNA práctica: las tabs muestran/ocultan secciones, no cambian de práctica.
+  const innerParts = PRACTICE_PARTS[practiceId];
+  if (innerParts) {
+    if (!innerParts.some((p) => p.id === activePart)) activePart = innerParts[0].id;
+    practicePartTabs.classList.remove("hidden");
+    practicePartTabs.innerHTML = innerParts
+      .map(
+        (p) =>
+          `<button type="button" class="part-tab ${p.id === activePart ? "active" : ""}" data-part-id="${escapeHtml(p.id)}">${escapeHtml(p.label)}</button>`
+      )
+      .join("");
+    practicePartTabs.querySelectorAll(".part-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        activePart = tab.dataset.partId;
+        practicePartTabs
+          .querySelectorAll(".part-tab")
+          .forEach((t) => t.classList.toggle("active", t === tab));
+        applyPartVisibility();
+      });
+    });
+    return;
+  }
+
   const group = PRACTICE_GROUPS[practiceId]?.group;
   const enabled = selectedCourse()?.practices ?? [];
   const parts = enabled
@@ -223,6 +258,14 @@ export function renderPartTabs(practiceId) {
       practiceSelect.value = tab.dataset.practiceId;
       practiceSelect.dispatchEvent(new Event("change", { bubbles: true }));
     });
+  });
+}
+
+/** Muestra solo los bloques `[data-section]` de la parte activa; los sin sección quedan siempre. */
+function applyPartVisibility() {
+  if (!PRACTICE_PARTS[practiceSelect.value]) return;
+  measurementFields.querySelectorAll("[data-section]").forEach((el) => {
+    el.hidden = el.dataset.section !== activePart;
   });
 }
 
@@ -357,7 +400,7 @@ export function renderMeasurementFields() {
   if (sections) {
     const used = new Set();
     const blocks = sections.map((sec) => {
-      const rows = sec.symbols
+      const rows = (sec.symbols ?? [])
         .map((sym) => definition.quantities.find((q) => q.symbol === sym))
         .filter(Boolean);
       rows.forEach((q) => used.add(q.id));
@@ -451,14 +494,32 @@ function needsChronoHelper(q) {
   return q.quantity === "tiempo" && !q.repeated && !q.is_given;
 }
 
-/** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`. */
+/** Parte temática (id de PRACTICE_PARTS) a la que pertenece un resultado final, o `null`. */
+function partForResult(symbol) {
+  const sections = PRACTICE_SECTIONS[practiceSelect.value] ?? [];
+  return sections.find((sec) => sec.id && (sec.results ?? []).includes(symbol))?.id ?? null;
+}
+
+/** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`.
+ *  Los símbolos en RESULTS_WITHOUT_U se entregan sin incertidumbre (sin campo U). */
 function finalResultSectionHtml(definition) {
   const finals = (definition.results ?? []).filter((r) => r.is_final);
   if (!finals.length) return "";
   const rows = finals
-    .map(
-      (r) => `
-        <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}">
+    .map((r) => {
+      const part = partForResult(r.symbol);
+      const uField = RESULTS_WITHOUT_U.has(r.symbol)
+        ? ""
+        : `
+            <label>Incertidumbre U (expandida)
+              <div class="replica-input-wrap">
+                ${prefixSelectHtml()}
+                <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
+                <span class="replica-unit">${unitHtml(r.unit)}</span>
+              </div>
+            </label>`;
+      return `
+        <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}>
           <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
           <div class="form-grid">
             <label>Valor
@@ -467,17 +528,10 @@ function finalResultSectionHtml(definition) {
                 <input class="final-result-value" type="number" step="any" placeholder="valor" />
                 <span class="replica-unit">${unitHtml(r.unit)}</span>
               </div>
-            </label>
-            <label>Incertidumbre U (expandida)
-              <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
-                <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
-                <span class="replica-unit">${unitHtml(r.unit)}</span>
-              </div>
-            </label>
+            </label>${uField}
           </div>
-        </fieldset>`,
-    )
+        </fieldset>`;
+    })
     .join("");
   return `
     <div class="measurement-section final-results-section">
@@ -496,7 +550,8 @@ function collectFinalResults() {
     if (rawVal === "") return acc;
     const value = Number(rawVal) * prefixFactor(valPrefix);
     if (!Number.isFinite(value)) return acc;
-    const rawU = row.querySelector(".final-result-u").value.trim();
+    // Sin campo U (RESULTS_WITHOUT_U) el resultado va sin incertidumbre.
+    const rawU = row.querySelector(".final-result-u")?.value.trim() ?? "";
     const u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
     acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
     return acc;
@@ -826,7 +881,8 @@ function applyFinalResultsPrefill() {
     const s = saved.get(row.dataset.symbol);
     if (!s) return;
     row.querySelector(".final-result-value").value = s.value;
-    if (s.u_expanded != null) row.querySelector(".final-result-u").value = s.u_expanded;
+    const uInput = row.querySelector(".final-result-u");
+    if (uInput && s.u_expanded != null) uInput.value = s.u_expanded;
   });
 }
 
@@ -868,6 +924,7 @@ export function applyPrefill() {
       });
     });
     updateSeriesMeans();
+    updateSeriesLive();
     // Escalares compartidos (Motor E): se rellenan como filas sueltas fuera de la serie.
     measurementFields
       .querySelectorAll(".shared-quantities .measurement-row")
@@ -934,13 +991,47 @@ function renderSeriesTable(definition) {
   // compartidos (datos de cátedra / medida única), que se cargan una sola vez.
   const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
   const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
+  const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
   const header = cols
     .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${symbolHtml(q.symbol)}${q.unit ? ` <span class="submission-meta">(${unitHtml(q.unit)})</span>` : ""}</th>`)
+    .join("") + liveCols
+    .map((c) => `<th>${symbolHtml(c.symbol)}${c.unit ? ` <span class="submission-meta">(${unitHtml(c.unit)})</span>` : ""}</th>`)
     .join("");
   const INITIAL_ROWS = 3;
   const body = Array.from({ length: INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
-  const sharedSection = shared.length
-    ? `<div class="shared-quantities"><h4>Datos compartidos</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`
+  // Secciones temáticas (PRACTICE_SECTIONS): agrupa los escalares por sección, con `data-section`
+  // para que las tabs de partes las muestren/oculten. Sin secciones, un solo bloque como siempre.
+  const sections = PRACTICE_SECTIONS[practiceSelect.value];
+  let sharedSection = "";
+  let seriesSectionAttr = "";
+  if (sections && shared.length) {
+    const used = new Set();
+    const blocks = [];
+    for (const sec of sections) {
+      if (sec.series) {
+        if (sec.id) seriesSectionAttr = ` data-section="${escapeHtml(sec.id)}"`;
+        continue;
+      }
+      const rows = (sec.symbols ?? [])
+        .map((sym) => shared.find((q) => q.symbol === sym))
+        .filter(Boolean);
+      rows.forEach((q) => used.add(q.id));
+      if (!rows.length) continue;
+      const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+      blocks.push(
+        `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}</div>`,
+      );
+    }
+    const rest = shared.filter((q) => !used.has(q.id));
+    if (rest.length) {
+      blocks.push(`<div class="shared-quantities"><h4>Datos compartidos</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
+    }
+    sharedSection = blocks.join("");
+  } else if (shared.length) {
+    sharedSection = `<div class="shared-quantities"><h4>Datos compartidos</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
+  }
+  const partsNote = PRACTICE_PARTS[practiceSelect.value]
+    ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
     : "";
   // Si alguna columna es una serie de tiempos con réplicas (p. ej. tiempo de caída en
   // viscosidad), ofrecemos un cronómetro de apoyo suelto arriba de la tabla.
@@ -948,16 +1039,19 @@ function renderSeriesTable(definition) {
   const chronoHelper = hasReplicatedTime ? chronoHelperSectionHtml() : "";
   measurementFields.innerHTML = `
     ${chronoHelper}
+    ${partsNote}
     ${sharedSection}
-    <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
-    <div class="directory-table-wrap">
-      <table class="series-table grade-table directory-data-table">
-        <thead><tr>${header}<th></th></tr></thead>
-        <tbody>${body}</tbody>
-      </table>
+    <div${seriesSectionAttr}>
+      <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
+      <div class="directory-table-wrap">
+        <table class="series-table grade-table directory-data-table">
+          <thead><tr>${header}<th></th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      <button type="button" class="add-series-row">＋ agregar punto</button>
+      <section class="series-preview panel" aria-live="polite"></section>
     </div>
-    <button type="button" class="add-series-row">＋ agregar punto</button>
-    <section class="series-preview panel" aria-live="polite"></section>
   `;
   // Wiring de las filas compartidas de medida única: instrumento → escalas compatibles.
   measurementFields.querySelectorAll(".shared-quantities .measurement-row").forEach((row) => {
@@ -973,6 +1067,7 @@ function renderSeriesTable(definition) {
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
     wireSeriesRemove();
+    updateSeriesLive();
     schedulePreview();
   });
   wireSeriesRemove();
@@ -989,21 +1084,23 @@ function renderSeriesTable(definition) {
       e.target.classList.contains("prefix-select")
     ) {
       updateSeriesMeans();
+      updateSeriesLive();
       schedulePreview();
     }
   });
   measurementFields.querySelector(".series-table").addEventListener("change", () => {
     updateSeriesMeans();
+    updateSeriesLive();
     schedulePreview();
   });
   // Los escalares compartidos también entran en las fórmulas de eje: refrescá la vista previa al
-  // editarlos (sus filas viven fuera de la tabla de la serie).
-  const sharedEl = measurementFields.querySelector(".shared-quantities");
-  if (sharedEl) {
+  // editarlos (sus filas viven fuera de la tabla de la serie; puede haber varios bloques).
+  measurementFields.querySelectorAll(".shared-quantities").forEach((sharedEl) => {
     sharedEl.addEventListener("input", schedulePreview);
     sharedEl.addEventListener("change", schedulePreview);
-  }
+  });
   updateSeriesMeans();
+  updateSeriesLive();
   wireChronoHelpers();
 }
 
@@ -1064,7 +1161,12 @@ function seriesRowHtml(cols) {
       return `<td class="series-cell"><div class="series-input-wrap">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" /></div></td>`;
     })
     .join("");
-  return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
+  // Columnas calculadas en vivo: solo lectura y sin clase `series-cell`, para que
+  // collectMeasurements no las cuente como parte del punto.
+  const liveCells = (SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [])
+    .map((c) => `<td class="series-live" data-live-symbol="${escapeHtml(c.symbol)}"><span class="series-live-value submission-meta">—</span></td>`)
+    .join("");
+  return `<tr class="series-row">${cells}${liveCells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
 }
 
 /// HTML de una fila de escalar compartido (Motor E): dato de cátedra (valor ± U) o medida única
@@ -1117,6 +1219,34 @@ function cellReplicaValues(cell) {
     .map((input) => input.value.trim())
     .filter((raw) => raw !== "")
     .map((raw) => Number(raw) * factor);
+}
+
+/** Valor numérico (con prefijo SI aplicado) del input de una magnitud dentro de una fila. */
+function seriesCellValue(row, quantityId) {
+  const input = row.querySelector(`.series-value[data-quantity-id="${CSS.escape(quantityId)}"]`);
+  if (!input) return NaN;
+  const raw = input.value.trim();
+  if (raw === "") return NaN;
+  const factor = prefixFactor(input.closest(".series-cell").querySelector(".prefix-select").value);
+  return Number(raw) * factor;
+}
+
+/** Recalcula las columnas en vivo (p. ej. P = I²·R) de cada fila de la tabla de series. */
+function updateSeriesLive() {
+  const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
+  if (!liveCols.length) return;
+  const quantities = state.practiceForm?.definition?.quantities ?? [];
+  const idBySymbol = new Map(quantities.map((q) => [q.symbol, q.id]));
+  measurementFields.querySelectorAll(".series-row").forEach((row) => {
+    for (const col of liveCols) {
+      const cell = row.querySelector(`.series-live[data-live-symbol="${CSS.escape(col.symbol)}"]`);
+      const out = cell?.querySelector(".series-live-value");
+      if (!out) continue;
+      const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
+      const value = args.every(Number.isFinite) ? pointPower(...args) : NaN;
+      out.textContent = Number.isFinite(value) ? format(value) : "—";
+    }
+  });
 }
 
 /** Actualiza el promedio (x̄) mostrado en cada celda de réplicas de la tabla de series. */

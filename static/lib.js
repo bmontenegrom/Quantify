@@ -452,6 +452,45 @@ export function compareResults(autoDerived, studentResults, tolerances = {}) {
   });
 }
 
+/** Potencia disipada en una resistencia: P = I²·R. Función pura para la columna en vivo. */
+export function pointPower(r, i) {
+  return i * i * r;
+}
+
+/**
+ * Empareja cada magnitud MEDIDA con su mensurando teórico automático por convención de símbolos:
+ * la magnitud `X` se compara con el derivado `X_t` (p. ej. `VR1_s` medida con multímetro contra
+ * `VR1_s_t` calculada por el programa). Devuelve una fila por par encontrado, con la medida
+ * experimental (valor ± U del instrumento), la teórica (valor ± U propagada) y las diferencias
+ * absolutas y relativas (%) de valor y de U (`null` si el denominador teórico es nulo/no finito).
+ *
+ * `quantities` es `analysis.quantities` (con `symbol`, `name`, `unit`, `result: {mean, u_expanded}`)
+ * y `derived` es `analysis.derived`. Función pura: el render arma la tabla con esto.
+ */
+export function compareMeasuredVsTheoretical(quantities, derived) {
+  const byQuantity = new Map((quantities ?? []).map((q) => [q.symbol, q]));
+  return (derived ?? []).reduce((rows, d) => {
+    if (!d.symbol.endsWith("_t")) return rows;
+    const q = byQuantity.get(d.symbol.slice(0, -2));
+    if (!q) return rows;
+    const ev = q.result?.mean ?? null;
+    const eu = q.result?.u_expanded ?? null;
+    rows.push({
+      symbol: q.symbol,
+      theoreticalSymbol: d.symbol,
+      name: q.name,
+      unit: q.unit,
+      exp: { value: ev, u: eu },
+      teo: { value: d.value, u: d.u_expanded },
+      dValue: ev == null || !Number.isFinite(ev) ? null : ev - d.value,
+      dValuePct: relPct(ev, d.value),
+      dU: eu == null || d.u_expanded == null || !Number.isFinite(eu) ? null : eu - d.u_expanded,
+      dUPct: relPct(eu, d.u_expanded),
+    });
+    return rows;
+  }, []);
+}
+
 /**
  * Valida que las medidas del formulario sean suficientes para el tipo de análisis.
  * Devuelve un mensaje de error en español, o `null` si todo está bien.

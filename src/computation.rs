@@ -477,7 +477,7 @@ type PointSeries = Vec<(f64, f64)>;
 /// magnitudes con `per_point = false` o `is_given` son escalares compartidos: se difunden a todos
 /// los puntos y **no** condicionan la cantidad de puntos. Falla si hay menos de 2 puntos o si un
 /// punto produce un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
-type PointContext = HashMap<String, f64>;
+pub type PointContext = HashMap<String, f64>;
 
 fn build_points(
     quantities: &[PracticeQuantity],
@@ -962,17 +962,20 @@ pub fn compute_regresion(
 /// Calcula el [`FormAnalysis`] de una práctica `curva`: para cada curva empareja las mediciones
 /// por punto y evalúa su par de fórmulas de eje, produciendo una serie de puntos **sin ajuste**
 /// (scatter + tabla) en `scatters`. No deriva mensurandos. Todas las curvas comparten el mismo
-/// barrido de mediciones; una `x_log` marca eje x logarítmico en esa curva.
+/// barrido de mediciones; una `x_log` marca eje x logarítmico en esa curva. Devuelve además los
+/// contextos por punto del barrido (los de la primera curva: todas comparten las mediciones), que
+/// el llamador usa para los alias de extremos (`{S}_max` / `{T}_at_{S}_max`).
 pub fn compute_curva(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
     curves: &[CurveSpec],
     measurements: &[MeasurementInput],
-) -> anyhow::Result<FormAnalysis> {
+) -> anyhow::Result<(FormAnalysis, Vec<PointContext>)> {
     let mut scatters = Vec::with_capacity(curves.len());
     let mut warnings = Vec::new();
+    let mut contexts: Vec<PointContext> = Vec::new();
     for curve in curves {
-        let (points, mut curve_warnings, _ctx) = build_points(
+        let (points, mut curve_warnings, ctx) = build_points(
             quantities,
             intermediates,
             curve.x_formula,
@@ -980,6 +983,9 @@ pub fn compute_curva(
             measurements,
             "se necesitan al menos 2 puntos para graficar la curva",
         )?;
+        if contexts.is_empty() {
+            contexts = ctx;
+        }
 
         if curve.x_log && points.iter().any(|(x, _)| *x <= 0.0) {
             anyhow::bail!("el eje x es logaritmico pero un punto tiene x <= 0");
@@ -1000,7 +1006,7 @@ pub fn compute_curva(
         }
     }
 
-    Ok(FormAnalysis {
+    let analysis = FormAnalysis {
         quantities: Vec::new(),
         regression: None,
         scatters,
@@ -1009,7 +1015,8 @@ pub fn compute_curva(
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
-    })
+    };
+    Ok((analysis, contexts))
 }
 
 /// Calcula los mensurandos derivados por propagación de varianzas: cada fórmula se evalúa y
@@ -1151,20 +1158,75 @@ pub async fn analyze(
                 x_log: c.x_log,
             })
             .collect();
-        let mut analysis = compute_curva(
+        let (mut analysis, contexts) = compute_curva(
             &definition.quantities,
             &definition.intermediates,
             &curves,
             measurements,
         )?;
+        // Magnitudes escalares (no-por-punto o dadas): siempre se computan y exponen, con su
+        // incertidumbre de instrumento, para que el frontend pueda mostrarlas y compararlas.
+        let scalar_qtys: Vec<&PracticeQuantity> = definition
+            .quantities
+            .iter()
+            .filter(|q| !q.per_point || q.is_given)
+            .collect();
+        let mut symbols: Vec<String> = scalar_qtys.iter().map(|q| q.symbol.clone()).collect();
+        let by_quantity: HashMap<&str, &MeasurementInput> = measurements
+            .iter()
+            .map(|m| (m.quantity_id.as_str(), m))
+            .collect();
+        let mut means = HashMap::new();
+        let mut us = HashMap::new();
+        analysis.quantities = compute_quantities(
+            &scalar_qtys,
+            &by_quantity,
+            &scales,
+            None,
+            &mut means,
+            &mut us,
+            &mut analysis.warnings,
+        )?;
+        // Alias de extremos por punto (análogos a `_first`/`_last` de la regresión): para cada
+        // símbolo por punto `S` (magnitudes medidas por punto + intermedias), `{S}_max` es su
+        // máximo sobre los puntos y `{T}_at_{S}_max` el valor de `T` en ese mismo punto. Van con
+        // u = 0 (son lecturas de la tabla, no medidas con incertidumbre propia), de modo que un
+        // mensurando como `P_max_e = P_max` resulta con U = 0 y el frontend lo muestra sin ±U.
+        let per_point_syms: Vec<String> = definition
+            .quantities
+            .iter()
+            .filter(|q| q.per_point && !q.is_given)
+            .map(|q| q.symbol.clone())
+            .chain(definition.intermediates.iter().map(|it| it.symbol.clone()))
+            .collect();
+        for s in &per_point_syms {
+            let mut best: Option<(usize, f64)> = None;
+            for (i, ctx) in contexts.iter().enumerate() {
+                if let Some(&v) = ctx.get(s) {
+                    if v.is_finite() && best.is_none_or(|(_, bv)| v > bv) {
+                        best = Some((i, v));
+                    }
+                }
+            }
+            let Some((idx, max_value)) = best else { continue };
+            let max_symbol = format!("{s}_max");
+            means.insert(max_symbol.clone(), max_value);
+            us.insert(max_symbol.clone(), 0.0);
+            symbols.push(max_symbol);
+            for t in &per_point_syms {
+                if t == s {
+                    continue;
+                }
+                if let Some(&tv) = contexts[idx].get(t) {
+                    let at_symbol = format!("{t}_at_{s}_max");
+                    means.insert(at_symbol.clone(), tv);
+                    us.insert(at_symbol.clone(), 0.0);
+                    symbols.push(at_symbol);
+                }
+            }
+        }
         if !definition.results.is_empty() {
-            let scalar_qtys: Vec<&PracticeQuantity> = definition
-                .quantities
-                .iter()
-                .filter(|q| !q.per_point || q.is_given)
-                .collect();
-            let symbols: Vec<String> = scalar_qtys.iter().map(|q| q.symbol.clone()).collect();
-            // Filtra result por result: los que no compilan con las magnitudes escalares
+            // Filtra result por result: los que no compilan con los símbolos escalares y alias
             // disponibles emiten un warning individual en lugar de silenciar todo el bloque.
             let scalar_results: Vec<PracticeResult> = definition
                 .results
@@ -1183,21 +1245,6 @@ pub async fn analyze(
                 .cloned()
                 .collect();
             if !scalar_results.is_empty() {
-                let by_quantity: HashMap<&str, &MeasurementInput> = measurements
-                    .iter()
-                    .map(|m| (m.quantity_id.as_str(), m))
-                    .collect();
-                let mut means = HashMap::new();
-                let mut us = HashMap::new();
-                compute_quantities(
-                    &scalar_qtys,
-                    &by_quantity,
-                    &scales,
-                    None,
-                    &mut means,
-                    &mut us,
-                    &mut analysis.warnings,
-                )?;
                 analysis.derived = derive_results(
                     &scalar_results,
                     &symbols,
@@ -3147,8 +3194,9 @@ mod tests {
             measurement("px", &[1.0, 2.0, 3.0]),
             measurement("py", &[4.0, 9.0, 16.0]),
         ];
-        let a =
+        let (a, contexts) =
             compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).unwrap();
+        assert_eq!(contexts.len(), 3);
         assert!(a.regression.is_none());
         assert!(a.derived.is_empty());
         assert_eq!(a.scatters.len(), 1);
@@ -3167,7 +3215,7 @@ mod tests {
             measurement("px", &[1.0, 2.0, 3.0]),
             measurement("py", &[4.0, 9.0, 16.0]),
         ];
-        let a = compute_curva(
+        let (a, _) = compute_curva(
             &quantities,
             &[],
             &[curve("px", "py", false), curve("py", "px", false)],
@@ -3219,7 +3267,7 @@ mod tests {
             measurement("py", &[4.0, 5.0, 6.0]),
             // 'aux' sin mediciones a propósito.
         ];
-        let a =
+        let (a, _) =
             compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).unwrap();
         assert_eq!(
             a.scatters[0].points,

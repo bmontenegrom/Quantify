@@ -200,6 +200,10 @@ function submissionItemHtml(item) {
 
 export async function openSubmissionWorkspace(id) {
   state.activeSubmissionId = id;
+  // El workspace vive en la vista "submissions": activarla por si se llega desde otra vista
+  // (p. ej. "Ver informe" en el formulario de práctica). Import dinámico para evitar el ciclo.
+  const { selectView } = await import("./navigation.js");
+  selectView("submissions");
   renderSubmissionsPage();
   submissionWorkspace.innerHTML = `<p class="submission-meta">Cargando...</p>`;
 

@@ -27,6 +27,8 @@ import {
   regressionPlot,
   scatterPlot,
   compareResults,
+  compareMeasuredVsTheoretical,
+  pointPower,
   SI_PREFIXES,
   prefixFactor,
   seriesStats,
@@ -411,6 +413,49 @@ test("compareResults: verdict pass/fail según tolerancia", () => {
   // |Δ%| = 4 > 3 -> fail.
   const [fail] = compareResults(auto, student, { Q: 3 });
   assert.equal(fail.verdict, "fail");
+});
+
+test("pointPower calcula P = I²·R", () => {
+  assert.equal(pointPower(100, 0.5), 25); // 0.25 * 100
+  assert.equal(pointPower(0, 3), 0);
+  assert.equal(pointPower(200, 0), 0);
+  // I negativa (sentido de la corriente) no cambia la potencia disipada.
+  assert.equal(pointPower(100, -0.5), 25);
+});
+
+test("compareMeasuredVsTheoretical empareja X con X_t y calcula deltas", () => {
+  const quantities = [
+    { symbol: "VR1_s", name: "Tension en R1", unit: "V", result: { mean: 1.5, u_expanded: 0.1 } },
+    { symbol: "Vg_s", name: "Fuente", unit: "V", result: { mean: 8, u_expanded: 0.2 } },
+  ];
+  const derived = [
+    { symbol: "VR1_s_t", name: "Teorica R1", unit: "V", value: 1.6, u_expanded: 0.08 },
+    { symbol: "I_s", name: "Corriente", unit: "A", value: 0.015, u_expanded: 0.001 },
+  ];
+  const rows = compareMeasuredVsTheoretical(quantities, derived);
+  // Solo VR1_s tiene par (VR1_s_t); I_s no termina en _t y Vg_s no tiene derivado.
+  assert.equal(rows.length, 1);
+  const [row] = rows;
+  assert.equal(row.symbol, "VR1_s");
+  assert.equal(row.theoreticalSymbol, "VR1_s_t");
+  assert.deepEqual(row.exp, { value: 1.5, u: 0.1 });
+  assert.deepEqual(row.teo, { value: 1.6, u: 0.08 });
+  assert.ok(Math.abs(row.dValue - -0.1) < 1e-9);
+  assert.ok(Math.abs(row.dValuePct - -6.25) < 1e-9); // -0.1/1.6*100
+  assert.ok(Math.abs(row.dU - 0.02) < 1e-9);
+  assert.ok(Math.abs(row.dUPct - 25) < 1e-9); // 0.02/0.08*100
+});
+
+test("compareMeasuredVsTheoretical: deltas null con teórico 0 o U faltante", () => {
+  const quantities = [
+    { symbol: "X", name: "X", unit: "u", result: { mean: 2, u_expanded: null } },
+  ];
+  const derived = [{ symbol: "X_t", name: "X teorica", unit: "u", value: 0, u_expanded: 0.1 }];
+  const [row] = compareMeasuredVsTheoretical(quantities, derived);
+  assert.ok(Math.abs(row.dValue - 2) < 1e-9);
+  assert.equal(row.dValuePct, null); // denominador 0
+  assert.equal(row.dU, null); // la medida no tiene U
+  assert.equal(row.dUPct, null);
 });
 
 test("SI_PREFIXES es un array con entradas para 'm', 'k' y ''", () => {

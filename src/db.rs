@@ -831,12 +831,9 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         ("p1-estadistica", "g"),
         ("p3-relajacion", "tau_exp"),
         ("p3-relajacion-desfasaje", "tau"),
-        ("p2-serie", "I"),
-        ("p2-corriente-continua", "I"),
         ("fluidos-1", "mu"),
         ("viscosidad", "mu"),
         ("fluidos-2", "M_medio"),
-        ("p2-potencia", "P_max"),
     ] {
         sqlx::query(
             "UPDATE practice_results SET is_final = 1 WHERE practice_id = ?1 AND symbol = ?2",
@@ -937,21 +934,17 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
-        // P2-serie: R1, R2, R3 en serie con RA; I = Vg/(R1+R2+R3+RA) y V=I*R en cada resistencia.
+        // P2 unificada — corriente continua en una sola entrega con tres partes tematicas:
+        // circuito serie, circuito paralelo y curva de potencia. R1, R2 y R3 se miden una vez y
+        // se comparten; Vg y RA se miden por parte (Vg_s/RA_s, Vg_p/RA_p, Vg_c/RA_c). Las
+        // tensiones VRi_s / VRi_p se miden con multimetro y se comparan con las teoricas
+        // (VRi_s_t / VRi_p_t, resultados finales). La curva usa R e I por punto con la
+        // intermedia P = I^2*R; P_max_e / RP_max_e salen de los alias de extremos de la tabla.
         (
-            "p2-serie",
-            "CC - Circuito en Serie",
-            "Circuito en serie: R1, R2 y R3 en serie con RA (resistencia interna del amperimetro). I y caidas de tension por leyes de circuito.",
-            "estadistico",
-            None,
-            None,
-        ),
-        // P2-paralelo: R2 y R3 en paralelo con el circuito serie. Req y I calculados.
-        (
-            "p2-corriente-continua",
-            "CC - Circuito en Paralelo",
-            "Circuito mixto: R2 y R3 en paralelo, en serie con R1 y RA. Req e I calculados por leyes de circuito.",
-            "estadistico",
+            "p2-cc",
+            "Corriente continua",
+            "Circuitos de corriente continua en una sola entrega: serie, paralelo (R1, R2, R3 compartidas) y curva de potencia P = I^2*R sobre carga variable.",
+            "curva",
             None,
             None,
         ),
@@ -1018,18 +1011,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             "filtros",
             "Filtros",
             "Barrido en frecuencia de un circuito RLC: respuesta en amplitud VR/Vg y desfasaje phi = asin(b/a) contra la frecuencia angular omega = 2*pi*f (eje log).",
-            "curva",
-            None,
-            None,
-        ),
-        // P2-parte2 — curva de potencia. Por punto: R (resistencia externa set) e I (medida con
-        // amperimetro). Potencia por punto P = I^2*R (intermedia). Escalares: Vg, RA, R2, R3.
-        // Rth = RA + R2||R3 (resistencia de Thevenin del circuito paralelo de parte 1).
-        // Mensurandos teoricos: RP_max = Rth, P_max = Vg^2/(4*Rth).
-        (
-            "p2-potencia",
-            "CC - Curva de Potencia",
-            "Curva de potencia P = I^2*R al variar la resistencia externa R. Rth = RA + R2||R3 (Thevenin del circuito paralelo); RP_max = Rth; P_max = Vg^2/(4*Rth).",
             "curva",
             None,
             None,
@@ -1145,15 +1126,13 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
 
     for practice in [
         "p1-estadistica",
-        "p2-serie",
-        "p2-corriente-continua",
+        "p2-cc",
         "p3-relajacion",
         "p3-relajacion-desfasaje",
         "fluidos-1",
         "viscosidad",
         "fluidos-2",
         "filtros",
-        "p2-potencia",
     ] {
         sqlx::query(
             r#"
@@ -1209,16 +1188,6 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
     // Una entrega por práctica con datos realistas.
     let submissions: &[(&str, &str, &str)] = &[
         ("p1-estadistica", "pendiente", ""),
-        (
-            "p2-serie",
-            "aprobada",
-            "Buena medición. Todos los valores dentro del rango esperado.",
-        ),
-        (
-            "p2-corriente-continua",
-            "observada",
-            "Revisar la medición de R3: la caída de tensión parece alta.",
-        ),
         ("p3-relajacion", "pendiente", ""),
     ];
 
@@ -1515,10 +1484,13 @@ mod tests {
             .map(|p| p.id)
             .collect();
         assert!(ids.contains(&"p1-estadistica".to_string()));
-        assert!(ids.contains(&"p2-serie".to_string()));
-        assert!(ids.contains(&"p2-corriente-continua".to_string()));
+        assert!(ids.contains(&"p2-cc".to_string()));
         assert!(ids.contains(&"p3-relajacion".to_string()));
         assert!(ids.contains(&"p3-relajacion-desfasaje".to_string()));
+        // Las tres practicas de CC viejas ya no se siembran.
+        assert!(!ids.contains(&"p2-serie".to_string()));
+        assert!(!ids.contains(&"p2-corriente-continua".to_string()));
+        assert!(!ids.contains(&"p2-potencia".to_string()));
     }
 
     #[tokio::test]
@@ -1557,7 +1529,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 8);
     }
 
     #[test]
