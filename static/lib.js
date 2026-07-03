@@ -12,6 +12,13 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+// p2-cc: sufijo de parte (_s serie, _p paralelo, _c curva de potencia) y, en los teóricos, un
+// _t adicional (VR1_s, VR1_s_t...). La pestaña ya distingue la parte, así que el símbolo se
+// muestra igual que su base — sólo se aplica si la base es una de las conocidas, para no afectar
+// símbolos de otras prácticas que puedan terminar en _s/_p/_c por coincidencia.
+const CC_PART_SUFFIX = /_[spc](?:_t)?$/;
+const CC_BASE_SYMBOLS = new Set(["Vg", "RA", "VR1", "VR2", "VR3", "I"]);
+
 /**
  * Escapa un símbolo y muestra como subíndice los dígitos pegados a letras:
  * `R1` → `R<sub>1</sub>`, `C12` → `C<sub>12</sub>`. No altera guiones bajos ni nombres largos.
@@ -23,9 +30,15 @@ export function symbolHtml(value) {
     T_OC: "T<sub>OC</sub>",
     gamma: "γ",
     mu: "μ",
+    // Vg/RA no llevan guion bajo en el símbolo guardado, pero se muestran con subíndice como
+    // el resto de las magnitudes (R1, rho_e, VR1...) para que la tipografía sea coherente.
+    Vg: "V<sub>G</sub>",
+    RA: "R<sub>A</sub>",
   };
   const raw = String(value);
   if (specials[raw]) return specials[raw];
+  const base = raw.replace(CC_PART_SUFFIX, "");
+  if (base !== raw && CC_BASE_SYMBOLS.has(base)) return symbolHtml(base);
   return escapeHtml(raw)
     .replace(/([A-Za-z])_([A-Za-z0-9/]{1,2})\b/g, (_, base, sub) => `${base}<sub>${sub.toUpperCase()}</sub>`)
     .replace(/([A-Za-z])(\d+(?:\/\d+)?)/g, "$1<sub>$2</sub>");

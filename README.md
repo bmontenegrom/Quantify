@@ -141,7 +141,7 @@ potencia** que alternan secciones del mismo formulario, sin cambiar de entrega):
 - **Compartidas** (medidas UNA vez con el óhmetro, valen para las tres partes): `R1`, `R2`, `R3`.
 - **Por parte** (la fuente y el amperímetro pueden cambiar entre armados): `Vg_s`/`RA_s` (serie),
   `Vg_p`/`RA_p` (paralelo), `Vg_c`/`RA_c` (curva de potencia).
-- **Tensiones experimentales** medidas con multímetro en cada circuito: `VR1_s`…`VR3_s` y
+- **Voltajes experimentales** medidos con multímetro en cada circuito: `VR1_s`…`VR3_s` y
   `VR1_p`…`VR3_p`. El análisis las compara contra las teóricas automáticas en la tabla
   **"Medido vs teórico"** (valor ± U del instrumento vs valor ± U propagada).
 - **Curva de potencia** (por punto): `R` (carga variable) e `I`, con la columna **P = I²·R**

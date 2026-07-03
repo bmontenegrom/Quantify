@@ -17,8 +17,23 @@ import {
 import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 
+// p2-cc: mismo orden que el "Resultado final" (símbolo primero, nombre como aclaración muted),
+// para las magnitudes cuyo símbolo no es obvio a simple vista o que ya se comparan 1 a 1 con su
+// teórica (VR1 medida vs VR1 teórica).
+const SYMBOL_FIRST_QUANTITIES = new Set([
+  "Vg_s", "Vg_p", "Vg_c",
+  "RA_s", "RA_p", "RA_c",
+  "VR1_s", "VR2_s", "VR3_s",
+  "VR1_p", "VR2_p", "VR3_p",
+]);
+
 function quantityNameHtml(q) {
   const base = inlineMathHtml(q.name);
+  if (SYMBOL_FIRST_QUANTITIES.has(q.symbol)) {
+    return `${symbolHtml(q.symbol)} <span class="submission-meta">${base}</span>`;
+  }
+  // T_oc no tiene subíndice obvio en el nombre: se agrega el símbolo al final, sin duplicarlo
+  // si el nombre ya lo menciona.
   if (q.symbol === "T_oc" && !/T_?oc/i.test(q.name)) {
     return `${base} ${symbolHtml(q.symbol)}`;
   }

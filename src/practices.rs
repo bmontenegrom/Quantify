@@ -1125,7 +1125,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     // P2 — Corriente continua unificada: una sola entrega con tres partes tematicas.
     // Escalares compartidos: R1, R2 y R3 se miden UNA vez (ohmetro) y valen para toda la
     // practica; Vg y RA pueden cambiar entre partes, asi que se miden por parte (sufijos
-    // _s = serie, _p = paralelo, _c = curva de potencia). Las tensiones VRi_s / VRi_p se miden
+    // _s = serie, _p = paralelo, _c = curva de potencia). Los voltajes VRi_s / VRi_p se miden
     // con multimetro y se comparan con las teoricas VRi_s_t / VRi_p_t (resultados finales que
     // el alumno calcula a mano con propagacion). Por punto: R (carga variable) e I; intermedia
     // P = I^2*R y curva P vs R. Los finales experimentales de potencia (P_max_e / RP_max_e)
@@ -1138,35 +1138,30 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("R1", "Resistencia R1 (compartida)", "ohm", "resistencia"),
             qty_shared("R2", "Resistencia R2 (compartida)", "ohm", "resistencia"),
             qty_shared("R3", "Resistencia R3 (compartida)", "ohm", "resistencia"),
-            qty_shared("Vg_s", "Voltaje de la fuente (serie)", "V", "voltaje"),
+            qty_shared("Vg_s", "Voltaje de la fuente", "V", "voltaje"),
             qty_shared(
                 "RA_s",
-                "Resistencia interna del amperimetro (serie)",
+                "Resistencia interna del amperimetro",
                 "ohm",
                 "resistencia",
             ),
-            qty_shared("VR1_s", "Tension medida en R1 (serie)", "V", "voltaje"),
-            qty_shared("VR2_s", "Tension medida en R2 (serie)", "V", "voltaje"),
-            qty_shared("VR3_s", "Tension medida en R3 (serie)", "V", "voltaje"),
-            qty_shared("Vg_p", "Voltaje de la fuente (paralelo)", "V", "voltaje"),
+            qty_shared("VR1_s", "Voltaje medido en R1", "V", "voltaje"),
+            qty_shared("VR2_s", "Voltaje medido en R2", "V", "voltaje"),
+            qty_shared("VR3_s", "Voltaje medido en R3", "V", "voltaje"),
+            qty_shared("Vg_p", "Voltaje de la fuente", "V", "voltaje"),
             qty_shared(
                 "RA_p",
-                "Resistencia interna del amperimetro (paralelo)",
+                "Resistencia interna del amperimetro",
                 "ohm",
                 "resistencia",
             ),
-            qty_shared("VR1_p", "Tension medida en R1 (paralelo)", "V", "voltaje"),
-            qty_shared("VR2_p", "Tension medida en R2 (paralelo)", "V", "voltaje"),
-            qty_shared("VR3_p", "Tension medida en R3 (paralelo)", "V", "voltaje"),
-            qty_shared(
-                "Vg_c",
-                "Voltaje de la fuente (curva de potencia)",
-                "V",
-                "voltaje",
-            ),
+            qty_shared("VR1_p", "Voltaje medido en R1", "V", "voltaje"),
+            qty_shared("VR2_p", "Voltaje medido en R2", "V", "voltaje"),
+            qty_shared("VR3_p", "Voltaje medido en R3", "V", "voltaje"),
+            qty_shared("Vg_c", "Voltaje de la fuente", "V", "voltaje"),
             qty_shared(
                 "RA_c",
-                "Resistencia interna del amperimetro (curva)",
+                "Resistencia interna del amperimetro",
                 "ohm",
                 "resistencia",
             ),
@@ -1182,55 +1177,55 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         &[
             res_final(
                 "I_s",
-                "Corriente teorica (serie)",
+                "Corriente teorica",
                 "A",
                 "Vg_s / (R1 + R2 + R3 + RA_s)",
             ),
             res_final(
                 "VR1_s_t",
-                "Tension teorica en R1 (serie)",
+                "Voltaje teorico en R1",
                 "V",
                 "Vg_s * R1 / (R1 + R2 + R3 + RA_s)",
             ),
             res_final(
                 "VR2_s_t",
-                "Tension teorica en R2 (serie)",
+                "Voltaje teorico en R2",
                 "V",
                 "Vg_s * R2 / (R1 + R2 + R3 + RA_s)",
             ),
             res_final(
                 "VR3_s_t",
-                "Tension teorica en R3 (serie)",
+                "Voltaje teorico en R3",
                 "V",
                 "Vg_s * R3 / (R1 + R2 + R3 + RA_s)",
             ),
             res(
                 "Req",
-                "Resistencia equivalente (paralelo)",
+                "Resistencia equivalente",
                 "ohm",
                 "R1 + RA_p + R2*R3/(R2+R3)",
             ),
             res_final(
                 "I_p",
-                "Corriente teorica (paralelo)",
+                "Corriente teorica",
                 "A",
                 "Vg_p / (R1 + RA_p + R2*R3/(R2+R3))",
             ),
             res_final(
                 "VR1_p_t",
-                "Tension teorica en R1 (paralelo)",
+                "Voltaje teorico en R1",
                 "V",
                 "Vg_p * R1 / (R1 + RA_p + R2*R3/(R2+R3))",
             ),
             res_final(
                 "VR2_p_t",
-                "Tension teorica en R2 (paralelo)",
+                "Voltaje teorico en R2",
                 "V",
                 "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
             ),
             res_final(
                 "VR3_p_t",
-                "Tension teorica en R3 (paralelo)",
+                "Voltaje teorico en R3",
                 "V",
                 "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
             ),
