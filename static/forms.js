@@ -2,20 +2,56 @@ import { state } from "./state.js";
 import {
   courseSelect, groupSelect, practiceSelect, tableSelect,
   measurementFields, latestResult, submitStatus, submitButton,
-  practicaTitle, practicePartTabs, submissionForm,
+  practicaTitle, practicePartTabs, submissionForm, studentComment,
 } from "./dom.js";
-import { fetchJson, postJson } from "./api.js";
+import { fetchJson, postJson, deleteJson } from "./api.js";
 import {
   escapeHtml, symbolHtml, inlineMathHtml, unitHtml, canReview, format,
-  compatibleInstruments, SI_PREFIXES, prefixFactor,
+  compatibleInstruments, SI_PREFIXES, prefixFactor, pointPower,
   seriesStats, histogram, normalCurve, validateMeasurements,
+  draftMeasurementsByQuantity,
 } from "./lib.js";
-import { PRACTICE_GROUPS, PRACTICE_SECTIONS } from "./constants.js";
+import {
+  PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS,
+  RESULTS_WITHOUT_U, SERIES_LIVE_COLUMNS,
+} from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 
+// p2-cc: mismo orden que el "Resultado final" (símbolo primero, nombre como aclaración muted),
+// para las magnitudes cuyo símbolo no es obvio a simple vista o que ya se comparan 1 a 1 con su
+// teórica (VR1 medida vs VR1 teórica).
+const SYMBOL_FIRST_QUANTITIES = new Set([
+  "Vg_s", "Vg_p", "Vg_c",
+  "RA_s", "RA_p", "RA_c",
+  "VR1_s", "VR2_s", "VR3_s",
+  "VR1_p", "VR2_p", "VR3_p",
+]);
+
+/** Agrupa `items` (con `.id`/`.symbol`) según `sections[].symbols`, en el mismo orden que las
+ *  secciones. Devuelve, por sección, sus `rows` encontrados, y aparte los `items` que no entraron
+ *  en ninguna sección (`rest`). Común al render de magnitudes (Motor D) y al de la serie (Motor E),
+ *  que solo difieren en cómo pintan cada fila/bloque, no en el matching contra PRACTICE_SECTIONS. */
+function groupBySections(items, sections) {
+  const used = new Set();
+  const grouped = sections.map((sec) => {
+    const rows = (sec.symbols ?? [])
+      .map((sym) => items.find((q) => q.symbol === sym))
+      .filter(Boolean);
+    rows.forEach((q) => used.add(q.id));
+    return { sec, rows };
+  });
+  const rest = items.filter((q) => !used.has(q.id));
+  return { grouped, rest };
+}
+
 function quantityNameHtml(q) {
   const base = inlineMathHtml(q.name);
+  if (SYMBOL_FIRST_QUANTITIES.has(q.symbol)) {
+    return `${symbolHtml(q.symbol)} <span class="submission-meta">${base}</span>`;
+  }
+  // T_oc no tiene subíndice obvio en el nombre: se agrega el símbolo al final, sin duplicarlo
+  // si el nombre ya lo menciona.
   if (q.symbol === "T_oc" && !/T_?oc/i.test(q.name)) {
     return `${base} ${symbolHtml(q.symbol)}`;
   }
@@ -50,7 +86,7 @@ export function renderStudentSelectors() {
   }
 }
 
-export function updateStudentSelectors() {
+export function updateStudentSelectors({ autoLoad = true } = {}) {
   const course = selectedCourse();
   groupSelect.innerHTML = course?.groups.length
     ? course.groups.map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.name)}</option>`).join("")
@@ -61,7 +97,7 @@ export function updateStudentSelectors() {
         .join("")
     : `<option value="">Sin practicas habilitadas</option>`;
   updateTableSelector();
-  loadSubmissionForm();
+  if (autoLoad) loadSubmissionForm();
 }
 
 export function updateTableSelector() {
@@ -103,6 +139,9 @@ export async function loadSubmissionForm() {
   if (canReview(state.user)) return;
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
+  // El textarea de observaciones vive fuera de #measurement-fields (no se destruye al cambiar
+  // de práctica): hay que vaciarlo a mano, salvo que se esté editando (ahí lo prellena applyPrefill).
+  if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const practiceId = practiceSelect.value;
   const courseId = courseSelect.value;
   if (practicaTitle) {
@@ -136,6 +175,8 @@ export async function loadSubmissionForm() {
     state.seriesDebug.clear();
     renderMeasurementFields();
     applyPrefill();
+    applyDraftPrefill();
+    applyPartVisibility();
   } catch (error) {
     state.practiceForm = null;
     measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
@@ -162,8 +203,10 @@ async function checkExistingReport(practiceId) {
           <button type="button" class="view-existing-btn" data-id="${escapeHtml(submission_id)}">Ver informe</button>
         </div>`;
       measurementFields.querySelector(".view-existing-btn")?.addEventListener("click", (e) => {
+        // Capturar el id ANTES del import(): currentTarget es null una vez despachado el evento.
+        const id = e.currentTarget.dataset.id;
         import("./submissions.js").then(({ openSubmissionWorkspace }) =>
-          openSubmissionWorkspace(e.currentTarget.dataset.id),
+          openSubmissionWorkspace(id),
         );
       });
       return true;
@@ -176,8 +219,9 @@ async function checkExistingReport(practiceId) {
           <button type="button" class="accept-existing-btn" data-id="${escapeHtml(submission_id)}">Aceptar invitación</button>
         </div>`;
       measurementFields.querySelector(".accept-existing-btn")?.addEventListener("click", async (e) => {
+        const id = e.currentTarget.dataset.id;
         const { acceptInvitation } = await import("./invitations.js");
-        await acceptInvitation(e.currentTarget.dataset.id);
+        await acceptInvitation(id);
         await loadSubmissionForm();
       });
       return true;
@@ -194,8 +238,36 @@ async function checkExistingReport(practiceId) {
   }
 }
 
+// Parte temática activa de una práctica con PRACTICE_PARTS (tabs que solo alternan secciones
+// de la misma definición, sin cambiar de práctica ni de entrega).
+let activePart = null;
+
 export function renderPartTabs(practiceId) {
   if (!practicePartTabs) return;
+
+  // Partes internas de UNA práctica: las tabs muestran/ocultan secciones, no cambian de práctica.
+  const innerParts = PRACTICE_PARTS[practiceId];
+  if (innerParts) {
+    if (!innerParts.some((p) => p.id === activePart)) activePart = innerParts[0].id;
+    practicePartTabs.classList.remove("hidden");
+    practicePartTabs.innerHTML = innerParts
+      .map(
+        (p) =>
+          `<button type="button" class="part-tab ${p.id === activePart ? "active" : ""}" data-part-id="${escapeHtml(p.id)}">${escapeHtml(p.label)}</button>`
+      )
+      .join("");
+    practicePartTabs.querySelectorAll(".part-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        activePart = tab.dataset.partId;
+        practicePartTabs
+          .querySelectorAll(".part-tab")
+          .forEach((t) => t.classList.toggle("active", t === tab));
+        applyPartVisibility();
+      });
+    });
+    return;
+  }
+
   const group = PRACTICE_GROUPS[practiceId]?.group;
   const enabled = selectedCourse()?.practices ?? [];
   const parts = enabled
@@ -223,6 +295,14 @@ export function renderPartTabs(practiceId) {
       practiceSelect.value = tab.dataset.practiceId;
       practiceSelect.dispatchEvent(new Event("change", { bubbles: true }));
     });
+  });
+}
+
+/** Muestra solo los bloques `[data-section]` de la parte activa; los sin sección quedan siempre. */
+function applyPartVisibility() {
+  if (!PRACTICE_PARTS[practiceSelect.value]) return;
+  measurementFields.querySelectorAll("[data-section]").forEach((el) => {
+    el.hidden = el.dataset.section !== activePart;
   });
 }
 
@@ -355,12 +435,8 @@ export function renderMeasurementFields() {
 
   const sections = PRACTICE_SECTIONS[practiceSelect.value];
   if (sections) {
-    const used = new Set();
-    const blocks = sections.map((sec) => {
-      const rows = sec.symbols
-        .map((sym) => definition.quantities.find((q) => q.symbol === sym))
-        .filter(Boolean);
-      rows.forEach((q) => used.add(q.id));
+    const { grouped, rest } = groupBySections(definition.quantities, sections);
+    const blocks = grouped.map(({ sec, rows }) => {
       if (rows.length === 0) return "";
       const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       return `<div class="measurement-section">
@@ -369,7 +445,6 @@ export function renderMeasurementFields() {
           ${helper}
         </div>`;
     });
-    const rest = definition.quantities.filter((q) => !used.has(q.id));
     measurementFields.innerHTML = blocks.join("") + rest.map(quantityRowHtml).join("");
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
@@ -451,14 +526,32 @@ function needsChronoHelper(q) {
   return q.quantity === "tiempo" && !q.repeated && !q.is_given;
 }
 
-/** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`. */
+/** Parte temática (id de PRACTICE_PARTS) a la que pertenece un resultado final, o `null`. */
+function partForResult(symbol) {
+  const sections = PRACTICE_SECTIONS[practiceSelect.value] ?? [];
+  return sections.find((sec) => sec.id && (sec.results ?? []).includes(symbol))?.id ?? null;
+}
+
+/** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`.
+ *  Los símbolos en RESULTS_WITHOUT_U se entregan sin incertidumbre (sin campo U). */
 function finalResultSectionHtml(definition) {
   const finals = (definition.results ?? []).filter((r) => r.is_final);
   if (!finals.length) return "";
   const rows = finals
-    .map(
-      (r) => `
-        <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}">
+    .map((r) => {
+      const part = partForResult(r.symbol);
+      const uField = RESULTS_WITHOUT_U.has(r.symbol)
+        ? ""
+        : `
+            <label>Incertidumbre U (expandida)
+              <div class="replica-input-wrap">
+                ${prefixSelectHtml()}
+                <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
+                <span class="replica-unit">${unitHtml(r.unit)}</span>
+              </div>
+            </label>`;
+      return `
+        <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}>
           <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
           <div class="form-grid">
             <label>Valor
@@ -467,17 +560,10 @@ function finalResultSectionHtml(definition) {
                 <input class="final-result-value" type="number" step="any" placeholder="valor" />
                 <span class="replica-unit">${unitHtml(r.unit)}</span>
               </div>
-            </label>
-            <label>Incertidumbre U (expandida)
-              <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
-                <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
-                <span class="replica-unit">${unitHtml(r.unit)}</span>
-              </div>
-            </label>
+            </label>${uField}
           </div>
-        </fieldset>`,
-    )
+        </fieldset>`;
+    })
     .join("");
   return `
     <div class="measurement-section final-results-section">
@@ -496,7 +582,8 @@ function collectFinalResults() {
     if (rawVal === "") return acc;
     const value = Number(rawVal) * prefixFactor(valPrefix);
     if (!Number.isFinite(value)) return acc;
-    const rawU = row.querySelector(".final-result-u").value.trim();
+    // Sin campo U (RESULTS_WITHOUT_U) el resultado va sin incertidumbre.
+    const rawU = row.querySelector(".final-result-u")?.value.trim() ?? "";
     const u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
     acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
     return acc;
@@ -736,6 +823,7 @@ export async function submitFormSubmission() {
         measurements,
         meta: collectMeta(),
         student_results: collectFinalResults(),
+        student_comment: studentComment?.value.trim() || null,
       });
       submitStatus.textContent = "Cambios guardados";
       exitEditMode();
@@ -757,8 +845,10 @@ export async function submitFormSubmission() {
       measurements,
       meta: collectMeta(),
       student_results: collectFinalResults(),
+      student_comment: studentComment?.value.trim() || null,
     });
     submitStatus.textContent = "Entrega guardada";
+    clearDraft();
     const { renderAnalysis } = await import("./analysis.js");
     renderAnalysis(latestResult, submission);
     latestResult.classList.remove("hidden");
@@ -774,13 +864,55 @@ export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
+  state.editPrefillComment = submission.student_comment ?? "";
   import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id));
 }
 
 export function exitEditMode() {
   state.editingSubmissionId = null;
+  state.editPrefillComment = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;
+}
+
+/** Cancela una entrega dentro de la ventana de edición: la borra del servidor y devuelve al
+ *  alumno al formulario de carga con todos los valores puestos, para que siga editando y vuelva
+ *  a entregar sin re-tipear nada. Pide confirmación antes de borrar. */
+export async function cancelSubmission(submission) {
+  const confirmed = window.confirm(
+    "¿Cancelar esta entrega? Se va a borrar del servidor; tus valores quedan cargados en el " +
+      "formulario para que sigas editando. Esta acción no se puede deshacer.",
+  );
+  if (!confirmed) return;
+
+  try {
+    await deleteJson(`/api/submissions/${submission.id}`);
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+
+  state.restoringCancelledSubmission = true;
+  state.editPrefill = submission.measurements ?? [];
+  state.editPrefillStudentResults = submission.student_results ?? [];
+  state.editPrefillComment = submission.student_comment ?? "";
+
+  const { selectView } = await import("./navigation.js");
+  selectView("practica");
+  courseSelect.value = submission.course_id ?? courseSelect.value;
+  updateStudentSelectors({ autoLoad: false });
+  groupSelect.value = submission.group_id ?? groupSelect.value;
+  practiceSelect.value = submission.practice_id;
+  updateTableSelector();
+  if (submission.table_number != null) tableSelect.value = String(submission.table_number);
+  await loadSubmissionForm();
+
+  state.restoringCancelledSubmission = false;
+  state.editPrefill = null;
+  state.editPrefillStudentResults = null;
+  state.editPrefillComment = null;
+
+  await loadSubmissions();
 }
 
 function editPrefillByQuantity() {
@@ -819,21 +951,47 @@ function editPrefillByQuantity() {
   return map;
 }
 
-/** Prellena el bloque opcional "Resultado final" con lo que ya se había entregado, si lo hay. */
-function applyFinalResultsPrefill() {
-  const saved = new Map((state.editPrefillStudentResults ?? []).map((s) => [s.symbol, s]));
+/** Prellena el bloque opcional "Resultado final" con `results` (lista `{symbol, value, u_expanded}`). */
+function applyFinalResultsPrefillFrom(results) {
+  const saved = new Map((results ?? []).map((s) => [s.symbol, s]));
   measurementFields.querySelectorAll('[data-final-result="1"]').forEach((row) => {
     const s = saved.get(row.dataset.symbol);
     if (!s) return;
     row.querySelector(".final-result-value").value = s.value;
-    if (s.u_expanded != null) row.querySelector(".final-result-u").value = s.u_expanded;
+    const uInput = row.querySelector(".final-result-u");
+    if (uInput && s.u_expanded != null) uInput.value = s.u_expanded;
   });
 }
 
+/** Restaura una entrega en edición (`applyPrefill`) desde `state.editPrefill*`. */
 export function applyPrefill() {
-  if (!state.editingSubmissionId) return;
-  applyFinalResultsPrefill();
-  const byQ = editPrefillByQuantity();
+  if (!state.editingSubmissionId && !state.restoringCancelledSubmission) return;
+  applyMeasurementPrefill(
+    editPrefillByQuantity(),
+    state.editPrefillStudentResults,
+    state.editPrefillComment,
+  );
+}
+
+/** Restaura el borrador local guardado para la (curso, grupo, mesa, práctica) actual, si hay uno
+ *  y no se está editando/restaurando una entrega existente (esos casos los maneja `applyPrefill`). */
+function applyDraftPrefill() {
+  if (state.editingSubmissionId || state.restoringCancelledSubmission) return;
+  const draft = loadDraft();
+  if (!draft) return;
+  applyMeasurementPrefill(
+    draftMeasurementsByQuantity(draft.measurements),
+    draft.finalResults,
+    draft.comment,
+  );
+}
+
+/** Pinta en el DOM un `byQ` (Map quantity_id -> {pointGroups, operatorGroups, values, value_u,
+ *  instrument_id, scale_id}) ya armado, sin importar si viene de una entrega guardada
+ *  (`editPrefillByQuantity`) o de un borrador local (`draftMeasurementsByQuantity`). */
+function applyMeasurementPrefill(byQ, finalResults, comment) {
+  applyFinalResultsPrefillFrom(finalResults);
+  if (studentComment) studentComment.value = comment ?? "";
 
   const seriesTable = measurementFields.querySelector(".series-table");
   if (seriesTable) {
@@ -868,6 +1026,7 @@ export function applyPrefill() {
       });
     });
     updateSeriesMeans();
+    updateSeriesLive();
     // Escalares compartidos (Motor E): se rellenan como filas sueltas fuera de la serie.
     measurementFields
       .querySelectorAll(".shared-quantities .measurement-row")
@@ -934,13 +1093,42 @@ function renderSeriesTable(definition) {
   // compartidos (datos de cátedra / medida única), que se cargan una sola vez.
   const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
   const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
+  const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
   const header = cols
     .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${symbolHtml(q.symbol)}${q.unit ? ` <span class="submission-meta">(${unitHtml(q.unit)})</span>` : ""}</th>`)
+    .join("") + liveCols
+    .map((c) => `<th>${symbolHtml(c.symbol)}${c.unit ? ` <span class="submission-meta">(${unitHtml(c.unit)})</span>` : ""}</th>`)
     .join("");
   const INITIAL_ROWS = 3;
   const body = Array.from({ length: INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
-  const sharedSection = shared.length
-    ? `<div class="shared-quantities"><h4>Datos compartidos</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`
+  // Secciones temáticas (PRACTICE_SECTIONS): agrupa los escalares por sección, con `data-section`
+  // para que las tabs de partes las muestren/oculten. Sin secciones, un solo bloque como siempre.
+  const sections = PRACTICE_SECTIONS[practiceSelect.value];
+  let sharedSection = "";
+  let seriesSectionAttr = "";
+  if (sections && shared.length) {
+    // La sección `series: true` no agrupa magnitudes: solo marca dónde va la tabla por punto.
+    const seriesSec = sections.find((sec) => sec.series);
+    if (seriesSec?.id) seriesSectionAttr = ` data-section="${escapeHtml(seriesSec.id)}"`;
+    const { grouped, rest } = groupBySections(
+      shared,
+      sections.filter((sec) => !sec.series),
+    );
+    const blocks = grouped
+      .filter(({ rows }) => rows.length)
+      .map(({ sec, rows }) => {
+        const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+        return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}</div>`;
+      });
+    if (rest.length) {
+      blocks.push(`<div class="shared-quantities"><h4>Datos compartidos</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
+    }
+    sharedSection = blocks.join("");
+  } else if (shared.length) {
+    sharedSection = `<div class="shared-quantities"><h4>Datos compartidos</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
+  }
+  const partsNote = PRACTICE_PARTS[practiceSelect.value]
+    ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
     : "";
   // Si alguna columna es una serie de tiempos con réplicas (p. ej. tiempo de caída en
   // viscosidad), ofrecemos un cronómetro de apoyo suelto arriba de la tabla.
@@ -948,16 +1136,19 @@ function renderSeriesTable(definition) {
   const chronoHelper = hasReplicatedTime ? chronoHelperSectionHtml() : "";
   measurementFields.innerHTML = `
     ${chronoHelper}
+    ${partsNote}
     ${sharedSection}
-    <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
-    <div class="directory-table-wrap">
-      <table class="series-table grade-table directory-data-table">
-        <thead><tr>${header}<th></th></tr></thead>
-        <tbody>${body}</tbody>
-      </table>
+    <div${seriesSectionAttr}>
+      <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
+      <div class="directory-table-wrap">
+        <table class="series-table grade-table directory-data-table">
+          <thead><tr>${header}<th></th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      <button type="button" class="add-series-row">＋ agregar punto</button>
+      <section class="series-preview panel" aria-live="polite"></section>
     </div>
-    <button type="button" class="add-series-row">＋ agregar punto</button>
-    <section class="series-preview panel" aria-live="polite"></section>
   `;
   // Wiring de las filas compartidas de medida única: instrumento → escalas compatibles.
   measurementFields.querySelectorAll(".shared-quantities .measurement-row").forEach((row) => {
@@ -973,6 +1164,7 @@ function renderSeriesTable(definition) {
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
     wireSeriesRemove();
+    updateSeriesLive();
     schedulePreview();
   });
   wireSeriesRemove();
@@ -989,21 +1181,23 @@ function renderSeriesTable(definition) {
       e.target.classList.contains("prefix-select")
     ) {
       updateSeriesMeans();
+      updateSeriesLive();
       schedulePreview();
     }
   });
   measurementFields.querySelector(".series-table").addEventListener("change", () => {
     updateSeriesMeans();
+    updateSeriesLive();
     schedulePreview();
   });
   // Los escalares compartidos también entran en las fórmulas de eje: refrescá la vista previa al
-  // editarlos (sus filas viven fuera de la tabla de la serie).
-  const sharedEl = measurementFields.querySelector(".shared-quantities");
-  if (sharedEl) {
+  // editarlos (sus filas viven fuera de la tabla de la serie; puede haber varios bloques).
+  measurementFields.querySelectorAll(".shared-quantities").forEach((sharedEl) => {
     sharedEl.addEventListener("input", schedulePreview);
     sharedEl.addEventListener("change", schedulePreview);
-  }
+  });
   updateSeriesMeans();
+  updateSeriesLive();
   wireChronoHelpers();
 }
 
@@ -1064,7 +1258,12 @@ function seriesRowHtml(cols) {
       return `<td class="series-cell"><div class="series-input-wrap">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" /></div></td>`;
     })
     .join("");
-  return `<tr class="series-row">${cells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
+  // Columnas calculadas en vivo: solo lectura y sin clase `series-cell`, para que
+  // collectMeasurements no las cuente como parte del punto.
+  const liveCells = (SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [])
+    .map((c) => `<td class="series-live" data-live-symbol="${escapeHtml(c.symbol)}"><span class="series-live-value submission-meta">—</span></td>`)
+    .join("");
+  return `<tr class="series-row">${cells}${liveCells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
 }
 
 /// HTML de una fila de escalar compartido (Motor E): dato de cátedra (valor ± U) o medida única
@@ -1117,6 +1316,34 @@ function cellReplicaValues(cell) {
     .map((input) => input.value.trim())
     .filter((raw) => raw !== "")
     .map((raw) => Number(raw) * factor);
+}
+
+/** Valor numérico (con prefijo SI aplicado) del input de una magnitud dentro de una fila. */
+function seriesCellValue(row, quantityId) {
+  const input = row.querySelector(`.series-value[data-quantity-id="${CSS.escape(quantityId)}"]`);
+  if (!input) return NaN;
+  const raw = input.value.trim();
+  if (raw === "") return NaN;
+  const factor = prefixFactor(input.closest(".series-cell").querySelector(".prefix-select").value);
+  return Number(raw) * factor;
+}
+
+/** Recalcula las columnas en vivo (p. ej. P = I²·R) de cada fila de la tabla de series. */
+function updateSeriesLive() {
+  const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
+  if (!liveCols.length) return;
+  const quantities = state.practiceForm?.definition?.quantities ?? [];
+  const idBySymbol = new Map(quantities.map((q) => [q.symbol, q.id]));
+  measurementFields.querySelectorAll(".series-row").forEach((row) => {
+    for (const col of liveCols) {
+      const cell = row.querySelector(`.series-live[data-live-symbol="${CSS.escape(col.symbol)}"]`);
+      const out = cell?.querySelector(".series-live-value");
+      if (!out) continue;
+      const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
+      const value = args.every(Number.isFinite) ? pointPower(...args) : NaN;
+      out.textContent = Number.isFinite(value) ? format(value) : "—";
+    }
+  });
 }
 
 /** Actualiza el promedio (x̄) mostrado en cada celda de réplicas de la tabla de series. */
@@ -1364,6 +1591,56 @@ function histogramSvg(hist, mean, std, n) {
   </svg>`;
 }
 
+// ── Borrador local ───────────────────────────────────────────────────────────
+// Autoguarda lo que el alumno va tipeando en una entrega NUEVA (no enviada aún) para que un
+// cambio de práctica/curso/grupo accidental, o un refresh de página, no pierda los valores.
+// No aplica mientras se edita/restaura una entrega existente (`applyPrefill` cubre esos casos).
+
+function draftKey() {
+  // Sin la mesa: `updateTableSelector()` reconstruye #table-select en cada cambio de práctica y
+  // vuelve al valor por defecto (asignación/perfil), así que no es estable mientras se compone.
+  const uid = state.user?.id ?? "anon";
+  return `quantify-draft:${uid}:${courseSelect.value}:${groupSelect.value}:${practiceSelect.value}`;
+}
+
+function saveDraft() {
+  if (state.editingSubmissionId || state.restoringCancelledSubmission || !state.practiceForm) return;
+  const draft = {
+    measurements: collectMeasurements(),
+    finalResults: collectFinalResults(),
+    comment: studentComment?.value ?? "",
+    savedAt: Date.now(),
+  };
+  try {
+    localStorage.setItem(draftKey(), JSON.stringify(draft));
+  } catch {
+    // localStorage puede fallar (cuota, modo privado); el borrador es best-effort.
+  }
+}
+
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(draftKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft() {
+  try {
+    localStorage.removeItem(draftKey());
+  } catch {
+    // no-op
+  }
+}
+
+let draftSaveTimer = null;
+function scheduleDraftSave() {
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(saveDraft, 350);
+}
+
 // ── Listeners top-level ────────────────────────────────────────────────────────
 
 // "Entregar" (submit del form / Enter): crea la entrega por formulario.
@@ -1371,6 +1648,11 @@ submissionForm.addEventListener("submit", (event) => {
   event.preventDefault();
   submitFormSubmission();
 });
+// `measurementFields` es un nodo estable (solo se reemplaza su innerHTML, nunca el nodo): un
+// único listener delegado alcanza para autoguardar el borrador sin tocar los renders.
+measurementFields.addEventListener("input", scheduleDraftSave);
+measurementFields.addEventListener("change", scheduleDraftSave);
+studentComment?.addEventListener("input", scheduleDraftSave);
 courseSelect.addEventListener("change", updateStudentSelectors);
 groupSelect.addEventListener("change", updateTableSelector);
 practiceSelect.addEventListener("change", () => {

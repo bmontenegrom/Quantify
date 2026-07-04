@@ -547,6 +547,16 @@ textarea {
   max-width: none;
 }
 
+/* Ocupa todo el ancho de la card (no va en .form-grid, que es de 3 columnas para
+   curso/grupo/mesa): es un único campo de texto libre. */
+.student-comment-field {
+  margin: 14px 0;
+}
+
+.student-comment-field textarea {
+  resize: vertical;
+}
+
 .measurement-row {
   background: var(--panel-raised);
   border: 1px solid var(--line);
@@ -1493,6 +1503,12 @@ textarea {
   background: var(--accent-soft);
 }
 
+.edit-banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .edit-submission-btn,
 .accept-invitation-btn,
 .accept-existing-btn,
@@ -1503,6 +1519,17 @@ textarea {
   min-height: 38px;
   padding: 0 16px;
   font-weight: 650;
+}
+
+.cancel-submission-btn {
+  background: transparent;
+  color: var(--danger, #dc2626);
+  border: 1px solid var(--danger, #dc2626);
+  border-radius: var(--radius);
+  min-height: 38px;
+  padding: 0 16px;
+  font-weight: 650;
+  cursor: pointer;
 }
 
 /* Banner de invitaciones a informes compartidos (arriba de todas las vistas). */

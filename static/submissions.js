@@ -200,6 +200,10 @@ function submissionItemHtml(item) {
 
 export async function openSubmissionWorkspace(id) {
   state.activeSubmissionId = id;
+  // El workspace vive en la vista "submissions": activarla por si se llega desde otra vista
+  // (p. ej. "Ver informe" en el formulario de práctica). Import dinámico para evitar el ciclo.
+  const { selectView } = await import("./navigation.js");
+  selectView("submissions");
   renderSubmissionsPage();
   submissionWorkspace.innerHTML = `<p class="submission-meta">Cargando...</p>`;
 
@@ -265,6 +269,18 @@ export function teacherCommentMarkup(submission) {
     </div>`;
 }
 
+/** Observaciones/comentarios libres que el alumno dejó junto a su entrega, si los hay. No se
+ *  gatea por `results_visible_to_student`: se ve siempre, igual que los resultados finales. */
+export function studentCommentMarkup(submission) {
+  const comment = (submission.student_comment ?? "").trim();
+  if (!comment) return "";
+  return `
+    <div class="teacher-comment">
+      <div class="teacher-comment-head">Observaciones del estudiante</div>
+      <p class="teacher-comment-body">${escapeHtml(comment)}</p>
+    </div>`;
+}
+
 export function editBannerMarkup(submission) {
   if (!submission.can_edit || !submission.editable_until) return "";
   const until = new Date(submission.editable_until);
@@ -276,7 +292,10 @@ export function editBannerMarkup(submission) {
   const left = h > 0 ? `${h} h ${m} min` : `${m} min`;
   return `<div class="edit-banner">
     <div>Podés editar esta entrega hasta el ${escapeHtml(formatDate(submission.editable_until))} — te quedan ${left}.</div>
-    <button type="button" class="edit-submission-btn">Editar entrega</button>
+    <div class="edit-banner-actions">
+      <button type="button" class="edit-submission-btn">Editar entrega</button>
+      <button type="button" class="cancel-submission-btn">Cancelar entrega</button>
+    </div>
   </div>`;
 }
 

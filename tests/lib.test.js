@@ -27,6 +27,9 @@ import {
   regressionPlot,
   scatterPlot,
   compareResults,
+  compareMeasuredVsTheoretical,
+  pointPower,
+  draftMeasurementsByQuantity,
   SI_PREFIXES,
   prefixFactor,
   seriesStats,
@@ -101,6 +104,24 @@ test("symbolHtml escapa HTML y convierte dígitos pegados a letras en subíndice
   assert.equal(symbolHtml("T_oc"), "T<sub>OC</sub>");
   assert.equal(symbolHtml("R_cap"), "R_cap");
   assert.equal(symbolHtml("<R1>"), "&lt;R<sub>1</sub>&gt;");
+});
+
+test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)", () => {
+  // Magnitudes medidas por parte: se muestran igual que su base, sin sufijo. Vg y RA llevan
+  // subíndice (coherente con el resto: R1, rho_e...) aunque el símbolo guardado no tenga "_".
+  assert.equal(symbolHtml("Vg_s"), "V<sub>G</sub>");
+  assert.equal(symbolHtml("Vg_p"), "V<sub>G</sub>");
+  assert.equal(symbolHtml("Vg_c"), "V<sub>G</sub>");
+  assert.equal(symbolHtml("RA_s"), "R<sub>A</sub>");
+  assert.equal(symbolHtml("VR1_s"), symbolHtml("VR1"));
+  assert.equal(symbolHtml("VR2_p"), symbolHtml("VR2"));
+  // Teóricos (sufijo _t adicional): mismo resultado que la magnitud medida.
+  assert.equal(symbolHtml("VR1_s_t"), "VR<sub>1</sub>");
+  assert.equal(symbolHtml("VR3_p_t"), "VR<sub>3</sub>");
+  assert.equal(symbolHtml("I_s"), "I");
+  assert.equal(symbolHtml("I_p"), "I");
+  // Sin whitelist de la base, no se toca: evita falsos positivos en otras prácticas.
+  assert.equal(symbolHtml("h_max"), "h_max");
 });
 
 test("inlineMathHtml y unitHtml formatean subíndices y superíndices visibles", () => {
@@ -411,6 +432,116 @@ test("compareResults: verdict pass/fail según tolerancia", () => {
   // |Δ%| = 4 > 3 -> fail.
   const [fail] = compareResults(auto, student, { Q: 3 });
   assert.equal(fail.verdict, "fail");
+});
+
+test("pointPower calcula P = I²·R", () => {
+  assert.equal(pointPower(100, 0.5), 25); // 0.25 * 100
+  assert.equal(pointPower(0, 3), 0);
+  assert.equal(pointPower(200, 0), 0);
+  // I negativa (sentido de la corriente) no cambia la potencia disipada.
+  assert.equal(pointPower(100, -0.5), 25);
+});
+
+test("draftMeasurementsByQuantity: columna de un valor por punto", () => {
+  const map = draftMeasurementsByQuantity([
+    { quantity_id: "q1", instrument_id: null, scale_id: null, values: [1, 2, 3], given_u: null },
+  ]);
+  assert.deepEqual(map.get("q1"), {
+    pointGroups: [[1], [2], [3]],
+    operatorGroups: [],
+    values: [1, 2, 3],
+    value_u: null,
+    instrument_id: null,
+    scale_id: null,
+  });
+});
+
+test("draftMeasurementsByQuantity: columna con réplicas por punto", () => {
+  const map = draftMeasurementsByQuantity([
+    {
+      quantity_id: "q1",
+      instrument_id: null,
+      scale_id: null,
+      values: [],
+      given_u: null,
+      point_replicas: [[1, 1.1], [2, 2.1, 2.2]],
+    },
+  ]);
+  assert.deepEqual(map.get("q1").pointGroups, [[1, 1.1], [2, 2.1, 2.2]]);
+});
+
+test("draftMeasurementsByQuantity: magnitud por operador (Motor D)", () => {
+  const map = draftMeasurementsByQuantity([
+    {
+      quantity_id: "q1",
+      instrument_id: null,
+      scale_id: null,
+      values: [],
+      given_u: null,
+      operator_replicas: [[1, 1.1], [2, 2.1, 2.2]],
+    },
+  ]);
+  assert.deepEqual(map.get("q1").operatorGroups, [[1, 1.1], [2, 2.1, 2.2]]);
+});
+
+test("draftMeasurementsByQuantity: fila suelta dada (valor ± U)", () => {
+  const map = draftMeasurementsByQuantity([
+    { quantity_id: "q1", instrument_id: null, scale_id: null, values: [0.5], given_u: 0.01 },
+  ]);
+  const e = map.get("q1");
+  assert.equal(e.values[0], 0.5);
+  assert.equal(e.value_u, 0.01);
+});
+
+test("draftMeasurementsByQuantity: fila suelta medida con réplicas e instrumento/escala", () => {
+  const map = draftMeasurementsByQuantity([
+    { quantity_id: "q1", instrument_id: "inst-1", scale_id: "sc-1", values: [10.1, 10.2, 9.9], given_u: null },
+  ]);
+  const e = map.get("q1");
+  assert.deepEqual(e.values, [10.1, 10.2, 9.9]);
+  assert.equal(e.instrument_id, "inst-1");
+  assert.equal(e.scale_id, "sc-1");
+  assert.equal(e.value_u, null);
+});
+
+test("draftMeasurementsByQuantity: lista vacía o ausente da un Map vacío", () => {
+  assert.equal(draftMeasurementsByQuantity([]).size, 0);
+  assert.equal(draftMeasurementsByQuantity(undefined).size, 0);
+});
+
+test("compareMeasuredVsTheoretical empareja X con X_t y calcula deltas", () => {
+  const quantities = [
+    { symbol: "VR1_s", name: "Voltaje en R1", unit: "V", result: { mean: 1.5, u_expanded: 0.1 } },
+    { symbol: "Vg_s", name: "Fuente", unit: "V", result: { mean: 8, u_expanded: 0.2 } },
+  ];
+  const derived = [
+    { symbol: "VR1_s_t", name: "Teorica R1", unit: "V", value: 1.6, u_expanded: 0.08 },
+    { symbol: "I_s", name: "Corriente", unit: "A", value: 0.015, u_expanded: 0.001 },
+  ];
+  const rows = compareMeasuredVsTheoretical(quantities, derived);
+  // Solo VR1_s tiene par (VR1_s_t); I_s no termina en _t y Vg_s no tiene derivado.
+  assert.equal(rows.length, 1);
+  const [row] = rows;
+  assert.equal(row.symbol, "VR1_s");
+  assert.equal(row.theoreticalSymbol, "VR1_s_t");
+  assert.deepEqual(row.exp, { value: 1.5, u: 0.1 });
+  assert.deepEqual(row.teo, { value: 1.6, u: 0.08 });
+  assert.ok(Math.abs(row.dValue - -0.1) < 1e-9);
+  assert.ok(Math.abs(row.dValuePct - -6.25) < 1e-9); // -0.1/1.6*100
+  assert.ok(Math.abs(row.dU - 0.02) < 1e-9);
+  assert.ok(Math.abs(row.dUPct - 25) < 1e-9); // 0.02/0.08*100
+});
+
+test("compareMeasuredVsTheoretical: deltas null con teórico 0 o U faltante", () => {
+  const quantities = [
+    { symbol: "X", name: "X", unit: "u", result: { mean: 2, u_expanded: null } },
+  ];
+  const derived = [{ symbol: "X_t", name: "X teorica", unit: "u", value: 0, u_expanded: 0.1 }];
+  const [row] = compareMeasuredVsTheoretical(quantities, derived);
+  assert.ok(Math.abs(row.dValue - 2) < 1e-9);
+  assert.equal(row.dValuePct, null); // denominador 0
+  assert.equal(row.dU, null); // la medida no tiene U
+  assert.equal(row.dUPct, null);
 });
 
 test("SI_PREFIXES es un array con entradas para 'm', 'k' y ''", () => {

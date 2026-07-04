@@ -222,7 +222,10 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/submissions/invitations", get(submission_invitations))
         .route("/submissions/existing", get(existing_report))
         .route("/submissions/{id}/edit", post(edit_form_submission))
-        .route("/submissions/{id}", get(submission_detail))
+        .route(
+            "/submissions/{id}",
+            get(submission_detail).delete(cancel_submission),
+        )
         .route("/submissions/{id}/review", post(review_submission))
         .route(
             "/submissions/{id}/student-results",
@@ -863,6 +866,9 @@ struct EditFormBody {
     /// `None` = no tocar los cálculos del alumno ya guardados; `Some(vec)` los reemplaza.
     #[serde(default)]
     student_results: Option<Vec<db::StudentResultInput>>,
+    /// Observaciones/comentarios libres del alumno; se reemplaza por completo en cada edición.
+    #[serde(default)]
+    student_comment: Option<String>,
 }
 
 /// `POST /api/submissions/{id}/edit`: el alumno dueño reemplaza sus lecturas dentro de la
@@ -900,6 +906,11 @@ async fn edit_form_submission(
         return Err(AppError::bad_request(message));
     }
 
+    let student_comment = input
+        .student_comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let updated = computation::update_form_submission(
         &state.pool,
         &id,
@@ -907,10 +918,49 @@ async fn edit_form_submission(
         &input.measurements,
         input.meta.as_ref(),
         input.student_results.as_deref(),
+        student_comment,
     )
     .await
     .map_err(analysis_error)?;
     Ok(Json(gate_analysis(updated, &user)))
+}
+
+/// `DELETE /api/submissions/{id}`: el alumno dueño (o miembro aceptado) cancela su entrega dentro
+/// de la ventana de edición, borrándola por completo (mediciones, resultados propios e integrantes
+/// se van con ella). Mismas reglas de propiedad/ventana que `edit_form_submission`.
+async fn cancel_submission(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Health>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    let detail = db::submission_detail(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
+
+    if !matches!(user.role.as_str(), "docente" | "admin") {
+        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
+        if !is_member {
+            return Err(AppError::forbidden(
+                "Solo podés cancelar entregas de las que sos miembro.",
+            ));
+        }
+    }
+    if !detail.can_edit {
+        let expired = detail
+            .editable_until
+            .map(|until| chrono::Utc::now() >= until)
+            .unwrap_or(true);
+        let message = if expired {
+            "El plazo de edición venció: ya no podés cancelar esta entrega."
+        } else {
+            "No podés cancelar una entrega que ya fue corregida."
+        };
+        return Err(AppError::bad_request(message));
+    }
+
+    db::delete_submission(&state.pool, &id).await?;
+    Ok(Json(Health { status: "ok" }))
 }
 
 /// `POST /api/submissions/{id}/review`: registra la revisión docente (estado/comentario/nota).

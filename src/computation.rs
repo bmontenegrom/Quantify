@@ -90,6 +90,9 @@ pub struct FormSubmissionInput {
     /// Se valida y persiste igual que `POST /submissions/{id}/student-results`.
     #[serde(default)]
     pub student_results: Vec<crate::db::StudentResultInput>,
+    /// Observaciones/comentarios libres del alumno sobre su entrega (opcional, cualquier práctica).
+    #[serde(default)]
+    pub student_comment: Option<String>,
 }
 
 /// Incertidumbre calculada de una magnitud medida directamente.
@@ -477,7 +480,17 @@ type PointSeries = Vec<(f64, f64)>;
 /// magnitudes con `per_point = false` o `is_given` son escalares compartidos: se difunden a todos
 /// los puntos y **no** condicionan la cantidad de puntos. Falla si hay menos de 2 puntos o si un
 /// punto produce un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
-type PointContext = HashMap<String, f64>;
+pub type PointContext = HashMap<String, f64>;
+
+/// Símbolos de las magnitudes medidas por punto (van en la serie, no son escalares compartidos):
+/// `per_point == true` y no `is_given`. Usado tanto para condicionar la cantidad de puntos
+/// (`build_points`) como para los alias de extremos por punto (`compute_curva`).
+fn per_point_quantity_symbols(quantities: &[PracticeQuantity]) -> impl Iterator<Item = &str> {
+    quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .map(|q| q.symbol.as_str())
+}
 
 fn build_points(
     quantities: &[PracticeQuantity],
@@ -556,11 +569,8 @@ fn build_points(
         .collect();
     // Magnitudes que se miden por punto (van en la serie): solo estas condicionan la cantidad de
     // puntos. Las `per_point = false` o `is_given` son escalares compartidos que se difunden.
-    let per_point_syms: std::collections::HashSet<&str> = quantities
-        .iter()
-        .filter(|q| q.per_point && !q.is_given)
-        .map(|q| q.symbol.as_str())
-        .collect();
+    let per_point_syms: std::collections::HashSet<&str> =
+        per_point_quantity_symbols(quantities).collect();
 
     // Las intermedias (Motor C) se compilan **en orden**: cada una puede usar las magnitudes y las
     // intermedias **anteriores** (a estas las ve como su valor por punto, ya promediado). Sus
@@ -962,17 +972,20 @@ pub fn compute_regresion(
 /// Calcula el [`FormAnalysis`] de una práctica `curva`: para cada curva empareja las mediciones
 /// por punto y evalúa su par de fórmulas de eje, produciendo una serie de puntos **sin ajuste**
 /// (scatter + tabla) en `scatters`. No deriva mensurandos. Todas las curvas comparten el mismo
-/// barrido de mediciones; una `x_log` marca eje x logarítmico en esa curva.
+/// barrido de mediciones; una `x_log` marca eje x logarítmico en esa curva. Devuelve además los
+/// contextos por punto del barrido (los de la primera curva: todas comparten las mediciones), que
+/// el llamador usa para los alias de extremos (`{S}_max` / `{T}_at_{S}_max`).
 pub fn compute_curva(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
     curves: &[CurveSpec],
     measurements: &[MeasurementInput],
-) -> anyhow::Result<FormAnalysis> {
+) -> anyhow::Result<(FormAnalysis, Vec<PointContext>)> {
     let mut scatters = Vec::with_capacity(curves.len());
     let mut warnings = Vec::new();
+    let mut contexts: Vec<PointContext> = Vec::new();
     for curve in curves {
-        let (points, mut curve_warnings, _ctx) = build_points(
+        let (points, mut curve_warnings, ctx) = build_points(
             quantities,
             intermediates,
             curve.x_formula,
@@ -980,6 +993,9 @@ pub fn compute_curva(
             measurements,
             "se necesitan al menos 2 puntos para graficar la curva",
         )?;
+        if contexts.is_empty() {
+            contexts = ctx;
+        }
 
         if curve.x_log && points.iter().any(|(x, _)| *x <= 0.0) {
             anyhow::bail!("el eje x es logaritmico pero un punto tiene x <= 0");
@@ -1000,7 +1016,7 @@ pub fn compute_curva(
         }
     }
 
-    Ok(FormAnalysis {
+    let analysis = FormAnalysis {
         quantities: Vec::new(),
         regression: None,
         scatters,
@@ -1009,7 +1025,8 @@ pub fn compute_curva(
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
-    })
+    };
+    Ok((analysis, contexts))
 }
 
 /// Calcula los mensurandos derivados por propagación de varianzas: cada fórmula se evalúa y
@@ -1151,20 +1168,74 @@ pub async fn analyze(
                 x_log: c.x_log,
             })
             .collect();
-        let mut analysis = compute_curva(
+        let (mut analysis, contexts) = compute_curva(
             &definition.quantities,
             &definition.intermediates,
             &curves,
             measurements,
         )?;
+        // Magnitudes escalares (no-por-punto o dadas): siempre se computan y exponen, con su
+        // incertidumbre de instrumento, para que el frontend pueda mostrarlas y compararlas.
+        let scalar_qtys: Vec<&PracticeQuantity> = definition
+            .quantities
+            .iter()
+            .filter(|q| !q.per_point || q.is_given)
+            .collect();
+        let mut symbols: Vec<String> = scalar_qtys.iter().map(|q| q.symbol.clone()).collect();
+        let by_quantity: HashMap<&str, &MeasurementInput> = measurements
+            .iter()
+            .map(|m| (m.quantity_id.as_str(), m))
+            .collect();
+        let mut means = HashMap::new();
+        let mut us = HashMap::new();
+        analysis.quantities = compute_quantities(
+            &scalar_qtys,
+            &by_quantity,
+            &scales,
+            None,
+            &mut means,
+            &mut us,
+            &mut analysis.warnings,
+        )?;
+        // Alias de extremos por punto (análogos a `_first`/`_last` de la regresión): para cada
+        // símbolo por punto `S` (magnitudes medidas por punto + intermedias), `{S}_max` es su
+        // máximo sobre los puntos y `{T}_at_{S}_max` el valor de `T` en ese mismo punto. Van con
+        // u = 0 (son lecturas de la tabla, no medidas con incertidumbre propia), de modo que un
+        // mensurando como `P_max_e = P_max` resulta con U = 0 y el frontend lo muestra sin ±U.
+        let per_point_syms: Vec<String> = per_point_quantity_symbols(&definition.quantities)
+            .map(String::from)
+            .chain(definition.intermediates.iter().map(|it| it.symbol.clone()))
+            .collect();
+        for s in &per_point_syms {
+            let mut best: Option<(usize, f64)> = None;
+            for (i, ctx) in contexts.iter().enumerate() {
+                if let Some(&v) = ctx.get(s) {
+                    if v.is_finite() && best.is_none_or(|(_, bv)| v > bv) {
+                        best = Some((i, v));
+                    }
+                }
+            }
+            let Some((idx, max_value)) = best else {
+                continue;
+            };
+            let max_symbol = format!("{s}_max");
+            means.insert(max_symbol.clone(), max_value);
+            us.insert(max_symbol.clone(), 0.0);
+            symbols.push(max_symbol);
+            for t in &per_point_syms {
+                if t == s {
+                    continue;
+                }
+                if let Some(&tv) = contexts[idx].get(t) {
+                    let at_symbol = format!("{t}_at_{s}_max");
+                    means.insert(at_symbol.clone(), tv);
+                    us.insert(at_symbol.clone(), 0.0);
+                    symbols.push(at_symbol);
+                }
+            }
+        }
         if !definition.results.is_empty() {
-            let scalar_qtys: Vec<&PracticeQuantity> = definition
-                .quantities
-                .iter()
-                .filter(|q| !q.per_point || q.is_given)
-                .collect();
-            let symbols: Vec<String> = scalar_qtys.iter().map(|q| q.symbol.clone()).collect();
-            // Filtra result por result: los que no compilan con las magnitudes escalares
+            // Filtra result por result: los que no compilan con los símbolos escalares y alias
             // disponibles emiten un warning individual en lugar de silenciar todo el bloque.
             let scalar_results: Vec<PracticeResult> = definition
                 .results
@@ -1183,21 +1254,6 @@ pub async fn analyze(
                 .cloned()
                 .collect();
             if !scalar_results.is_empty() {
-                let by_quantity: HashMap<&str, &MeasurementInput> = measurements
-                    .iter()
-                    .map(|m| (m.quantity_id.as_str(), m))
-                    .collect();
-                let mut means = HashMap::new();
-                let mut us = HashMap::new();
-                compute_quantities(
-                    &scalar_qtys,
-                    &by_quantity,
-                    &scales,
-                    None,
-                    &mut means,
-                    &mut us,
-                    &mut analysis.warnings,
-                )?;
                 analysis.derived = derive_results(
                     &scalar_results,
                     &symbols,
@@ -1417,6 +1473,11 @@ pub async fn create_form_submission(
         Some(value) => Some(serde_json::to_string(value)?),
         None => None,
     };
+    let student_comment = input
+        .student_comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     let id = Uuid::new_v4().to_string();
     let now = Utc::now();
@@ -1428,7 +1489,7 @@ pub async fn create_form_submission(
         INSERT INTO submissions (
             id, student_name, group_name, course, practice_id, file_name, csv_path,
             analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
-            entry_mode, measurement_meta_json, table_number
+            entry_mode, measurement_meta_json, table_number, student_comment
         )
         SELECT
             ?1,
@@ -1446,7 +1507,8 @@ pub async fn create_form_submission(
             g.id,
             'form',
             ?8,
-            ?9
+            ?9,
+            ?10
         FROM users u, lab_groups g, courses c
         WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
         "#,
@@ -1460,6 +1522,7 @@ pub async fn create_form_submission(
     .bind(now)
     .bind(&meta_json)
     .bind(table_number)
+    .bind(student_comment)
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -1559,6 +1622,7 @@ pub async fn update_form_submission(
     measurements: &[MeasurementInput],
     meta: Option<&serde_json::Value>,
     student_results: Option<&[db::StudentResultInput]>,
+    student_comment: Option<&str>,
 ) -> anyhow::Result<db::SubmissionDetail> {
     if let Some(results) = student_results {
         validate_student_results(pool, practice_id, results).await?;
@@ -1574,11 +1638,13 @@ pub async fn update_form_submission(
 
     let mut tx = pool.begin().await?;
     sqlx::query(
-        "UPDATE submissions SET analysis_json = ?2, measurement_meta_json = ?3 WHERE id = ?1",
+        "UPDATE submissions SET analysis_json = ?2, measurement_meta_json = ?3, \
+         student_comment = ?4 WHERE id = ?1",
     )
     .bind(submission_id)
     .bind(&analysis_json)
     .bind(&meta_json)
+    .bind(student_comment)
     .execute(&mut *tx)
     .await?;
     sqlx::query("DELETE FROM submission_measurements WHERE submission_id = ?1")
@@ -1955,6 +2021,7 @@ mod tests {
             meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         assert_eq!(detail.entry_mode, "form");
@@ -1964,6 +2031,89 @@ mod tests {
         let meta = detail.measurement_meta.expect("meta persistida");
         assert_eq!(meta["q1"]["bins"], 8);
         assert_eq!(meta["q1"]["discarded"][0], 9.9);
+    }
+
+    /// Las observaciones/comentarios del alumno son opcionales, se persisten recortando
+    /// espacios, y un texto en blanco (o ausente) queda como `None` en vez de una cadena vacía.
+    #[tokio::test]
+    async fn create_form_submission_trims_and_persists_student_comment() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
+        let mk = |comment: Option<&str>| FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: t_id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![5.0, 5.2, 4.9],
+                given_u: None,
+                point_replicas: None,
+                operator_replicas: None,
+            }],
+            meta: None,
+            table_number: None,
+            student_results: vec![],
+            student_comment: comment.map(String::from),
+        };
+
+        // Con texto (con espacios de sobra): se persiste recortado.
+        let detail = create_form_submission(&pool, &user, mk(Some("  anduvo mal el generador  ")))
+            .await
+            .unwrap();
+        assert_eq!(
+            detail.student_comment.as_deref(),
+            Some("anduvo mal el generador")
+        );
+
+        // En blanco: se persiste como None, no como cadena vacía.
+        let blank = create_form_submission(&pool, &user, mk(Some("   ")))
+            .await
+            .unwrap();
+        assert_eq!(blank.student_comment, None);
+
+        // Ausente (None): también None.
+        let absent = create_form_submission(&pool, &user, mk(None))
+            .await
+            .unwrap();
+        assert_eq!(absent.student_comment, None);
     }
 
     /// El alumno puede entregar opcionalmente su resultado final (p. ej. `g`) junto con la
@@ -2028,6 +2178,7 @@ mod tests {
                 value: 9.8,
                 u_expanded: Some(0.1),
             }],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         assert_eq!(detail.student_results.len(), 1);
@@ -2096,6 +2247,7 @@ mod tests {
                 value: 1.0,
                 u_expanded: None,
             }],
+            student_comment: None,
         };
         let err = create_form_submission(&pool, &user, input)
             .await
@@ -2166,6 +2318,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
@@ -2275,6 +2428,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
@@ -2389,6 +2543,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
@@ -2476,6 +2631,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let created = create_form_submission(&pool, &user, mk(vec![5.0, 5.2, 4.9]))
             .await
@@ -2491,6 +2647,7 @@ mod tests {
             &mk(vec![10.0, 12.0, 11.0]).measurements,
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -2504,6 +2661,207 @@ mod tests {
             .find(|q| q["symbol"] == "T")
             .unwrap();
         assert!((q_t["result"]["mean"].as_f64().unwrap() - 11.0).abs() < 1e-9);
+    }
+
+    /// Cancelar (`db::delete_submission`) borra la entrega por completo: deja de existir
+    /// (`submission_detail` devuelve `None`) y libera la mesa para una nueva entrega en la
+    /// misma (práctica, grupo, mesa) — el índice único ya no choca.
+    #[tokio::test]
+    async fn cancel_submission_deletes_and_frees_table() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
+        let mk = || FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: t_id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![5.0, 5.2, 4.9],
+                given_u: None,
+                point_replicas: None,
+                operator_replicas: None,
+            }],
+            meta: None,
+            table_number: Some(1),
+            student_results: vec![db::StudentResultInput {
+                symbol: "g".into(),
+                value: 9.8,
+                u_expanded: Some(0.1),
+            }],
+            student_comment: Some("un comentario".into()),
+        };
+        let created = create_form_submission(&pool, &user, mk()).await.unwrap();
+
+        // Antes de cancelar: hay resultado del alumno y un integrante (owner).
+        assert_eq!(created.student_results.len(), 1);
+        assert_eq!(created.members.len(), 1);
+
+        // Cancelar: la mesa 1 de esta práctica/grupo ya está ocupada por `created`.
+        assert!(
+            db::find_existing_report(&pool, "p1-estadistica", &group.id, 1)
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        let existed = db::delete_submission(&pool, &created.id).await.unwrap();
+        assert!(existed);
+
+        // La entrega deja de existir.
+        assert!(db::submission_detail(&pool, &created.id)
+            .await
+            .unwrap()
+            .is_none());
+
+        // La mesa quedó libre: ya no hay informe para (práctica, grupo, 1).
+        assert!(
+            db::find_existing_report(&pool, "p1-estadistica", &group.id, 1)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // Cancelar de nuevo (id ya borrado) es un no-op, no un error.
+        assert!(!db::delete_submission(&pool, &created.id).await.unwrap());
+
+        // Se puede crear una entrega nueva para la misma mesa sin chocar con el índice único.
+        let recreated = create_form_submission(&pool, &user, mk()).await.unwrap();
+        assert_ne!(recreated.id, created.id);
+        assert_eq!(recreated.table_number, Some(1));
+    }
+
+    /// `update_form_submission` reemplaza el comentario del alumno igual que las lecturas:
+    /// se puede agregar uno donde no había, cambiarlo, y en blanco vuelve a quedar en `None`.
+    #[tokio::test]
+    async fn update_form_submission_replaces_student_comment() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
+        let measurements = vec![MeasurementInput {
+            quantity_id: t_id,
+            instrument_id: None,
+            scale_id: None,
+            values: vec![5.0, 5.2, 4.9],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        }];
+        let input = FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: measurements.clone(),
+            meta: None,
+            table_number: None,
+            student_results: vec![],
+            student_comment: None,
+        };
+        let created = create_form_submission(&pool, &user, input).await.unwrap();
+        assert_eq!(created.student_comment, None);
+
+        // Agrega un comentario donde no había.
+        let edited = update_form_submission(
+            &pool,
+            &created.id,
+            "p1-estadistica",
+            &measurements,
+            None,
+            None,
+            Some("faltó una réplica por corte de luz"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            edited.student_comment.as_deref(),
+            Some("faltó una réplica por corte de luz")
+        );
+
+        // Lo borra (en blanco vuelve a None, no queda pegado el anterior).
+        let cleared = update_form_submission(
+            &pool,
+            &created.id,
+            "p1-estadistica",
+            &measurements,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(cleared.student_comment, None);
     }
 
     #[tokio::test]
@@ -2559,6 +2917,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         assert!(create_form_submission(&pool, &user, input).await.is_err());
         // Rollback: no debe quedar ninguna entrega ni medición.
@@ -3147,8 +3506,9 @@ mod tests {
             measurement("px", &[1.0, 2.0, 3.0]),
             measurement("py", &[4.0, 9.0, 16.0]),
         ];
-        let a =
+        let (a, contexts) =
             compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).unwrap();
+        assert_eq!(contexts.len(), 3);
         assert!(a.regression.is_none());
         assert!(a.derived.is_empty());
         assert_eq!(a.scatters.len(), 1);
@@ -3167,7 +3527,7 @@ mod tests {
             measurement("px", &[1.0, 2.0, 3.0]),
             measurement("py", &[4.0, 9.0, 16.0]),
         ];
-        let a = compute_curva(
+        let (a, _) = compute_curva(
             &quantities,
             &[],
             &[curve("px", "py", false), curve("py", "px", false)],
@@ -3219,7 +3579,7 @@ mod tests {
             measurement("py", &[4.0, 5.0, 6.0]),
             // 'aux' sin mediciones a propósito.
         ];
-        let a =
+        let (a, _) =
             compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).unwrap();
         assert_eq!(
             a.scatters[0].points,

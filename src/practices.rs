@@ -1122,73 +1122,165 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
-    // P2-serie — Circuito en serie: R1, R2 y R3 en serie con RA (resistencia interna del
-    // amperimetro). I = Vg/(R1+R2+R3+RA) y la caida de tension en cada resistencia es V=I*R.
-    // Medida unica (tipo A despreciable); incertidumbre tipo B (fabricante del tester).
-    seed_practice(
+    // P2 — Corriente continua unificada: una sola entrega con tres partes tematicas.
+    // Escalares compartidos: R1, R2 y R3 se miden UNA vez (ohmetro) y valen para toda la
+    // practica; Vg y RA pueden cambiar entre partes, asi que se miden por parte (sufijos
+    // _s = serie, _p = paralelo, _c = curva de potencia). Los voltajes VRi_s / VRi_p se miden
+    // con multimetro y se comparan con las teoricas VRi_s_t / VRi_p_t (resultados finales que
+    // el alumno calcula a mano con propagacion). Por punto: R (carga variable) e I; intermedia
+    // P = I^2*R y curva P vs R. Los finales experimentales de potencia (P_max_e / RP_max_e)
+    // usan los alias de extremos del camino curva (`P_max`, `R_at_P_max`) con U = 0; por eso
+    // sus formulas no son editables desde la UI admin (check_formula no conoce los alias).
+    let fresh_p2cc = seed_practice(
         pool,
-        "p2-serie",
+        "p2-cc",
         &[
-            qty("Vg", "Voltaje de la fuente", "V", false, "voltaje"),
-            qty("R1", "Resistencia R1", "ohm", false, "resistencia"),
-            qty("R2", "Resistencia R2", "ohm", false, "resistencia"),
-            qty("R3", "Resistencia R3", "ohm", false, "resistencia"),
-            qty(
-                "RA",
+            qty_shared("R1", "Resistencia R1 (compartida)", "ohm", "resistencia"),
+            qty_shared("R2", "Resistencia R2 (compartida)", "ohm", "resistencia"),
+            qty_shared("R3", "Resistencia R3 (compartida)", "ohm", "resistencia"),
+            qty_shared("Vg_s", "Voltaje de la fuente", "V", "voltaje"),
+            // RA es un dato de tabla segun la escala del amperimetro, no se mide: va como dato
+            // dado por catedra (valor +/- U), igual en las tres partes.
+            qty_given(
+                "RA_s",
                 "Resistencia interna del amperimetro",
+                "ohm",
+                "resistencia",
+            ),
+            qty_shared("VR1_s", "Voltaje medido en R1", "V", "voltaje"),
+            qty_shared("VR2_s", "Voltaje medido en R2", "V", "voltaje"),
+            qty_shared("VR3_s", "Voltaje medido en R3", "V", "voltaje"),
+            qty_shared("Vg_p", "Voltaje de la fuente", "V", "voltaje"),
+            qty_given(
+                "RA_p",
+                "Resistencia interna del amperimetro",
+                "ohm",
+                "resistencia",
+            ),
+            qty_shared("VR1_p", "Voltaje medido en R1", "V", "voltaje"),
+            qty_shared("VR2_p", "Voltaje medido en R2", "V", "voltaje"),
+            qty_shared("VR3_p", "Voltaje medido en R3", "V", "voltaje"),
+            qty_shared("Vg_c", "Voltaje de la fuente", "V", "voltaje"),
+            qty_given(
+                "RA_c",
+                "Resistencia interna del amperimetro",
+                "ohm",
+                "resistencia",
+            ),
+            qty(
+                "R",
+                "Resistencia externa (carga variable)",
                 "ohm",
                 false,
                 "resistencia",
             ),
+            qty("I", "Corriente de carga", "A", false, "corriente"),
         ],
         &[
             res_final(
-                "I",
-                "Intensidad de corriente",
+                "I_s",
+                "Corriente teorica",
                 "A",
-                "Vg / (R1 + R2 + R3 + RA)",
+                "Vg_s / (R1 + R2 + R3 + RA_s)",
             ),
-            res("VR1", "Tension en R1", "V", "Vg * R1 / (R1 + R2 + R3 + RA)"),
-            res("VR2", "Tension en R2", "V", "Vg * R2 / (R1 + R2 + R3 + RA)"),
-            res("VR3", "Tension en R3", "V", "Vg * R3 / (R1 + R2 + R3 + RA)"),
-        ],
-    )
-    .await?;
-
-    // P2-paralelo — Circuito mixto: R2 y R3 en paralelo, en serie con R1 y RA.
-    // Req = R1 + RA + R2*R3/(R2+R3); I = Vg/Req.
-    seed_practice(
-        pool,
-        "p2-corriente-continua",
-        &[
-            qty("Vg", "Voltaje de la fuente", "V", false, "voltaje"),
-            qty("R1", "Resistencia R1", "ohm", false, "resistencia"),
-            qty("R2", "Resistencia R2", "ohm", false, "resistencia"),
-            qty("R3", "Resistencia R3", "ohm", false, "resistencia"),
-            qty(
-                "RA",
-                "Resistencia interna del amperimetro",
-                "ohm",
-                false,
-                "resistencia",
+            res_final(
+                "VR1_s_t",
+                "Voltaje teorico en R1",
+                "V",
+                "Vg_s * R1 / (R1 + R2 + R3 + RA_s)",
             ),
-        ],
-        &[
+            res_final(
+                "VR2_s_t",
+                "Voltaje teorico en R2",
+                "V",
+                "Vg_s * R2 / (R1 + R2 + R3 + RA_s)",
+            ),
+            res_final(
+                "VR3_s_t",
+                "Voltaje teorico en R3",
+                "V",
+                "Vg_s * R3 / (R1 + R2 + R3 + RA_s)",
+            ),
             res(
                 "Req",
                 "Resistencia equivalente",
                 "ohm",
-                "R1 + RA + R2*R3/(R2+R3)",
+                "R1 + RA_p + R2*R3/(R2+R3)",
             ),
             res_final(
-                "I",
-                "Intensidad de corriente teorica",
+                "I_p",
+                "Corriente teorica",
                 "A",
-                "Vg / (R1 + RA + R2*R3/(R2+R3))",
+                "Vg_p / (R1 + RA_p + R2*R3/(R2+R3))",
+            ),
+            res_final(
+                "VR1_p_t",
+                "Voltaje teorico en R1",
+                "V",
+                "Vg_p * R1 / (R1 + RA_p + R2*R3/(R2+R3))",
+            ),
+            res_final(
+                "VR2_p_t",
+                "Voltaje teorico en R2",
+                "V",
+                "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+            ),
+            res_final(
+                "VR3_p_t",
+                "Voltaje teorico en R3",
+                "V",
+                "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+            ),
+            res_final(
+                "RP_max_t",
+                "Resistencia de maxima transferencia teorica (Rth)",
+                "ohm",
+                "RA_c + R2*R3/(R2+R3)",
+            ),
+            res_final(
+                "P_max_t",
+                "Potencia maxima teorica",
+                "W",
+                "Vg_c*Vg_c/(4*(RA_c + R2*R3/(R2+R3)))",
+            ),
+            res_final(
+                "P_max_e",
+                "Potencia maxima experimental (de la tabla)",
+                "W",
+                "P_max",
+            ),
+            res_final(
+                "RP_max_e",
+                "Resistencia de maxima transferencia experimental",
+                "ohm",
+                "R_at_P_max",
             ),
         ],
     )
     .await?;
+    if fresh_p2cc {
+        create_intermediate(
+            pool,
+            "p2-cc",
+            IntermediateInput {
+                symbol: "P".into(),
+                name: "Potencia disipada en R".into(),
+                unit: "W".into(),
+                formula: "I*I*R".into(),
+            },
+        )
+        .await?;
+        create_curve(
+            pool,
+            "p2-cc",
+            CurveInput {
+                x_formula: "R".into(),
+                y_formula: "P".into(),
+                x_log: false,
+            },
+        )
+        .await?;
+    }
 
     // P3 — parte 2 (desfasaje por figura de Lissajous). El alumno carga una serie de puntos
     // con f, a y b; las fórmulas de eje (en `practices.x_formula`/`y_formula`) derivan
@@ -1477,74 +1569,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             )
             .await?;
         }
-    }
-
-    // P2-parte2 — curva de potencia. Por punto: R (resistencia externa, set con caja de
-    // resistencias) e I (corriente, medida con amperimetro). Escalares: Vg (tension del
-    // generador, medida), RA (resistencia interna del amperimetro, catedra), R2 y R3 (del
-    // circuito paralelo de parte 1, dados). Intermedia P = I^2*R (W). Una curva: P vs R.
-    // Mensurandos: Rth = RA + R2||R3 (resistencia de Thevenin del circuito) y
-    // RP_max = Rth, P_max = Vg^2/(4*Rth).
-    let fresh_p2pot = seed_practice(
-        pool,
-        "p2-potencia",
-        &[
-            qty(
-                "R",
-                "Resistencia externa (carga variable)",
-                "ohm",
-                false,
-                "resistencia",
-            ),
-            qty("I", "Corriente", "A", false, "corriente"),
-            qty_shared("Vg", "Tension del generador", "V", "tension"),
-            qty_given(
-                "RA",
-                "Resistencia interna del amperimetro",
-                "ohm",
-                "resistencia",
-            ),
-            qty_given("R2", "Resistencia R2", "ohm", "resistencia"),
-            qty_given("R3", "Resistencia R3", "ohm", "resistencia"),
-        ],
-        &[
-            res(
-                "RP_max",
-                "Resistencia de maxima transferencia de potencia (Rth)",
-                "ohm",
-                "RA + R2*R3/(R2+R3)",
-            ),
-            res_final(
-                "P_max",
-                "Potencia maxima (teorica)",
-                "W",
-                "Vg*Vg/(4*(RA + R2*R3/(R2+R3)))",
-            ),
-        ],
-    )
-    .await?;
-    if fresh_p2pot {
-        create_intermediate(
-            pool,
-            "p2-potencia",
-            IntermediateInput {
-                symbol: "P".into(),
-                name: "Potencia disipada en R".into(),
-                unit: "W".into(),
-                formula: "I*I*R".into(),
-            },
-        )
-        .await?;
-        create_curve(
-            pool,
-            "p2-potencia",
-            CurveInput {
-                x_formula: "R".into(),
-                y_formula: "P".into(),
-                x_log: false,
-            },
-        )
-        .await?;
     }
 
     Ok(())
@@ -2135,7 +2159,7 @@ mod tests {
         // práctica): update → None, delete → false.
         assert!(update_curve(
             &pool,
-            "p2-serie",
+            "p2-cc",
             &c1.id,
             CurveInput {
                 x_formula: "a".into(),
@@ -2146,7 +2170,7 @@ mod tests {
         .await
         .unwrap()
         .is_none());
-        assert!(!delete_curve(&pool, "p2-serie", &c1.id).await.unwrap());
+        assert!(!delete_curve(&pool, "p2-cc", &c1.id).await.unwrap());
 
         // Baja correcta: queda una sola curva.
         assert!(delete_curve(&pool, "p1-estadistica", &c1.id).await.unwrap());
@@ -2264,7 +2288,7 @@ mod tests {
         // Editar acotado por práctica; práctica equivocada → None.
         assert!(update_intermediate(
             &pool,
-            "p2-serie",
+            "p2-cc",
             &q.id,
             IntermediateInput {
                 symbol: "Q".into(),
@@ -2407,41 +2431,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seed_definitions_populates_p2_corriente_continua() {
-        let (pool, _dir) = setup().await;
-        seed_definitions(&pool).await.unwrap();
-        let def = definition(&pool, "p2-corriente-continua")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(def.quantities.len(), 5);
-        for symbol in ["Vg", "R1", "R2", "R3", "RA"] {
-            assert!(
-                def.quantities.iter().any(|q| q.symbol == symbol),
-                "falta la magnitud {symbol}"
-            );
-        }
-        assert!(def.results.iter().any(|r| r.symbol == "I"));
-    }
-
-    #[tokio::test]
-    async fn seed_definitions_populates_p2_serie() {
-        let (pool, _dir) = setup().await;
-        seed_definitions(&pool).await.unwrap();
-        let def = definition(&pool, "p2-serie").await.unwrap().unwrap();
-        assert_eq!(def.quantities.len(), 5);
-        for symbol in ["Vg", "R1", "R2", "R3", "RA"] {
-            assert!(
-                def.quantities.iter().any(|q| q.symbol == symbol),
-                "falta la magnitud {symbol}"
-            );
-        }
-        let i = def.results.iter().find(|r| r.symbol == "I").unwrap();
-        assert_eq!(i.formula, "Vg / (R1 + R2 + R3 + RA)");
-        assert!(def.results.iter().any(|r| r.symbol == "VR1"));
-    }
-
-    #[tokio::test]
     async fn seed_definitions_populates_p3_relajacion() {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
@@ -2462,9 +2451,10 @@ mod tests {
         assert!(def.results.iter().any(|r| r.symbol == "tau_exp"));
     }
 
-    // Verifica que las fórmulas sembradas de P2/P3 son evaluables por el motor (sin NaN/errores).
+    // Verifica que las fórmulas sembradas de P3 son evaluables por el motor (sin NaN/errores).
+    // Las de P2 (p2-cc) las cubre `analyze_p2_cc_derives_results_and_aliases`.
     #[tokio::test]
-    async fn seeded_p2_p3_formulas_compute() {
+    async fn seeded_p3_formulas_compute() {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
 
@@ -2505,45 +2495,6 @@ mod tests {
             .find(|d| d.symbol == "tau_teorico")
             .unwrap();
         assert!((tau_t.value - 1.01e-4).abs() < 1e-12);
-
-        // P2: Vg=8, R1=100, R2=200, R3=200, RA=10 -> Req=100+10+100=210; I=8/210
-        let def2 = definition(&pool, "p2-corriente-continua")
-            .await
-            .unwrap()
-            .unwrap();
-        let m2: Vec<crate::computation::MeasurementInput> = def2
-            .quantities
-            .iter()
-            .map(|q| {
-                let v = match q.symbol.as_str() {
-                    "Vg" => 8.0,
-                    "RA" => 10.0,
-                    "R1" => 100.0,
-                    _ => 200.0,
-                };
-                crate::computation::MeasurementInput {
-                    quantity_id: q.id.clone(),
-                    instrument_id: None,
-                    scale_id: None,
-                    values: vec![v],
-                    given_u: None,
-                    point_replicas: None,
-                    operator_replicas: None,
-                }
-            })
-            .collect();
-        let a2 = crate::computation::compute(
-            &def2.quantities,
-            &def2.results,
-            &Default::default(),
-            &m2,
-            None,
-        )
-        .unwrap();
-        let req = a2.derived.iter().find(|d| d.symbol == "Req").unwrap();
-        assert!((req.value - 210.0).abs() < 1e-9);
-        let i = a2.derived.iter().find(|d| d.symbol == "I").unwrap();
-        assert!((i.value - 8.0 / 210.0).abs() < 1e-9);
     }
 
     #[tokio::test]
@@ -2844,7 +2795,7 @@ mod tests {
                 x_log: c.x_log,
             })
             .collect();
-        let analysis = crate::computation::compute_curva(
+        let (analysis, _) = crate::computation::compute_curva(
             &def.quantities,
             &def.intermediates,
             &curves,
@@ -2862,102 +2813,64 @@ mod tests {
         assert!(ph.x_log);
     }
 
-    /// La definición sembrada de P2-potencia tiene 6 magnitudes, 1 intermedia (P=I^2*R), 1 curva
-    /// y 2 mensurandos escalares (RP_max, P_max). El análisis computa P_max = Vg^2/(4*Rth).
+    /// La definición sembrada de P2-cc (corriente continua unificada) tiene 17 magnitudes
+    /// (15 escalares + R e I por punto), 13 mensurandos (12 finales; Req no lo es),
+    /// la intermedia P = I^2*R y la curva P vs R.
     #[tokio::test]
-    async fn seeded_p2_potencia_populates_and_computes() {
+    async fn seeded_p2_cc_populates_definition() {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
-        let def = definition(&pool, "p2-potencia").await.unwrap().unwrap();
+        let def = definition(&pool, "p2-cc").await.unwrap().unwrap();
 
-        assert_eq!(def.quantities.len(), 6);
-        assert_eq!(
-            def.results
-                .iter()
-                .map(|r| r.symbol.as_str())
-                .collect::<Vec<_>>(),
-            ["RP_max", "P_max"]
-        );
+        assert_eq!(def.quantities.len(), 17);
+        for symbol in [
+            "R1", "R2", "R3", "Vg_s", "RA_s", "VR1_s", "VR2_s", "VR3_s", "Vg_p", "RA_p", "VR1_p",
+            "VR2_p", "VR3_p", "Vg_c", "RA_c", "R", "I",
+        ] {
+            assert!(
+                def.quantities.iter().any(|q| q.symbol == symbol),
+                "falta la magnitud {symbol}"
+            );
+        }
+        // Solo R e I son por punto; el resto son escalares compartidos. RA (por parte) es dato
+        // de catedra (tabla segun la escala del amperimetro); el resto se mide.
+        let given = ["RA_s", "RA_p", "RA_c"];
+        for q in &def.quantities {
+            let per_point = q.symbol == "R" || q.symbol == "I";
+            assert_eq!(q.per_point, per_point, "per_point de {}", q.symbol);
+            assert_eq!(
+                q.is_given,
+                given.contains(&q.symbol.as_str()),
+                "is_given de {}",
+                q.symbol
+            );
+        }
+        assert_eq!(def.results.len(), 13);
+        assert_eq!(def.results.iter().filter(|r| r.is_final).count(), 12);
+        let req = def.results.iter().find(|r| r.symbol == "Req").unwrap();
+        assert!(!req.is_final);
+        let i_s = def.results.iter().find(|r| r.symbol == "I_s").unwrap();
+        assert_eq!(i_s.formula, "Vg_s / (R1 + R2 + R3 + RA_s)");
         assert_eq!(def.intermediates.len(), 1);
         assert_eq!(def.intermediates[0].symbol, "P");
         assert_eq!(def.curves.len(), 1);
         assert!(!def.curves[0].x_log);
         assert_eq!(def.curves[0].x_formula, "R");
         assert_eq!(def.curves[0].y_formula, "P");
-
-        // Computo end-to-end: Vg=10V, RA=100ohm, R2=200ohm, R3=200ohm → Rth=RA+R2||R3=200ohm.
-        // RP_max = 200 ohm, P_max = 100/(4*200) = 0.125 W.
-        // 3 puntos con R=[100,200,400] e I=Vg/(Rth+R).
-        let id = |sym: &str| {
-            def.quantities
-                .iter()
-                .find(|q| q.symbol == sym)
-                .unwrap()
-                .id
-                .clone()
-        };
-        let pt = |sym: &str, vals: Vec<f64>| crate::computation::MeasurementInput {
-            quantity_id: id(sym),
-            instrument_id: None,
-            scale_id: None,
-            values: vals,
-            given_u: None,
-            point_replicas: None,
-            operator_replicas: None,
-        };
-        let vg = 10.0_f64;
-        let ra = 100.0_f64;
-        let r2 = 200.0_f64;
-        let r3 = 200.0_f64;
-        let rth = ra + r2 * r3 / (r2 + r3); // = 200.0
-        let rs = vec![100.0_f64, 200.0, 400.0];
-        let is: Vec<f64> = rs.iter().map(|r| vg / (rth + r)).collect();
-        let measurements = vec![
-            pt("R", rs.clone()),
-            pt("I", is.clone()),
-            pt("Vg", vec![vg]),
-            pt("RA", vec![ra]),
-            pt("R2", vec![r2]),
-            pt("R3", vec![r3]),
-        ];
-        let curves: Vec<crate::computation::CurveSpec> = def
-            .curves
-            .iter()
-            .map(|c| crate::computation::CurveSpec {
-                x_formula: &c.x_formula,
-                y_formula: &c.y_formula,
-                x_log: c.x_log,
-            })
-            .collect();
-        let analysis = crate::computation::compute_curva(
-            &def.quantities,
-            &def.intermediates,
-            &curves,
-            &measurements,
-        )
-        .unwrap();
-        // La curva tiene 3 puntos: x=R, y=P=I^2*R. El punto central (R=Rth=200) maximiza P.
-        assert_eq!(analysis.scatters[0].points.len(), 3);
-        let p_at_rth = (vg / (rth + rth)).powi(2) * rth; // P_max = Vg^2/(4*Rth)
-        let p_curve_max = analysis.scatters[0]
-            .points
-            .iter()
-            .map(|(_, p)| *p)
-            .fold(f64::NEG_INFINITY, f64::max);
-        assert!((p_curve_max - p_at_rth).abs() < 1e-9);
-        // Los mensurandos RP_max y P_max los calcula el camino `analyze` (no compute_curva puro).
-        // Aquí solo verificamos la estructura; el test de integración cubre el análisis completo.
     }
 
-    /// Integración: `analyze()` para p2-potencia deriva RP_max y P_max correctamente.
+    /// Integración: `analyze()` para p2-cc deriva los mensurandos de las tres partes y los
+    /// alias de extremos de la tabla de potencia.
     ///
-    /// Verifica que el camino curva + escalares en `analyze()` llena `derived` con
-    /// RP_max = Rth = 200 Ω y P_max = Vg²/(4·Rth) = 0.125 W.
+    /// Serie: I_s = Vg_s/(R1+R2+R3+RA_s) y VRi_s_t. Paralelo: Req, I_p y VRi_p_t.
+    /// Potencia: RP_max_t = Rth, P_max_t = Vg_c²/(4·Rth), y los experimentales
+    /// P_max_e = max(P) e RP_max_e = R en ese punto, ambos con U = 0. Además el análisis
+    /// expone las magnitudes escalares medidas (`quantities`), que antes se descartaban.
     #[tokio::test]
-    async fn analyze_p2_potencia_derives_rp_max_and_p_max() {
+    async fn analyze_p2_cc_derives_results_and_aliases() {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
-        let def = definition(&pool, "p2-potencia").await.unwrap().unwrap();
+        let def = definition(&pool, "p2-cc").await.unwrap().unwrap();
 
         let id = |sym: &str| {
             def.quantities
@@ -2977,52 +2890,78 @@ mod tests {
             operator_replicas: None,
         };
 
-        let vg = 10.0_f64;
-        let ra = 100.0_f64;
-        let r2 = 200.0_f64;
-        let r3 = 200.0_f64;
-        let rth = ra + r2 * r3 / (r2 + r3); // = 200.0
+        let (r1, r2, r3) = (100.0_f64, 200.0_f64, 200.0_f64);
+        let (vg_s, ra_s) = (8.0_f64, 10.0_f64);
+        let (vg_p, ra_p) = (8.0_f64, 10.0_f64);
+        let (vg_c, ra_c) = (10.0_f64, 100.0_f64);
+        let rpar = r2 * r3 / (r2 + r3); // = 100.0
+        let rth = ra_c + rpar; // = 200.0
         let rs = vec![100.0_f64, 200.0, 400.0];
-        let is: Vec<f64> = rs.iter().map(|r| vg / (rth + r)).collect();
+        let is: Vec<f64> = rs.iter().map(|r| vg_c / (rth + r)).collect();
         let measurements = vec![
-            pt("R", rs),
-            pt("I", is),
-            pt("Vg", vec![vg]),
-            pt("RA", vec![ra]),
+            pt("R1", vec![r1]),
             pt("R2", vec![r2]),
             pt("R3", vec![r3]),
+            pt("Vg_s", vec![vg_s]),
+            pt("RA_s", vec![ra_s]),
+            pt("VR1_s", vec![1.55]),
+            pt("VR2_s", vec![3.15]),
+            pt("VR3_s", vec![3.15]),
+            pt("Vg_p", vec![vg_p]),
+            pt("RA_p", vec![ra_p]),
+            pt("VR1_p", vec![3.8]),
+            pt("VR2_p", vec![3.8]),
+            pt("VR3_p", vec![3.8]),
+            pt("Vg_c", vec![vg_c]),
+            pt("RA_c", vec![ra_c]),
+            pt("R", rs.clone()),
+            pt("I", is),
         ];
 
-        let analysis = crate::computation::analyze(&pool, "p2-potencia", &measurements)
+        let analysis = crate::computation::analyze(&pool, "p2-cc", &measurements)
             .await
             .unwrap();
 
-        // El camino curva escalar debe poblar `derived`.
+        // Las magnitudes escalares medidas se exponen (antes el camino curva las descartaba).
+        assert_eq!(analysis.quantities.len(), 15);
+        assert!(analysis.quantities.iter().any(|q| q.symbol == "VR1_s"));
+
+        let derived = |sym: &str| {
+            analysis
+                .derived
+                .iter()
+                .find(|d| d.symbol == sym)
+                .unwrap_or_else(|| panic!("{sym} debe estar en derived"))
+        };
+
+        // Serie: Rtot = 510.
+        let rtot = r1 + r2 + r3 + ra_s;
+        assert!((derived("I_s").value - vg_s / rtot).abs() < 1e-9);
+        assert!((derived("VR1_s_t").value - vg_s * r1 / rtot).abs() < 1e-9);
+        assert!((derived("VR3_s_t").value - vg_s * r3 / rtot).abs() < 1e-9);
+
+        // Paralelo: Req = 210.
+        let req = r1 + ra_p + rpar;
+        assert!((derived("Req").value - req).abs() < 1e-9);
+        assert!((derived("I_p").value - vg_p / req).abs() < 1e-9);
+        assert!((derived("VR2_p_t").value - vg_p * rpar / req).abs() < 1e-9);
+
+        // Potencia teorica: Rth = 200, P_max = 0.125 W.
+        assert!((derived("RP_max_t").value - rth).abs() < 1e-9);
+        assert!((derived("P_max_t").value - vg_c * vg_c / (4.0 * rth)).abs() < 1e-9);
+
+        // Experimentales por alias: el punto R = 200 = Rth maximiza P en la tabla.
+        let p_max_table = (vg_c / (rth + rth)).powi(2) * rth;
+        let pme = derived("P_max_e");
         assert!(
-            !analysis.derived.is_empty(),
-            "derived debe contener al menos RP_max y P_max"
+            (pme.value - p_max_table).abs() < 1e-9,
+            "P_max_e esperado {p_max_table}, obtenido {}",
+            pme.value
         );
-        let rp = analysis
-            .derived
-            .iter()
-            .find(|d| d.symbol == "RP_max")
-            .expect("RP_max debe estar en derived");
-        assert!(
-            (rp.value - rth).abs() < 1e-9,
-            "RP_max esperado {rth}, obtenido {}",
-            rp.value
-        );
-        let p_max_expected = vg * vg / (4.0 * rth); // 0.125 W
-        let pm = analysis
-            .derived
-            .iter()
-            .find(|d| d.symbol == "P_max")
-            .expect("P_max debe estar en derived");
-        assert!(
-            (pm.value - p_max_expected).abs() < 1e-9,
-            "P_max esperado {p_max_expected}, obtenido {}",
-            pm.value
-        );
+        assert_eq!(pme.u_expanded, 0.0, "P_max_e va sin incertidumbre");
+        let rpe = derived("RP_max_e");
+        assert!((rpe.value - 200.0).abs() < 1e-9);
+        assert_eq!(rpe.u_expanded, 0.0, "RP_max_e va sin incertidumbre");
     }
 
     /// Integración: `analyze()` para filtros deriva fpasaje y fbloqueo correctamente.

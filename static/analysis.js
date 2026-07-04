@@ -1,7 +1,8 @@
 import { state } from "./state.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, cssEscape, allStudents } from "./lib.js";
+import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, compareMeasuredVsTheoretical, cssEscape, allStudents } from "./lib.js";
+import { RESULTS_WITHOUT_U } from "./constants.js";
 import { postJson } from "./api.js";
-import { submissionHeader, teacherCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
+import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
 
 export function renderAnalysis(target, submission, includeReview = false, definition = null) {
@@ -37,6 +38,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     target.innerHTML = `
       ${submissionHeader(submission)}
       ${teacherCommentMarkup(submission)}
+      ${studentCommentMarkup(submission)}
       ${!isTeacher ? editBannerMarkup(submission) : ""}
       ${body}
       ${includeReview ? renderReviewForm(submission) : ""}
@@ -46,6 +48,11 @@ export function renderAnalysis(target, submission, includeReview = false, defini
       .querySelector(".edit-submission-btn")
       ?.addEventListener("click", () =>
         import("./forms.js").then(({ startEditSubmission }) => startEditSubmission(submission))
+      );
+    target
+      .querySelector(".cancel-submission-btn")
+      ?.addEventListener("click", () =>
+        import("./forms.js").then(({ cancelSubmission }) => cancelSubmission(submission))
       );
     const reviewForm = target.querySelector(".review-form");
     if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
@@ -63,6 +70,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
   target.innerHTML = `
     ${submissionHeader(submission)}
     ${teacherCommentMarkup(submission)}
+    ${studentCommentMarkup(submission)}
 
     <div class="metrics">
       <div class="metric">
@@ -192,7 +200,8 @@ function quantitiesTableMarkup(quantities) {
     </div>`;
 }
 
-/** Bloque de mensurandos derivados (valor ± U + fórmula). `heading` controla el título opcional. */
+/** Bloque de mensurandos derivados (valor ± U + fórmula). `heading` controla el título opcional.
+ *  Los símbolos de RESULTS_WITHOUT_U se muestran sin ±U (van sin incertidumbre por diseño). */
 export function derivedBlockMarkup(derived, heading = "Mensurandos") {
   if (!derived.length) return "";
   return `
@@ -203,7 +212,7 @@ export function derivedBlockMarkup(derived, heading = "Mensurandos") {
           (d) => `
           <div class="metric">
             <div class="metric-label">${symbolHtml(d.symbol)}${d.unit ? ` (${unitHtml(d.unit)})` : ""}</div>
-            <div class="metric-value metric-text">${escapeHtml(measureText(d.value, d.u_expanded))}</div>
+            <div class="metric-value metric-text">${escapeHtml(measureText(d.value, RESULTS_WITHOUT_U.has(d.symbol) ? null : d.u_expanded))}</div>
             <div class="submission-meta">${escapeHtml(d.formula)}</div>
           </div>`,
         )
@@ -282,10 +291,17 @@ function formAnalysisMarkup(analysis) {
         return `${heading}${scatterMarkup(s)}`;
       })
       .join("");
+    // Los escalares medidos (p. ej. las tensiones con multímetro) también se muestran acá,
+    // con su tabla de incertidumbres y la comparación contra los teóricos automáticos.
+    const quantitiesSection = quantities.length
+      ? `<h3>Incertidumbres por magnitud</h3>${quantitiesTable}`
+      : "";
     return `
       <h3>${title}</h3>
       ${blocks}
+      ${quantitiesSection}
       ${derivedBlock}
+      ${measuredVsTheoreticalMarkup(quantities, derived)}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
   }
@@ -414,6 +430,44 @@ function scatterSvg(plot, xLabel = "x", yLabel = "y") {
   });
 }
 
+/** Tabla "Medido vs teórico": magnitudes medidas (`X`) contra su derivado automático (`X_t`). */
+function measuredVsTheoreticalMarkup(quantities, derived) {
+  const rows = compareMeasuredVsTheoretical(quantities, derived);
+  if (!rows.length) return "";
+  const num = (v) => (v == null ? "—" : escapeHtml(format(v)));
+  const pct = (v) => (v == null ? "—" : `${escapeHtml(format(v))} %`);
+  return `
+    <h3>Medido vs teórico (automático)</h3>
+    <p class="submission-meta">Cada magnitud medida comparada con el valor teórico que calcula el programa (con su U propagada).</p>
+    <div class="directory-table-wrap">
+      <table class="grade-table directory-data-table compare-table">
+        <thead>
+          <tr>
+            <th>Magnitud</th><th>Medido (±U)</th><th>Teórico (±U)</th>
+            <th>Δ valor</th><th>Δ valor (%)</th><th>Δ U</th><th>Δ U (%)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (r) => `
+            <tr>
+              <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong> <span class="submission-meta">${unitHtml(r.unit)}</span></td>
+              <td>${escapeHtml(measureText(r.exp.value, r.exp.u))}</td>
+              <td>${escapeHtml(measureText(r.teo.value, r.teo.u))}</td>
+              <td>${num(r.dValue)}</td>
+              <td>${pct(r.dValuePct)}</td>
+              <td>${num(r.dU)}</td>
+              <td>${pct(r.dUPct)}</td>
+            </tr>`,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
   const rows = compareResults(autoDerived, studentResults, tolerances);
   if (!rows.length) return "";
@@ -443,8 +497,8 @@ function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
               (r) => `
             <tr>
               <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong> <span class="submission-meta">${unitHtml(r.unit)}</span></td>
-              <td>${escapeHtml(measureText(r.auto.value, r.auto.u))}</td>
-              <td>${r.student ? escapeHtml(measureText(r.student.value, r.student.u)) : "—"}</td>
+              <td>${escapeHtml(measureText(r.auto.value, RESULTS_WITHOUT_U.has(r.symbol) ? null : r.auto.u))}</td>
+              <td>${r.student ? escapeHtml(measureText(r.student.value, RESULTS_WITHOUT_U.has(r.symbol) ? null : r.student.u)) : "—"}</td>
               <td>${num(r.dValue)}</td>
               <td>${pct(r.dValuePct)}</td>
               <td>${num(r.dU)}</td>
@@ -470,11 +524,15 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
       const v = s ? escapeHtml(String(s.value)) : "";
       const u = s && s.u_expanded != null ? escapeHtml(String(s.u_expanded)) : "";
       const dis = locked ? "disabled" : "";
+      // Los resultados sin incertidumbre (RESULTS_WITHOUT_U) no llevan input U.
+      const uCell = RESULTS_WITHOUT_U.has(m.symbol)
+        ? `<td class="submission-meta">sin U</td>`
+        : `<td><input class="student-u" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${u}" ${dis} placeholder="U" /></td>`;
       return `
         <tr>
           <td class="directory-primary"><strong>${symbolHtml(m.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(m.name)}${m.unit ? ` (${unitHtml(m.unit)})` : ""}</span></td>
           <td><input class="student-value" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${v}" ${dis} placeholder="valor" /></td>
-          <td><input class="student-u" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${u}" ${dis} placeholder="U" /></td>
+          ${uCell}
         </tr>`;
     })
     .join("");

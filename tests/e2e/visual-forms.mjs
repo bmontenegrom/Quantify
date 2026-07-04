@@ -100,9 +100,52 @@ async function main() {
     await login(page);
     await page.click("#theme-toggle");
 
-    await openPractice(page, "p2-serie");
+    await openPractice(page, "p2-cc");
     await assertInputContrast(page);
     await page.screenshot({ path: join(ARTIFACTS, "visual-cc-dark.png"), fullPage: true });
+
+    // Tabs de partes: alternan secciones de la MISMA práctica sin recargar la definición.
+    const partTabs = page.locator("#practice-part-tabs .part-tab");
+    assert((await partTabs.count()) === 3, "p2-cc debe tener 3 tabs de partes");
+    await partTabs.nth(0).click(); // Serie
+    assert(
+      await page.locator('#measurement-fields [data-section="serie"]').first().isVisible(),
+      "la sección serie debe verse en su tab",
+    );
+    await page.screenshot({ path: join(ARTIFACTS, "visual-cc-serie.png"), fullPage: true });
+    await partTabs.nth(1).click(); // Paralelo
+    assert(
+      await page.locator('#measurement-fields [data-section="paralelo"]').first().isVisible(),
+      "la sección paralelo debe verse en su tab",
+    );
+    assert(
+      await page.locator('#measurement-fields [data-section="serie"]').first().isHidden(),
+      "la sección serie debe ocultarse fuera de su tab",
+    );
+    await page.screenshot({ path: join(ARTIFACTS, "visual-cc-paralelo.png"), fullPage: true });
+    await partTabs.nth(2).click(); // Curva de potencia
+    await page.waitForSelector("#measurement-fields .series-table", { state: "visible" });
+
+    // Columna P en vivo: al tipear R e I la celda P muestra I²·R.
+    const firstRow = page.locator("#measurement-fields .series-row").first();
+    await firstRow.locator(".series-value").nth(0).fill("100"); // R
+    await firstRow.locator(".series-value").nth(1).fill("0.5"); // I
+    const liveText = await firstRow.locator(".series-live-value").innerText();
+    assert(liveText.replace(",", ".").includes("25"), `celda P debía mostrar 25, mostró "${liveText}"`);
+    await page.screenshot({ path: join(ARTIFACTS, "visual-cc-potencia.png"), fullPage: true });
+
+    // Finales sin incertidumbre: P_max_*/RP_max_* no tienen input U; los VR teóricos sí.
+    for (const sym of ["P_max_e", "P_max_t", "RP_max_e", "RP_max_t"]) {
+      const row = page.locator(`#measurement-fields [data-final-result="1"][data-symbol="${sym}"]`);
+      assert((await row.count()) === 1, `falta la fila de resultado final ${sym}`);
+      assert((await row.locator(".final-result-u").count()) === 0, `${sym} no debe tener input U`);
+    }
+    assert(
+      (await page
+        .locator('#measurement-fields [data-final-result="1"][data-symbol="VR1_s_t"] .final-result-u')
+        .count()) === 1,
+      "VR1_s_t debe tener input U",
+    );
 
     await openPractice(page, "fluidos-1");
     await assertInputContrast(page);

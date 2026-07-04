@@ -32,6 +32,7 @@ const ARTIFACTS = join(ROOT, "tests", "e2e", "artifacts");
 const STUDENT = { email: "estudiante@quantify.local", password: "estudiante123" };
 const TEACHER = { email: "docente@quantify.local", password: "docente123" };
 const REVIEW_COMMENT = "Muy buen trabajo (E2E)";
+const STUDENT_COMMENT = "No pude tomar réplicas extra por falta de tiempo (E2E)";
 
 let currentStep = "(inicio)";
 function step(name) {
@@ -123,6 +124,9 @@ async function studentSubmitsP1(page) {
     .locator(".measure-value")
     .fill("12.5");
 
+  step("estudiante: agrega observaciones opcionales");
+  await page.fill("#student-comment", STUDENT_COMMENT);
+
   step("estudiante: entrega el formulario");
   await page.click("#submit-button");
   await page.waitForSelector('#submit-status:has-text("Entrega guardada")', { timeout: 15_000 });
@@ -132,6 +136,10 @@ async function studentSubmitsP1(page) {
   assert(
     (latest ?? "").includes("El docente todavia no habilito"),
     "la entrega recién creada no debía mostrar el cálculo automático al estudiante",
+  );
+  assert(
+    (latest ?? "").includes(STUDENT_COMMENT),
+    "las observaciones del alumno debían verse aunque el análisis esté oculto",
   );
 }
 
@@ -162,6 +170,10 @@ async function teacherReviews(page) {
     (detail ?? "").includes("Comparación: tus cálculos vs automático"),
     "el docente debía ver la tabla de comparación",
   );
+  assert(
+    (detail ?? "").includes(STUDENT_COMMENT),
+    "el docente debía ver las observaciones del alumno sin habilitar la visibilidad",
+  );
 
   step("docente: guarda la corrección y habilita la visibilidad");
   await page.selectOption('.review-form select[name="status"]', "aprobada");
@@ -180,6 +192,10 @@ async function studentSeesResults(page) {
   const detail = await page.locator("#submission-detail-body").textContent();
   assert((detail ?? "").includes("u_A"), "el estudiante debía ver la tabla de incertidumbres");
   assert((detail ?? "").includes(REVIEW_COMMENT), "el estudiante debía ver el comentario del docente");
+  assert(
+    (detail ?? "").includes(STUDENT_COMMENT),
+    "el estudiante debía seguir viendo sus propias observaciones",
+  );
   assert(
     (detail ?? "").includes("quedó congelado"),
     "el formulario de cálculos propios debía quedar bloqueado",

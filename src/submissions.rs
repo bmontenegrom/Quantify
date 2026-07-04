@@ -153,8 +153,10 @@ pub struct SubmissionRecord {
     pub reviewed_at: Option<DateTime<Utc>>,
     pub measurement_meta_json: Option<String>,
     pub course_id: Option<String>,
+    pub group_id: Option<String>,
     pub submission_edit_hours: f64,
     pub table_number: Option<i64>,
+    pub student_comment: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,6 +165,10 @@ pub struct SubmissionDetail {
     pub student_name: String,
     pub group_name: String,
     pub course: String,
+    /// Ids de curso/grupo (a diferencia de `course`/`group_name`, que son solo texto). Los usa
+    /// el frontend para reabrir el formulario de carga tras cancelar una entrega.
+    pub course_id: Option<String>,
+    pub group_id: Option<String>,
     pub practice_id: String,
     pub practice_name: String,
     pub file_name: String,
@@ -198,6 +204,9 @@ pub struct SubmissionDetail {
     /// Tolerancias porcentuales por símbolo de mensurando (solo los que tienen tolerancia fijada).
     /// Usado por el frontend para mostrar el veredicto ✓/✗ en la tabla de comparación.
     pub result_tolerances: HashMap<String, f64>,
+    /// Observaciones/comentarios libres del alumno sobre su entrega. No se gatea: se ve siempre,
+    /// igual que `student_results`.
+    pub student_comment: Option<String>,
 }
 
 /// Un mensurando final calculado por el estudiante (valor ± U), por símbolo.
@@ -1069,8 +1078,10 @@ pub async fn submission_detail(
             s.reviewed_at,
             s.measurement_meta_json,
             s.course_id,
+            s.group_id,
             COALESCE(c.submission_edit_hours, 4) AS submission_edit_hours,
-            s.table_number
+            s.table_number,
+            s.student_comment
         FROM submissions s
         JOIN practices p ON p.id = s.practice_id
         LEFT JOIN courses c ON c.id = s.course_id
@@ -1114,6 +1125,8 @@ pub async fn submission_detail(
         student_name: row.student_name,
         group_name: row.group_name,
         course: row.course,
+        course_id: row.course_id,
+        group_id: row.group_id,
         practice_id: row.practice_id,
         practice_name: row.practice_name,
         file_name: row.file_name,
@@ -1133,6 +1146,7 @@ pub async fn submission_detail(
         table_number: row.table_number,
         members,
         result_tolerances,
+        student_comment: row.student_comment,
     }))
 }
 
@@ -1203,6 +1217,33 @@ pub async fn save_student_results(
     }
     tx.commit().await?;
     Ok(())
+}
+
+/// Borra una entrega y todo lo que depende de ella (lecturas, resultados del alumno,
+/// integrantes del informe). Borra explícito en orden, en una transacción (no depende de
+/// `PRAGMA foreign_keys`, mismo criterio que `instruments::delete_instrument`). Al borrar la
+/// fila de `submissions` la mesa queda libre para una nueva entrega (el índice único
+/// `idx_submissions_report_unique` solo mira esa tabla). Devuelve `true` si existía.
+pub async fn delete_submission(pool: &SqlitePool, id: &str) -> anyhow::Result<bool> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM submission_measurements WHERE submission_id = ?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM submission_student_results WHERE submission_id = ?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM report_members WHERE submission_id = ?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    let result = sqlx::query("DELETE FROM submissions WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Registra la revisión docente de una entrega (estado, comentario, nota y fecha) y
