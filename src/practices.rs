@@ -1170,21 +1170,27 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     // Migración de forma: la definición original tenía un único T/g compartidos; ahora son T1/T2/T3
     // y g1/g2/g3 por operador, más el flag `has_uncertainty` en t_med/gamma/Q. `seed_practice` es
     // idempotente y no re-siembra sobre una base ya sembrada, así que las instalaciones existentes
-    // necesitan este backfill puntual (no-op en instalaciones nuevas, que ya siembran la forma
-    // final arriba). Se asume que no hay entregas reales todavía sobre `T`/`g` (práctica en
-    // desarrollo); si las hubiera, sus mediciones quedan huérfanas tras este borrado.
-    sqlx::query(
-        "DELETE FROM practice_quantities WHERE practice_id = 'p1-estadistica' AND symbol = 'T'",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "DELETE FROM practice_results WHERE practice_id = 'p1-estadistica' \
-         AND symbol IN ('g', 'Tmedio', 'delta')",
-    )
-    .execute(pool)
-    .await?;
+    // necesitan este backfill puntual (no-op en instalaciones nuevas, que ya siembran la forma final
+    // arriba). Cada bloque corre una única vez, guardado por el símbolo nuevo que da de alta: una
+    // vez que T1/g1 existen, no se vuelve a tocar (así no se pisan ediciones del admin sobre
+    // has_uncertainty/optional/formula hechas después de la migración).
     if quantity_missing(pool, "p1-estadistica", "T1").await? {
+        // Borra primero las mediciones que referencian la magnitud vieja: `submission_measurements
+        // .quantity_id` tiene FK a `practice_quantities(id)` sin `ON DELETE CASCADE`, así que
+        // borrar la magnitud con mediciones reales cargadas violaría la constraint (con
+        // `foreign_keys` activo) y tiraría el boot abajo. Si hubiera entregas reales sobre `T`,
+        // se descartan sus mediciones en vez de eso.
+        sqlx::query(
+            "DELETE FROM submission_measurements WHERE quantity_id IN \
+             (SELECT id FROM practice_quantities WHERE practice_id = 'p1-estadistica' AND symbol = 'T')",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "DELETE FROM practice_quantities WHERE practice_id = 'p1-estadistica' AND symbol = 'T'",
+        )
+        .execute(pool)
+        .await?;
         let mut conn = pool.acquire().await?;
         let base_pos: (i64,) = sqlx::query_as(
             "SELECT COALESCE(MAX(position), 0) FROM practice_quantities WHERE practice_id = ?1",
@@ -1202,8 +1208,27 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         {
             insert_quantity(&mut conn, "p1-estadistica", base_pos.0 + i as i64 + 1, q).await?;
         }
+        // t_med sin instrumento/U, T2/T3 opcionales: forma vieja de la base no tenía estos flags.
+        sqlx::query(
+            "UPDATE practice_quantities SET has_uncertainty = 0 \
+             WHERE practice_id = 'p1-estadistica' AND symbol = 't_med'",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "UPDATE practice_quantities SET optional = 1 \
+             WHERE practice_id = 'p1-estadistica' AND symbol IN ('T2', 'T3')",
+        )
+        .execute(pool)
+        .await?;
     }
     if result_missing(pool, "p1-estadistica", "g1").await? {
+        sqlx::query(
+            "DELETE FROM practice_results WHERE practice_id = 'p1-estadistica' \
+             AND symbol IN ('g', 'Tmedio', 'delta')",
+        )
+        .execute(pool)
+        .await?;
         let mut conn = pool.acquire().await?;
         let base_pos: (i64,) = sqlx::query_as(
             "SELECT COALESCE(MAX(position), 0) FROM practice_results WHERE practice_id = ?1",
@@ -1236,31 +1261,28 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         {
             insert_result(&mut conn, "p1-estadistica", base_pos.0 + i as i64 + 1, r).await?;
         }
+        // gamma/Q sin ±U, y Q pasa a referenciar T1 (antes T): forma vieja de la base no tenía
+        // `has_uncertainty` ni el operador explícito en la fórmula/nombre.
+        sqlx::query(
+            "UPDATE practice_results SET has_uncertainty = 0 \
+             WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q')",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "UPDATE practice_results SET formula = 'pi*t_med/(T1*math::ln(2))', \
+                 name = 'Factor de calidad (usa el periodo del Operador 1)' \
+             WHERE practice_id = 'p1-estadistica' AND symbol = 'Q'",
+        )
+        .execute(pool)
+        .await?;
     }
-    // Backfill: t_med sin instrumento/U, gamma/Q sin ±U, Q referencia T1 (antes T), y T2/T3 son
-    // opcionales — todo esto pudo quedar desactualizado en una base ya sembrada con la forma vieja.
+    // gamma/Q pasaron a ser resultado final después del alta inicial de la práctica: invariante que
+    // se re-aplica en cada boot (no solo en la migración de forma de arriba) para autocurar bases
+    // donde haya quedado en `is_final = 0` por cualquier motivo.
     sqlx::query(
-        "UPDATE practice_quantities SET has_uncertainty = 0 \
-         WHERE practice_id = 'p1-estadistica' AND symbol = 't_med'",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "UPDATE practice_quantities SET optional = 1 \
-         WHERE practice_id = 'p1-estadistica' AND symbol IN ('T2', 'T3')",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "UPDATE practice_results SET has_uncertainty = 0, is_final = 1 \
-         WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q')",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "UPDATE practice_results SET formula = 'pi*t_med/(T1*math::ln(2))', \
-             name = 'Factor de calidad (usa el periodo del Operador 1)' \
-         WHERE practice_id = 'p1-estadistica' AND symbol = 'Q'",
+        "UPDATE practice_results SET is_final = 1 \
+         WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q') AND is_final = 0",
     )
     .execute(pool)
     .await?;
