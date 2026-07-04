@@ -2348,6 +2348,8 @@ mod tests {
             is_given: false,
             replicas_per_point: None,
             per_point: true,
+            has_uncertainty: true,
+            optional: false,
         };
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),
@@ -2403,6 +2405,8 @@ mod tests {
             is_given: false,
             replicas_per_point: None,
             per_point: true,
+            has_uncertainty: true,
+            optional: false,
         };
         let mut c = h.clone();
         c.id = "q-c".into();
@@ -2433,6 +2437,7 @@ mod tests {
                 formula: "slope".into(),
                 tolerance: None,
                 is_final: false,
+                has_uncertainty: true,
             }],
             curves: vec![],
             operator_count: None,
@@ -2576,6 +2581,8 @@ mod tests {
             is_given: false,
             replicas_per_point: None,
             per_point: false,
+            has_uncertainty: true,
+            optional: false,
         };
         // Unidad vacía (o solo espacios) → magnitud adimensional, válida.
         assert!(validate_quantity(&q("")).is_ok());
@@ -2603,6 +2610,7 @@ mod tests {
             formula: "slope".into(),
             tolerance: None,
             is_final: false,
+            has_uncertainty: true,
         };
         // Unidad vacía → mensurando adimensional, válido.
         assert!(validate_result(&r("")).is_ok());

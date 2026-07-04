@@ -45,6 +45,13 @@ pub struct QuantityInput {
     /// compartido (Motor E). Default `true` (comportamiento previo).
     #[serde(default = "default_true")]
     pub per_point: bool,
+    /// `false` solo tiene efecto combinado con `is_given`: pide únicamente "Valor" (sin
+    /// instrumento ni campo U), computado con U = 0. Default `true` (comportamiento previo).
+    #[serde(default = "default_true")]
+    pub has_uncertainty: bool,
+    /// `true` si puede quedar sin lecturas sin bloquear el envío del formulario.
+    #[serde(default)]
+    pub optional: bool,
 }
 
 /// Default `true` para campos booleanos opcionales (p. ej. `per_point`).
@@ -70,6 +77,10 @@ pub struct ResultInput {
     /// `true` si es el resultado central que el alumno debe entregar para esta práctica.
     #[serde(default)]
     pub is_final: bool,
+    /// `false` oculta la ±U de este mensurando en toda la UI. Default `true` (comportamiento
+    /// previo). Reemplaza el Set hardcodeado `RESULTS_WITHOUT_U` del frontend.
+    #[serde(default = "default_true")]
+    pub has_uncertainty: bool,
 }
 
 /// Definición completa de una práctica: tipo de análisis, magnitudes y mensurandos.
@@ -718,7 +729,7 @@ pub async fn update_quantity(
     let result = sqlx::query(
         "UPDATE practice_quantities \
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
-             replicas_per_point = ?8, per_point = ?9 \
+             replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11 \
          WHERE id = ?1",
     )
     .bind(quantity_id)
@@ -730,6 +741,8 @@ pub async fn update_quantity(
     .bind(input.is_given)
     .bind(input.replicas_per_point)
     .bind(input.per_point)
+    .bind(input.has_uncertainty)
+    .bind(input.optional)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -776,7 +789,8 @@ pub async fn update_result(
     let rows = match input.tolerance {
         None => sqlx::query(
             "UPDATE practice_results \
-                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, is_final = ?6 \
+                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, is_final = ?6, \
+                     has_uncertainty = ?7 \
                  WHERE id = ?1",
         )
         .bind(result_id)
@@ -785,12 +799,14 @@ pub async fn update_result(
         .bind(input.unit.trim())
         .bind(input.formula.trim())
         .bind(input.is_final)
+        .bind(input.has_uncertainty)
         .execute(pool)
         .await?
         .rows_affected(),
         Some(tol) => sqlx::query(
             "UPDATE practice_results \
-                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6, is_final = ?7 \
+                 SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6, is_final = ?7, \
+                     has_uncertainty = ?8 \
                  WHERE id = ?1",
         )
         .bind(result_id)
@@ -800,6 +816,7 @@ pub async fn update_result(
         .bind(input.formula.trim())
         .bind(tol)
         .bind(input.is_final)
+        .bind(input.has_uncertainty)
         .execute(pool)
         .await?
         .rows_affected(),
@@ -926,6 +943,8 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
         is_given: false,
         replicas_per_point: None,
         per_point: true,
+        has_uncertainty: true,
+        optional: false,
     }
 }
 
@@ -940,7 +959,23 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
         is_given: true,
         replicas_per_point: None,
         per_point: false,
+        has_uncertainty: true,
+        optional: false,
     }
+}
+
+/// Igual que [`qty_given`], pero sin campo de incertidumbre: el formulario pide solo "Valor" (sin
+/// instrumento ni U), y se computa con U = 0. Para datos de tabla que no tienen incertidumbre
+/// propia (p. ej. un tiempo leído de una tabla de referencia).
+fn no_u(mut q: QuantityInput) -> QuantityInput {
+    q.has_uncertainty = false;
+    q
+}
+
+/// Marca una magnitud como opcional: puede quedar sin lecturas sin bloquear el envío.
+fn opt(mut q: QuantityInput) -> QuantityInput {
+    q.optional = true;
+    q
 }
 
 /// Magnitud medida **por punto con réplicas** (regresión/curva): grilla de `replicas` por punto.
@@ -960,6 +995,8 @@ fn qty_replicas(
         is_given: false,
         replicas_per_point: Some(replicas),
         per_point: true,
+        has_uncertainty: true,
+        optional: false,
     }
 }
 
@@ -975,6 +1012,8 @@ fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityI
         is_given: false,
         replicas_per_point: None,
         per_point: false,
+        has_uncertainty: true,
+        optional: false,
     }
 }
 
@@ -987,6 +1026,7 @@ fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
         formula: formula.into(),
         tolerance: None,
         is_final: false,
+        has_uncertainty: true,
     }
 }
 
@@ -996,6 +1036,13 @@ fn res_final(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput
         is_final: true,
         ..res(symbol, name, unit, formula)
     }
+}
+
+/// Igual que [`res`]/[`res_final`], pero oculta la ±U en toda la UI (reemplaza el hack
+/// `RESULTS_WITHOUT_U` del frontend). El valor propagado de fondo no cambia, solo su display.
+fn res_no_u(mut r: ResultInput) -> ResultInput {
+    r.has_uncertainty = false;
+    r
 }
 
 /// Siembra la definición de una práctica (magnitudes + mensurandos). Idempotente: no hace nada si
@@ -1026,53 +1073,194 @@ async fn seed_practice(
     Ok(true)
 }
 
+/// `true` si la práctica no tiene una magnitud con ese símbolo. Para migraciones puntuales que
+/// agregan símbolos nuevos a una práctica ya sembrada (`seed_practice` es idempotente y no
+/// re-siembra), evitando duplicar el `INSERT` en una base que ya los tiene.
+async fn quantity_missing(
+    pool: &SqlitePool,
+    practice_id: &str,
+    symbol: &str,
+) -> anyhow::Result<bool> {
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1 AND symbol = ?2",
+    )
+    .bind(practice_id)
+    .bind(symbol)
+    .fetch_one(pool)
+    .await?;
+    Ok(count.0 == 0)
+}
+
+/// Igual que [`quantity_missing`], para mensurandos derivados.
+async fn result_missing(
+    pool: &SqlitePool,
+    practice_id: &str,
+    symbol: &str,
+) -> anyhow::Result<bool> {
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_results WHERE practice_id = ?1 AND symbol = ?2",
+    )
+    .bind(practice_id)
+    .bind(symbol)
+    .fetch_one(pool)
+    .await?;
+    Ok(count.0 == 0)
+}
+
 /// Siembra las definiciones iniciales de las prácticas (idempotente por práctica).
 /// Las magnitudes/fórmulas salen de las técnicas de trabajo de Física 103.
 pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
-    // P1 — Péndulo simple: T medido con cronómetro (réplicas), L dado por cátedra.
-    // g = 4*pi^2*L/T^2 ; T y L en SI (s y m) para que g salga en m/s^2.
-    // Tres secciones que comparten datos: (1) Periodos -> T (cronometro, replicas);
-    // (2) Amortiguamiento -> t_med (t1/2) da delta=ln2/t1/2, gamma=2*delta y Q=w0/gamma;
-    // (3) Gravedad -> g = 4*pi^2*L/T^2 (usa T medio y L dado por catedra).
+    // P1 — Tratamiento estadístico de datos (péndulo simple), con 3 operadores independientes:
+    // cada uno mide su propia serie de períodos (T1/T2/T3, cronómetro, sin cruzar datos entre
+    // operadores) y tiene su propio g1/g2/g3 = 4*pi^2*L/T{n}^2. Operador 1 obligatorio; 2 y 3
+    // opcionales (el alumno puede no cargarlos). L (cátedra), t_med y los mensurandos gamma/Q son
+    // únicos para toda la práctica (no por operador). t_med ("t_1/2") es un dato de tabla sin
+    // incertidumbre propia: solo pide el campo "Valor" (`no_u`, sin instrumento ni U). gamma y Q
+    // se muestran sin ±U (`res_no_u`) aunque Q sí propaga, de fondo, la incertidumbre real del
+    // período (usa el del operador 1 — ver el nombre del mensurando).
     seed_practice(
         pool,
         "p1-estadistica",
         &[
-            qty("T", "Periodo", "s", true, "tiempo"),
             qty_given("L", "Longitud del pendulo", "m", "longitud"),
-            qty(
+            no_u(qty_given(
                 "t_med",
                 "Tiempo de semiamplitud (t1/2)",
                 "s",
-                false,
                 "tiempo",
-            ),
+            )),
+            qty("T1", "Periodo - Operador 1", "s", true, "tiempo"),
+            opt(qty("T2", "Periodo - Operador 2", "s", true, "tiempo")),
+            opt(qty("T3", "Periodo - Operador 3", "s", true, "tiempo")),
         ],
         &[
-            res("Tmedio", "Periodo medio", "s", "T"),
-            res(
-                "delta",
-                "Constante de amortiguamiento",
-                "1/s",
-                "math::ln(2)/t_med",
-            ),
-            res_final(
+            res_no_u(res_final(
                 "gamma",
                 "Coeficiente de amortiguamiento",
                 "1/s",
                 "2*math::ln(2)/t_med",
+            )),
+            res_no_u(res_final(
+                "Q",
+                "Factor de calidad (usa el periodo del Operador 1)",
+                "",
+                "pi*t_med/(T1*math::ln(2))",
+            )),
+            res_final(
+                "g1",
+                "Aceleracion de gravedad - Operador 1",
+                "m/s2",
+                "4*pi^2*L/T1^2",
             ),
-            res_final("Q", "Factor de calidad", "", "pi*t_med/(T*math::ln(2))"),
-            res_final("g", "Aceleracion de gravedad", "m/s2", "4*pi^2*L/T^2"),
+            res_final(
+                "g2",
+                "Aceleracion de gravedad - Operador 2",
+                "m/s2",
+                "4*pi^2*L/T2^2",
+            ),
+            res_final(
+                "g3",
+                "Aceleracion de gravedad - Operador 3",
+                "m/s2",
+                "4*pi^2*L/T3^2",
+            ),
         ],
     )
     .await?;
-    // Backfill: gamma y Q pasaron a ser resultado final despues del alta inicial de la practica;
-    // seed_practice es idempotente y no re-siembra, asi que las bases ya sembradas necesitan este
-    // update puntual para que el alumno pueda entregarlos.
+    // Migración de forma: la definición original tenía un único T/g compartidos; ahora son T1/T2/T3
+    // y g1/g2/g3 por operador, más el flag `has_uncertainty` en t_med/gamma/Q. `seed_practice` es
+    // idempotente y no re-siembra sobre una base ya sembrada, así que las instalaciones existentes
+    // necesitan este backfill puntual (no-op en instalaciones nuevas, que ya siembran la forma
+    // final arriba). Se asume que no hay entregas reales todavía sobre `T`/`g` (práctica en
+    // desarrollo); si las hubiera, sus mediciones quedan huérfanas tras este borrado.
     sqlx::query(
-        "UPDATE practice_results SET is_final = 1 \
-         WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q') AND is_final = 0",
+        "DELETE FROM practice_quantities WHERE practice_id = 'p1-estadistica' AND symbol = 'T'",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "DELETE FROM practice_results WHERE practice_id = 'p1-estadistica' \
+         AND symbol IN ('g', 'Tmedio', 'delta')",
+    )
+    .execute(pool)
+    .await?;
+    if quantity_missing(pool, "p1-estadistica", "T1").await? {
+        let mut conn = pool.acquire().await?;
+        let base_pos: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(MAX(position), 0) FROM practice_quantities WHERE practice_id = ?1",
+        )
+        .bind("p1-estadistica")
+        .fetch_one(pool)
+        .await?;
+        for (i, q) in [
+            qty("T1", "Periodo - Operador 1", "s", true, "tiempo"),
+            opt(qty("T2", "Periodo - Operador 2", "s", true, "tiempo")),
+            opt(qty("T3", "Periodo - Operador 3", "s", true, "tiempo")),
+        ]
+        .iter()
+        .enumerate()
+        {
+            insert_quantity(&mut conn, "p1-estadistica", base_pos.0 + i as i64 + 1, q).await?;
+        }
+    }
+    if result_missing(pool, "p1-estadistica", "g1").await? {
+        let mut conn = pool.acquire().await?;
+        let base_pos: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(MAX(position), 0) FROM practice_results WHERE practice_id = ?1",
+        )
+        .bind("p1-estadistica")
+        .fetch_one(pool)
+        .await?;
+        for (i, r) in [
+            res_final(
+                "g1",
+                "Aceleracion de gravedad - Operador 1",
+                "m/s2",
+                "4*pi^2*L/T1^2",
+            ),
+            res_final(
+                "g2",
+                "Aceleracion de gravedad - Operador 2",
+                "m/s2",
+                "4*pi^2*L/T2^2",
+            ),
+            res_final(
+                "g3",
+                "Aceleracion de gravedad - Operador 3",
+                "m/s2",
+                "4*pi^2*L/T3^2",
+            ),
+        ]
+        .iter()
+        .enumerate()
+        {
+            insert_result(&mut conn, "p1-estadistica", base_pos.0 + i as i64 + 1, r).await?;
+        }
+    }
+    // Backfill: t_med sin instrumento/U, gamma/Q sin ±U, Q referencia T1 (antes T), y T2/T3 son
+    // opcionales — todo esto pudo quedar desactualizado en una base ya sembrada con la forma vieja.
+    sqlx::query(
+        "UPDATE practice_quantities SET has_uncertainty = 0 \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 't_med'",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "UPDATE practice_quantities SET optional = 1 \
+         WHERE practice_id = 'p1-estadistica' AND symbol IN ('T2', 'T3')",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "UPDATE practice_results SET has_uncertainty = 0, is_final = 1 \
+         WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q')",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "UPDATE practice_results SET formula = 'pi*t_med/(T1*math::ln(2))', \
+             name = 'Factor de calidad (usa el periodo del Operador 1)' \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 'Q'",
     )
     .execute(pool)
     .await?;
@@ -1603,7 +1791,7 @@ async fn quantities_for(
 ) -> anyhow::Result<Vec<PracticeQuantity>> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point, per_point \
+         replicas_per_point, per_point, has_uncertainty, optional \
          FROM practice_quantities WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -1614,7 +1802,7 @@ async fn quantities_for(
 /// Lee los mensurandos derivados de una práctica, ordenados por posición y símbolo.
 async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticeResult>> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final \
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty \
          FROM practice_results WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -1626,7 +1814,7 @@ async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec
 async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQuantity> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point, per_point \
+         replicas_per_point, per_point, has_uncertainty, optional \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -1637,7 +1825,7 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
 /// Lee un mensurando derivado por su id.
 async fn fetch_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeResult> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final \
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty \
          FROM practice_results WHERE id = ?1",
     )
     .bind(id)
@@ -1656,8 +1844,8 @@ async fn insert_quantity(
     sqlx::query(
         "INSERT INTO practice_quantities \
          (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-          replicas_per_point, per_point) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+          replicas_per_point, per_point, has_uncertainty, optional) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -1670,6 +1858,8 @@ async fn insert_quantity(
     .bind(input.is_given)
     .bind(input.replicas_per_point)
     .bind(input.per_point)
+    .bind(input.has_uncertainty)
+    .bind(input.optional)
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -1685,8 +1875,8 @@ async fn insert_result(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_results \
-         (id, practice_id, symbol, name, unit, formula, position, tolerance, is_final) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         (id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -1697,6 +1887,7 @@ async fn insert_result(
     .bind(position)
     .bind(input.tolerance.flatten())
     .bind(input.is_final)
+    .bind(input.has_uncertainty)
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -1738,6 +1929,8 @@ mod tests {
             is_given: false,
             replicas_per_point: None,
             per_point: true,
+            has_uncertainty: true,
+            optional: false,
         }
     }
 
@@ -1749,6 +1942,7 @@ mod tests {
             formula: "l*a".into(),
             tolerance: None,
             is_final: false,
+            has_uncertainty: true,
         }
     }
 
@@ -1791,6 +1985,8 @@ mod tests {
                 is_given: false,
                 replicas_per_point: None,
                 per_point: true,
+                has_uncertainty: true,
+                optional: false,
             },
         )
         .await
@@ -2347,33 +2543,60 @@ mod tests {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
         let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-        // P1 péndulo: T (repeated) + L (is_given) + t_med (t1/2).
-        assert_eq!(def.quantities.len(), 3);
-        let t = def.quantities.iter().find(|q| q.symbol == "T").unwrap();
-        assert!(t.repeated);
+        // P1 péndulo, 3 operadores independientes: L (is_given) + t_med (dato sin incertidumbre,
+        // "t_1/2") + T1 (obligatorio) + T2/T3 (opcionales), todos repeated.
+        assert_eq!(def.quantities.len(), 5);
         let l = def.quantities.iter().find(|q| q.symbol == "L").unwrap();
         assert!(l.is_given);
+        let t_med = def.quantities.iter().find(|q| q.symbol == "t_med").unwrap();
+        assert!(t_med.is_given);
+        assert!(
+            !t_med.has_uncertainty,
+            "t_med no deberia pedir incertidumbre"
+        );
+        let t1 = def.quantities.iter().find(|q| q.symbol == "T1").unwrap();
+        assert!(t1.repeated);
+        assert!(!t1.optional, "el operador 1 es obligatorio");
+        for symbol in ["T2", "T3"] {
+            let t = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
+            assert!(t.repeated);
+            assert!(t.optional, "{symbol} deberia ser opcional");
+        }
+
         assert_eq!(def.results.len(), 5);
-        for symbol in ["Tmedio", "delta", "gamma", "Q", "g"] {
+        for symbol in ["gamma", "Q", "g1", "g2", "g3"] {
             assert!(
                 def.results.iter().any(|r| r.symbol == symbol),
                 "falta el resultado {symbol}"
             );
         }
-        // g, gamma y Q son los resultados centrales que el alumno debe entregar; los demás no.
-        for symbol in ["g", "gamma", "Q"] {
+        // gamma, Q, g1/g2/g3 son los resultados centrales que el alumno debe entregar.
+        for symbol in ["gamma", "Q", "g1", "g2", "g3"] {
             let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
             assert!(r.is_final, "{symbol} deberia ser final");
         }
-        for symbol in ["Tmedio", "delta"] {
+        // gamma y Q van sin ±U (t_med tampoco, pero es magnitud, no resultado); g1/g2/g3 sí
+        // muestran su incertidumbre (propagada de T1/T2/T3 y L).
+        for symbol in ["gamma", "Q"] {
             let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
-            assert!(!r.is_final, "{symbol} no deberia ser final");
+            assert!(
+                !r.has_uncertainty,
+                "{symbol} no deberia mostrar incertidumbre"
+            );
         }
+        for symbol in ["g1", "g2", "g3"] {
+            let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
+            assert!(r.has_uncertainty, "{symbol} deberia mostrar incertidumbre");
+        }
+        // Q usa el periodo del operador 1 (aclarado en el nombre para el docente).
+        let q = def.results.iter().find(|r| r.symbol == "Q").unwrap();
+        assert!(q.formula.contains("T1"));
+        assert!(q.name.contains("Operador 1"));
 
         // Segunda pasada: no debe duplicar.
         seed_definitions(&pool).await.unwrap();
         let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-        assert_eq!(def2.quantities.len(), 3);
+        assert_eq!(def2.quantities.len(), 5);
         assert_eq!(def2.results.len(), 5);
     }
 

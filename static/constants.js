@@ -8,6 +8,11 @@ export const PRACTICE_GROUPS = {
 // Partes temáticas DENTRO de una misma práctica (una sola definición y una sola entrega):
 // las tabs solo muestran/ocultan las secciones con data-section correspondiente.
 export const PRACTICE_PARTS = {
+  "p1-estadistica": [
+    { id: "op1", label: "Operador 1" },
+    { id: "op2", label: "Operador 2" },
+    { id: "op3", label: "Operador 3" },
+  ],
   "p2-cc": [
     { id: "serie", label: "Serie" },
     { id: "paralelo", label: "Paralelo" },
@@ -20,9 +25,10 @@ export const PRACTICE_PARTS = {
 // `id` vincula la sección a una parte de PRACTICE_PARTS (sin `id` ⇒ siempre visible).
 export const PRACTICE_SECTIONS = {
   "p1-estadistica": [
-    { title: "1) Determinación de períodos", symbols: ["T"] },
-    { title: "2) Amortiguamiento (γ, Q)", symbols: ["t_med"] },
-    { title: "3) Determinación de g", symbols: ["L"] },
+    { id: "op1", title: "Operador 1 — Períodos", symbols: ["T1"], results: ["g1"] },
+    { id: "op2", title: "Operador 2 — Períodos (opcional)", symbols: ["T2"], results: ["g2"] },
+    { id: "op3", title: "Operador 3 — Períodos (opcional)", symbols: ["T3"], results: ["g3"] },
+    { title: "Datos compartidos", symbols: ["L", "t_med"], results: ["gamma", "Q"] },
   ],
   "p2-cc": [
     { title: "Resistencias (medidas una vez, valen para las tres partes)", symbols: ["R1", "R2", "R3"] },
@@ -47,10 +53,6 @@ export const PRACTICE_SECTIONS = {
     { id: "potencia", series: true },
   ],
 };
-
-// Resultados finales que se entregan SIN incertidumbre: el form y las tablas de análisis
-// omiten el campo/columna U para estos símbolos.
-export const RESULTS_WITHOUT_U = new Set(["P_max_e", "P_max_t", "RP_max_e", "RP_max_t"]);
 
 // Columnas calculadas en vivo en la tabla de series (solo lectura, el cliente las computa al
 // tipear): `inputs` son los símbolos de las columnas de entrada, en el orden que espera `fn`

@@ -12,8 +12,7 @@ import {
   draftMeasurementsByQuantity,
 } from "./lib.js";
 import {
-  PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS,
-  RESULTS_WITHOUT_U, SERIES_LIVE_COLUMNS,
+  PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS, SERIES_LIVE_COLUMNS,
 } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
@@ -347,6 +346,17 @@ export function renderMeasurementFields() {
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
     if (q.is_given) {
+      // `has_uncertainty === false`: dato de tabla sin incertidumbre propia (p. ej. un tiempo de
+      // semiamplitud leído de una lectura única) — pide solo "Valor", sin instrumento ni U.
+      const uField = q.has_uncertainty === false
+        ? ""
+        : `<label>Incertidumbre U (expandida)
+              <div class="replica-input-wrap">
+                ${prefixSelectHtml()}
+                <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
+                <span class="replica-unit">${unitHtml(q.unit)}</span>
+              </div>
+            </label>`;
       return `
         <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
           <legend>${legendHtml(q)}</legend>
@@ -358,13 +368,7 @@ export function renderMeasurementFields() {
                 <span class="replica-unit">${unitHtml(q.unit)}</span>
               </div>
             </label>
-            <label>Incertidumbre U (expandida)
-              <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
-                <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
-                <span class="replica-unit">${unitHtml(q.unit)}</span>
-              </div>
-            </label>
+            ${uField}
           </div>
         </fieldset>
       `;
@@ -439,7 +443,8 @@ export function renderMeasurementFields() {
     const blocks = grouped.map(({ sec, rows }) => {
       if (rows.length === 0) return "";
       const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
-      return `<div class="measurement-section">
+      const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+      return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
           ${rows.map(quantityRowHtml).join("")}
           ${helper}
@@ -533,14 +538,14 @@ function partForResult(symbol) {
 }
 
 /** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`.
- *  Los símbolos en RESULTS_WITHOUT_U se entregan sin incertidumbre (sin campo U). */
+ *  Los resultados con `has_uncertainty: false` se entregan sin incertidumbre (sin campo U). */
 function finalResultSectionHtml(definition) {
   const finals = (definition.results ?? []).filter((r) => r.is_final);
   if (!finals.length) return "";
   const rows = finals
     .map((r) => {
       const part = partForResult(r.symbol);
-      const uField = RESULTS_WITHOUT_U.has(r.symbol)
+      const uField = r.has_uncertainty === false
         ? ""
         : `
             <label>Incertidumbre U (expandida)
@@ -582,7 +587,7 @@ function collectFinalResults() {
     if (rawVal === "") return acc;
     const value = Number(rawVal) * prefixFactor(valPrefix);
     if (!Number.isFinite(value)) return acc;
-    // Sin campo U (RESULTS_WITHOUT_U) el resultado va sin incertidumbre.
+    // Sin campo U (resultado con has_uncertainty: false) va sin incertidumbre.
     const rawU = row.querySelector(".final-result-u")?.value.trim() ?? "";
     const u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
     acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
@@ -720,7 +725,8 @@ function collectStandaloneRow(row) {
     const uInput = row.querySelector(".measure-given-u");
     const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
     const rawVal = valInput.value.trim();
-    const rawU = uInput.value.trim();
+    // Sin campo U (magnitud `has_uncertainty: false`, p. ej. t_med): no hay nada que leer, va null.
+    const rawU = uInput?.value.trim() ?? "";
     const value = rawVal === "" ? null : Number(rawVal) * prefixFactor(valPrefix);
     const given_u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
     return {
@@ -798,6 +804,9 @@ function buildMetaMap(measurements) {
       isChrono: row?.dataset.isChrono === "1",
       // En regresión/curva: las magnitudes con per_point=false (o dadas) son escalares compartidos.
       perPoint: def?.per_point ?? true,
+      hasUncertainty: def?.has_uncertainty ?? true,
+      // Puede quedar sin lecturas sin bloquear el envío (p. ej. operador 2/3 opcional).
+      optional: def?.optional ?? false,
     };
   }
   return map;
@@ -1270,6 +1279,11 @@ function seriesRowHtml(cols) {
 /// (instrumento/escala + un valor). Se cargan una sola vez, fuera de la tabla de la serie.
 function sharedRowHtml(q) {
   if (q.is_given) {
+    const uField = q.has_uncertainty === false
+      ? ""
+      : `<label>Incertidumbre U (expandida)
+            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
+          </label>`;
     return `
       <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
         <legend>${quantityNameHtml(q)}</legend>
@@ -1277,9 +1291,7 @@ function sharedRowHtml(q) {
           <label>Valor
             <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-value" type="number" step="any" placeholder="valor" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
           </label>
-          <label>Incertidumbre U (expandida)
-            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
-          </label>
+          ${uField}
         </div>
       </fieldset>`;
   }
