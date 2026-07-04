@@ -471,6 +471,29 @@ export function pointPower(r, i) {
 }
 
 /**
+ * Convierte la forma *agrupada por magnitud* que devuelve `collectMeasurements()` (una fila por
+ * magnitud, con `values`/`point_replicas`/`operator_replicas`) al mismo `Map` que ya espera el
+ * prefill de edición (`pointGroups`/`operatorGroups`/`values`/`value_u`/instrumento/escala),
+ * para poder restaurar un borrador local con los mismos helpers de pintado que restauran una
+ * entrega guardada. Sin magnitudes con réplicas por punto, cada punto se trata como un array de
+ * un solo valor (igual que el prefill de edición, que agrupa una lectura por punto).
+ */
+export function draftMeasurementsByQuantity(measurements) {
+  const map = new Map();
+  for (const m of measurements ?? []) {
+    map.set(m.quantity_id, {
+      pointGroups: m.point_replicas ?? (m.values ?? []).map((v) => [v]),
+      operatorGroups: m.operator_replicas ?? [],
+      values: m.values ?? [],
+      value_u: m.given_u ?? null,
+      instrument_id: m.instrument_id ?? null,
+      scale_id: m.scale_id ?? null,
+    });
+  }
+  return map;
+}
+
+/**
  * Empareja cada magnitud MEDIDA con su mensurando teórico automático por convención de símbolos:
  * la magnitud `X` se compara con el derivado `X_t` (p. ej. `VR1_s` medida con multímetro contra
  * `VR1_s_t` calculada por el programa). Devuelve una fila por par encontrado, con la medida

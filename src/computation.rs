@@ -2655,6 +2655,111 @@ mod tests {
         assert!((q_t["result"]["mean"].as_f64().unwrap() - 11.0).abs() < 1e-9);
     }
 
+    /// Cancelar (`db::delete_submission`) borra la entrega por completo: deja de existir
+    /// (`submission_detail` devuelve `None`) y libera la mesa para una nueva entrega en la
+    /// misma (práctica, grupo, mesa) — el índice único ya no choca.
+    #[tokio::test]
+    async fn cancel_submission_deletes_and_frees_table() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
+        let mk = || FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: t_id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![5.0, 5.2, 4.9],
+                given_u: None,
+                point_replicas: None,
+                operator_replicas: None,
+            }],
+            meta: None,
+            table_number: Some(1),
+            student_results: vec![db::StudentResultInput {
+                symbol: "g".into(),
+                value: 9.8,
+                u_expanded: Some(0.1),
+            }],
+            student_comment: Some("un comentario".into()),
+        };
+        let created = create_form_submission(&pool, &user, mk()).await.unwrap();
+
+        // Antes de cancelar: hay resultado del alumno y un integrante (owner).
+        assert_eq!(created.student_results.len(), 1);
+        assert_eq!(created.members.len(), 1);
+
+        // Cancelar: la mesa 1 de esta práctica/grupo ya está ocupada por `created`.
+        assert!(
+            db::find_existing_report(&pool, "p1-estadistica", &group.id, 1)
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        let existed = db::delete_submission(&pool, &created.id).await.unwrap();
+        assert!(existed);
+
+        // La entrega deja de existir.
+        assert!(db::submission_detail(&pool, &created.id)
+            .await
+            .unwrap()
+            .is_none());
+
+        // La mesa quedó libre: ya no hay informe para (práctica, grupo, 1).
+        assert!(
+            db::find_existing_report(&pool, "p1-estadistica", &group.id, 1)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // Cancelar de nuevo (id ya borrado) es un no-op, no un error.
+        assert!(!db::delete_submission(&pool, &created.id).await.unwrap());
+
+        // Se puede crear una entrega nueva para la misma mesa sin chocar con el índice único.
+        let recreated = create_form_submission(&pool, &user, mk()).await.unwrap();
+        assert_ne!(recreated.id, created.id);
+        assert_eq!(recreated.table_number, Some(1));
+    }
+
     /// `update_form_submission` reemplaza el comentario del alumno igual que las lecturas:
     /// se puede agregar uno donde no había, cambiarlo, y en blanco vuelve a quedar en `None`.
     #[tokio::test]

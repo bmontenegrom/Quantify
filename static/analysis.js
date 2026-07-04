@@ -49,6 +49,11 @@ export function renderAnalysis(target, submission, includeReview = false, defini
       ?.addEventListener("click", () =>
         import("./forms.js").then(({ startEditSubmission }) => startEditSubmission(submission))
       );
+    target
+      .querySelector(".cancel-submission-btn")
+      ?.addEventListener("click", () =>
+        import("./forms.js").then(({ cancelSubmission }) => cancelSubmission(submission))
+      );
     const reviewForm = target.querySelector(".review-form");
     if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
     const studentForm = target.querySelector(".student-results-form");

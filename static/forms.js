@@ -4,11 +4,12 @@ import {
   measurementFields, latestResult, submitStatus, submitButton,
   practicaTitle, practicePartTabs, submissionForm, studentComment,
 } from "./dom.js";
-import { fetchJson, postJson } from "./api.js";
+import { fetchJson, postJson, deleteJson } from "./api.js";
 import {
   escapeHtml, symbolHtml, inlineMathHtml, unitHtml, canReview, format,
   compatibleInstruments, SI_PREFIXES, prefixFactor, pointPower,
   seriesStats, histogram, normalCurve, validateMeasurements,
+  draftMeasurementsByQuantity,
 } from "./lib.js";
 import {
   PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS,
@@ -68,7 +69,7 @@ export function renderStudentSelectors() {
   }
 }
 
-export function updateStudentSelectors() {
+export function updateStudentSelectors({ autoLoad = true } = {}) {
   const course = selectedCourse();
   groupSelect.innerHTML = course?.groups.length
     ? course.groups.map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.name)}</option>`).join("")
@@ -79,7 +80,7 @@ export function updateStudentSelectors() {
         .join("")
     : `<option value="">Sin practicas habilitadas</option>`;
   updateTableSelector();
-  loadSubmissionForm();
+  if (autoLoad) loadSubmissionForm();
 }
 
 export function updateTableSelector() {
@@ -157,6 +158,7 @@ export async function loadSubmissionForm() {
     state.seriesDebug.clear();
     renderMeasurementFields();
     applyPrefill();
+    applyDraftPrefill();
     applyPartVisibility();
   } catch (error) {
     state.practiceForm = null;
@@ -834,6 +836,7 @@ export async function submitFormSubmission() {
       student_comment: studentComment?.value.trim() || null,
     });
     submitStatus.textContent = "Entrega guardada";
+    clearDraft();
     const { renderAnalysis } = await import("./analysis.js");
     renderAnalysis(latestResult, submission);
     latestResult.classList.remove("hidden");
@@ -858,6 +861,46 @@ export function exitEditMode() {
   state.editPrefillComment = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;
+}
+
+/** Cancela una entrega dentro de la ventana de edición: la borra del servidor y devuelve al
+ *  alumno al formulario de carga con todos los valores puestos, para que siga editando y vuelva
+ *  a entregar sin re-tipear nada. Pide confirmación antes de borrar. */
+export async function cancelSubmission(submission) {
+  const confirmed = window.confirm(
+    "¿Cancelar esta entrega? Se va a borrar del servidor; tus valores quedan cargados en el " +
+      "formulario para que sigas editando. Esta acción no se puede deshacer.",
+  );
+  if (!confirmed) return;
+
+  try {
+    await deleteJson(`/api/submissions/${submission.id}`);
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+
+  state.restoringCancelledSubmission = true;
+  state.editPrefill = submission.measurements ?? [];
+  state.editPrefillStudentResults = submission.student_results ?? [];
+  state.editPrefillComment = submission.student_comment ?? "";
+
+  const { selectView } = await import("./navigation.js");
+  selectView("practica");
+  courseSelect.value = submission.course_id ?? courseSelect.value;
+  updateStudentSelectors({ autoLoad: false });
+  groupSelect.value = submission.group_id ?? groupSelect.value;
+  practiceSelect.value = submission.practice_id;
+  updateTableSelector();
+  if (submission.table_number != null) tableSelect.value = String(submission.table_number);
+  await loadSubmissionForm();
+
+  state.restoringCancelledSubmission = false;
+  state.editPrefill = null;
+  state.editPrefillStudentResults = null;
+  state.editPrefillComment = null;
+
+  await loadSubmissions();
 }
 
 function editPrefillByQuantity() {
@@ -896,9 +939,9 @@ function editPrefillByQuantity() {
   return map;
 }
 
-/** Prellena el bloque opcional "Resultado final" con lo que ya se había entregado, si lo hay. */
-function applyFinalResultsPrefill() {
-  const saved = new Map((state.editPrefillStudentResults ?? []).map((s) => [s.symbol, s]));
+/** Prellena el bloque opcional "Resultado final" con `results` (lista `{symbol, value, u_expanded}`). */
+function applyFinalResultsPrefillFrom(results) {
+  const saved = new Map((results ?? []).map((s) => [s.symbol, s]));
   measurementFields.querySelectorAll('[data-final-result="1"]').forEach((row) => {
     const s = saved.get(row.dataset.symbol);
     if (!s) return;
@@ -908,11 +951,35 @@ function applyFinalResultsPrefill() {
   });
 }
 
+/** Restaura una entrega en edición (`applyPrefill`) desde `state.editPrefill*`. */
 export function applyPrefill() {
-  if (!state.editingSubmissionId) return;
-  applyFinalResultsPrefill();
-  if (studentComment) studentComment.value = state.editPrefillComment ?? "";
-  const byQ = editPrefillByQuantity();
+  if (!state.editingSubmissionId && !state.restoringCancelledSubmission) return;
+  applyMeasurementPrefill(
+    editPrefillByQuantity(),
+    state.editPrefillStudentResults,
+    state.editPrefillComment,
+  );
+}
+
+/** Restaura el borrador local guardado para la (curso, grupo, mesa, práctica) actual, si hay uno
+ *  y no se está editando/restaurando una entrega existente (esos casos los maneja `applyPrefill`). */
+function applyDraftPrefill() {
+  if (state.editingSubmissionId || state.restoringCancelledSubmission) return;
+  const draft = loadDraft();
+  if (!draft) return;
+  applyMeasurementPrefill(
+    draftMeasurementsByQuantity(draft.measurements),
+    draft.finalResults,
+    draft.comment,
+  );
+}
+
+/** Pinta en el DOM un `byQ` (Map quantity_id -> {pointGroups, operatorGroups, values, value_u,
+ *  instrument_id, scale_id}) ya armado, sin importar si viene de una entrega guardada
+ *  (`editPrefillByQuantity`) o de un borrador local (`draftMeasurementsByQuantity`). */
+function applyMeasurementPrefill(byQ, finalResults, comment) {
+  applyFinalResultsPrefillFrom(finalResults);
+  if (studentComment) studentComment.value = comment ?? "";
 
   const seriesTable = measurementFields.querySelector(".series-table");
   if (seriesTable) {
@@ -1517,6 +1584,56 @@ function histogramSvg(hist, mean, std, n) {
   </svg>`;
 }
 
+// ── Borrador local ───────────────────────────────────────────────────────────
+// Autoguarda lo que el alumno va tipeando en una entrega NUEVA (no enviada aún) para que un
+// cambio de práctica/curso/grupo accidental, o un refresh de página, no pierda los valores.
+// No aplica mientras se edita/restaura una entrega existente (`applyPrefill` cubre esos casos).
+
+function draftKey() {
+  // Sin la mesa: `updateTableSelector()` reconstruye #table-select en cada cambio de práctica y
+  // vuelve al valor por defecto (asignación/perfil), así que no es estable mientras se compone.
+  const uid = state.user?.id ?? "anon";
+  return `quantify-draft:${uid}:${courseSelect.value}:${groupSelect.value}:${practiceSelect.value}`;
+}
+
+function saveDraft() {
+  if (state.editingSubmissionId || state.restoringCancelledSubmission || !state.practiceForm) return;
+  const draft = {
+    measurements: collectMeasurements(),
+    finalResults: collectFinalResults(),
+    comment: studentComment?.value ?? "",
+    savedAt: Date.now(),
+  };
+  try {
+    localStorage.setItem(draftKey(), JSON.stringify(draft));
+  } catch {
+    // localStorage puede fallar (cuota, modo privado); el borrador es best-effort.
+  }
+}
+
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(draftKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft() {
+  try {
+    localStorage.removeItem(draftKey());
+  } catch {
+    // no-op
+  }
+}
+
+let draftSaveTimer = null;
+function scheduleDraftSave() {
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(saveDraft, 350);
+}
+
 // ── Listeners top-level ────────────────────────────────────────────────────────
 
 // "Entregar" (submit del form / Enter): crea la entrega por formulario.
@@ -1524,6 +1641,11 @@ submissionForm.addEventListener("submit", (event) => {
   event.preventDefault();
   submitFormSubmission();
 });
+// `measurementFields` es un nodo estable (solo se reemplaza su innerHTML, nunca el nodo): un
+// único listener delegado alcanza para autoguardar el borrador sin tocar los renders.
+measurementFields.addEventListener("input", scheduleDraftSave);
+measurementFields.addEventListener("change", scheduleDraftSave);
+studentComment?.addEventListener("input", scheduleDraftSave);
 courseSelect.addEventListener("change", updateStudentSelectors);
 groupSelect.addEventListener("change", updateTableSelector);
 practiceSelect.addEventListener("change", () => {

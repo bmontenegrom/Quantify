@@ -29,6 +29,7 @@ import {
   compareResults,
   compareMeasuredVsTheoretical,
   pointPower,
+  draftMeasurementsByQuantity,
   SI_PREFIXES,
   prefixFactor,
   seriesStats,
@@ -439,6 +440,73 @@ test("pointPower calcula P = I²·R", () => {
   assert.equal(pointPower(200, 0), 0);
   // I negativa (sentido de la corriente) no cambia la potencia disipada.
   assert.equal(pointPower(100, -0.5), 25);
+});
+
+test("draftMeasurementsByQuantity: columna de un valor por punto", () => {
+  const map = draftMeasurementsByQuantity([
+    { quantity_id: "q1", instrument_id: null, scale_id: null, values: [1, 2, 3], given_u: null },
+  ]);
+  assert.deepEqual(map.get("q1"), {
+    pointGroups: [[1], [2], [3]],
+    operatorGroups: [],
+    values: [1, 2, 3],
+    value_u: null,
+    instrument_id: null,
+    scale_id: null,
+  });
+});
+
+test("draftMeasurementsByQuantity: columna con réplicas por punto", () => {
+  const map = draftMeasurementsByQuantity([
+    {
+      quantity_id: "q1",
+      instrument_id: null,
+      scale_id: null,
+      values: [],
+      given_u: null,
+      point_replicas: [[1, 1.1], [2, 2.1, 2.2]],
+    },
+  ]);
+  assert.deepEqual(map.get("q1").pointGroups, [[1, 1.1], [2, 2.1, 2.2]]);
+});
+
+test("draftMeasurementsByQuantity: magnitud por operador (Motor D)", () => {
+  const map = draftMeasurementsByQuantity([
+    {
+      quantity_id: "q1",
+      instrument_id: null,
+      scale_id: null,
+      values: [],
+      given_u: null,
+      operator_replicas: [[1, 1.1], [2, 2.1, 2.2]],
+    },
+  ]);
+  assert.deepEqual(map.get("q1").operatorGroups, [[1, 1.1], [2, 2.1, 2.2]]);
+});
+
+test("draftMeasurementsByQuantity: fila suelta dada (valor ± U)", () => {
+  const map = draftMeasurementsByQuantity([
+    { quantity_id: "q1", instrument_id: null, scale_id: null, values: [0.5], given_u: 0.01 },
+  ]);
+  const e = map.get("q1");
+  assert.equal(e.values[0], 0.5);
+  assert.equal(e.value_u, 0.01);
+});
+
+test("draftMeasurementsByQuantity: fila suelta medida con réplicas e instrumento/escala", () => {
+  const map = draftMeasurementsByQuantity([
+    { quantity_id: "q1", instrument_id: "inst-1", scale_id: "sc-1", values: [10.1, 10.2, 9.9], given_u: null },
+  ]);
+  const e = map.get("q1");
+  assert.deepEqual(e.values, [10.1, 10.2, 9.9]);
+  assert.equal(e.instrument_id, "inst-1");
+  assert.equal(e.scale_id, "sc-1");
+  assert.equal(e.value_u, null);
+});
+
+test("draftMeasurementsByQuantity: lista vacía o ausente da un Map vacío", () => {
+  assert.equal(draftMeasurementsByQuantity([]).size, 0);
+  assert.equal(draftMeasurementsByQuantity(undefined).size, 0);
 });
 
 test("compareMeasuredVsTheoretical empareja X con X_t y calcula deltas", () => {

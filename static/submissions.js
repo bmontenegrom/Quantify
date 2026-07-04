@@ -292,7 +292,10 @@ export function editBannerMarkup(submission) {
   const left = h > 0 ? `${h} h ${m} min` : `${m} min`;
   return `<div class="edit-banner">
     <div>Podés editar esta entrega hasta el ${escapeHtml(formatDate(submission.editable_until))} — te quedan ${left}.</div>
-    <button type="button" class="edit-submission-btn">Editar entrega</button>
+    <div class="edit-banner-actions">
+      <button type="button" class="edit-submission-btn">Editar entrega</button>
+      <button type="button" class="cancel-submission-btn">Cancelar entrega</button>
+    </div>
   </div>`;
 }
 
