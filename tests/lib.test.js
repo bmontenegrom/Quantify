@@ -717,3 +717,30 @@ test("validateMeasurements: isGiven exige valor e incertidumbre", () => {
   // Ambos -> ok.
   assert.equal(validateMeasurements([{ quantity_id: "g1", values: [3], given_u: 0.1 }], "estadistico", meta), null);
 });
+
+test("validateMeasurements: isGiven con hasUncertainty:false no exige U (p. ej. t_med)", () => {
+  const meta = { t_med: { name: "t_med", isGiven: true, hasUncertainty: false } };
+  // Sin valor -> sigue siendo error (el valor es obligatorio).
+  const err = validateMeasurements([{ quantity_id: "t_med", values: [], given_u: null }], "estadistico", meta);
+  assert.ok(typeof err === "string" && err.includes("t_med"));
+  // Con valor y sin U -> ok (no hay campo U para esta magnitud).
+  assert.equal(
+    validateMeasurements([{ quantity_id: "t_med", values: [12.5], given_u: null }], "estadistico", meta),
+    null,
+  );
+});
+
+test("validateMeasurements: magnitud optional puede quedar sin lecturas", () => {
+  const meta = {
+    T2: { name: "Periodo Operador 2", isGiven: false, isChrono: true, optional: true },
+  };
+  // Sin lecturas pero optional -> ok (no bloquea el envío).
+  assert.equal(
+    validateMeasurements([{ quantity_id: "T2", values: [] }], "estadistico", meta),
+    null,
+  );
+  // Sin optional, la misma magnitud sí bloquea.
+  const metaRequerida = { T2: { ...meta.T2, optional: false } };
+  const err = validateMeasurements([{ quantity_id: "T2", values: [] }], "estadistico", metaRequerida);
+  assert.ok(typeof err === "string");
+});

@@ -2600,6 +2600,113 @@ mod tests {
         assert_eq!(def2.results.len(), 5);
     }
 
+    /// Extremo a extremo sobre la práctica real (no un fixture sintético): Operador 1 con datos,
+    /// Operador 2/3 sin cargar (opcionales, no deben bloquear ni romper el análisis). Verifica que
+    /// g1 se computa, g2/g3 quedan como advertencia (no pánico), t_med/gamma/Q dan U = 0 pese a
+    /// que T1 sí tiene incertidumbre real, y Q usa T1 (confirmado en el valor, no solo la fórmula).
+    #[tokio::test]
+    async fn analyze_p1_estadistica_con_operadores_opcionales() {
+        let (pool, _dir) = setup().await;
+        seed_definitions(&pool).await.unwrap();
+        let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+        let id = |sym: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == sym)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let mk = |sym: &str, vals: Vec<f64>, given_u: Option<f64>| {
+            crate::computation::MeasurementInput {
+                quantity_id: id(sym),
+                instrument_id: None,
+                scale_id: None,
+                values: vals,
+                given_u,
+                point_replicas: None,
+                operator_replicas: None,
+            }
+        };
+
+        let (l, t_med) = (1.0_f64, 2.006_f64);
+        let t1_vals = vec![2.0_f64, 2.02, 1.98];
+        let t1_mean = t1_vals.iter().sum::<f64>() / t1_vals.len() as f64;
+        let measurements = vec![
+            mk("L", vec![l], Some(0.002)),
+            // t_med no tiene campo U en el form: aunque llegara un given_u (p. ej. de una entrega
+            // vieja), has_uncertainty=false debe ignorarlo y dejar u=0.
+            mk("t_med", vec![t_med], Some(99.0)),
+            mk("T1", t1_vals, None),
+            // T2/T3 sin cargar: opcionales, no deben bloquear el análisis.
+        ];
+
+        let analysis = crate::computation::analyze(&pool, "p1-estadistica", &measurements)
+            .await
+            .unwrap();
+
+        let t1_q = analysis
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T1")
+            .unwrap();
+        assert!(t1_q.result.u_c > 0.0, "T1 sí debe tener incertidumbre real");
+
+        let t_med_q = analysis
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "t_med")
+            .unwrap();
+        assert_eq!(
+            t_med_q.result.u_c, 0.0,
+            "t_med sin instrumento/U debe dar u=0 pese a un given_u cargado"
+        );
+
+        let derived = |sym: &str| {
+            analysis
+                .derived
+                .iter()
+                .find(|d| d.symbol == sym)
+                .unwrap_or_else(|| panic!("{sym} debe estar en derived"))
+        };
+
+        let g1 = derived("g1");
+        let expected_g1 = 4.0 * std::f64::consts::PI.powi(2) * l / (t1_mean * t1_mean);
+        assert!(
+            (g1.value - expected_g1).abs() < 1e-9,
+            "g1 esperado {expected_g1}, obtenido {}",
+            g1.value
+        );
+
+        // g2/g3 dependen de T2/T3, que no se cargaron: no deben tirar la práctica abajo, solo
+        // avisar y quedar no-finitos.
+        assert!(!derived("g2").value.is_finite());
+        assert!(!derived("g3").value.is_finite());
+        assert!(
+            analysis
+                .warnings
+                .iter()
+                .any(|w| w.contains("T2") || w.contains("g2")),
+            "debe haber una advertencia por T2/g2 sin datos"
+        );
+
+        // gamma y Q se muestran sin ±U (has_uncertainty=false), aunque Q propague de fondo la
+        // incertidumbre real de T1.
+        let gamma = derived("gamma");
+        assert!(!gamma.has_uncertainty);
+        let expected_gamma = 2.0 * std::f64::consts::LN_2 / t_med;
+        assert!((gamma.value - expected_gamma).abs() < 1e-9);
+
+        let q = derived("Q");
+        assert!(!q.has_uncertainty);
+        let expected_q = std::f64::consts::PI * t_med / (t1_mean * std::f64::consts::LN_2);
+        assert!(
+            (q.value - expected_q).abs() < 1e-9,
+            "Q debe usar T1: esperado {expected_q}, obtenido {}",
+            q.value
+        );
+    }
+
     /// gamma/Q pasaron a ser resultado final despues del alta inicial; una base ya sembrada con
     /// el esquema viejo (is_final=0) debe actualizarse via backfill, no requiere resembrar.
     #[tokio::test]
