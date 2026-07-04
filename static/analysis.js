@@ -1,6 +1,5 @@
 import { state } from "./state.js";
 import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, compareMeasuredVsTheoretical, cssEscape, allStudents } from "./lib.js";
-import { RESULTS_WITHOUT_U } from "./constants.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -201,7 +200,7 @@ function quantitiesTableMarkup(quantities) {
 }
 
 /** Bloque de mensurandos derivados (valor ± U + fórmula). `heading` controla el título opcional.
- *  Los símbolos de RESULTS_WITHOUT_U se muestran sin ±U (van sin incertidumbre por diseño). */
+ *  Los mensurandos con `has_uncertainty: false` se muestran sin ±U (van sin incertidumbre por diseño). */
 export function derivedBlockMarkup(derived, heading = "Mensurandos") {
   if (!derived.length) return "";
   return `
@@ -212,7 +211,7 @@ export function derivedBlockMarkup(derived, heading = "Mensurandos") {
           (d) => `
           <div class="metric">
             <div class="metric-label">${symbolHtml(d.symbol)}${d.unit ? ` (${unitHtml(d.unit)})` : ""}</div>
-            <div class="metric-value metric-text">${escapeHtml(measureText(d.value, RESULTS_WITHOUT_U.has(d.symbol) ? null : d.u_expanded))}</div>
+            <div class="metric-value metric-text">${escapeHtml(measureText(d.value, d.has_uncertainty === false ? null : d.u_expanded))}</div>
             <div class="submission-meta">${escapeHtml(d.formula)}</div>
           </div>`,
         )
@@ -497,8 +496,8 @@ function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
               (r) => `
             <tr>
               <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong> <span class="submission-meta">${unitHtml(r.unit)}</span></td>
-              <td>${escapeHtml(measureText(r.auto.value, RESULTS_WITHOUT_U.has(r.symbol) ? null : r.auto.u))}</td>
-              <td>${r.student ? escapeHtml(measureText(r.student.value, RESULTS_WITHOUT_U.has(r.symbol) ? null : r.student.u)) : "—"}</td>
+              <td>${escapeHtml(measureText(r.auto.value, r.hasUncertainty ? r.auto.u : null))}</td>
+              <td>${r.student ? escapeHtml(measureText(r.student.value, r.hasUncertainty ? r.student.u : null)) : "—"}</td>
               <td>${num(r.dValue)}</td>
               <td>${pct(r.dValuePct)}</td>
               <td>${num(r.dU)}</td>
@@ -524,8 +523,8 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
       const v = s ? escapeHtml(String(s.value)) : "";
       const u = s && s.u_expanded != null ? escapeHtml(String(s.u_expanded)) : "";
       const dis = locked ? "disabled" : "";
-      // Los resultados sin incertidumbre (RESULTS_WITHOUT_U) no llevan input U.
-      const uCell = RESULTS_WITHOUT_U.has(m.symbol)
+      // Los resultados con has_uncertainty: false no llevan input U.
+      const uCell = m.has_uncertainty === false
         ? `<td class="submission-meta">sin U</td>`
         : `<td><input class="student-u" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${u}" ${dis} placeholder="U" /></td>`;
       return `

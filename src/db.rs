@@ -178,6 +178,13 @@ pub struct PracticeQuantity {
     /// `false` si es un **escalar compartido** que se carga una sola vez (Motor E). Los `is_given`
     /// son siempre compartidos. En el estadístico no aplica.
     pub per_point: bool,
+    /// `false` solo tiene efecto combinado con `is_given`: el formulario pide únicamente el campo
+    /// "Valor" (sin instrumento ni incertidumbre U), y se computa con U = 0. Reemplaza el hack de
+    /// forzar U a mano para datos que no tienen incertidumbre propia (p. ej. un tiempo de tabla).
+    pub has_uncertainty: bool,
+    /// `true` si la magnitud puede quedar sin lecturas sin bloquear el envío del formulario
+    /// (p. ej. el operador 2/3 de una práctica donde solo el operador 1 es obligatorio).
+    pub optional: bool,
 }
 
 /// Mensurando derivado de una práctica (determinación indirecta).
@@ -198,6 +205,10 @@ pub struct PracticeResult {
     /// `true` si es el resultado central que el alumno debe entregar (valor ± U) para esta
     /// práctica, p. ej. `g` en el péndulo. Habilita la sección "Resultado final" en la entrega.
     pub is_final: bool,
+    /// `false` oculta la ±U de este mensurando en toda la UI (vista previa, resultado final,
+    /// comparación auto-vs-alumno), aunque el valor propagado de fondo no sea cero. Reemplaza el
+    /// Set hardcodeado `RESULTS_WITHOUT_U` del frontend por un flag por-práctica en la definición.
+    pub has_uncertainty: bool,
 }
 
 /// Instrumento de medida del catálogo de un curso. El `kind` (`analogico`/`digital`) es
@@ -847,6 +858,51 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
+    // `has_uncertainty` (magnitudes dadas y mensurandos): generaliza el antiguo hack de ocultar la
+    // U de ciertos símbolos a mano en el frontend (`RESULTS_WITHOUT_U`). En `false`, la magnitud
+    // dada no pide U al alumno (queda en 0, sin campo) y el mensurando se muestra sin ±U aunque el
+    // valor propagado de fondo no sea exactamente cero (p. ej. `Q`, que sí usa la incertidumbre del
+    // período). Default `true` = comportamiento previo (con incertidumbre).
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "has_uncertainty",
+        "INTEGER NOT NULL DEFAULT 1",
+    )
+    .await?;
+    add_column_if_missing(
+        pool,
+        "practice_results",
+        "has_uncertainty",
+        "INTEGER NOT NULL DEFAULT 1",
+    )
+    .await?;
+    // Backfill: migra los símbolos que hoy dependen del hack `RESULTS_WITHOUT_U` del frontend.
+    for (practice_id, symbol) in [
+        ("p2-cc", "P_max_e"),
+        ("p2-cc", "P_max_t"),
+        ("p2-cc", "RP_max_e"),
+        ("p2-cc", "RP_max_t"),
+    ] {
+        sqlx::query(
+            "UPDATE practice_results SET has_uncertainty = 0 WHERE practice_id = ?1 AND symbol = ?2",
+        )
+        .bind(practice_id)
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
+
+    // Magnitud opcional (Motor... ninguno: entrega normal con campos opcionales, p. ej. operadores
+    // 2 y 3 de p1-estadistica): si no tiene lecturas, no bloquea el envío del formulario.
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "optional",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+
     Ok(())
 }
 
@@ -931,8 +987,8 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     let practices = [
         (
             "p1-estadistica",
-            "Tratamiento Estadistico - Pendulo Simple",
-            "Medicion del periodo T con replicas (cronometro), longitud L dada por catedra; incertidumbres tipo A y B, calculo indirecto de g = 4*pi^2*L/T^2.",
+            "Tratamiento estadístico de Datos",
+            "Pendulo simple con hasta 3 operadores independientes: cada uno mide su propia serie de periodos (T1/T2/T3) y determina su g; incertidumbres tipo A y B, calculo indirecto de g = 4*pi^2*L/T^2.",
             "estadistico",
             None,
             None,

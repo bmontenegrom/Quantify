@@ -454,6 +454,7 @@ export function compareResults(autoDerived, studentResults, tolerances = {}) {
       symbol: d.symbol,
       name: d.name,
       unit: d.unit,
+      hasUncertainty: d.has_uncertainty !== false,
       auto: { value: d.value, u: d.u_expanded },
       student: s ? { value: sv, u: su } : null,
       dValue: sv == null ? null : sv - d.value,
@@ -556,10 +557,12 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
       const meta = metaMap[m.quantity_id] ?? {};
       const name = meta.name ?? m.quantity_id;
       if (meta.isGiven) {
-        if (m.values.length === 0 || m.given_u == null) {
-          return `El dato "${name}" requiere valor e incertidumbre U.`;
+        if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
+          return meta.hasUncertainty === false
+            ? `El dato "${name}" requiere un valor.`
+            : `El dato "${name}" requiere valor e incertidumbre U.`;
         }
-      } else if (meta.perPoint === false && m.values.length === 0) {
+      } else if (meta.perPoint === false && !meta.optional && m.values.length === 0) {
         return `La magnitud compartida "${name}" no tiene valor cargado.`;
       }
     }
@@ -568,9 +571,14 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
   for (const m of measurements) {
     const meta = metaMap[m.quantity_id] ?? {};
     const name = meta.name ?? m.quantity_id;
+    if (meta.optional) {
+      continue; // puede quedar sin lecturas sin bloquear el envío (p. ej. operador 2/3).
+    }
     if (meta.isGiven) {
-      if (m.values.length === 0 || m.given_u == null) {
-        return `El dato "${name}" requiere valor e incertidumbre U.`;
+      if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
+        return meta.hasUncertainty === false
+          ? `El dato "${name}" requiere un valor.`
+          : `El dato "${name}" requiere valor e incertidumbre U.`;
       }
     } else if (m.operator_replicas) {
       // Motor D: cada operador debe tener al menos una lectura de la magnitud repetida.

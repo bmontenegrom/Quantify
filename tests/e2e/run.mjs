@@ -99,13 +99,15 @@ async function loginAs(browser, pageErrors, { email, password }) {
 }
 
 async function studentSubmitsP1(page) {
-  step("estudiante: abre la práctica P1 (péndulo)");
-  await page.click('#practice-nav-children .nav-child:has-text("Pendulo")');
+  step("estudiante: abre la práctica P1 (péndulo, tratamiento estadístico)");
+  await page.click('#practice-nav-children .nav-child:has-text("Tratamiento estad")');
   await page.waitForSelector(".measurement-row--chrono");
   await page.selectOption("#table-select", "1");
 
-  step("estudiante: registra períodos con el cronómetro");
-  const chronoRow = page.locator(".measurement-row--chrono");
+  // Operador 1 (obligatorio) es la pestaña activa por default; operador 2/3 son opcionales y
+  // quedan sin cargar en este test.
+  step("estudiante: registra períodos del Operador 1 con el cronómetro");
+  const chronoRow = page.locator('[data-section="op1"] .measurement-row--chrono');
   await chronoRow.locator(".chrono-start").click();
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(120);
@@ -115,14 +117,16 @@ async function studentSubmitsP1(page) {
   const chronoCount = await chronoRow.locator(".chrono-count").textContent();
   assert(/3 lecturas/.test(chronoCount ?? ""), `el cronómetro debía producir 3 lecturas (vi: "${chronoCount}")`);
 
-  step("estudiante: completa L (dato de cátedra) y t_med");
-  const givenRow = page.locator(".measurement-row--given");
-  await givenRow.locator(".measure-given-value").fill("1");
-  await givenRow.locator(".measure-given-u").fill("0.002");
-  await page
-    .locator(".measurement-row:not(.measurement-row--chrono):not(.measurement-row--given)")
-    .locator(".measure-value")
-    .fill("12.5");
+  step("estudiante: completa L (dato de cátedra) y t_med (sin incertidumbre, sin instrumento)");
+  const lRow = page.locator('.measurement-row--given:has-text("Longitud")');
+  await lRow.locator(".measure-given-value").fill("1");
+  await lRow.locator(".measure-given-u").fill("0.002");
+  const tMedRow = page.locator('.measurement-row--given:has-text("semiamplitud")');
+  await tMedRow.locator(".measure-given-value").fill("12.5");
+  assert(
+    (await tMedRow.locator(".measure-given-u").count()) === 0,
+    "t_med no debía tener campo de incertidumbre U",
+  );
 
   step("estudiante: agrega observaciones opcionales");
   await page.fill("#student-comment", STUDENT_COMMENT);
@@ -148,12 +152,12 @@ async function studentSavesOwnResults(page) {
   await page.click('.tab.student-only[data-view="submissions"]');
   await page.click('.submission-item:has-text("Mesa 1")');
   await page.waitForSelector(".student-results-form");
-  await page.fill('.student-value[data-symbol="g"]', "9.78");
-  await page.fill('.student-u[data-symbol="g"]', "0.08");
+  await page.fill('.student-value[data-symbol="g1"]', "9.78");
+  await page.fill('.student-u[data-symbol="g1"]', "0.08");
   await page.click('.student-results-form button[type="submit"]');
   // El guardado re-renderiza el detalle con los valores persistidos.
   await page.waitForFunction(
-    () => document.querySelector('.student-value[data-symbol="g"]')?.value === "9.78",
+    () => document.querySelector('.student-value[data-symbol="g1"]')?.value === "9.78",
   );
 }
 

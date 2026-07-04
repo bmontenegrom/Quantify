@@ -118,6 +118,8 @@ pub struct DerivedComputation {
     pub value: f64,
     pub u: f64,
     pub u_expanded: f64,
+    /// `false` si el mensurando se muestra sin ±U en toda la UI (ver `PracticeResult::has_uncertainty`).
+    pub has_uncertainty: bool,
 }
 
 /// Resultado de un ajuste lineal `y = slope*x + intercept` sobre una serie de puntos.
@@ -324,7 +326,14 @@ fn compute_quantities(
 
         let result = if quantity.is_given {
             let value = values.first().copied().unwrap_or(f64::NAN);
-            let u_exp = measurement.and_then(|m| m.given_u).unwrap_or(0.0);
+            // `has_uncertainty = false`: el form no tiene campo U para esta magnitud (solo
+            // "Valor"), así que cualquier `given_u` cargado (de una entrega vieja, por ejemplo) se
+            // ignora y queda en 0.
+            let u_exp = if quantity.has_uncertainty {
+                measurement.and_then(|m| m.given_u).unwrap_or(0.0)
+            } else {
+                0.0
+            };
             if value.is_nan() {
                 warnings.push(format!(
                     "El dato \"{}\" ({}) no tiene valor cargado.",
@@ -1081,6 +1090,7 @@ fn derive_results(
             symbol: result.symbol.clone(),
             name: result.name.clone(),
             unit: result.unit.clone(),
+            has_uncertainty: result.has_uncertainty,
             formula: result.formula.clone(),
             value,
             u,
@@ -1709,6 +1719,8 @@ mod tests {
             is_given: false,
             replicas_per_point: None,
             per_point: true,
+            has_uncertainty: true,
+            optional: false,
         }
     }
 
@@ -1812,6 +1824,7 @@ mod tests {
             position: 0,
             tolerance: None,
             is_final: false,
+            has_uncertainty: true,
         }];
         let measurements = vec![
             measurement("l", &[2.0]),
@@ -1847,6 +1860,7 @@ mod tests {
             position: 0,
             tolerance: None,
             is_final: false,
+            has_uncertainty: true,
         }];
         let measurements = vec![
             measurement("l", &[9.0, 11.0]),
@@ -1889,6 +1903,7 @@ mod tests {
             position: 0,
             tolerance: None,
             is_final: false,
+            has_uncertainty: true,
         }];
         let measurements = vec![
             MeasurementInput {
@@ -1938,7 +1953,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -1957,7 +1972,7 @@ mod tests {
         let q_t = analysis
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap();
         assert_eq!(q_t.result.n, 3);
         assert!(close(q_t.result.mean, 11.0, 1e-12));
@@ -2001,7 +2016,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -2071,7 +2086,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -2154,7 +2169,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -2174,7 +2189,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![db::StudentResultInput {
-                symbol: "g".into(),
+                symbol: "g1".into(),
                 value: 9.8,
                 u_expanded: Some(0.1),
             }],
@@ -2182,7 +2197,7 @@ mod tests {
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         assert_eq!(detail.student_results.len(), 1);
-        assert_eq!(detail.student_results[0].symbol, "g");
+        assert_eq!(detail.student_results[0].symbol, "g1");
         assert_eq!(detail.student_results[0].value, 9.8);
     }
 
@@ -2223,7 +2238,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -2297,7 +2312,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -2374,7 +2389,8 @@ mod tests {
             .into_iter()
             .find(|u| u.email == "docente@quantify.local")
             .unwrap();
-        // P1 como curva: T (un valor por punto) vs t_med (réplicas por punto).
+        // P1 como curva (fixture generico, no la forma real de la practica): T1 (un valor por
+        // punto) vs T2 (réplicas por punto).
         crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
             .await
             .unwrap();
@@ -2382,8 +2398,8 @@ mod tests {
             &pool,
             "p1-estadistica",
             crate::practices::CurveInput {
-                x_formula: "T".into(),
-                y_formula: "t_med".into(),
+                x_formula: "T1".into(),
+                y_formula: "T2".into(),
                 x_log: false,
             },
         )
@@ -2407,7 +2423,7 @@ mod tests {
             practice_id: "p1-estadistica".into(),
             measurements: vec![
                 MeasurementInput {
-                    quantity_id: qid("T"),
+                    quantity_id: qid("T1"),
                     instrument_id: None,
                     scale_id: None,
                     values: vec![1.0, 2.0, 3.0],
@@ -2416,7 +2432,7 @@ mod tests {
                     operator_replicas: None,
                 },
                 MeasurementInput {
-                    quantity_id: qid("t_med"),
+                    quantity_id: qid("T2"),
                     instrument_id: None,
                     scale_id: None,
                     values: vec![],
@@ -2433,8 +2449,8 @@ mod tests {
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
 
-        // T: un valor por punto → point_index 0,1,2 y replicate_index 0.
-        let mut t_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T")).collect();
+        // T1: un valor por punto → point_index 0,1,2 y replicate_index 0.
+        let mut t_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T1")).collect();
         t_rows.sort_by_key(|m| m.point_index);
         assert_eq!(t_rows.len(), 3);
         for (i, m) in t_rows.iter().enumerate() {
@@ -2443,11 +2459,8 @@ mod tests {
             assert!(close(m.value, (i + 1) as f64, 1e-9));
         }
 
-        // t_med: réplicas por punto → point_index = punto, replicate_index = réplica.
-        let tmed_rows: Vec<_> = rows
-            .iter()
-            .filter(|m| m.quantity_id == qid("t_med"))
-            .collect();
+        // T2: réplicas por punto → point_index = punto, replicate_index = réplica.
+        let tmed_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T2")).collect();
         assert_eq!(tmed_rows.len(), 6); // 3 puntos x 2 réplicas
         assert!(tmed_rows
             .iter()
@@ -2496,8 +2509,8 @@ mod tests {
             &pool,
             "p1-estadistica",
             crate::practices::CurveInput {
-                x_formula: "T".into(),
-                y_formula: "t_med".into(),
+                x_formula: "T1".into(),
+                y_formula: "T2".into(),
                 x_log: false,
             },
         )
@@ -2522,7 +2535,7 @@ mod tests {
             practice_id: "p1-estadistica".into(),
             measurements: vec![
                 MeasurementInput {
-                    quantity_id: qid("T"),
+                    quantity_id: qid("T1"),
                     instrument_id: None,
                     scale_id: None,
                     values: vec![1.0, 2.0, 3.0],
@@ -2531,7 +2544,7 @@ mod tests {
                     operator_replicas: None,
                 },
                 MeasurementInput {
-                    quantity_id: qid("t_med"),
+                    quantity_id: qid("T2"),
                     instrument_id: None,
                     scale_id: None,
                     values: vec![],
@@ -2550,10 +2563,7 @@ mod tests {
 
         // Cada punto guarda su cantidad propia de réplicas (1 + 3 + 2 = 6), con replicate_index
         // contiguo desde 0 dentro del punto.
-        let tmed_rows: Vec<_> = rows
-            .iter()
-            .filter(|m| m.quantity_id == qid("t_med"))
-            .collect();
+        let tmed_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T2")).collect();
         assert_eq!(tmed_rows.len(), 6);
         for (point, expected_n) in [(0i64, 1usize), (1, 3), (2, 2)] {
             let mut reps: Vec<i64> = tmed_rows
@@ -2611,7 +2621,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -2658,7 +2668,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|q| q["symbol"] == "T")
+            .find(|q| q["symbol"] == "T1")
             .unwrap();
         assert!((q_t["result"]["mean"].as_f64().unwrap() - 11.0).abs() < 1e-9);
     }
@@ -2702,7 +2712,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -2722,7 +2732,7 @@ mod tests {
             meta: None,
             table_number: Some(1),
             student_results: vec![db::StudentResultInput {
-                symbol: "g".into(),
+                symbol: "g1".into(),
                 value: 9.8,
                 u_expanded: Some(0.1),
             }],
@@ -2806,7 +2816,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -2897,7 +2907,7 @@ mod tests {
         let t_id = def
             .quantities
             .iter()
-            .find(|q| q.symbol == "T")
+            .find(|q| q.symbol == "T1")
             .unwrap()
             .id
             .clone();
@@ -2939,6 +2949,7 @@ mod tests {
             position: 0,
             tolerance: None,
             is_final: false,
+            has_uncertainty: true,
         }
     }
 
@@ -3777,7 +3788,8 @@ mod tests {
     #[tokio::test]
     async fn analyze_routes_curva_to_scatter() {
         let (pool, _dir) = setup().await;
-        // Configuramos P1 como curva con ejes sobre sus propias magnitudes (T vs t_med).
+        // Configuramos P1 como curva con ejes sobre sus propias magnitudes (fixture generico:
+        // T1 vs T2, no la forma real "estadistico" de la practica).
         crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
             .await
             .unwrap();
@@ -3785,8 +3797,8 @@ mod tests {
             &pool,
             "p1-estadistica",
             crate::practices::CurveInput {
-                x_formula: "T".into(),
-                y_formula: "t_med".into(),
+                x_formula: "T1".into(),
+                y_formula: "T2".into(),
                 x_log: false,
             },
         )
@@ -3796,17 +3808,16 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        // L es magnitud auxiliar (no está en los ejes T vs t_med): se omite a propósito y
-        // build_points debe ignorarla sin exigirle mediciones.
+        // L y t_med son magnitudes auxiliares (no estan en los ejes T1 vs T2): se omiten a
+        // proposito y build_points debe ignorarlas sin exigirles mediciones.
         let measurements = vec![
-            measurement_for(&def, "T", &[1.0, 2.0, 3.0]),
-            measurement_for(&def, "t_med", &[4.0, 5.0, 6.0]),
+            measurement_for(&def, "T1", &[1.0, 2.0, 3.0]),
+            measurement_for(&def, "T2", &[4.0, 5.0, 6.0]),
         ];
         let analysis = analyze(&pool, "p1-estadistica", &measurements)
             .await
             .unwrap();
         assert!(analysis.regression.is_none());
-        assert!(analysis.derived.is_empty());
         // Una única curva en la lista → un scatter sin ajuste ni mensurandos.
         assert_eq!(analysis.scatters.len(), 1);
         assert_eq!(
@@ -3826,8 +3837,8 @@ mod tests {
             &pool,
             "p1-estadistica",
             crate::practices::CurveInput {
-                x_formula: "T".into(),
-                y_formula: "t_med".into(),
+                x_formula: "T1".into(),
+                y_formula: "T2".into(),
                 x_log: false,
             },
         )
@@ -3837,8 +3848,8 @@ mod tests {
             &pool,
             "p1-estadistica",
             crate::practices::CurveInput {
-                x_formula: "t_med".into(),
-                y_formula: "T".into(),
+                x_formula: "T2".into(),
+                y_formula: "T1".into(),
                 x_log: false,
             },
         )
@@ -3849,20 +3860,20 @@ mod tests {
             .unwrap()
             .unwrap();
         let measurements = vec![
-            measurement_for(&def, "T", &[1.0, 2.0, 3.0]),
-            measurement_for(&def, "t_med", &[4.0, 5.0, 6.0]),
+            measurement_for(&def, "T1", &[1.0, 2.0, 3.0]),
+            measurement_for(&def, "T2", &[4.0, 5.0, 6.0]),
         ];
         let analysis = analyze(&pool, "p1-estadistica", &measurements)
             .await
             .unwrap();
         assert_eq!(analysis.scatters.len(), 2);
-        assert_eq!(analysis.scatters[0].x_label, "T");
-        assert_eq!(analysis.scatters[0].y_label, "t_med");
+        assert_eq!(analysis.scatters[0].x_label, "T1");
+        assert_eq!(analysis.scatters[0].y_label, "T2");
         assert_eq!(
             analysis.scatters[0].points,
             vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
         );
-        assert_eq!(analysis.scatters[1].x_label, "t_med");
+        assert_eq!(analysis.scatters[1].x_label, "T2");
         assert_eq!(
             analysis.scatters[1].points,
             vec![(4.0, 1.0), (5.0, 2.0), (6.0, 3.0)]

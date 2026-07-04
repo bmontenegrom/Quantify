@@ -558,6 +558,18 @@ function renderQuantityForm(qty, practiceId) {
         <input type="checkbox" name="per_point" ${qty ? (qty.per_point ? "checked" : "") : "checked"} />
         Se mide por punto (regresión/curva; desmarcá para escalar compartido)
       </label>
+      <label class="detail-form-checkbox">
+        <input type="checkbox" name="is_given" ${qty?.is_given ? "checked" : ""} />
+        Dato dado (valor ± U cargado a mano, sin instrumento ni réplicas)
+      </label>
+      <label class="detail-form-checkbox">
+        <input type="checkbox" name="has_uncertainty" ${qty ? (qty.has_uncertainty ? "checked" : "") : "checked"} />
+        Tiene incertidumbre (solo aplica si es dato dado; desmarcá para pedir solo "Valor")
+      </label>
+      <label class="detail-form-checkbox">
+        <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />
+        Opcional (puede quedar sin lecturas sin bloquear la entrega)
+      </label>
       <div class="detail-actions">
         <button type="submit">${qty ? "Guardar" : "Agregar"}</button>
         ${qty ? `<button type="button" data-cancel-quantity>Cancelar</button>` : ""}
@@ -621,6 +633,10 @@ function renderResultForm(res, practiceId) {
       <label>
         <input name="is_final" type="checkbox" ${res?.is_final ? "checked" : ""} />
         Resultado final (el alumno lo entrega para comparar)
+      </label>
+      <label>
+        <input name="has_uncertainty" type="checkbox" ${res ? (res.has_uncertainty ? "checked" : "") : "checked"} />
+        Tiene incertidumbre (desmarcá para mostrarlo siempre sin ±U)
       </label>
       <div class="detail-actions">
         <button type="submit">${res ? "Guardar" : "Agregar"}</button>
@@ -764,6 +780,9 @@ function quantityPayloadFromForm(form) {
     // guardamos un ancho de grilla muerto aunque el campo traiga un número.
     replicas_per_point: repeated && raw.replicas_per_point && replicas > 0 ? replicas : null,
     per_point: "per_point" in raw,
+    is_given: "is_given" in raw,
+    has_uncertainty: "has_uncertainty" in raw,
+    optional: "optional" in raw,
   };
 }
 
@@ -1060,6 +1079,7 @@ async function saveNewResult(event) {
       formula: raw.formula,
       tolerance: parseTolerance(raw.tolerance ?? ""),
       is_final: raw.is_final === "on",
+      has_uncertainty: raw.has_uncertainty === "on",
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingResultId = null;
@@ -1085,6 +1105,7 @@ async function saveEditResult(event) {
       formula: raw.formula,
       tolerance: parseTolerance(raw.tolerance ?? ""),
       is_final: raw.is_final === "on",
+      has_uncertainty: raw.has_uncertainty === "on",
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editingResultId = null;
