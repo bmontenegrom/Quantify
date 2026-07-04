@@ -547,6 +547,16 @@ textarea {
   max-width: none;
 }
 
+/* Ocupa todo el ancho de la card (no va en .form-grid, que es de 3 columnas para
+   curso/grupo/mesa): es un único campo de texto libre. */
+.student-comment-field {
+  margin: 14px 0;
+}
+
+.student-comment-field textarea {
+  resize: vertical;
+}
+
 .measurement-row {
   background: var(--panel-raised);
   border: 1px solid var(--line);

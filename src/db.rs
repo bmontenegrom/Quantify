@@ -476,6 +476,9 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     // Metadatos de depuración por magnitud (JSON): nº de bins del histograma y valores
     // descartados por el alumno. Visible para el docente. NULL en entregas sin depuración.
     add_column_if_missing(pool, "submissions", "measurement_meta_json", "TEXT").await?;
+    // Observaciones/comentarios libres del alumno sobre su propia entrega (opcional, cualquier
+    // practica). No se gatea: se ve siempre, igual que los resultados finales del alumno.
+    add_column_if_missing(pool, "submissions", "student_comment", "TEXT").await?;
     // Horas durante las que el alumno puede editar su entrega (desde submitted_at). Default 4h.
     add_column_if_missing(
         pool,

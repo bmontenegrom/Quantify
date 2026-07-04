@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, compareMeasuredVsTheoretical, cssEscape, allStudents } from "./lib.js";
 import { RESULTS_WITHOUT_U } from "./constants.js";
 import { postJson } from "./api.js";
-import { submissionHeader, teacherCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
+import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
 
 export function renderAnalysis(target, submission, includeReview = false, definition = null) {
@@ -38,6 +38,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     target.innerHTML = `
       ${submissionHeader(submission)}
       ${teacherCommentMarkup(submission)}
+      ${studentCommentMarkup(submission)}
       ${!isTeacher ? editBannerMarkup(submission) : ""}
       ${body}
       ${includeReview ? renderReviewForm(submission) : ""}
@@ -64,6 +65,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
   target.innerHTML = `
     ${submissionHeader(submission)}
     ${teacherCommentMarkup(submission)}
+    ${studentCommentMarkup(submission)}
 
     <div class="metrics">
       <div class="metric">

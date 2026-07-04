@@ -269,6 +269,18 @@ export function teacherCommentMarkup(submission) {
     </div>`;
 }
 
+/** Observaciones/comentarios libres que el alumno dejó junto a su entrega, si los hay. No se
+ *  gatea por `results_visible_to_student`: se ve siempre, igual que los resultados finales. */
+export function studentCommentMarkup(submission) {
+  const comment = (submission.student_comment ?? "").trim();
+  if (!comment) return "";
+  return `
+    <div class="teacher-comment">
+      <div class="teacher-comment-head">Observaciones del estudiante</div>
+      <p class="teacher-comment-body">${escapeHtml(comment)}</p>
+    </div>`;
+}
+
 export function editBannerMarkup(submission) {
   if (!submission.can_edit || !submission.editable_until) return "";
   const until = new Date(submission.editable_until);

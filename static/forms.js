@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import {
   courseSelect, groupSelect, practiceSelect, tableSelect,
   measurementFields, latestResult, submitStatus, submitButton,
-  practicaTitle, practicePartTabs, submissionForm,
+  practicaTitle, practicePartTabs, submissionForm, studentComment,
 } from "./dom.js";
 import { fetchJson, postJson } from "./api.js";
 import {
@@ -121,6 +121,9 @@ export async function loadSubmissionForm() {
   if (canReview(state.user)) return;
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
+  // El textarea de observaciones vive fuera de #measurement-fields (no se destruye al cambiar
+  // de práctica): hay que vaciarlo a mano, salvo que se esté editando (ahí lo prellena applyPrefill).
+  if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const practiceId = practiceSelect.value;
   const courseId = courseSelect.value;
   if (practicaTitle) {
@@ -806,6 +809,7 @@ export async function submitFormSubmission() {
         measurements,
         meta: collectMeta(),
         student_results: collectFinalResults(),
+        student_comment: studentComment?.value.trim() || null,
       });
       submitStatus.textContent = "Cambios guardados";
       exitEditMode();
@@ -827,6 +831,7 @@ export async function submitFormSubmission() {
       measurements,
       meta: collectMeta(),
       student_results: collectFinalResults(),
+      student_comment: studentComment?.value.trim() || null,
     });
     submitStatus.textContent = "Entrega guardada";
     const { renderAnalysis } = await import("./analysis.js");
@@ -844,11 +849,13 @@ export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
+  state.editPrefillComment = submission.student_comment ?? "";
   import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id));
 }
 
 export function exitEditMode() {
   state.editingSubmissionId = null;
+  state.editPrefillComment = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;
 }
@@ -904,6 +911,7 @@ function applyFinalResultsPrefill() {
 export function applyPrefill() {
   if (!state.editingSubmissionId) return;
   applyFinalResultsPrefill();
+  if (studentComment) studentComment.value = state.editPrefillComment ?? "";
   const byQ = editPrefillByQuantity();
 
   const seriesTable = measurementFields.querySelector(".series-table");

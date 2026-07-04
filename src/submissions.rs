@@ -155,6 +155,7 @@ pub struct SubmissionRecord {
     pub course_id: Option<String>,
     pub submission_edit_hours: f64,
     pub table_number: Option<i64>,
+    pub student_comment: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,6 +199,9 @@ pub struct SubmissionDetail {
     /// Tolerancias porcentuales por símbolo de mensurando (solo los que tienen tolerancia fijada).
     /// Usado por el frontend para mostrar el veredicto ✓/✗ en la tabla de comparación.
     pub result_tolerances: HashMap<String, f64>,
+    /// Observaciones/comentarios libres del alumno sobre su entrega. No se gatea: se ve siempre,
+    /// igual que `student_results`.
+    pub student_comment: Option<String>,
 }
 
 /// Un mensurando final calculado por el estudiante (valor ± U), por símbolo.
@@ -1070,7 +1074,8 @@ pub async fn submission_detail(
             s.measurement_meta_json,
             s.course_id,
             COALESCE(c.submission_edit_hours, 4) AS submission_edit_hours,
-            s.table_number
+            s.table_number,
+            s.student_comment
         FROM submissions s
         JOIN practices p ON p.id = s.practice_id
         LEFT JOIN courses c ON c.id = s.course_id
@@ -1133,6 +1138,7 @@ pub async fn submission_detail(
         table_number: row.table_number,
         members,
         result_tolerances,
+        student_comment: row.student_comment,
     }))
 }
 

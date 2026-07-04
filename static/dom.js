@@ -19,6 +19,7 @@ export const submissionForm = document.querySelector("#submission-form");
 export const submitStatus = document.querySelector("#submit-status");
 export const latestResult = document.querySelector("#latest-result");
 export const measurementFields = document.querySelector("#measurement-fields");
+export const studentComment = document.querySelector("#student-comment");
 export const submitButton = document.querySelector("#submit-button");
 export const submissionsTitle = document.querySelector("#submissions-title");
 export const submissionsSubtitle = document.querySelector("#submissions-subtitle");

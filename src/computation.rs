@@ -90,6 +90,9 @@ pub struct FormSubmissionInput {
     /// Se valida y persiste igual que `POST /submissions/{id}/student-results`.
     #[serde(default)]
     pub student_results: Vec<crate::db::StudentResultInput>,
+    /// Observaciones/comentarios libres del alumno sobre su entrega (opcional, cualquier práctica).
+    #[serde(default)]
+    pub student_comment: Option<String>,
 }
 
 /// Incertidumbre calculada de una magnitud medida directamente.
@@ -1464,6 +1467,11 @@ pub async fn create_form_submission(
         Some(value) => Some(serde_json::to_string(value)?),
         None => None,
     };
+    let student_comment = input
+        .student_comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     let id = Uuid::new_v4().to_string();
     let now = Utc::now();
@@ -1475,7 +1483,7 @@ pub async fn create_form_submission(
         INSERT INTO submissions (
             id, student_name, group_name, course, practice_id, file_name, csv_path,
             analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
-            entry_mode, measurement_meta_json, table_number
+            entry_mode, measurement_meta_json, table_number, student_comment
         )
         SELECT
             ?1,
@@ -1493,7 +1501,8 @@ pub async fn create_form_submission(
             g.id,
             'form',
             ?8,
-            ?9
+            ?9,
+            ?10
         FROM users u, lab_groups g, courses c
         WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
         "#,
@@ -1507,6 +1516,7 @@ pub async fn create_form_submission(
     .bind(now)
     .bind(&meta_json)
     .bind(table_number)
+    .bind(student_comment)
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -1606,6 +1616,7 @@ pub async fn update_form_submission(
     measurements: &[MeasurementInput],
     meta: Option<&serde_json::Value>,
     student_results: Option<&[db::StudentResultInput]>,
+    student_comment: Option<&str>,
 ) -> anyhow::Result<db::SubmissionDetail> {
     if let Some(results) = student_results {
         validate_student_results(pool, practice_id, results).await?;
@@ -1621,11 +1632,13 @@ pub async fn update_form_submission(
 
     let mut tx = pool.begin().await?;
     sqlx::query(
-        "UPDATE submissions SET analysis_json = ?2, measurement_meta_json = ?3 WHERE id = ?1",
+        "UPDATE submissions SET analysis_json = ?2, measurement_meta_json = ?3, \
+         student_comment = ?4 WHERE id = ?1",
     )
     .bind(submission_id)
     .bind(&analysis_json)
     .bind(&meta_json)
+    .bind(student_comment)
     .execute(&mut *tx)
     .await?;
     sqlx::query("DELETE FROM submission_measurements WHERE submission_id = ?1")
@@ -2002,6 +2015,7 @@ mod tests {
             meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         assert_eq!(detail.entry_mode, "form");
@@ -2011,6 +2025,87 @@ mod tests {
         let meta = detail.measurement_meta.expect("meta persistida");
         assert_eq!(meta["q1"]["bins"], 8);
         assert_eq!(meta["q1"]["discarded"][0], 9.9);
+    }
+
+    /// Las observaciones/comentarios del alumno son opcionales, se persisten recortando
+    /// espacios, y un texto en blanco (o ausente) queda como `None` en vez de una cadena vacía.
+    #[tokio::test]
+    async fn create_form_submission_trims_and_persists_student_comment() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
+        let mk = |comment: Option<&str>| FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![MeasurementInput {
+                quantity_id: t_id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![5.0, 5.2, 4.9],
+                given_u: None,
+                point_replicas: None,
+                operator_replicas: None,
+            }],
+            meta: None,
+            table_number: None,
+            student_results: vec![],
+            student_comment: comment.map(String::from),
+        };
+
+        // Con texto (con espacios de sobra): se persiste recortado.
+        let detail = create_form_submission(&pool, &user, mk(Some("  anduvo mal el generador  ")))
+            .await
+            .unwrap();
+        assert_eq!(
+            detail.student_comment.as_deref(),
+            Some("anduvo mal el generador")
+        );
+
+        // En blanco: se persiste como None, no como cadena vacía.
+        let blank = create_form_submission(&pool, &user, mk(Some("   ")))
+            .await
+            .unwrap();
+        assert_eq!(blank.student_comment, None);
+
+        // Ausente (None): también None.
+        let absent = create_form_submission(&pool, &user, mk(None)).await.unwrap();
+        assert_eq!(absent.student_comment, None);
     }
 
     /// El alumno puede entregar opcionalmente su resultado final (p. ej. `g`) junto con la
@@ -2075,6 +2170,7 @@ mod tests {
                 value: 9.8,
                 u_expanded: Some(0.1),
             }],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         assert_eq!(detail.student_results.len(), 1);
@@ -2143,6 +2239,7 @@ mod tests {
                 value: 1.0,
                 u_expanded: None,
             }],
+            student_comment: None,
         };
         let err = create_form_submission(&pool, &user, input)
             .await
@@ -2213,6 +2310,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
@@ -2322,6 +2420,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
@@ -2436,6 +2535,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let detail = create_form_submission(&pool, &user, input).await.unwrap();
         let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
@@ -2523,6 +2623,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         let created = create_form_submission(&pool, &user, mk(vec![5.0, 5.2, 4.9]))
             .await
@@ -2538,6 +2639,7 @@ mod tests {
             &mk(vec![10.0, 12.0, 11.0]).measurements,
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -2551,6 +2653,102 @@ mod tests {
             .find(|q| q["symbol"] == "T")
             .unwrap();
         assert!((q_t["result"]["mean"].as_f64().unwrap() - 11.0).abs() < 1e-9);
+    }
+
+    /// `update_form_submission` reemplaza el comentario del alumno igual que las lecturas:
+    /// se puede agregar uno donde no había, cambiarlo, y en blanco vuelve a quedar en `None`.
+    #[tokio::test]
+    async fn update_form_submission_replaces_student_comment() {
+        let (pool, _dir) = setup().await;
+        let course = db::create_course(
+            &pool,
+            db::CreateCourse {
+                name: "Curso".into(),
+                term: "2026".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = db::create_group(
+            &pool,
+            &course.id,
+            db::CreateGroup {
+                name: "Grupo 1".into(),
+                table_count: Some(4),
+                group_type: None,
+            },
+        )
+        .await
+        .unwrap();
+        let user = db::users(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|u| u.email == "docente@quantify.local")
+            .unwrap();
+        let def = crate::practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let t_id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == "T")
+            .unwrap()
+            .id
+            .clone();
+        let measurements = vec![MeasurementInput {
+            quantity_id: t_id,
+            instrument_id: None,
+            scale_id: None,
+            values: vec![5.0, 5.2, 4.9],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        }];
+        let input = FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: measurements.clone(),
+            meta: None,
+            table_number: None,
+            student_results: vec![],
+            student_comment: None,
+        };
+        let created = create_form_submission(&pool, &user, input).await.unwrap();
+        assert_eq!(created.student_comment, None);
+
+        // Agrega un comentario donde no había.
+        let edited = update_form_submission(
+            &pool,
+            &created.id,
+            "p1-estadistica",
+            &measurements,
+            None,
+            None,
+            Some("faltó una réplica por corte de luz"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            edited.student_comment.as_deref(),
+            Some("faltó una réplica por corte de luz")
+        );
+
+        // Lo borra (en blanco vuelve a None, no queda pegado el anterior).
+        let cleared = update_form_submission(
+            &pool,
+            &created.id,
+            "p1-estadistica",
+            &measurements,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(cleared.student_comment, None);
     }
 
     #[tokio::test]
@@ -2606,6 +2804,7 @@ mod tests {
             meta: None,
             table_number: None,
             student_results: vec![],
+            student_comment: None,
         };
         assert!(create_form_submission(&pool, &user, input).await.is_err());
         // Rollback: no debe quedar ninguna entrega ni medición.

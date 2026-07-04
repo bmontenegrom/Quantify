@@ -863,6 +863,9 @@ struct EditFormBody {
     /// `None` = no tocar los cálculos del alumno ya guardados; `Some(vec)` los reemplaza.
     #[serde(default)]
     student_results: Option<Vec<db::StudentResultInput>>,
+    /// Observaciones/comentarios libres del alumno; se reemplaza por completo en cada edición.
+    #[serde(default)]
+    student_comment: Option<String>,
 }
 
 /// `POST /api/submissions/{id}/edit`: el alumno dueño reemplaza sus lecturas dentro de la
@@ -900,6 +903,11 @@ async fn edit_form_submission(
         return Err(AppError::bad_request(message));
     }
 
+    let student_comment = input
+        .student_comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let updated = computation::update_form_submission(
         &state.pool,
         &id,
@@ -907,6 +915,7 @@ async fn edit_form_submission(
         &input.measurements,
         input.meta.as_ref(),
         input.student_results.as_deref(),
+        student_comment,
     )
     .await
     .map_err(analysis_error)?;
