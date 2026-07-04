@@ -482,6 +482,16 @@ type PointSeries = Vec<(f64, f64)>;
 /// punto produce un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
 pub type PointContext = HashMap<String, f64>;
 
+/// Símbolos de las magnitudes medidas por punto (van en la serie, no son escalares compartidos):
+/// `per_point == true` y no `is_given`. Usado tanto para condicionar la cantidad de puntos
+/// (`build_points`) como para los alias de extremos por punto (`compute_curva`).
+fn per_point_quantity_symbols(quantities: &[PracticeQuantity]) -> impl Iterator<Item = &str> {
+    quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .map(|q| q.symbol.as_str())
+}
+
 fn build_points(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
@@ -559,11 +569,8 @@ fn build_points(
         .collect();
     // Magnitudes que se miden por punto (van en la serie): solo estas condicionan la cantidad de
     // puntos. Las `per_point = false` o `is_given` son escalares compartidos que se difunden.
-    let per_point_syms: std::collections::HashSet<&str> = quantities
-        .iter()
-        .filter(|q| q.per_point && !q.is_given)
-        .map(|q| q.symbol.as_str())
-        .collect();
+    let per_point_syms: std::collections::HashSet<&str> =
+        per_point_quantity_symbols(quantities).collect();
 
     // Las intermedias (Motor C) se compilan **en orden**: cada una puede usar las magnitudes y las
     // intermedias **anteriores** (a estas las ve como su valor por punto, ya promediado). Sus
@@ -1195,11 +1202,8 @@ pub async fn analyze(
         // máximo sobre los puntos y `{T}_at_{S}_max` el valor de `T` en ese mismo punto. Van con
         // u = 0 (son lecturas de la tabla, no medidas con incertidumbre propia), de modo que un
         // mensurando como `P_max_e = P_max` resulta con U = 0 y el frontend lo muestra sin ±U.
-        let per_point_syms: Vec<String> = definition
-            .quantities
-            .iter()
-            .filter(|q| q.per_point && !q.is_given)
-            .map(|q| q.symbol.clone())
+        let per_point_syms: Vec<String> = per_point_quantity_symbols(&definition.quantities)
+            .map(String::from)
             .chain(definition.intermediates.iter().map(|it| it.symbol.clone()))
             .collect();
         for s in &per_point_syms {
@@ -1211,7 +1215,9 @@ pub async fn analyze(
                     }
                 }
             }
-            let Some((idx, max_value)) = best else { continue };
+            let Some((idx, max_value)) = best else {
+                continue;
+            };
             let max_symbol = format!("{s}_max");
             means.insert(max_symbol.clone(), max_value);
             us.insert(max_symbol.clone(), 0.0);
@@ -2104,7 +2110,9 @@ mod tests {
         assert_eq!(blank.student_comment, None);
 
         // Ausente (None): también None.
-        let absent = create_form_submission(&pool, &user, mk(None)).await.unwrap();
+        let absent = create_form_submission(&pool, &user, mk(None))
+            .await
+            .unwrap();
         assert_eq!(absent.student_comment, None);
     }
 

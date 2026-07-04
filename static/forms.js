@@ -28,6 +28,23 @@ const SYMBOL_FIRST_QUANTITIES = new Set([
   "VR1_p", "VR2_p", "VR3_p",
 ]);
 
+/** Agrupa `items` (con `.id`/`.symbol`) según `sections[].symbols`, en el mismo orden que las
+ *  secciones. Devuelve, por sección, sus `rows` encontrados, y aparte los `items` que no entraron
+ *  en ninguna sección (`rest`). Común al render de magnitudes (Motor D) y al de la serie (Motor E),
+ *  que solo difieren en cómo pintan cada fila/bloque, no en el matching contra PRACTICE_SECTIONS. */
+function groupBySections(items, sections) {
+  const used = new Set();
+  const grouped = sections.map((sec) => {
+    const rows = (sec.symbols ?? [])
+      .map((sym) => items.find((q) => q.symbol === sym))
+      .filter(Boolean);
+    rows.forEach((q) => used.add(q.id));
+    return { sec, rows };
+  });
+  const rest = items.filter((q) => !used.has(q.id));
+  return { grouped, rest };
+}
+
 function quantityNameHtml(q) {
   const base = inlineMathHtml(q.name);
   if (SYMBOL_FIRST_QUANTITIES.has(q.symbol)) {
@@ -418,12 +435,8 @@ export function renderMeasurementFields() {
 
   const sections = PRACTICE_SECTIONS[practiceSelect.value];
   if (sections) {
-    const used = new Set();
-    const blocks = sections.map((sec) => {
-      const rows = (sec.symbols ?? [])
-        .map((sym) => definition.quantities.find((q) => q.symbol === sym))
-        .filter(Boolean);
-      rows.forEach((q) => used.add(q.id));
+    const { grouped, rest } = groupBySections(definition.quantities, sections);
+    const blocks = grouped.map(({ sec, rows }) => {
       if (rows.length === 0) return "";
       const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       return `<div class="measurement-section">
@@ -432,7 +445,6 @@ export function renderMeasurementFields() {
           ${helper}
         </div>`;
     });
-    const rest = definition.quantities.filter((q) => !used.has(q.id));
     measurementFields.innerHTML = blocks.join("") + rest.map(quantityRowHtml).join("");
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
@@ -1095,24 +1107,19 @@ function renderSeriesTable(definition) {
   let sharedSection = "";
   let seriesSectionAttr = "";
   if (sections && shared.length) {
-    const used = new Set();
-    const blocks = [];
-    for (const sec of sections) {
-      if (sec.series) {
-        if (sec.id) seriesSectionAttr = ` data-section="${escapeHtml(sec.id)}"`;
-        continue;
-      }
-      const rows = (sec.symbols ?? [])
-        .map((sym) => shared.find((q) => q.symbol === sym))
-        .filter(Boolean);
-      rows.forEach((q) => used.add(q.id));
-      if (!rows.length) continue;
-      const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
-      blocks.push(
-        `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}</div>`,
-      );
-    }
-    const rest = shared.filter((q) => !used.has(q.id));
+    // La sección `series: true` no agrupa magnitudes: solo marca dónde va la tabla por punto.
+    const seriesSec = sections.find((sec) => sec.series);
+    if (seriesSec?.id) seriesSectionAttr = ` data-section="${escapeHtml(seriesSec.id)}"`;
+    const { grouped, rest } = groupBySections(
+      shared,
+      sections.filter((sec) => !sec.series),
+    );
+    const blocks = grouped
+      .filter(({ rows }) => rows.length)
+      .map(({ sec, rows }) => {
+        const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+        return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}</div>`;
+      });
     if (rest.length) {
       blocks.push(`<div class="shared-quantities"><h4>Datos compartidos</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
     }
