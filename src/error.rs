@@ -98,6 +98,17 @@ impl AppError {
             message: message.into(),
         }
     }
+
+    /// Mapea un error de dominio (`anyhow`) a la respuesta HTTP adecuada: los de base de datos van
+    /// a un 500 genérico (sin filtrar detalle); el resto son errores de dominio (práctica/escala
+    /// inexistente, fórmula inválida, etc.) y llevan su mensaje amigable como 400.
+    pub fn from_domain_or_db(err: anyhow::Error) -> Self {
+        if err.downcast_ref::<sqlx::Error>().is_some() {
+            AppError::from(err)
+        } else {
+            AppError::bad_request(err.to_string())
+        }
+    }
 }
 
 impl IntoResponse for AppError {

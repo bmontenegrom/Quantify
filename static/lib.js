@@ -437,6 +437,12 @@ function relPct(b, a) {
  * alumno cargó un valor, `verdict` es `"pass"` o `"fail"`; en otro caso es `null`.
  * Función pura: el render arma la tabla con esto.
  */
+/** `true` salvo que `has_uncertainty` sea explícitamente `false` (magnitud/resultado sin ±U por
+ *  diseño, p. ej. un dato de tabla o un mensurando que se muestra sin incertidumbre). */
+export function hasUncertainty(entity) {
+  return entity?.has_uncertainty !== false;
+}
+
 export function compareResults(autoDerived, studentResults, tolerances = {}) {
   const auto = autoDerived ?? [];
   const byStudent = new Map((studentResults ?? []).map((s) => [s.symbol, s]));
@@ -454,7 +460,7 @@ export function compareResults(autoDerived, studentResults, tolerances = {}) {
       symbol: d.symbol,
       name: d.name,
       unit: d.unit,
-      hasUncertainty: d.has_uncertainty !== false,
+      hasUncertainty: hasUncertainty(d),
       auto: { value: d.value, u: d.u_expanded },
       student: s ? { value: sv, u: su } : null,
       dValue: sv == null ? null : sv - d.value,

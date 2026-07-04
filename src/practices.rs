@@ -4,7 +4,7 @@
 //! con sus magnitudes y fórmulas, cualquier curso que habilite P1 usa la misma definición.
 //! El cálculo de incertidumbres (Fase 4) lee esta definición para saber qué medir y qué derivar.
 
-use crate::db::{PracticeQuantity, PracticeResult};
+use crate::db::{next_position, PracticeQuantity, PracticeResult};
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
@@ -268,12 +268,8 @@ pub async fn create_point_result(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud derivada por punto necesita símbolo y fórmula");
     }
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_point_results WHERE practice_id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
+    let position =
+        next_position(pool, "practice_point_results", "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_point_results (id, practice_id, position, symbol, name, unit, formula) \
@@ -281,7 +277,7 @@ pub async fn create_point_result(
     )
     .bind(&id)
     .bind(practice_id)
-    .bind(position.0)
+    .bind(position)
     .bind(symbol)
     .bind(input.name.trim())
     .bind(input.unit.trim())
@@ -372,12 +368,7 @@ pub async fn create_aggregate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("el mensurando agregado necesita símbolo y fórmula");
     }
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_aggregates WHERE practice_id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
+    let position = next_position(pool, "practice_aggregates", "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_aggregates (id, practice_id, position, symbol, name, unit, formula) \
@@ -385,7 +376,7 @@ pub async fn create_aggregate(
     )
     .bind(&id)
     .bind(practice_id)
-    .bind(position.0)
+    .bind(position)
     .bind(symbol)
     .bind(input.name.trim())
     .bind(input.unit.trim())
@@ -475,12 +466,8 @@ pub async fn create_intermediate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
     }
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_intermediates WHERE practice_id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
+    let position =
+        next_position(pool, "practice_intermediates", "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_intermediates (id, practice_id, position, symbol, name, unit, formula) \
@@ -488,7 +475,7 @@ pub async fn create_intermediate(
     )
     .bind(&id)
     .bind(practice_id)
-    .bind(position.0)
+    .bind(position)
     .bind(symbol)
     .bind(input.name.trim())
     .bind(input.unit.trim())
@@ -580,12 +567,7 @@ pub async fn create_curve(
     if x.is_empty() || y.is_empty() {
         anyhow::bail!("la curva necesita las fórmulas de ambos ejes");
     }
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_curves WHERE practice_id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
+    let position = next_position(pool, "practice_curves", "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_curves (id, practice_id, position, x_formula, y_formula, x_log) \
@@ -593,7 +575,7 @@ pub async fn create_curve(
     )
     .bind(&id)
     .bind(practice_id)
-    .bind(position.0)
+    .bind(position)
     .bind(x)
     .bind(y)
     .bind(input.x_log)
@@ -707,15 +689,10 @@ pub async fn create_quantity(
     practice_id: &str,
     input: QuantityInput,
 ) -> anyhow::Result<PracticeQuantity> {
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_quantities WHERE practice_id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
+    let position = next_position(pool, "practice_quantities", "practice_id", practice_id).await?;
     let id = {
         let mut conn = pool.acquire().await?;
-        insert_quantity(&mut conn, practice_id, position.0, &input).await?
+        insert_quantity(&mut conn, practice_id, position, &input).await?
     };
     fetch_quantity(pool, &id).await
 }
@@ -766,15 +743,10 @@ pub async fn create_result(
     practice_id: &str,
     input: ResultInput,
 ) -> anyhow::Result<PracticeResult> {
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_results WHERE practice_id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
+    let position = next_position(pool, "practice_results", "practice_id", practice_id).await?;
     let id = {
         let mut conn = pool.acquire().await?;
-        insert_result(&mut conn, practice_id, position.0, &input).await?
+        insert_result(&mut conn, practice_id, position, &input).await?
     };
     fetch_result(pool, &id).await
 }

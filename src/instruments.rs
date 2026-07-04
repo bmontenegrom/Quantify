@@ -3,7 +3,7 @@
 //! Los tipos de fila ([`Instrument`], [`InstrumentScale`]) y el esquema viven en [`crate::db`];
 //! este módulo concentra las operaciones CRUD y la portabilidad del catálogo entre cursos.
 
-use crate::db::{Instrument, InstrumentScale};
+use crate::db::{next_position, Instrument, InstrumentScale};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
@@ -241,15 +241,10 @@ pub async fn create_scale(
     instrument_id: &str,
     input: ScaleInput,
 ) -> anyhow::Result<InstrumentScale> {
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM instrument_scales WHERE instrument_id = ?1",
-    )
-    .bind(instrument_id)
-    .fetch_one(pool)
-    .await?;
+    let position = next_position(pool, "instrument_scales", "instrument_id", instrument_id).await?;
     let id = {
         let mut conn = pool.acquire().await?;
-        insert_scale(&mut conn, instrument_id, position.0, &input).await?
+        insert_scale(&mut conn, instrument_id, position, &input).await?
     };
     fetch_scale(pool, &id).await
 }

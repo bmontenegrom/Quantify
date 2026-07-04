@@ -158,8 +158,8 @@ function renderInstrumentDirectory() {
 
   instrumentCatalog.innerHTML = exportImportBar + (rows.length
     ? `
-      <div class="directory-table-wrap">
-        <table class="grade-table directory-data-table">
+      <div class="data-table-wrap">
+        <table class="data-table">
           <thead>
             <tr>
               <th>Nombre</th>
@@ -283,8 +283,8 @@ function renderScalesList(item) {
   });
 
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr>
             <th>Etiqueta</th>

@@ -209,8 +209,8 @@ function renderPracticeDirectory() {
 
   practiceCatalog.innerHTML = rows.length
     ? `
-      <div class="directory-table-wrap">
-        <table class="grade-table directory-data-table">
+      <div class="data-table-wrap">
+        <table class="data-table">
           <thead>
             <tr>
               <th>Práctica</th>
@@ -335,8 +335,8 @@ function renderPointResultsList(def, practiceId) {
     return [baseRow, editRow];
   });
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -396,8 +396,8 @@ function renderAggregatesList(def, practiceId) {
     return [baseRow, editRow];
   });
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -456,8 +456,8 @@ function renderIntermediatesList(def, practiceId) {
     return [baseRow, editRow];
   });
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -524,8 +524,8 @@ function renderCurvesList(def, practiceId) {
   });
 
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr><th>#</th><th>Eje X</th><th>Eje Y</th><th>Acciones</th></tr>
         </thead>
@@ -602,8 +602,8 @@ function renderQuantitiesList(def, practiceId) {
   });
 
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Magnitud</th><th>Réplicas</th><th>Acciones</th></tr>
         </thead>
@@ -673,8 +673,8 @@ function renderResultsList(def, practiceId) {
   });
 
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Fórmula</th><th>Tolerancia (%)</th><th>Final</th><th>Acciones</th></tr>
         </thead>

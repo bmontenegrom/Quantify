@@ -379,7 +379,8 @@ textarea {
   margin-top: 16px;
 }
 
-#submit-status {
+#submit-status,
+.inline-status {
   color: var(--muted);
   font-size: 0.9rem;
 }
@@ -435,25 +436,26 @@ textarea {
   margin-top: 14px;
 }
 
-.grade-table-wrap {
+.data-table-wrap {
+  max-width: 100%;
   overflow-x: auto;
 }
 
-.grade-table {
+.data-table {
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: min(760px, 100%);
   width: 100%;
 }
 
-.grade-table th,
-.grade-table td {
+.data-table th,
+.data-table td {
   border-bottom: 1px solid var(--line);
   padding: 8px;
   text-align: left;
   vertical-align: top;
 }
 
-.grade-table th {
+.data-table th {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 750;
@@ -867,15 +869,6 @@ textarea {
   white-space: pre-wrap;
 }
 
-.directory-table-wrap {
-  max-width: 100%;
-  overflow-x: auto;
-}
-
-.directory-data-table {
-  min-width: min(760px, 100%);
-}
-
 .directory-detail-row {
   background: var(--bg-soft);
 }
@@ -970,7 +963,7 @@ textarea {
 }
 
 .status-chip {
-  background: #eef6f5;
+  background: var(--accent-soft);
   border-radius: 999px;
   color: var(--accent-strong);
   font-size: 0.78rem;
@@ -1115,7 +1108,7 @@ textarea {
 
 .warnings {
   border-left: 4px solid var(--warn);
-  color: #713f12;
+  color: var(--warn-strong);
   display: grid;
   gap: 4px;
   margin-top: 14px;
@@ -1268,7 +1261,7 @@ textarea {
 }
 
 /* Tabla de serie para cargar puntos (modo regresión). */
-.series-table.directory-data-table {
+.series-table.data-table {
   min-width: 0;
   table-layout: auto;
 }

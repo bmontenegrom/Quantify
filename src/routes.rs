@@ -819,17 +819,6 @@ async fn create_submission(
     Ok(Json(gate_analysis(created, &user)))
 }
 
-/// Mapea un error del cálculo de incertidumbres: los de base de datos van a un 500 genérico
-/// (sin filtrar detalle); los de dominio (práctica/escala inexistente, fórmula inválida, etc.)
-/// llevan su mensaje amigable como 400.
-fn analysis_error(err: anyhow::Error) -> AppError {
-    if err.downcast_ref::<sqlx::Error>().is_some() {
-        AppError::from(err)
-    } else {
-        AppError::bad_request(err.to_string())
-    }
-}
-
 /// `POST /api/submissions/form`: crea una entrega por formulario (lecturas crudas) calculando
 /// las incertidumbres automáticamente. Valida acceso al curso/grupo/práctica.
 async fn create_form_submission(
@@ -853,7 +842,7 @@ async fn create_form_submission(
     }
     let detail = computation::create_form_submission(&state.pool, &user, input)
         .await
-        .map_err(analysis_error)?;
+        .map_err(AppError::from_domain_or_db)?;
     Ok(Json(gate_analysis(detail, &user)))
 }
 
@@ -921,7 +910,7 @@ async fn edit_form_submission(
         student_comment,
     )
     .await
-    .map_err(analysis_error)?;
+    .map_err(AppError::from_domain_or_db)?;
     Ok(Json(gate_analysis(updated, &user)))
 }
 
@@ -1406,7 +1395,7 @@ async fn analyze_preview(
     current_user(&state, &headers).await?;
     let analysis = computation::analyze(&state.pool, &id, &body.measurements)
         .await
-        .map_err(analysis_error)?;
+        .map_err(AppError::from_domain_or_db)?;
     Ok(Json(analysis))
 }
 

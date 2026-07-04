@@ -50,8 +50,10 @@ export function renderAnalysis(target, submission, includeReview = false, defini
       );
     target
       .querySelector(".cancel-submission-btn")
-      ?.addEventListener("click", () =>
-        import("./forms.js").then(({ cancelSubmission }) => cancelSubmission(submission))
+      ?.addEventListener("click", (event) =>
+        import("./forms.js").then(({ cancelSubmission }) =>
+          cancelSubmission(submission, event.currentTarget.closest(".edit-banner"))
+        )
       );
     const reviewForm = target.querySelector(".review-form");
     if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
@@ -173,8 +175,8 @@ function measurementMetaMarkup(submission, definition) {
 function quantitiesTableMarkup(quantities) {
   if (!quantities.length) return `<p class="submission-meta">Sin magnitudes cargadas.</p>`;
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr><th>Magnitud</th><th>n</th><th>media</th><th>s</th><th>u_A</th><th>u_B</th><th>u_c</th><th>U</th></tr>
         </thead>
@@ -233,8 +235,8 @@ function pointResultsMarkup(pointResults) {
   }).join("");
   return `
     <h3>Por corrida</h3>
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead><tr><th>#</th>${headers}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -253,8 +255,8 @@ function aggregatesMarkup(aggregates) {
     .join("");
   return `
     <h3>Mensurandos agregados</h3>
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead><tr><th>Símbolo</th><th>Nombre</th><th>Valor</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -402,8 +404,8 @@ export function scatterMarkup(scatter) {
   const plot = scatterPlot(points, { xLog: scatter.x_log });
   const xHeader = scatter.x_log ? `${escapeHtml(scatter.x_label)} (log)` : escapeHtml(scatter.x_label);
   const table = `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr><th>#</th><th>${xHeader}</th><th>${escapeHtml(scatter.y_label)}</th></tr>
         </thead>
@@ -438,8 +440,8 @@ function measuredVsTheoreticalMarkup(quantities, derived) {
   return `
     <h3>Medido vs teórico (automático)</h3>
     <p class="submission-meta">Cada magnitud medida comparada con el valor teórico que calcula el programa (con su U propagada).</p>
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table compare-table">
+    <div class="data-table-wrap">
+      <table class="data-table compare-table">
         <thead>
           <tr>
             <th>Magnitud</th><th>Medido (±U)</th><th>Teórico (±U)</th>
@@ -481,8 +483,8 @@ function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
   };
   return `
     <h3>Comparación: tus cálculos vs automático</h3>
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table compare-table">
+    <div class="data-table-wrap">
+      <table class="data-table compare-table">
         <thead>
           <tr>
             <th>Mensurando</th><th>Automático</th><th>Tus cálculos</th>
@@ -545,8 +547,8 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
     <form class="student-results-form detail-form">
       <h3>${title}</h3>
       <p class="submission-meta">${helpText}</p>
-      <div class="directory-table-wrap">
-        <table class="grade-table directory-data-table">
+      <div class="data-table-wrap">
+        <table class="data-table">
           <thead><tr><th>Mensurando</th><th>Valor</th><th>U</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -581,8 +583,8 @@ function membersEditorMarkup(submission) {
   return `
     <section class="panel members-editor">
       <h4>Integrantes del informe</h4>
-      <div class="directory-table-wrap">
-        <table class="grade-table directory-data-table">
+      <div class="data-table-wrap">
+        <table class="data-table">
           <thead><tr><th>Nombre</th><th>Rol</th><th>Estado</th><th>Aceptado</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
