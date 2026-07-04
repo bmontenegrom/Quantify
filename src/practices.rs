@@ -1139,7 +1139,9 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("R2", "Resistencia R2 (compartida)", "ohm", "resistencia"),
             qty_shared("R3", "Resistencia R3 (compartida)", "ohm", "resistencia"),
             qty_shared("Vg_s", "Voltaje de la fuente", "V", "voltaje"),
-            qty_shared(
+            // RA es un dato de tabla segun la escala del amperimetro, no se mide: va como dato
+            // dado por catedra (valor +/- U), igual en las tres partes.
+            qty_given(
                 "RA_s",
                 "Resistencia interna del amperimetro",
                 "ohm",
@@ -1149,7 +1151,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("VR2_s", "Voltaje medido en R2", "V", "voltaje"),
             qty_shared("VR3_s", "Voltaje medido en R3", "V", "voltaje"),
             qty_shared("Vg_p", "Voltaje de la fuente", "V", "voltaje"),
-            qty_shared(
+            qty_given(
                 "RA_p",
                 "Resistencia interna del amperimetro",
                 "ohm",
@@ -1159,7 +1161,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("VR2_p", "Voltaje medido en R2", "V", "voltaje"),
             qty_shared("VR3_p", "Voltaje medido en R3", "V", "voltaje"),
             qty_shared("Vg_c", "Voltaje de la fuente", "V", "voltaje"),
-            qty_shared(
+            qty_given(
                 "RA_c",
                 "Resistencia interna del amperimetro",
                 "ohm",
@@ -2830,11 +2832,18 @@ mod tests {
                 "falta la magnitud {symbol}"
             );
         }
-        // Solo R e I son por punto; el resto son escalares compartidos medidos.
+        // Solo R e I son por punto; el resto son escalares compartidos. RA (por parte) es dato
+        // de catedra (tabla segun la escala del amperimetro); el resto se mide.
+        let given = ["RA_s", "RA_p", "RA_c"];
         for q in &def.quantities {
             let per_point = q.symbol == "R" || q.symbol == "I";
             assert_eq!(q.per_point, per_point, "per_point de {}", q.symbol);
-            assert!(!q.is_given, "{} no es dato de catedra", q.symbol);
+            assert_eq!(
+                q.is_given,
+                given.contains(&q.symbol.as_str()),
+                "is_given de {}",
+                q.symbol
+            );
         }
         assert_eq!(def.results.len(), 13);
         assert_eq!(def.results.iter().filter(|r| r.is_final).count(), 12);
