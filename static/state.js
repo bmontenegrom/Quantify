@@ -25,12 +25,10 @@ export const state = {
   activePracticeId: null,
   practiceDefinition: null,
   practiceActionStatus: "",
-  editingQuantityId: null,
-  editingResultId: null,
-  editingCurveId: null,
-  editingIntermediateId: null,
-  editingPointResultId: null,
-  editingAggregateId: null,
+  // Fila en edición dentro del workspace de una práctica (a lo sumo una a la vez, entre
+  // magnitudes/mensurandos/curvas/intermedias/derivadas-por-punto/agregados). `kind` identifica
+  // la lista ("quantity"/"result"/"curve"/"intermediate"/"pointResult"/"aggregate").
+  editing: { kind: null, id: null },
   practiceForm: null,
   chronometers: new Map(),
   seriesDebug: new Map(),
