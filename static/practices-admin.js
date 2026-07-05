@@ -15,6 +15,19 @@ function isEditing(kind, id) {
   return state.editing.kind === kind && state.editing.id === id;
 }
 
+/** Arma statusCreate/Update/Delete a partir de un label y su género gramatical, para no repetir
+ *  a mano las 3 variantes (agregada/actualizada/eliminada vs. -o) en cada kind. */
+function statusStrings(label, fem) {
+  const suffix = fem
+    ? { create: "agregada", update: "actualizada", delete: "eliminada" }
+    : { create: "agregado", update: "actualizado", delete: "eliminado" };
+  return {
+    statusCreate: `${label} ${suffix.create}`,
+    statusUpdate: `${label} ${suffix.update}`,
+    statusDelete: `${label} ${suffix.delete}`,
+  };
+}
+
 const SYMBOL_FORMULA_KINDS = {
   pointResult: {
     kind: "pointResult",
@@ -26,9 +39,7 @@ const SYMBOL_FORMULA_KINDS = {
     symbolPlaceholder: "Re",
     namePlaceholder: "Número de Reynolds",
     formulaPlaceholder: "2*rho*Q / (pi*mu*R)",
-    statusCreate: "Derivada por punto agregada",
-    statusUpdate: "Derivada por punto actualizada",
-    statusDelete: "Derivada por punto eliminada",
+    ...statusStrings("Derivada por punto", true),
     confirmDelete: "¿Eliminar esta magnitud derivada por punto? Esta accion no se puede deshacer.",
   },
   aggregate: {
@@ -41,9 +52,7 @@ const SYMBOL_FORMULA_KINDS = {
     symbolPlaceholder: "Re_medio",
     namePlaceholder: "Reynolds medio",
     formulaPlaceholder: "(Re_max + Re_min) / 2",
-    statusCreate: "Mensurando agregado agregado",
-    statusUpdate: "Mensurando agregado actualizado",
-    statusDelete: "Mensurando agregado eliminado",
+    ...statusStrings("Mensurando agregado", false),
     confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
   },
   intermediate: {
@@ -56,9 +65,7 @@ const SYMBOL_FORMULA_KINDS = {
     symbolPlaceholder: "Q",
     namePlaceholder: "Caudal medio",
     formulaPlaceholder: "V / t",
-    statusCreate: "Intermedia agregada",
-    statusUpdate: "Intermedia actualizada",
-    statusDelete: "Intermedia eliminada",
+    ...statusStrings("Intermedia", true),
     confirmDelete: "¿Eliminar esta magnitud intermedia? Esta accion no se puede deshacer.",
   },
 };

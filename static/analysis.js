@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, compareMeasuredVsTheoretical, cssEscape, allStudents } from "./lib.js";
+import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, compareMeasuredVsTheoretical, cssEscape, allStudents, hasUncertainty } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -213,7 +213,7 @@ export function derivedBlockMarkup(derived, heading = "Mensurandos") {
           (d) => `
           <div class="metric">
             <div class="metric-label">${symbolHtml(d.symbol)}${d.unit ? ` (${unitHtml(d.unit)})` : ""}</div>
-            <div class="metric-value metric-text">${escapeHtml(measureText(d.value, d.has_uncertainty === false ? null : d.u_expanded))}</div>
+            <div class="metric-value metric-text">${escapeHtml(measureText(d.value, hasUncertainty(d) ? d.u_expanded : null))}</div>
             <div class="submission-meta">${escapeHtml(d.formula)}</div>
           </div>`,
         )
@@ -526,9 +526,9 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
       const u = s && s.u_expanded != null ? escapeHtml(String(s.u_expanded)) : "";
       const dis = locked ? "disabled" : "";
       // Los resultados con has_uncertainty: false no llevan input U.
-      const uCell = m.has_uncertainty === false
-        ? `<td class="submission-meta">sin U</td>`
-        : `<td><input class="student-u" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${u}" ${dis} placeholder="U" /></td>`;
+      const uCell = hasUncertainty(m)
+        ? `<td><input class="student-u" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${u}" ${dis} placeholder="U" /></td>`
+        : `<td class="submission-meta">sin U</td>`;
       return `
         <tr>
           <td class="directory-primary"><strong>${symbolHtml(m.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(m.name)}${m.unit ? ` (${unitHtml(m.unit)})` : ""}</span></td>

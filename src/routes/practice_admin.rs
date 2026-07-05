@@ -3,8 +3,7 @@
 
 use super::{current_user, require_teacher, Health, SharedState};
 use crate::{
-    computation::{self},
-    db,
+    computation, db,
     error::AppError,
     practices::{
         self, AggregateInput, CurveInput, IntermediateInput, PointResultInput, QuantityInput,
