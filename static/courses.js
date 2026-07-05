@@ -106,8 +106,8 @@ export function renderCourseDirectory(courses) {
 
   courseCatalog.innerHTML = rows.length
     ? `
-      <div class="directory-table-wrap">
-        <table class="grade-table directory-data-table">
+      <div class="data-table-wrap">
+        <table class="data-table">
           <thead>
             <tr>
               <th>Curso</th>
@@ -228,8 +228,8 @@ function renderCourseGroupsTable(course) {
     `,
   );
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr>
             <th>Grupo</th>
@@ -292,8 +292,8 @@ function renderCourseSubgroupsPanel(course) {
     ${
       rows.length
         ? `
-          <div class="directory-table-wrap">
-            <table class="grade-table directory-data-table">
+          <div class="data-table-wrap">
+            <table class="data-table">
               <thead>
                 <tr>
                   <th>Subgrupo</th>

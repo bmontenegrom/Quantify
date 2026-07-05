@@ -4,7 +4,7 @@
 //! con sus magnitudes y fórmulas, cualquier curso que habilite P1 usa la misma definición.
 //! El cálculo de incertidumbres (Fase 4) lee esta definición para saber qué medir y qué derivar.
 
-use crate::db::{PracticeQuantity, PracticeResult};
+use crate::db::{next_position, PracticeQuantity, PracticeResult};
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
@@ -243,18 +243,141 @@ pub async fn definition(
     }))
 }
 
+/// `point_results` (Motor E), `aggregates` (Motor F) e `intermediates` (Motor C) son, en la base,
+/// la misma forma: `(id, practice_id, position, symbol, name, unit, formula)`, con el mismo CRUD
+/// (fetch-all/create/update/delete/fetch-by-id). Solo cambian de tabla y de tipo Rust — `curves`
+/// no entra acá porque tiene otras columnas (`x_formula`/`y_formula`/`x_log`, sin `name`/`unit`) y
+/// una operación extra (`move_curve`) que las otras tres no tienen.
+trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin {
+    const TABLE: &'static str;
+}
+
+impl SymbolFormulaRow for PracticePointResult {
+    const TABLE: &'static str = "practice_point_results";
+}
+
+impl SymbolFormulaRow for PracticeAggregate {
+    const TABLE: &'static str = "practice_aggregates";
+}
+
+impl SymbolFormulaRow for PracticeIntermediate {
+    const TABLE: &'static str = "practice_intermediates";
+}
+
+async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
+    pool: &SqlitePool,
+    practice_id: &str,
+) -> anyhow::Result<Vec<T>> {
+    let query = format!(
+        "SELECT id, practice_id, position, symbol, name, unit, formula \
+         FROM {} WHERE practice_id = ?1 ORDER BY position, id",
+        T::TABLE
+    );
+    Ok(sqlx::query_as::<_, T>(&query)
+        .bind(practice_id)
+        .fetch_all(pool)
+        .await?)
+}
+
+async fn fetch_symbol_formula_row<T: SymbolFormulaRow>(
+    pool: &SqlitePool,
+    id: &str,
+) -> anyhow::Result<T> {
+    let query = format!(
+        "SELECT id, practice_id, position, symbol, name, unit, formula FROM {} WHERE id = ?1",
+        T::TABLE
+    );
+    Ok(sqlx::query_as::<_, T>(&query)
+        .bind(id)
+        .fetch_one(pool)
+        .await?)
+}
+
+/// Inserta una fila symbol/name/unit/formula nueva, asignándole la siguiente posición, y la
+/// devuelve. El llamador ya validó y recortó `symbol`/`formula` (el mensaje de error es distinto
+/// por tipo, así que queda del lado de cada wrapper público).
+async fn create_symbol_formula_row<T: SymbolFormulaRow>(
+    pool: &SqlitePool,
+    practice_id: &str,
+    symbol: &str,
+    name: &str,
+    unit: &str,
+    formula: &str,
+) -> anyhow::Result<T> {
+    let position = next_position(pool, T::TABLE, "practice_id", practice_id).await?;
+    let id = Uuid::new_v4().to_string();
+    let query = format!(
+        "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        T::TABLE
+    );
+    sqlx::query(&query)
+        .bind(&id)
+        .bind(practice_id)
+        .bind(position)
+        .bind(symbol)
+        .bind(name)
+        .bind(unit)
+        .bind(formula)
+        .execute(pool)
+        .await?;
+    fetch_symbol_formula_row::<T>(pool, &id).await
+}
+
+/// Actualiza una fila symbol/name/unit/formula **de esa práctica**. Devuelve `None` si no existe.
+async fn update_symbol_formula_row<T: SymbolFormulaRow>(
+    pool: &SqlitePool,
+    practice_id: &str,
+    row_id: &str,
+    symbol: &str,
+    name: &str,
+    unit: &str,
+    formula: &str,
+) -> anyhow::Result<Option<T>> {
+    let query = format!(
+        "UPDATE {} SET symbol = ?3, name = ?4, unit = ?5, formula = ?6 \
+         WHERE id = ?1 AND practice_id = ?2",
+        T::TABLE
+    );
+    let result = sqlx::query(&query)
+        .bind(row_id)
+        .bind(practice_id)
+        .bind(symbol)
+        .bind(name)
+        .bind(unit)
+        .bind(formula)
+        .execute(pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+    Ok(Some(fetch_symbol_formula_row::<T>(pool, row_id).await?))
+}
+
+/// Elimina una fila symbol/name/unit/formula de esa práctica por id. Devuelve `true` si existía.
+async fn delete_symbol_formula_row<T: SymbolFormulaRow>(
+    pool: &SqlitePool,
+    practice_id: &str,
+    row_id: &str,
+) -> anyhow::Result<bool> {
+    let query = format!(
+        "DELETE FROM {} WHERE id = ?1 AND practice_id = ?2",
+        T::TABLE
+    );
+    let result = sqlx::query(&query)
+        .bind(row_id)
+        .bind(practice_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Lee las magnitudes derivadas por punto de una práctica (Motor E), ordenadas por posición.
 pub async fn point_results_for(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticePointResult>> {
-    Ok(sqlx::query_as::<_, PracticePointResult>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula \
-         FROM practice_point_results WHERE practice_id = ?1 ORDER BY position, id",
-    )
-    .bind(practice_id)
-    .fetch_all(pool)
-    .await?)
+    symbol_formula_rows_for(pool, practice_id).await
 }
 
 /// Crea una magnitud derivada por punto; asigna la siguiente posición. Símbolo y fórmula obligatorios.
@@ -268,27 +391,15 @@ pub async fn create_point_result(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud derivada por punto necesita símbolo y fórmula");
     }
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_point_results WHERE practice_id = ?1",
+    create_symbol_formula_row(
+        pool,
+        practice_id,
+        symbol,
+        input.name.trim(),
+        input.unit.trim(),
+        formula,
     )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
-    let id = Uuid::new_v4().to_string();
-    sqlx::query(
-        "INSERT INTO practice_point_results (id, practice_id, position, symbol, name, unit, formula) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-    )
-    .bind(&id)
-    .bind(practice_id)
-    .bind(position.0)
-    .bind(symbol)
-    .bind(input.name.trim())
-    .bind(input.unit.trim())
-    .bind(formula)
-    .execute(pool)
-    .await?;
-    fetch_point_result(pool, &id).await
+    .await
 }
 
 /// Actualiza una magnitud derivada por punto de esa práctica. Devuelve `None` si no existe.
@@ -303,22 +414,16 @@ pub async fn update_point_result(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud derivada por punto necesita símbolo y fórmula");
     }
-    let result = sqlx::query(
-        "UPDATE practice_point_results SET symbol = ?3, name = ?4, unit = ?5, formula = ?6 \
-         WHERE id = ?1 AND practice_id = ?2",
+    update_symbol_formula_row(
+        pool,
+        practice_id,
+        point_result_id,
+        symbol,
+        input.name.trim(),
+        input.unit.trim(),
+        formula,
     )
-    .bind(point_result_id)
-    .bind(practice_id)
-    .bind(symbol)
-    .bind(input.name.trim())
-    .bind(input.unit.trim())
-    .bind(formula)
-    .execute(pool)
-    .await?;
-    if result.rows_affected() == 0 {
-        return Ok(None);
-    }
-    Ok(Some(fetch_point_result(pool, point_result_id).await?))
+    .await
 }
 
 /// Elimina una magnitud derivada por punto de esa práctica por id. Devuelve `true` si existía.
@@ -327,24 +432,7 @@ pub async fn delete_point_result(
     practice_id: &str,
     point_result_id: &str,
 ) -> anyhow::Result<bool> {
-    let result =
-        sqlx::query("DELETE FROM practice_point_results WHERE id = ?1 AND practice_id = ?2")
-            .bind(point_result_id)
-            .bind(practice_id)
-            .execute(pool)
-            .await?;
-    Ok(result.rows_affected() > 0)
-}
-
-/// Lee una magnitud derivada por punto por su id.
-async fn fetch_point_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticePointResult> {
-    Ok(sqlx::query_as::<_, PracticePointResult>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula \
-         FROM practice_point_results WHERE id = ?1",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await?)
+    delete_symbol_formula_row::<PracticePointResult>(pool, practice_id, point_result_id).await
 }
 
 /// Lee los mensurandos agregados de una práctica (Motor F), ordenados por posición.
@@ -352,13 +440,7 @@ pub async fn aggregates_for(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeAggregate>> {
-    Ok(sqlx::query_as::<_, PracticeAggregate>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula \
-         FROM practice_aggregates WHERE practice_id = ?1 ORDER BY position, id",
-    )
-    .bind(practice_id)
-    .fetch_all(pool)
-    .await?)
+    symbol_formula_rows_for(pool, practice_id).await
 }
 
 /// Crea un mensurando agregado; asigna la siguiente posición. Símbolo y fórmula obligatorios.
@@ -372,27 +454,15 @@ pub async fn create_aggregate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("el mensurando agregado necesita símbolo y fórmula");
     }
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_aggregates WHERE practice_id = ?1",
+    create_symbol_formula_row(
+        pool,
+        practice_id,
+        symbol,
+        input.name.trim(),
+        input.unit.trim(),
+        formula,
     )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
-    let id = Uuid::new_v4().to_string();
-    sqlx::query(
-        "INSERT INTO practice_aggregates (id, practice_id, position, symbol, name, unit, formula) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-    )
-    .bind(&id)
-    .bind(practice_id)
-    .bind(position.0)
-    .bind(symbol)
-    .bind(input.name.trim())
-    .bind(input.unit.trim())
-    .bind(formula)
-    .execute(pool)
-    .await?;
-    fetch_aggregate(pool, &id).await
+    .await
 }
 
 /// Actualiza un mensurando agregado de esa práctica. Devuelve `None` si no existe.
@@ -407,22 +477,16 @@ pub async fn update_aggregate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("el mensurando agregado necesita símbolo y fórmula");
     }
-    let result = sqlx::query(
-        "UPDATE practice_aggregates SET symbol = ?3, name = ?4, unit = ?5, formula = ?6 \
-         WHERE id = ?1 AND practice_id = ?2",
+    update_symbol_formula_row(
+        pool,
+        practice_id,
+        aggregate_id,
+        symbol,
+        input.name.trim(),
+        input.unit.trim(),
+        formula,
     )
-    .bind(aggregate_id)
-    .bind(practice_id)
-    .bind(symbol)
-    .bind(input.name.trim())
-    .bind(input.unit.trim())
-    .bind(formula)
-    .execute(pool)
-    .await?;
-    if result.rows_affected() == 0 {
-        return Ok(None);
-    }
-    Ok(Some(fetch_aggregate(pool, aggregate_id).await?))
+    .await
 }
 
 /// Elimina un mensurando agregado de esa práctica por id. Devuelve `true` si existía.
@@ -431,23 +495,7 @@ pub async fn delete_aggregate(
     practice_id: &str,
     aggregate_id: &str,
 ) -> anyhow::Result<bool> {
-    let result = sqlx::query("DELETE FROM practice_aggregates WHERE id = ?1 AND practice_id = ?2")
-        .bind(aggregate_id)
-        .bind(practice_id)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() > 0)
-}
-
-/// Lee un mensurando agregado por su id.
-async fn fetch_aggregate(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeAggregate> {
-    Ok(sqlx::query_as::<_, PracticeAggregate>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula \
-         FROM practice_aggregates WHERE id = ?1",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await?)
+    delete_symbol_formula_row::<PracticeAggregate>(pool, practice_id, aggregate_id).await
 }
 
 /// Lee las magnitudes intermedias por punto de una práctica (Motor C), ordenadas por posición.
@@ -455,13 +503,7 @@ pub async fn intermediates_for(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeIntermediate>> {
-    Ok(sqlx::query_as::<_, PracticeIntermediate>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula \
-         FROM practice_intermediates WHERE practice_id = ?1 ORDER BY position, id",
-    )
-    .bind(practice_id)
-    .fetch_all(pool)
-    .await?)
+    symbol_formula_rows_for(pool, practice_id).await
 }
 
 /// Crea una magnitud intermedia; asigna la siguiente posición. Símbolo y fórmula obligatorios.
@@ -475,27 +517,15 @@ pub async fn create_intermediate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
     }
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_intermediates WHERE practice_id = ?1",
+    create_symbol_formula_row(
+        pool,
+        practice_id,
+        symbol,
+        input.name.trim(),
+        input.unit.trim(),
+        formula,
     )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
-    let id = Uuid::new_v4().to_string();
-    sqlx::query(
-        "INSERT INTO practice_intermediates (id, practice_id, position, symbol, name, unit, formula) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-    )
-    .bind(&id)
-    .bind(practice_id)
-    .bind(position.0)
-    .bind(symbol)
-    .bind(input.name.trim())
-    .bind(input.unit.trim())
-    .bind(formula)
-    .execute(pool)
-    .await?;
-    fetch_intermediate(pool, &id).await
+    .await
 }
 
 /// Actualiza una magnitud intermedia de esa práctica. Devuelve `None` si no existe.
@@ -510,22 +540,16 @@ pub async fn update_intermediate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
     }
-    let result = sqlx::query(
-        "UPDATE practice_intermediates SET symbol = ?3, name = ?4, unit = ?5, formula = ?6 \
-         WHERE id = ?1 AND practice_id = ?2",
+    update_symbol_formula_row(
+        pool,
+        practice_id,
+        intermediate_id,
+        symbol,
+        input.name.trim(),
+        input.unit.trim(),
+        formula,
     )
-    .bind(intermediate_id)
-    .bind(practice_id)
-    .bind(symbol)
-    .bind(input.name.trim())
-    .bind(input.unit.trim())
-    .bind(formula)
-    .execute(pool)
-    .await?;
-    if result.rows_affected() == 0 {
-        return Ok(None);
-    }
-    Ok(Some(fetch_intermediate(pool, intermediate_id).await?))
+    .await
 }
 
 /// Elimina una magnitud intermedia de esa práctica por id. Devuelve `true` si existía.
@@ -534,24 +558,7 @@ pub async fn delete_intermediate(
     practice_id: &str,
     intermediate_id: &str,
 ) -> anyhow::Result<bool> {
-    let result =
-        sqlx::query("DELETE FROM practice_intermediates WHERE id = ?1 AND practice_id = ?2")
-            .bind(intermediate_id)
-            .bind(practice_id)
-            .execute(pool)
-            .await?;
-    Ok(result.rows_affected() > 0)
-}
-
-/// Lee una magnitud intermedia por su id.
-async fn fetch_intermediate(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeIntermediate> {
-    Ok(sqlx::query_as::<_, PracticeIntermediate>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula \
-         FROM practice_intermediates WHERE id = ?1",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await?)
+    delete_symbol_formula_row::<PracticeIntermediate>(pool, practice_id, intermediate_id).await
 }
 
 /// Lee las curvas de una práctica (Motor B), ordenadas por posición.
@@ -580,12 +587,7 @@ pub async fn create_curve(
     if x.is_empty() || y.is_empty() {
         anyhow::bail!("la curva necesita las fórmulas de ambos ejes");
     }
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_curves WHERE practice_id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
+    let position = next_position(pool, "practice_curves", "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_curves (id, practice_id, position, x_formula, y_formula, x_log) \
@@ -593,7 +595,7 @@ pub async fn create_curve(
     )
     .bind(&id)
     .bind(practice_id)
-    .bind(position.0)
+    .bind(position)
     .bind(x)
     .bind(y)
     .bind(input.x_log)
@@ -707,15 +709,10 @@ pub async fn create_quantity(
     practice_id: &str,
     input: QuantityInput,
 ) -> anyhow::Result<PracticeQuantity> {
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_quantities WHERE practice_id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
+    let position = next_position(pool, "practice_quantities", "practice_id", practice_id).await?;
     let id = {
         let mut conn = pool.acquire().await?;
-        insert_quantity(&mut conn, practice_id, position.0, &input).await?
+        insert_quantity(&mut conn, practice_id, position, &input).await?
     };
     fetch_quantity(pool, &id).await
 }
@@ -766,15 +763,10 @@ pub async fn create_result(
     practice_id: &str,
     input: ResultInput,
 ) -> anyhow::Result<PracticeResult> {
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM practice_results WHERE practice_id = ?1",
-    )
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
+    let position = next_position(pool, "practice_results", "practice_id", practice_id).await?;
     let id = {
         let mut conn = pool.acquire().await?;
-        insert_result(&mut conn, practice_id, position.0, &input).await?
+        insert_result(&mut conn, practice_id, position, &input).await?
     };
     fetch_result(pool, &id).await
 }
@@ -1107,9 +1099,8 @@ async fn result_missing(
     Ok(count.0 == 0)
 }
 
-/// Siembra las definiciones iniciales de las prácticas (idempotente por práctica).
-/// Las magnitudes/fórmulas salen de las técnicas de trabajo de Física 103.
-pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
+/// Siembra P1 (ver [`seed_definitions`]).
+async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
     // P1 — Tratamiento estadístico de datos (péndulo simple), con 3 operadores independientes:
     // cada uno mide su propia serie de períodos (T1/T2/T3, cronómetro, sin cruzar datos entre
     // operadores) y tiene su propio g1/g2/g3 = 4*pi^2*L/T{n}^2. Operador 1 obligatorio; 2 y 3
@@ -1286,7 +1277,11 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
+    Ok(())
+}
 
+/// Siembra P3 parte 1 (ver [`seed_definitions`]).
+async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
     // P3 — Relajación exponencial (parte 1, determinación directa de tau en un RC serie).
     // tau_teorico = (R + Rint)*C ; tau_exp = t_medio/ln2 (porque t_1/2 = tau*ln2).
     // Unidades SI (ohm, F, s) para que tau salga en segundos. Tipo A despreciable -> medida unica.
@@ -1331,7 +1326,11 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         ],
     )
     .await?;
+    Ok(())
+}
 
+/// Siembra P2-CC (ver [`seed_definitions`]).
+async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
     // P2 — Corriente continua unificada: una sola entrega con tres partes tematicas.
     // Escalares compartidos: R1, R2 y R3 se miden UNA vez (ohmetro) y valen para toda la
     // practica; Vg y RA pueden cambiar entre partes, asi que se miden por parte (sufijos
@@ -1491,7 +1490,11 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         .await?;
     }
+    Ok(())
+}
 
+/// Siembra P3 parte 2 (ver [`seed_definitions`]).
+async fn seed_p3_relajacion_desfasaje(pool: &SqlitePool) -> anyhow::Result<()> {
     // P3 — parte 2 (desfasaje por figura de Lissajous). El alumno carga una serie de puntos
     // con f, a y b; las fórmulas de eje (en `practices.x_formula`/`y_formula`) derivan
     // x = 2*pi*f (= omega) y y = b/sqrt(a^2 - b^2) (= tg phi). La pendiente del ajuste es
@@ -1519,7 +1522,11 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         &[res_final("tau", "Constante de tiempo RC", "s", "slope")],
     )
     .await?;
+    Ok(())
+}
 
+/// Siembra Fluidos I (ver [`seed_definitions`]).
+async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
     // Fluidos I — viscosidad por Hagen-Poiseuille. Por altura (punto) se miden V y t con 2
     // réplicas; Q = V/t (intermedia, promedio por punto). Ejes: 1/Q vs h/Q^2 (set en seed_practices).
     // Escalares compartidos: R, L, g (cátedra) y rho (medida única). `Temp` se registra solo como
@@ -1578,7 +1585,11 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         .await?;
     }
+    Ok(())
+}
 
+/// Siembra Viscosidad (ver [`seed_definitions`]).
+async fn seed_viscosidad(pool: &SqlitePool) -> anyhow::Result<()> {
     // Viscosidad (Stokes) — ajuste v_lim vs R^2 (ejes en seed_practices: x=R^2, y=dx/t). Por esfera
     // (punto): R (un valor) y t (5 réplicas → Motor A promedia → t medio, así y = dx/t = v_lim).
     // Escalares compartidos: dx, rho_e, rho_f (medida única), g (cátedra); Temp de referencia.
@@ -1621,7 +1632,11 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         .await?;
     }
+    Ok(())
+}
 
+/// Siembra Fluidos II (ver [`seed_definitions`]).
+async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
     // Fluidos II — descarga de un recipiente por un capilar. Por punto: h (altura) y t (tiempo, con
     // t=0 en la altura maxima). Ejes (en seed_practices): x = sqrt(h_max) - sqrt(h), y = t. La
     // pendiente da M_medio = 2*g*(slope*R_cap^2/(2*R_recip^2))^2 - 2 (coef. medio de perdidas).
@@ -1702,7 +1717,11 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
             create_aggregate(pool, "fluidos-2", input).await?;
         }
     }
+    Ok(())
+}
 
+/// Siembra Filtros (ver [`seed_definitions`]).
+async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
     // Filtros — barrido en frecuencia de un circuito RLC. Por punto: f (frecuencia fijada por el
     // alumno), VRpp y Vgpp (tensiones pico a pico medidas), a y b (semiejes de la figura de
     // Lissajous). Componentes dados por la catedra: R, C1, C2, L. Intermedias: omega=2*pi*f
@@ -1781,6 +1800,22 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Siembra las definiciones iniciales de las prácticas (idempotente por práctica, ver
+/// [`seed_practice`]). Las magnitudes/fórmulas salen de las técnicas de trabajo de Física 103.
+/// Cada práctica es independiente (no comparten estado entre sí); una función por práctica
+/// mantiene cada una navegable por separado en vez de un único bloque de ~700 líneas.
+pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
+    seed_p1_estadistica(pool).await?;
+    seed_p3_relajacion(pool).await?;
+    seed_p2_cc(pool).await?;
+    seed_p3_relajacion_desfasaje(pool).await?;
+    seed_fluidos1(pool).await?;
+    seed_viscosidad(pool).await?;
+    seed_fluidos2(pool).await?;
+    seed_filtros(pool).await?;
     Ok(())
 }
 

@@ -4,6 +4,178 @@ import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
 import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel } from "./lib.js";
 import { selectView } from "./navigation.js";
 
+/// `point_results`, `aggregates` e `intermediates` son, en el admin, la misma forma —
+/// símbolo/nombre/unidad/fórmula con alta/edición/borrado — y solo cambian de endpoint, de clave
+/// de estado "en edición" y de textos. `curves` (otras columnas, sin nombre/unidad, con
+/// reordenamiento) y `quantities`/`results` (más campos: réplicas, flags, tolerancia) no entran
+/// acá: forzarlas al mismo molde pediría un form-builder genérico para ganar poco.
+/** `true` si la fila `(kind, id)` es la que está actualmente en edición (a lo sumo una por vez
+ *  en todo el workspace de la práctica: ver `state.editing` en state.js). */
+function isEditing(kind, id) {
+  return state.editing.kind === kind && state.editing.id === id;
+}
+
+/** Arma statusCreate/Update/Delete a partir de un label y su género gramatical, para no repetir
+ *  a mano las 3 variantes (agregada/actualizada/eliminada vs. -o) en cada kind. */
+function statusStrings(label, fem) {
+  const suffix = fem
+    ? { create: "agregada", update: "actualizada", delete: "eliminada" }
+    : { create: "agregado", update: "actualizado", delete: "eliminado" };
+  return {
+    statusCreate: `${label} ${suffix.create}`,
+    statusUpdate: `${label} ${suffix.update}`,
+    statusDelete: `${label} ${suffix.delete}`,
+  };
+}
+
+const SYMBOL_FORMULA_KINDS = {
+  pointResult: {
+    kind: "pointResult",
+    urlSegment: "point-results",
+    idParam: "pid",
+    dataAttr: "point-result",
+    listOf: (def) => def?.point_results ?? [],
+    emptyText: "Sin magnitudes derivadas por punto.",
+    symbolPlaceholder: "Re",
+    namePlaceholder: "Número de Reynolds",
+    formulaPlaceholder: "2*rho*Q / (pi*mu*R)",
+    ...statusStrings("Derivada por punto", true),
+    confirmDelete: "¿Eliminar esta magnitud derivada por punto? Esta accion no se puede deshacer.",
+  },
+  aggregate: {
+    kind: "aggregate",
+    urlSegment: "aggregates",
+    idParam: "aid",
+    dataAttr: "aggregate",
+    listOf: (def) => def?.aggregates ?? [],
+    emptyText: "Sin mensurandos agregados.",
+    symbolPlaceholder: "Re_medio",
+    namePlaceholder: "Reynolds medio",
+    formulaPlaceholder: "(Re_max + Re_min) / 2",
+    ...statusStrings("Mensurando agregado", false),
+    confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
+  },
+  intermediate: {
+    kind: "intermediate",
+    urlSegment: "intermediates",
+    idParam: "iid",
+    dataAttr: "intermediate",
+    listOf: (def) => def?.intermediates ?? [],
+    emptyText: "Sin magnitudes intermedias.",
+    symbolPlaceholder: "Q",
+    namePlaceholder: "Caudal medio",
+    formulaPlaceholder: "V / t",
+    ...statusStrings("Intermedia", true),
+    confirmDelete: "¿Eliminar esta magnitud intermedia? Esta accion no se puede deshacer.",
+  },
+};
+
+function renderSymbolFormulaForm(kind, item, practiceId) {
+  const formId = item ? `edit-${kind.dataAttr}-form` : `new-${kind.dataAttr}-form`;
+  const formAttr = item ? `data-edit-${kind.dataAttr}-form data-${kind.idParam}="${escapeHtml(item.id)}"` : "";
+  const v = (f) => (item ? escapeHtml(String(item[f] ?? "")) : "");
+  return `
+    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
+      <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
+      ${item ? `<input name="${kind.idParam}" type="hidden" value="${escapeHtml(item.id)}" />` : ""}
+      <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="${kind.symbolPlaceholder}" /></label>
+      <label>Nombre <input name="name" value="${v("name")}" placeholder="${kind.namePlaceholder}" /></label>
+      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
+      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" /></label>
+      <div class="detail-actions">
+        <button type="submit">${item ? "Guardar" : "Agregar"}</button>
+        ${item ? `<button type="button" data-cancel-${kind.dataAttr}>Cancelar</button>` : ""}
+      </div>
+    </form>
+  `;
+}
+
+function renderSymbolFormulaList(kind, def, practiceId) {
+  const items = kind.listOf(def);
+  if (items.length === 0) return `<p class="submission-meta">${kind.emptyText}</p>`;
+  const rows = items.flatMap((item) => {
+    const editing = isEditing(kind.kind, item.id);
+    const baseRow = `
+      <tr>
+        <td class="directory-primary"><strong>${symbolHtml(item.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(item.name)}${item.unit ? ` (${unitHtml(item.unit)})` : " (adimensional)"}</span></td>
+        <td><code>${escapeHtml(item.formula)}</code></td>
+        <td class="directory-actions">
+          <button type="button" data-edit-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">${editing ? "Cerrar" : "Editar"}</button>
+          <button type="button" data-delete-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">Eliminar</button>
+        </td>
+      </tr>`;
+    const editRow = editing
+      ? `<tr><td colspan="3" class="scale-edit-cell">${renderSymbolFormulaForm(kind, item, practiceId)}</td></tr>`
+      : "";
+    return [baseRow, editRow];
+  });
+  return `
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
+        <tbody>${rows.join("")}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function symbolFormulaPayloadFromForm(form) {
+  const raw = Object.fromEntries(new FormData(form).entries());
+  return {
+    symbol: raw.symbol,
+    name: raw.name || "",
+    unit: raw.unit || "",
+    formula: raw.formula,
+  };
+}
+
+async function saveNewSymbolFormulaRow(kind, event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  try {
+    await postJson(`/api/practices/${practiceId}/${kind.urlSegment}`, symbolFormulaPayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editing = { kind: null, id: null };
+    state.practiceActionStatus = kind.statusCreate;
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function saveEditSymbolFormulaRow(kind, event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const practiceId = form.querySelector('[name="practice_id"]').value;
+  const id = form.querySelector(`[name="${kind.idParam}"]`).value;
+  try {
+    await postJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`, symbolFormulaPayloadFromForm(form));
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editing = { kind: null, id: null };
+    state.practiceActionStatus = kind.statusUpdate;
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
+async function deleteSymbolFormulaRow(kind, id, practiceId) {
+  if (!window.confirm(kind.confirmDelete)) return;
+  try {
+    await deleteJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`);
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.editing = { kind: null, id: null };
+    state.practiceActionStatus = kind.statusDelete;
+    renderPracticesPage();
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
+}
+
 export function renderPracticesPage() {
   renderPracticeDirectory();
   if (!practiceWorkspace) return;
@@ -90,61 +262,33 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
-  practiceWorkspace.querySelector("#new-intermediate-form")?.addEventListener("submit", saveNewIntermediate);
 
-  practiceWorkspace.querySelectorAll("[data-edit-intermediate]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.editingIntermediateId = state.editingIntermediateId === btn.dataset.iid ? null : btn.dataset.iid;
-      renderPracticesPage();
+  for (const kind of Object.values(SYMBOL_FORMULA_KINDS)) {
+    practiceWorkspace
+      .querySelector(`#new-${kind.dataAttr}-form`)
+      ?.addEventListener("submit", (event) => saveNewSymbolFormulaRow(kind, event));
+    practiceWorkspace.querySelectorAll(`[data-edit-${kind.dataAttr}]`).forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset[kind.idParam];
+        state.editing = isEditing(kind.kind, id) ? { kind: null, id: null } : { kind: kind.kind, id };
+        renderPracticesPage();
+      });
     });
-  });
-  practiceWorkspace.querySelectorAll("[data-delete-intermediate]").forEach((btn) => {
-    btn.addEventListener("click", () => deletePracticeIntermediate(btn.dataset.iid, practice.id));
-  });
-  practiceWorkspace.querySelectorAll("[data-cancel-intermediate]").forEach((btn) => {
-    btn.addEventListener("click", () => { state.editingIntermediateId = null; renderPracticesPage(); });
-  });
-  practiceWorkspace.querySelectorAll("[data-edit-intermediate-form]").forEach((form) => {
-    form.addEventListener("submit", saveEditIntermediate);
-  });
-
-  practiceWorkspace.querySelector("#new-point-result-form")?.addEventListener("submit", saveNewPointResult);
-  practiceWorkspace.querySelectorAll("[data-edit-point-result]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.editingPointResultId = state.editingPointResultId === btn.dataset.pid ? null : btn.dataset.pid;
-      renderPracticesPage();
+    practiceWorkspace.querySelectorAll(`[data-delete-${kind.dataAttr}]`).forEach((btn) => {
+      btn.addEventListener("click", () => deleteSymbolFormulaRow(kind, btn.dataset[kind.idParam], practice.id));
     });
-  });
-  practiceWorkspace.querySelectorAll("[data-delete-point-result]").forEach((btn) => {
-    btn.addEventListener("click", () => deletePracticePointResult(btn.dataset.pid, practice.id));
-  });
-  practiceWorkspace.querySelectorAll("[data-cancel-point-result]").forEach((btn) => {
-    btn.addEventListener("click", () => { state.editingPointResultId = null; renderPracticesPage(); });
-  });
-  practiceWorkspace.querySelectorAll("[data-edit-point-result-form]").forEach((form) => {
-    form.addEventListener("submit", saveEditPointResult);
-  });
-
-  practiceWorkspace.querySelector("#new-aggregate-form")?.addEventListener("submit", saveNewAggregate);
-  practiceWorkspace.querySelectorAll("[data-edit-aggregate]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.editingAggregateId = state.editingAggregateId === btn.dataset.aid ? null : btn.dataset.aid;
-      renderPracticesPage();
+    practiceWorkspace.querySelectorAll(`[data-cancel-${kind.dataAttr}]`).forEach((btn) => {
+      btn.addEventListener("click", () => { state.editing = { kind: null, id: null }; renderPracticesPage(); });
     });
-  });
-  practiceWorkspace.querySelectorAll("[data-delete-aggregate]").forEach((btn) => {
-    btn.addEventListener("click", () => deletePracticeAggregate(btn.dataset.aid, practice.id));
-  });
-  practiceWorkspace.querySelectorAll("[data-cancel-aggregate]").forEach((btn) => {
-    btn.addEventListener("click", () => { state.editingAggregateId = null; renderPracticesPage(); });
-  });
-  practiceWorkspace.querySelectorAll("[data-edit-aggregate-form]").forEach((form) => {
-    form.addEventListener("submit", saveEditAggregate);
-  });
+    practiceWorkspace.querySelectorAll(`[data-edit-${kind.dataAttr}-form]`).forEach((form) => {
+      form.addEventListener("submit", (event) => saveEditSymbolFormulaRow(kind, event));
+    });
+  }
 
   practiceWorkspace.querySelectorAll("[data-edit-curve]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      state.editingCurveId = state.editingCurveId === btn.dataset.cid ? null : btn.dataset.cid;
+      const id = btn.dataset.cid;
+      state.editing = isEditing("curve", id) ? { kind: null, id: null } : { kind: "curve", id };
       renderPracticesPage();
     });
   });
@@ -155,7 +299,7 @@ export function renderPracticesPage() {
     btn.addEventListener("click", () => movePracticeCurve(btn.dataset.cid, practice.id, btn.dataset.dir));
   });
   practiceWorkspace.querySelectorAll("[data-cancel-curve]").forEach((btn) => {
-    btn.addEventListener("click", () => { state.editingCurveId = null; renderPracticesPage(); });
+    btn.addEventListener("click", () => { state.editing = { kind: null, id: null }; renderPracticesPage(); });
   });
   practiceWorkspace.querySelectorAll("[data-edit-curve-form]").forEach((form) => {
     form.addEventListener("submit", saveEditCurve);
@@ -163,7 +307,8 @@ export function renderPracticesPage() {
 
   practiceWorkspace.querySelectorAll("[data-edit-quantity]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      state.editingQuantityId = state.editingQuantityId === btn.dataset.qid ? null : btn.dataset.qid;
+      const id = btn.dataset.qid;
+      state.editing = isEditing("quantity", id) ? { kind: null, id: null } : { kind: "quantity", id };
       renderPracticesPage();
     });
   });
@@ -171,14 +316,15 @@ export function renderPracticesPage() {
     btn.addEventListener("click", () => deletePracticeQuantity(btn.dataset.qid, practice.id));
   });
   practiceWorkspace.querySelectorAll("[data-cancel-quantity]").forEach((btn) => {
-    btn.addEventListener("click", () => { state.editingQuantityId = null; renderPracticesPage(); });
+    btn.addEventListener("click", () => { state.editing = { kind: null, id: null }; renderPracticesPage(); });
   });
   practiceWorkspace.querySelectorAll("[data-edit-quantity-form]").forEach((form) => {
     form.addEventListener("submit", saveEditQuantity);
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      state.editingResultId = state.editingResultId === btn.dataset.rid ? null : btn.dataset.rid;
+      const id = btn.dataset.rid;
+      state.editing = isEditing("result", id) ? { kind: null, id: null } : { kind: "result", id };
       renderPracticesPage();
     });
   });
@@ -186,7 +332,7 @@ export function renderPracticesPage() {
     btn.addEventListener("click", () => deletePracticeResult(btn.dataset.rid, practice.id));
   });
   practiceWorkspace.querySelectorAll("[data-cancel-result]").forEach((btn) => {
-    btn.addEventListener("click", () => { state.editingResultId = null; renderPracticesPage(); });
+    btn.addEventListener("click", () => { state.editing = { kind: null, id: null }; renderPracticesPage(); });
   });
   practiceWorkspace.querySelectorAll("[data-edit-result-form]").forEach((form) => {
     form.addEventListener("submit", saveEditResult);
@@ -209,8 +355,8 @@ function renderPracticeDirectory() {
 
   practiceCatalog.innerHTML = rows.length
     ? `
-      <div class="directory-table-wrap">
-        <table class="grade-table directory-data-table">
+      <div class="data-table-wrap">
+        <table class="data-table">
           <thead>
             <tr>
               <th>Práctica</th>
@@ -287,60 +433,13 @@ function renderOperatorCountForm(practice, def) {
 /// Gestión de magnitudes derivadas por punto (Motor E): lista editable + alta. Se evalúan tras el
 /// ajuste, una por corrida, usando magnitudes/intermedias del punto + slope/intercept + mensurandos.
 function renderPointResultsSection(practice, def) {
+  const kind = SYMBOL_FORMULA_KINDS.pointResult;
   return `
     <h4>Magnitudes derivadas por punto</h4>
     <p class="submission-meta">Se calculan tras el ajuste, una por corrida (p. ej. Reynolds). La fórmula puede usar las magnitudes y las intermedias del punto, <code>slope</code>/<code>intercept</code> y los mensurandos. Sin incertidumbre.</p>
-    ${renderPointResultsList(def, practice.id)}
+    ${renderSymbolFormulaList(kind, def, practice.id)}
     <h4>Nueva derivada por punto</h4>
-    ${renderPointResultForm(null, practice.id)}
-  `;
-}
-
-function renderPointResultForm(pr, practiceId) {
-  const formId = pr ? "edit-point-result-form" : "new-point-result-form";
-  const formAttr = pr ? `data-edit-point-result-form data-pid="${escapeHtml(pr.id)}"` : "";
-  const v = (f) => (pr ? escapeHtml(String(pr[f] ?? "")) : "");
-  return `
-    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
-      <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
-      ${pr ? `<input name="pid" type="hidden" value="${escapeHtml(pr.id)}" />` : ""}
-      <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Re" /></label>
-      <label>Nombre <input name="name" value="${v("name")}" placeholder="Número de Reynolds" /></label>
-      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
-      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="2*rho*Q / (pi*mu*R)" /></label>
-      <div class="detail-actions">
-        <button type="submit">${pr ? "Guardar" : "Agregar"}</button>
-        ${pr ? `<button type="button" data-cancel-point-result>Cancelar</button>` : ""}
-      </div>
-    </form>
-  `;
-}
-
-function renderPointResultsList(def, practiceId) {
-  const items = def?.point_results ?? [];
-  if (items.length === 0) return `<p class="submission-meta">Sin magnitudes derivadas por punto.</p>`;
-  const rows = items.flatMap((pr) => {
-    const baseRow = `
-      <tr>
-        <td class="directory-primary"><strong>${symbolHtml(pr.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(pr.name)}${pr.unit ? ` (${unitHtml(pr.unit)})` : " (adimensional)"}</span></td>
-        <td><code>${escapeHtml(pr.formula)}</code></td>
-        <td class="directory-actions">
-          <button type="button" data-edit-point-result data-pid="${escapeHtml(pr.id)}">${state.editingPointResultId === pr.id ? "Cerrar" : "Editar"}</button>
-          <button type="button" data-delete-point-result data-pid="${escapeHtml(pr.id)}">Eliminar</button>
-        </td>
-      </tr>`;
-    const editRow = state.editingPointResultId === pr.id
-      ? `<tr><td colspan="3" class="scale-edit-cell">${renderPointResultForm(pr, practiceId)}</td></tr>`
-      : "";
-    return [baseRow, editRow];
-  });
-  return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
-        <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
-        <tbody>${rows.join("")}</tbody>
-      </table>
-    </div>
+    ${renderSymbolFormulaForm(kind, null, practice.id)}
   `;
 }
 
@@ -348,120 +447,26 @@ function renderPointResultsList(def, practiceId) {
 /// ajuste (un valor escalar) y pueden usar escalares compartidos, slope/intercept, los mensurandos,
 /// los agregados anteriores y los extremos de cada magnitud por punto.
 function renderAggregatesSection(practice, def) {
+  const kind = SYMBOL_FORMULA_KINDS.aggregate;
   return `
     <h4>Mensurandos agregados</h4>
     <p class="submission-meta">Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Sin incertidumbre.</p>
-    ${renderAggregatesList(def, practice.id)}
+    ${renderSymbolFormulaList(kind, def, practice.id)}
     <h4>Nuevo agregado</h4>
-    ${renderAggregateForm(null, practice.id)}
-  `;
-}
-
-function renderAggregateForm(agg, practiceId) {
-  const formId = agg ? "edit-aggregate-form" : "new-aggregate-form";
-  const formAttr = agg ? `data-edit-aggregate-form data-aid="${escapeHtml(agg.id)}"` : "";
-  const v = (f) => (agg ? escapeHtml(String(agg[f] ?? "")) : "");
-  return `
-    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
-      <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
-      ${agg ? `<input name="aid" type="hidden" value="${escapeHtml(agg.id)}" />` : ""}
-      <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Re_medio" /></label>
-      <label>Nombre <input name="name" value="${v("name")}" placeholder="Reynolds medio" /></label>
-      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
-      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="(Re_max + Re_min) / 2" /></label>
-      <div class="detail-actions">
-        <button type="submit">${agg ? "Guardar" : "Agregar"}</button>
-        ${agg ? `<button type="button" data-cancel-aggregate>Cancelar</button>` : ""}
-      </div>
-    </form>
-  `;
-}
-
-function renderAggregatesList(def, practiceId) {
-  const items = def?.aggregates ?? [];
-  if (items.length === 0) return `<p class="submission-meta">Sin mensurandos agregados.</p>`;
-  const rows = items.flatMap((agg) => {
-    const baseRow = `
-      <tr>
-        <td class="directory-primary"><strong>${symbolHtml(agg.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(agg.name)}${agg.unit ? ` (${unitHtml(agg.unit)})` : " (adimensional)"}</span></td>
-        <td><code>${escapeHtml(agg.formula)}</code></td>
-        <td class="directory-actions">
-          <button type="button" data-edit-aggregate data-aid="${escapeHtml(agg.id)}">${state.editingAggregateId === agg.id ? "Cerrar" : "Editar"}</button>
-          <button type="button" data-delete-aggregate data-aid="${escapeHtml(agg.id)}">Eliminar</button>
-        </td>
-      </tr>`;
-    const editRow = state.editingAggregateId === agg.id
-      ? `<tr><td colspan="3" class="scale-edit-cell">${renderAggregateForm(agg, practiceId)}</td></tr>`
-      : "";
-    return [baseRow, editRow];
-  });
-  return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
-        <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
-        <tbody>${rows.join("")}</tbody>
-      </table>
-    </div>
+    ${renderSymbolFormulaForm(kind, null, practice.id)}
   `;
 }
 
 /// Gestión de magnitudes intermedias por punto (Motor C): lista editable + alta. Cada una define
 /// un símbolo y una fórmula que se promedia por punto y queda disponible en las fórmulas de eje.
 function renderIntermediatesSection(practice, def) {
+  const kind = SYMBOL_FORMULA_KINDS.intermediate;
   return `
     <h4>Magnitudes intermedias por punto</h4>
     <p class="submission-meta">Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio). El símbolo queda disponible en las fórmulas de eje.</p>
-    ${renderIntermediatesList(def, practice.id)}
+    ${renderSymbolFormulaList(kind, def, practice.id)}
     <h4>Nueva intermedia</h4>
-    ${renderIntermediateForm(null, practice.id)}
-  `;
-}
-
-function renderIntermediateForm(it, practiceId) {
-  const formId = it ? "edit-intermediate-form" : "new-intermediate-form";
-  const formAttr = it ? `data-edit-intermediate-form data-iid="${escapeHtml(it.id)}"` : "";
-  const v = (f) => (it ? escapeHtml(String(it[f] ?? "")) : "");
-  return `
-    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
-      <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
-      ${it ? `<input name="iid" type="hidden" value="${escapeHtml(it.id)}" />` : ""}
-      <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Q" /></label>
-      <label>Nombre <input name="name" value="${v("name")}" placeholder="Caudal medio" /></label>
-      <label>Unidad <input name="unit" value="${v("unit")}" placeholder="m3/s" /></label>
-      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="V / t" /></label>
-      <div class="detail-actions">
-        <button type="submit">${it ? "Guardar" : "Agregar"}</button>
-        ${it ? `<button type="button" data-cancel-intermediate>Cancelar</button>` : ""}
-      </div>
-    </form>
-  `;
-}
-
-function renderIntermediatesList(def, practiceId) {
-  const items = def?.intermediates ?? [];
-  if (items.length === 0) return `<p class="submission-meta">Sin magnitudes intermedias.</p>`;
-  const rows = items.flatMap((it) => {
-    const baseRow = `
-      <tr>
-        <td class="directory-primary"><strong>${symbolHtml(it.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(it.name)}${it.unit ? ` (${unitHtml(it.unit)})` : " (adimensional)"}</span></td>
-        <td><code>${escapeHtml(it.formula)}</code></td>
-        <td class="directory-actions">
-          <button type="button" data-edit-intermediate data-iid="${escapeHtml(it.id)}">${state.editingIntermediateId === it.id ? "Cerrar" : "Editar"}</button>
-          <button type="button" data-delete-intermediate data-iid="${escapeHtml(it.id)}">Eliminar</button>
-        </td>
-      </tr>`;
-    const editRow = state.editingIntermediateId === it.id
-      ? `<tr><td colspan="3" class="scale-edit-cell">${renderIntermediateForm(it, practiceId)}</td></tr>`
-      : "";
-    return [baseRow, editRow];
-  });
-  return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
-        <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
-        <tbody>${rows.join("")}</tbody>
-      </table>
-    </div>
+    ${renderSymbolFormulaForm(kind, null, practice.id)}
   `;
 }
 
@@ -505,6 +510,7 @@ function renderCurvesList(def, practiceId) {
   if (curves.length === 0) return `<p class="submission-meta">Sin curvas en la lista.</p>`;
 
   const rows = curves.flatMap((c, i) => {
+    const editing = isEditing("curve", c.id);
     const baseRow = `
       <tr>
         <td class="directory-primary"><strong>${i + 1}</strong></td>
@@ -513,19 +519,19 @@ function renderCurvesList(def, practiceId) {
         <td class="directory-actions">
           <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="up" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
           <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="down" title="Bajar" ${i === curves.length - 1 ? "disabled" : ""}>▼</button>
-          <button type="button" data-edit-curve data-cid="${escapeHtml(c.id)}">${state.editingCurveId === c.id ? "Cerrar" : "Editar"}</button>
+          <button type="button" data-edit-curve data-cid="${escapeHtml(c.id)}">${editing ? "Cerrar" : "Editar"}</button>
           <button type="button" data-delete-curve data-cid="${escapeHtml(c.id)}">Eliminar</button>
         </td>
       </tr>`;
-    const editRow = state.editingCurveId === c.id
+    const editRow = editing
       ? `<tr><td colspan="4" class="scale-edit-cell">${renderCurveForm(c, practiceId)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
 
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr><th>#</th><th>Eje X</th><th>Eje Y</th><th>Acciones</th></tr>
         </thead>
@@ -583,6 +589,7 @@ function renderQuantitiesList(def, practiceId) {
   if (quantities.length === 0) return `<p class="submission-meta">Sin magnitudes. Agrega una desde el panel lateral.</p>`;
 
   const rows = quantities.flatMap((q) => {
+    const editing = isEditing("quantity", q.id);
     const baseRow = `
       <tr>
         <td class="directory-primary"><strong>${symbolHtml(q.symbol)}</strong></td>
@@ -591,19 +598,19 @@ function renderQuantitiesList(def, practiceId) {
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
         <td>${q.repeated ? "Sí" : "No"}</td>
         <td class="directory-actions">
-          <button type="button" data-edit-quantity data-qid="${escapeHtml(q.id)}">${state.editingQuantityId === q.id ? "Cerrar" : "Editar"}</button>
+          <button type="button" data-edit-quantity data-qid="${escapeHtml(q.id)}">${editing ? "Cerrar" : "Editar"}</button>
           <button type="button" data-delete-quantity data-qid="${escapeHtml(q.id)}">Eliminar</button>
         </td>
       </tr>`;
-    const editRow = state.editingQuantityId === q.id
+    const editRow = editing
       ? `<tr><td colspan="6" class="scale-edit-cell">${renderQuantityForm(q, practiceId)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
 
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Magnitud</th><th>Réplicas</th><th>Acciones</th></tr>
         </thead>
@@ -653,6 +660,7 @@ function renderResultsList(def, practiceId) {
   const rows = results.flatMap((r) => {
     const tolLabel = r.tolerance != null ? `${escapeHtml(String(r.tolerance))} %` : `<span class="submission-meta">—</span>`;
     const finalLabel = r.is_final ? "Sí" : "";
+    const editing = isEditing("result", r.id);
     const baseRow = `
       <tr>
         <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong></td>
@@ -662,19 +670,19 @@ function renderResultsList(def, practiceId) {
         <td>${tolLabel}</td>
         <td>${finalLabel}</td>
         <td class="directory-actions">
-          <button type="button" data-edit-result data-rid="${escapeHtml(r.id)}">${state.editingResultId === r.id ? "Cerrar" : "Editar"}</button>
+          <button type="button" data-edit-result data-rid="${escapeHtml(r.id)}">${editing ? "Cerrar" : "Editar"}</button>
           <button type="button" data-delete-result data-rid="${escapeHtml(r.id)}">Eliminar</button>
         </td>
       </tr>`;
-    const editRow = state.editingResultId === r.id
+    const editRow = editing
       ? `<tr><td colspan="7" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
 
   return `
-    <div class="directory-table-wrap">
-      <table class="grade-table directory-data-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Fórmula</th><th>Tolerancia (%)</th><th>Final</th><th>Acciones</th></tr>
         </thead>
@@ -687,12 +695,7 @@ function renderResultsList(def, practiceId) {
 export async function openPracticeWorkspace(practiceId) {
   state.activePracticeId = practiceId;
   state.practiceActionStatus = "";
-  state.editingQuantityId = null;
-  state.editingResultId = null;
-  state.editingCurveId = null;
-  state.editingIntermediateId = null;
-  state.editingPointResultId = null;
-  state.editingAggregateId = null;
+  state.editing = { kind: null, id: null };
   state.practiceDefinition = null;
   renderPracticesPage();
   selectView("practices");
@@ -707,13 +710,8 @@ export async function openPracticeWorkspace(practiceId) {
 export function closePracticeWorkspace() {
   state.activePracticeId = null;
   state.practiceDefinition = null;
-  state.editingAggregateId = null;
   state.practiceActionStatus = "";
-  state.editingQuantityId = null;
-  state.editingResultId = null;
-  state.editingCurveId = null;
-  state.editingIntermediateId = null;
-  state.editingPointResultId = null;
+  state.editing = { kind: null, id: null };
   renderPracticesPage();
 }
 
@@ -793,7 +791,7 @@ async function saveNewQuantity(event) {
   try {
     await postJson(`/api/practices/${practiceId}/quantities`, quantityPayloadFromForm(form));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingQuantityId = null;
+    state.editing = { kind: null, id: null };
     state.practiceActionStatus = "Magnitud agregada";
     renderPracticesPage();
   } catch (error) {
@@ -810,7 +808,7 @@ async function saveEditQuantity(event) {
   try {
     await postJson(`/api/practices/${practiceId}/quantities/${qid}`, quantityPayloadFromForm(form));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingQuantityId = null;
+    state.editing = { kind: null, id: null };
     state.practiceActionStatus = "Magnitud actualizada";
     renderPracticesPage();
   } catch (error) {
@@ -824,7 +822,7 @@ async function deletePracticeQuantity(qid, practiceId) {
   try {
     await deleteJson(`/api/practices/${practiceId}/quantities/${qid}`);
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingQuantityId = null;
+    state.editing = { kind: null, id: null };
     state.practiceActionStatus = "Magnitud eliminada";
     renderPracticesPage();
   } catch (error) {
@@ -849,9 +847,7 @@ async function saveNewCurve(event) {
   try {
     await postJson(`/api/practices/${practiceId}/curves`, curvePayloadFromForm(form));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingCurveId = null;
-  state.editingIntermediateId = null;
-  state.editingPointResultId = null;
+    state.editing = { kind: null, id: null };
     state.practiceActionStatus = "Curva agregada";
     renderPracticesPage();
   } catch (error) {
@@ -868,169 +864,13 @@ async function saveEditCurve(event) {
   try {
     await postJson(`/api/practices/${practiceId}/curves/${cid}`, curvePayloadFromForm(form));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingCurveId = null;
-  state.editingIntermediateId = null;
-  state.editingPointResultId = null;
+    state.editing = { kind: null, id: null };
     state.practiceActionStatus = "Curva actualizada";
     renderPracticesPage();
   } catch (error) {
     state.practiceActionStatus = error.message;
     renderPracticesPage();
   }
-}
-
-async function saveNewIntermediate(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const practiceId = form.querySelector('[name="practice_id"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/intermediates`, intermediatePayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingIntermediateId = null;
-  state.editingPointResultId = null;
-    state.practiceActionStatus = "Intermedia agregada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
-}
-
-async function saveEditIntermediate(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const practiceId = form.querySelector('[name="practice_id"]').value;
-  const iid = form.querySelector('[name="iid"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/intermediates/${iid}`, intermediatePayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingIntermediateId = null;
-  state.editingPointResultId = null;
-    state.practiceActionStatus = "Intermedia actualizada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
-}
-
-async function deletePracticeIntermediate(iid, practiceId) {
-  if (!window.confirm("¿Eliminar esta magnitud intermedia? Esta accion no se puede deshacer.")) return;
-  try {
-    await deleteJson(`/api/practices/${practiceId}/intermediates/${iid}`);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingIntermediateId = null;
-  state.editingPointResultId = null;
-    state.practiceActionStatus = "Intermedia eliminada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
-}
-
-async function saveNewPointResult(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const practiceId = form.querySelector('[name="practice_id"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/point-results`, intermediatePayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingPointResultId = null;
-    state.practiceActionStatus = "Derivada por punto agregada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
-}
-
-async function saveEditPointResult(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const practiceId = form.querySelector('[name="practice_id"]').value;
-  const pid = form.querySelector('[name="pid"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/point-results/${pid}`, intermediatePayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingPointResultId = null;
-    state.practiceActionStatus = "Derivada por punto actualizada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
-}
-
-async function deletePracticePointResult(pid, practiceId) {
-  if (!window.confirm("¿Eliminar esta magnitud derivada por punto? Esta accion no se puede deshacer.")) return;
-  try {
-    await deleteJson(`/api/practices/${practiceId}/point-results/${pid}`);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingPointResultId = null;
-    state.practiceActionStatus = "Derivada por punto eliminada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
-}
-
-async function saveNewAggregate(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const practiceId = form.querySelector('[name="practice_id"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/aggregates`, intermediatePayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingAggregateId = null;
-    state.practiceActionStatus = "Mensurando agregado agregado";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
-}
-
-async function saveEditAggregate(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const practiceId = form.querySelector('[name="practice_id"]').value;
-  const aid = form.querySelector('[name="aid"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/aggregates/${aid}`, intermediatePayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingAggregateId = null;
-    state.practiceActionStatus = "Mensurando agregado actualizado";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
-}
-
-async function deletePracticeAggregate(aid, practiceId) {
-  if (!window.confirm("¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.")) return;
-  try {
-    await deleteJson(`/api/practices/${practiceId}/aggregates/${aid}`);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingAggregateId = null;
-    state.practiceActionStatus = "Mensurando agregado eliminado";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
-}
-
-function intermediatePayloadFromForm(form) {
-  const raw = Object.fromEntries(new FormData(form).entries());
-  return {
-    symbol: raw.symbol,
-    name: raw.name || "",
-    unit: raw.unit || "",
-    formula: raw.formula,
-  };
 }
 
 async function movePracticeCurve(cid, practiceId, dir) {
@@ -1049,9 +889,7 @@ async function deletePracticeCurve(cid, practiceId) {
   try {
     await deleteJson(`/api/practices/${practiceId}/curves/${cid}`);
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingCurveId = null;
-  state.editingIntermediateId = null;
-  state.editingPointResultId = null;
+    state.editing = { kind: null, id: null };
     state.practiceActionStatus = "Curva eliminada";
     renderPracticesPage();
   } catch (error) {
@@ -1082,7 +920,7 @@ async function saveNewResult(event) {
       has_uncertainty: raw.has_uncertainty === "on",
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingResultId = null;
+    state.editing = { kind: null, id: null };
     state.practiceActionStatus = "Mensurando agregado";
     renderPracticesPage();
   } catch (error) {
@@ -1108,7 +946,7 @@ async function saveEditResult(event) {
       has_uncertainty: raw.has_uncertainty === "on",
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingResultId = null;
+    state.editing = { kind: null, id: null };
     state.practiceActionStatus = "Mensurando actualizado";
     renderPracticesPage();
   } catch (error) {
@@ -1122,7 +960,7 @@ async function deletePracticeResult(rid, practiceId) {
   try {
     await deleteJson(`/api/practices/${practiceId}/results/${rid}`);
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editingResultId = null;
+    state.editing = { kind: null, id: null };
     state.practiceActionStatus = "Mensurando eliminado";
     renderPracticesPage();
   } catch (error) {

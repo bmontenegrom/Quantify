@@ -52,8 +52,8 @@ export function renderStudentDirectory() {
 
   studentDirectory.innerHTML = rows.length
     ? `
-        <div class="directory-table-wrap">
-          <table class="grade-table directory-data-table">
+        <div class="data-table-wrap">
+          <table class="data-table">
             <thead>
               <tr>
                 <th>Estudiante</th>

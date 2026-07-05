@@ -38,8 +38,8 @@ export function renderKindTotals(summary) {
 
 export function renderStudentGradeTable(summary) {
   return `
-    <div class="grade-table-wrap">
-      <table class="grade-table">
+    <div class="data-table-wrap">
+      <table class="data-table">
         <thead>
           <tr>
             <th>Tipo</th>

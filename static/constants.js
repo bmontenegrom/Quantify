@@ -60,3 +60,12 @@ export const PRACTICE_SECTIONS = {
 export const SERIES_LIVE_COLUMNS = {
   "p2-cc": [{ symbol: "P", unit: "W", inputs: ["R", "I"] }],
 };
+
+// p2-cc: mismo orden que el "Resultado final" (símbolo primero, nombre como aclaración muted),
+// para las magnitudes cuyo símbolo no es obvio a simple vista o que ya se comparan 1 a 1 con su
+// teórica (VR1 medida vs VR1 teórica). Se derivan de las secciones por parte (serie/paralelo/
+// potencia, identificadas por su `id`) en vez de mantener una lista aparte: son exactamente esas
+// magnitudes, no las compartidas (Resistencias) que quedan fuera de una parte.
+export const SYMBOL_FIRST_QUANTITIES = new Set(
+  PRACTICE_SECTIONS["p2-cc"].filter((sec) => sec.id).flatMap((sec) => sec.symbols ?? []),
+);

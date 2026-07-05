@@ -9,23 +9,14 @@ import {
   escapeHtml, symbolHtml, inlineMathHtml, unitHtml, canReview, format,
   compatibleInstruments, SI_PREFIXES, prefixFactor, pointPower,
   seriesStats, histogram, normalCurve, validateMeasurements,
-  draftMeasurementsByQuantity,
+  draftMeasurementsByQuantity, hasUncertainty,
 } from "./lib.js";
 import {
   PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS, SERIES_LIVE_COLUMNS,
+  SYMBOL_FIRST_QUANTITIES,
 } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
-
-// p2-cc: mismo orden que el "Resultado final" (símbolo primero, nombre como aclaración muted),
-// para las magnitudes cuyo símbolo no es obvio a simple vista o que ya se comparan 1 a 1 con su
-// teórica (VR1 medida vs VR1 teórica).
-const SYMBOL_FIRST_QUANTITIES = new Set([
-  "Vg_s", "Vg_p", "Vg_c",
-  "RA_s", "RA_p", "RA_c",
-  "VR1_s", "VR2_s", "VR3_s",
-  "VR1_p", "VR2_p", "VR3_p",
-]);
 
 /** Agrupa `items` (con `.id`/`.symbol`) según `sections[].symbols`, en el mismo orden que las
  *  secciones. Devuelve, por sección, sus `rows` encontrados, y aparte los `items` que no entraron
@@ -346,9 +337,9 @@ export function renderMeasurementFields() {
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
     if (q.is_given) {
-      // `has_uncertainty === false`: dato de tabla sin incertidumbre propia (p. ej. un tiempo de
+      // Sin has_uncertainty: dato de tabla sin incertidumbre propia (p. ej. un tiempo de
       // semiamplitud leído de una lectura única) — pide solo "Valor", sin instrumento ni U.
-      const uField = q.has_uncertainty === false
+      const uField = !hasUncertainty(q)
         ? ""
         : `<label>Incertidumbre U (expandida)
               <div class="replica-input-wrap">
@@ -545,7 +536,7 @@ function finalResultSectionHtml(definition) {
   const rows = finals
     .map((r) => {
       const part = partForResult(r.symbol);
-      const uField = r.has_uncertainty === false
+      const uField = !hasUncertainty(r)
         ? ""
         : `
             <label>Incertidumbre U (expandida)
@@ -804,7 +795,7 @@ function buildMetaMap(measurements) {
       isChrono: row?.dataset.isChrono === "1",
       // En regresión/curva: las magnitudes con per_point=false (o dadas) son escalares compartidos.
       perPoint: def?.per_point ?? true,
-      hasUncertainty: def?.has_uncertainty ?? true,
+      hasUncertainty: hasUncertainty(def),
       // Puede quedar sin lecturas sin bloquear el envío (p. ej. operador 2/3 opcional).
       optional: def?.optional ?? false,
     };
@@ -886,8 +877,9 @@ export function exitEditMode() {
 
 /** Cancela una entrega dentro de la ventana de edición: la borra del servidor y devuelve al
  *  alumno al formulario de carga con todos los valores puestos, para que siga editando y vuelva
- *  a entregar sin re-tipear nada. Pide confirmación antes de borrar. */
-export async function cancelSubmission(submission) {
+ *  a entregar sin re-tipear nada. Pide confirmación antes de borrar. `banner` es el `.edit-banner`
+ *  que contiene el botón clickeado, para mostrar un error ahí mismo si falla el borrado. */
+export async function cancelSubmission(submission, banner) {
   const confirmed = window.confirm(
     "¿Cancelar esta entrega? Se va a borrar del servidor; tus valores quedan cargados en el " +
       "formulario para que sigas editando. Esta acción no se puede deshacer.",
@@ -897,7 +889,8 @@ export async function cancelSubmission(submission) {
   try {
     await deleteJson(`/api/submissions/${submission.id}`);
   } catch (error) {
-    alert(error.message);
+    const status = banner?.querySelector(".edit-banner-status");
+    if (status) status.textContent = error.message;
     return;
   }
 
@@ -1149,8 +1142,8 @@ function renderSeriesTable(definition) {
     ${sharedSection}
     <div${seriesSectionAttr}>
       <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
-      <div class="directory-table-wrap">
-        <table class="series-table grade-table directory-data-table">
+      <div class="data-table-wrap">
+        <table class="series-table data-table">
           <thead><tr>${header}<th></th></tr></thead>
           <tbody>${body}</tbody>
         </table>
@@ -1279,7 +1272,7 @@ function seriesRowHtml(cols) {
 /// (instrumento/escala + un valor). Se cargan una sola vez, fuera de la tabla de la serie.
 function sharedRowHtml(q) {
   if (q.is_given) {
-    const uField = q.has_uncertainty === false
+    const uField = !hasUncertainty(q)
       ? ""
       : `<label>Incertidumbre U (expandida)
             <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>

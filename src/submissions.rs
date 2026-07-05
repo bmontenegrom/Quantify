@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::analysis::AnalysisResult;
 use crate::courses::Course;
-use crate::db::clean_zero;
+use crate::db::{clean_zero, next_position};
 use crate::users::AuthUser;
 
 #[derive(Debug, Serialize, FromRow)]
@@ -267,12 +267,7 @@ pub async fn create_grade_component(
     input: CreateGradeComponent,
 ) -> anyhow::Result<GradeComponent> {
     let id = Uuid::new_v4().to_string();
-    let position: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM grade_components WHERE course_id = ?1",
-    )
-    .bind(&input.course_id)
-    .fetch_one(pool)
-    .await?;
+    let position = next_position(pool, "grade_components", "course_id", &input.course_id).await?;
 
     sqlx::query(
         r#"
@@ -288,7 +283,7 @@ pub async fn create_grade_component(
     .bind(input.name.trim())
     .bind(input.max_points)
     .bind(input.weight_points)
-    .bind(position.0)
+    .bind(position)
     .bind(Utc::now())
     .execute(pool)
     .await?;

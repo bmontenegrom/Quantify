@@ -295,6 +295,7 @@ export function editBannerMarkup(submission) {
     <div class="edit-banner-actions">
       <button type="button" class="edit-submission-btn">Editar entrega</button>
       <button type="button" class="cancel-submission-btn">Cancelar entrega</button>
+      <span class="edit-banner-status inline-status" role="status"></span>
     </div>
   </div>`;
 }
@@ -330,6 +331,7 @@ export function renderReviewForm(submission) {
       <div class="review-actions">
         <button type="submit">Guardar correccion</button>
         <span class="submission-meta">${submission.reviewed_at ? `Revisada: ${new Date(submission.reviewed_at).toLocaleString()}` : ""}</span>
+        <span class="review-status inline-status" role="status"></span>
       </div>
     </form>
   `;
@@ -346,7 +348,8 @@ export async function saveReview(event, id) {
   try {
     updated = await postJson(`/api/submissions/${id}/review`, payload);
   } catch (error) {
-    alert(error.message);
+    const status = form.querySelector(".review-status");
+    if (status) status.textContent = error.message;
     return;
   }
   state.activeSubmission = updated;

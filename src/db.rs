@@ -926,6 +926,24 @@ async fn add_column_if_missing(
     Ok(())
 }
 
+/// Calcula la próxima posición disponible para una fila nueva en `table`, dentro del scope dado
+/// por `scope_col = scope_val` (p. ej. `practice_id`, `course_id`, `instrument_id`). `table` y
+/// `scope_col` son siempre literales fijos del código, nunca entrada de usuario.
+pub async fn next_position(
+    pool: &SqlitePool,
+    table: &str,
+    scope_col: &str,
+    scope_val: &str,
+) -> anyhow::Result<i64> {
+    let query =
+        format!("SELECT COALESCE(MAX(position), 0) + 1 FROM {table} WHERE {scope_col} = ?1");
+    let position: (i64,) = sqlx::query_as(&query)
+        .bind(scope_val)
+        .fetch_one(pool)
+        .await?;
+    Ok(position.0)
+}
+
 /// Inserta los usuarios iniciales de desarrollo (admin, docente, estudiante) si no existen.
 /// Las contraseñas salen de las variables `SEED_*_PASSWORD` o usan valores por defecto.
 pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
