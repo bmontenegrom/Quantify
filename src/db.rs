@@ -1115,6 +1115,25 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
+    // Baja de las practicas de CC viejas (p2-serie, p2-corriente-continua, p2-potencia):
+    // quedaron reemplazadas por p2-cc (entrega unica con tabs), pero como ya no se siembran
+    // arriba, las bases que las tenian de antes de la unificacion (#43) las conservan para
+    // siempre y aparecen duplicadas en el nav. Se dan de baja solo si no tienen entregas reales
+    // (el borrado de `practices` en cascada se llevaria las mediciones si las hubiera).
+    for legacy_id in ["p2-serie", "p2-corriente-continua", "p2-potencia"] {
+        let has_submissions: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM submissions WHERE practice_id = ?1")
+                .bind(legacy_id)
+                .fetch_one(pool)
+                .await?;
+        if has_submissions.0 == 0 {
+            sqlx::query("DELETE FROM practices WHERE id = ?1")
+                .bind(legacy_id)
+                .execute(pool)
+                .await?;
+        }
+    }
+
     Ok(())
 }
 
