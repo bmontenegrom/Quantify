@@ -61,6 +61,11 @@ export const SERIES_LIVE_COLUMNS = {
   "p2-cc": [{ symbol: "P", unit: "W", inputs: ["R", "I"] }],
 };
 
+// Prácticas cuyas magnitudes de tiempo de medida única se leen directo de un instrumento con
+// lectura propia (p. ej. un osciloscopio), no a mano con cronómetro: no ofrecen el cronómetro
+// de ayuda genérico (ver `needsChronoHelper` en forms.js).
+export const PRACTICES_WITHOUT_CHRONO_HELPER = new Set(["p3-relajacion"]);
+
 // p2-cc: mismo orden que el "Resultado final" (símbolo primero, nombre como aclaración muted),
 // para las magnitudes cuyo símbolo no es obvio a simple vista o que ya se comparan 1 a 1 con su
 // teórica (VR1 medida vs VR1 teórica). Se derivan de las secciones por parte (serie/paralelo/

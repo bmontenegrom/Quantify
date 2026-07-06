@@ -13,7 +13,7 @@ import {
 } from "./lib.js";
 import {
   PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS, SERIES_LIVE_COLUMNS,
-  SYMBOL_FIRST_QUANTITIES,
+  SYMBOL_FIRST_QUANTITIES, PRACTICES_WITHOUT_CHRONO_HELPER,
 } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
@@ -431,22 +431,40 @@ export function renderMeasurementFields() {
   const sections = PRACTICE_SECTIONS[practiceSelect.value];
   if (sections) {
     const { grouped, rest } = groupBySections(definition.quantities, sections);
+    // Los resultados finales de una sección (p. ej. g1 en "Operador 1") se incrustan ahí mismo,
+    // junto a la magnitud de la que salen (T1), en vez de amontonarse aparte al final.
+    const allFinals = (definition.results ?? []).filter((r) => r.is_final);
+    const embedded = new Set();
     const blocks = grouped.map(({ sec, rows }) => {
       if (rows.length === 0) return "";
       const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+      // `!embedded.has` evita reventarlo dos veces si un símbolo quedara en el `results` de más
+      // de una sección: gana la primera (mismo orden que PRACTICE_SECTIONS).
+      const secFinals = allFinals.filter((r) => !embedded.has(r.symbol) && (sec.results ?? []).includes(r.symbol));
+      secFinals.forEach((r) => embedded.add(r.symbol));
+      // Se pasa `sec.id` explícito: es la sección donde esta fila realmente queda en el DOM, que
+      // puede no coincidir con lo que `partForResult` (usada por el fallback de `leftoverFinals`)
+      // encontraría si la sección "dueña" del símbolo en PRACTICE_SECTIONS no llegó a renderizar.
+      const finalsHtml = secFinals.length
+        ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
+           ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
+        : "";
       return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
           ${rows.map(quantityRowHtml).join("")}
           ${helper}
+          ${finalsHtml}
         </div>`;
     });
-    measurementFields.innerHTML = blocks.join("") + rest.map(quantityRowHtml).join("");
+    const leftoverFinals = allFinals.filter((r) => !embedded.has(r.symbol));
+    measurementFields.innerHTML =
+      blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
-    measurementFields.innerHTML = definition.quantities.map(quantityRowHtml).join("") + helper;
+    measurementFields.innerHTML =
+      definition.quantities.map(quantityRowHtml).join("") + helper + finalResultSectionHtml(definition);
   }
-  measurementFields.insertAdjacentHTML("beforeend", finalResultSectionHtml(definition));
   wireChronoHelpers();
 
   measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
@@ -517,8 +535,11 @@ function wireChronoHelpers() {
   });
 }
 
-/** `true` si esta magnitud se mide a mano (sin cronómetro propio) pero es un tiempo. */
+/** `true` si esta magnitud se mide a mano (sin cronómetro propio) pero es un tiempo, y la
+ *  práctica no está en `PRACTICES_WITHOUT_CHRONO_HELPER` (instrumento con lectura propia,
+ *  p. ej. osciloscopio: relajación exponencial no cronometra T_oc/tmedio a mano). */
 function needsChronoHelper(q) {
+  if (PRACTICES_WITHOUT_CHRONO_HELPER.has(practiceSelect.value)) return false;
   return q.quantity === "tiempo" && !q.repeated && !q.is_given;
 }
 
@@ -528,44 +549,49 @@ function partForResult(symbol) {
   return sections.find((sec) => sec.id && (sec.results ?? []).includes(symbol))?.id ?? null;
 }
 
-/** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`.
- *  Los resultados con `has_uncertainty: false` se entregan sin incertidumbre (sin campo U). */
-function finalResultSectionHtml(definition) {
-  const finals = (definition.results ?? []).filter((r) => r.is_final);
-  if (!finals.length) return "";
-  const rows = finals
-    .map((r) => {
-      const part = partForResult(r.symbol);
-      const uField = !hasUncertainty(r)
-        ? ""
-        : `
-            <label>Incertidumbre U (expandida)
-              <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
-                <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
-                <span class="replica-unit">${unitHtml(r.unit)}</span>
-              </div>
-            </label>`;
-      return `
-        <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}>
-          <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
-          <div class="form-grid">
-            <label>Valor
-              <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
-                <input class="final-result-value" type="number" step="any" placeholder="valor" />
-                <span class="replica-unit">${unitHtml(r.unit)}</span>
-              </div>
-            </label>${uField}
+/** Fila de un resultado final (valor ± U), p. ej. `g`. Los resultados con `has_uncertainty:
+ *  false` se entregan sin incertidumbre (sin campo U). `sectionId` es la parte donde se está
+ *  incrustando esta fila (si el caller ya sabe en qué `<div data-section>` la está poniendo);
+ *  sin ese dato se cae a `partForResult`, que puede no coincidir con dónde termina embebida si
+ *  una sección "dueña" del símbolo no llegó a renderizar (ver `renderMeasurementFields`). */
+function finalResultRowHtml(r, sectionId) {
+  const part = sectionId !== undefined ? sectionId : partForResult(r.symbol);
+  const uField = !hasUncertainty(r)
+    ? ""
+    : `
+        <label>Incertidumbre U (expandida)
+          <div class="replica-input-wrap">
+            ${prefixSelectHtml()}
+            <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
+            <span class="replica-unit">${unitHtml(r.unit)}</span>
           </div>
-        </fieldset>`;
-    })
-    .join("");
+        </label>`;
+  return `
+    <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}>
+      <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
+      <div class="form-grid">
+        <label>Valor
+          <div class="replica-input-wrap">
+            ${prefixSelectHtml()}
+            <input class="final-result-value" type="number" step="any" placeholder="valor" />
+            <span class="replica-unit">${unitHtml(r.unit)}</span>
+          </div>
+        </label>${uField}
+      </div>
+    </fieldset>`;
+}
+
+/** Sección opcional para que el alumno cargue sus resultados finales (valor ± U). `finals`
+ *  por defecto son todos los de la definición; se puede pasar un subconjunto (p. ej. los que
+ *  no quedaron ya incrustados en una sección temática, ver `renderMeasurementFields`). */
+function finalResultSectionHtml(definition, finals) {
+  const rows = finals ?? (definition.results ?? []).filter((r) => r.is_final);
+  if (!rows.length) return "";
   return `
     <div class="measurement-section final-results-section">
       <h4 class="measurement-section-title">Resultado final <span class="submission-meta">— opcional</span></h4>
       <p class="submission-meta">Si ya calculaste tu resultado, cargalo acá. Podés dejarlo para más adelante; el docente puede cargarlo después.</p>
-      ${rows}
+      ${rows.map((r) => finalResultRowHtml(r)).join("")}
     </div>
   `;
 }

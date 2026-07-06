@@ -1166,6 +1166,11 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
     // vez que T1/g1 existen, no se vuelve a tocar (así no se pisan ediciones del admin sobre
     // has_uncertainty/optional/formula hechas después de la migración).
     if quantity_missing(pool, "p1-estadistica", "T1").await? {
+        // Una sola transacción: si el proceso muere a mitad de camino (p. ej. despues de borrar
+        // `T` pero antes de insertar T2/T3), `quantity_missing(pool, "T1")` ya daria `false` en
+        // el siguiente boot (T1 si se llego a insertar) y el bloque no se volveria a correr,
+        // dejando la migracion incompleta para siempre.
+        let mut tx = pool.begin().await?;
         // Borra primero las mediciones que referencian la magnitud vieja: `submission_measurements
         // .quantity_id` tiene FK a `practice_quantities(id)` sin `ON DELETE CASCADE`, así que
         // borrar la magnitud con mediciones reales cargadas violaría la constraint (con
@@ -1175,19 +1180,18 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
             "DELETE FROM submission_measurements WHERE quantity_id IN \
              (SELECT id FROM practice_quantities WHERE practice_id = 'p1-estadistica' AND symbol = 'T')",
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
         sqlx::query(
             "DELETE FROM practice_quantities WHERE practice_id = 'p1-estadistica' AND symbol = 'T'",
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-        let mut conn = pool.acquire().await?;
         let base_pos: (i64,) = sqlx::query_as(
             "SELECT COALESCE(MAX(position), 0) FROM practice_quantities WHERE practice_id = ?1",
         )
         .bind("p1-estadistica")
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
         for (i, q) in [
             qty("T1", "Periodo - Operador 1", "s", true, "tiempo"),
@@ -1197,35 +1201,38 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
         .iter()
         .enumerate()
         {
-            insert_quantity(&mut conn, "p1-estadistica", base_pos.0 + i as i64 + 1, q).await?;
+            insert_quantity(&mut tx, "p1-estadistica", base_pos.0 + i as i64 + 1, q).await?;
         }
         // t_med sin instrumento/U, T2/T3 opcionales: forma vieja de la base no tenía estos flags.
         sqlx::query(
             "UPDATE practice_quantities SET has_uncertainty = 0 \
              WHERE practice_id = 'p1-estadistica' AND symbol = 't_med'",
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
         sqlx::query(
             "UPDATE practice_quantities SET optional = 1 \
              WHERE practice_id = 'p1-estadistica' AND symbol IN ('T2', 'T3')",
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
     }
     if result_missing(pool, "p1-estadistica", "g1").await? {
+        // Misma razón que la migración de arriba: todo o nada, para no quedar con g1 insertado
+        // pero g2/g3 faltantes si el proceso muere a mitad de camino.
+        let mut tx = pool.begin().await?;
         sqlx::query(
             "DELETE FROM practice_results WHERE practice_id = 'p1-estadistica' \
              AND symbol IN ('g', 'Tmedio', 'delta')",
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-        let mut conn = pool.acquire().await?;
         let base_pos: (i64,) = sqlx::query_as(
             "SELECT COALESCE(MAX(position), 0) FROM practice_results WHERE practice_id = ?1",
         )
         .bind("p1-estadistica")
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
         for (i, r) in [
             res_final(
@@ -1250,7 +1257,7 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
         .iter()
         .enumerate()
         {
-            insert_result(&mut conn, "p1-estadistica", base_pos.0 + i as i64 + 1, r).await?;
+            insert_result(&mut tx, "p1-estadistica", base_pos.0 + i as i64 + 1, r).await?;
         }
         // gamma/Q sin ±U, y Q pasa a referenciar T1 (antes T): forma vieja de la base no tenía
         // `has_uncertainty` ni el operador explícito en la fórmula/nombre.
@@ -1258,15 +1265,16 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
             "UPDATE practice_results SET has_uncertainty = 0 \
              WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q')",
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
         sqlx::query(
             "UPDATE practice_results SET formula = 'pi*t_med/(T1*math::ln(2))', \
                  name = 'Factor de calidad (usa el periodo del Operador 1)' \
              WHERE practice_id = 'p1-estadistica' AND symbol = 'Q'",
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
     }
     // gamma/Q pasaron a ser resultado final después del alta inicial de la práctica: invariante que
     // se re-aplica en cada boot (no solo en la migración de forma de arriba) para autocurar bases
@@ -1274,6 +1282,18 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query(
         "UPDATE practice_results SET is_final = 1 \
          WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q') AND is_final = 0",
+    )
+    .execute(pool)
+    .await?;
+    // `operator_count` (Motor D) es de una epoca anterior a T1/T2/T3: dividia UNA magnitud
+    // repetida ("T") en N series, una por operador. Ahora cada operador ya es un simbolo propio
+    // (T1/T2/T3, con su propio tab y su propio g_i), asi que Motor D queda incompatible: si
+    // quedo seteado (p. ej. desde el admin, antes de este rediseño) vuelve a tratar T1/T2/T3 como
+    // si fueran 3 series del mismo operador, mostrando 3 cronometros por tab en vez de 1 y
+    // triplicando los mensurandos derivados. Se autocura en cada boot.
+    sqlx::query(
+        "UPDATE practices SET operator_count = NULL \
+         WHERE id = 'p1-estadistica' AND operator_count IS NOT NULL",
     )
     .execute(pool)
     .await?;
@@ -1340,6 +1360,42 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
     // P = I^2*R y curva P vs R. Los finales experimentales de potencia (P_max_e / RP_max_e)
     // usan los alias de extremos del camino curva (`P_max`, `R_at_P_max`) con U = 0; por eso
     // sus formulas no son editables desde la UI admin (check_formula no conoce los alias).
+    // Migración de forma: mientras se desarrollaba la unificación (#43) algunas bases quedaron
+    // sembradas con una forma intermedia de p2-cc (símbolos con sufijo _serie/_paralelo/_potencia,
+    // p. ej. `Vg_serie`/`RA_serie`, en vez de los `_s`/`_p`/`_c` actuales). `seed_practice` es
+    // idempotente y no resiembra sobre una base que ya tiene filas, así que esas bases quedan
+    // desincronizadas de PRACTICE_SECTIONS (constants.js) para siempre: el front no encuentra los
+    // símbolos esperados, no arma `data-section` y las tabs Serie/Paralelo/Potencia dejan de
+    // separar sus campos. No hay mediciones reales bajo esa forma intermedia (era de desarrollo),
+    // así que en vez de renombrar símbolo a símbolo se limpia todo p2-cc y se deja que el seed de
+    // abajo lo siembre de cero con la forma final.
+    if !quantity_missing(pool, "p2-cc", "R").await?
+        && quantity_missing(pool, "p2-cc", "Vg_s").await?
+    {
+        // Una sola transacción: si el proceso muere a mitad de camino, no queda un estado
+        // parcial (p. ej. `practice_quantities` ya vacía pero `practice_results` todavía con
+        // las filas viejas, que chocarían con `UNIQUE(practice_id, symbol)` al resembrar).
+        let mut tx = pool.begin().await?;
+        sqlx::query(
+            "DELETE FROM submission_measurements WHERE quantity_id IN \
+             (SELECT id FROM practice_quantities WHERE practice_id = 'p2-cc')",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM practice_quantities WHERE practice_id = 'p2-cc'")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM practice_results WHERE practice_id = 'p2-cc'")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM practice_curves WHERE practice_id = 'p2-cc'")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM practice_intermediates WHERE practice_id = 'p2-cc'")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+    }
     let fresh_p2cc = seed_practice(
         pool,
         "p2-cc",
