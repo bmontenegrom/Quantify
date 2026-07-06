@@ -531,7 +531,11 @@ function partForResult(symbol) {
 /** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`.
  *  Los resultados con `has_uncertainty: false` se entregan sin incertidumbre (sin campo U). */
 function finalResultSectionHtml(definition) {
-  const finals = (definition.results ?? []).filter((r) => r.is_final);
+  // Los de una parte (g1/g2/g3, VR_t, etc.) van primero, en orden; los compartidos (sin parte,
+  // p. ej. gamma/Q) quedan al final. `sort` es estable: dentro de cada grupo no se reordena.
+  const finals = (definition.results ?? [])
+    .filter((r) => r.is_final)
+    .sort((a, b) => (partForResult(a.symbol) ? 0 : 1) - (partForResult(b.symbol) ? 0 : 1));
   if (!finals.length) return "";
   const rows = finals
     .map((r) => {

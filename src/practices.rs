@@ -1277,6 +1277,18 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
+    // `operator_count` (Motor D) es de una epoca anterior a T1/T2/T3: dividia UNA magnitud
+    // repetida ("T") en N series, una por operador. Ahora cada operador ya es un simbolo propio
+    // (T1/T2/T3, con su propio tab y su propio g_i), asi que Motor D queda incompatible: si
+    // quedo seteado (p. ej. desde el admin, antes de este rediseño) vuelve a tratar T1/T2/T3 como
+    // si fueran 3 series del mismo operador, mostrando 3 cronometros por tab en vez de 1 y
+    // triplicando los mensurandos derivados. Se autocura en cada boot.
+    sqlx::query(
+        "UPDATE practices SET operator_count = NULL \
+         WHERE id = 'p1-estadistica' AND operator_count IS NOT NULL",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
