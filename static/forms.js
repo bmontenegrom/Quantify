@@ -530,8 +530,11 @@ function wireChronoHelpers() {
   });
 }
 
-/** `true` si esta magnitud se mide a mano (sin cronómetro propio) pero es un tiempo. */
+/** `true` si esta magnitud se mide a mano (sin cronómetro propio) pero es un tiempo, y la
+ *  práctica no tiene ya un instrumento que lea el tiempo directamente (p. ej. relajación
+ *  exponencial: T_oc y tmedio se leen del osciloscopio, no se cronometran). */
 function needsChronoHelper(q) {
+  if (practiceSelect.value === "p3-relajacion") return false;
   return q.quantity === "tiempo" && !q.repeated && !q.is_given;
 }
 
