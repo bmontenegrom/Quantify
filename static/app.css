@@ -1387,6 +1387,17 @@ textarea {
   font-size: 0.95rem;
 }
 
+/* Subtítulo de un resultado final incrustado dentro de su propia sección (p. ej. g1 en
+   "Operador 1"), para distinguirlo visualmente de las magnitudes medidas de arriba. */
+.measurement-section-subtitle {
+  margin: 14px 0 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  color: var(--accent-strong);
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
 /* Depuración de una serie repetida: lista ordenada + histograma + curva normal. */
 .series-debug {
   margin-top: 12px;

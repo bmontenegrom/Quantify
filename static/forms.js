@@ -431,22 +431,35 @@ export function renderMeasurementFields() {
   const sections = PRACTICE_SECTIONS[practiceSelect.value];
   if (sections) {
     const { grouped, rest } = groupBySections(definition.quantities, sections);
+    // Los resultados finales de una sección (p. ej. g1 en "Operador 1") se incrustan ahí mismo,
+    // junto a la magnitud de la que salen (T1), en vez de amontonarse aparte al final.
+    const allFinals = (definition.results ?? []).filter((r) => r.is_final);
+    const embedded = new Set();
     const blocks = grouped.map(({ sec, rows }) => {
       if (rows.length === 0) return "";
       const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+      const secFinals = allFinals.filter((r) => (sec.results ?? []).includes(r.symbol));
+      secFinals.forEach((r) => embedded.add(r.symbol));
+      const finalsHtml = secFinals.length
+        ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
+           ${secFinals.map(finalResultRowHtml).join("")}`
+        : "";
       return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
           ${rows.map(quantityRowHtml).join("")}
           ${helper}
+          ${finalsHtml}
         </div>`;
     });
-    measurementFields.innerHTML = blocks.join("") + rest.map(quantityRowHtml).join("");
+    const leftoverFinals = allFinals.filter((r) => !embedded.has(r.symbol));
+    measurementFields.innerHTML =
+      blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
-    measurementFields.innerHTML = definition.quantities.map(quantityRowHtml).join("") + helper;
+    measurementFields.innerHTML =
+      definition.quantities.map(quantityRowHtml).join("") + helper + finalResultSectionHtml(definition);
   }
-  measurementFields.insertAdjacentHTML("beforeend", finalResultSectionHtml(definition));
   wireChronoHelpers();
 
   measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
@@ -528,48 +541,46 @@ function partForResult(symbol) {
   return sections.find((sec) => sec.id && (sec.results ?? []).includes(symbol))?.id ?? null;
 }
 
-/** Sección opcional para que el alumno cargue su resultado final (valor ± U), p. ej. `g`.
- *  Los resultados con `has_uncertainty: false` se entregan sin incertidumbre (sin campo U). */
-function finalResultSectionHtml(definition) {
-  // Los de una parte (g1/g2/g3, VR_t, etc.) van primero, en orden; los compartidos (sin parte,
-  // p. ej. gamma/Q) quedan al final. `sort` es estable: dentro de cada grupo no se reordena.
-  const finals = (definition.results ?? [])
-    .filter((r) => r.is_final)
-    .sort((a, b) => (partForResult(a.symbol) ? 0 : 1) - (partForResult(b.symbol) ? 0 : 1));
-  if (!finals.length) return "";
-  const rows = finals
-    .map((r) => {
-      const part = partForResult(r.symbol);
-      const uField = !hasUncertainty(r)
-        ? ""
-        : `
-            <label>Incertidumbre U (expandida)
-              <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
-                <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
-                <span class="replica-unit">${unitHtml(r.unit)}</span>
-              </div>
-            </label>`;
-      return `
-        <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}>
-          <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
-          <div class="form-grid">
-            <label>Valor
-              <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
-                <input class="final-result-value" type="number" step="any" placeholder="valor" />
-                <span class="replica-unit">${unitHtml(r.unit)}</span>
-              </div>
-            </label>${uField}
+/** Fila de un resultado final (valor ± U), p. ej. `g`. Los resultados con `has_uncertainty:
+ *  false` se entregan sin incertidumbre (sin campo U). */
+function finalResultRowHtml(r) {
+  const part = partForResult(r.symbol);
+  const uField = !hasUncertainty(r)
+    ? ""
+    : `
+        <label>Incertidumbre U (expandida)
+          <div class="replica-input-wrap">
+            ${prefixSelectHtml()}
+            <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
+            <span class="replica-unit">${unitHtml(r.unit)}</span>
           </div>
-        </fieldset>`;
-    })
-    .join("");
+        </label>`;
+  return `
+    <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}>
+      <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
+      <div class="form-grid">
+        <label>Valor
+          <div class="replica-input-wrap">
+            ${prefixSelectHtml()}
+            <input class="final-result-value" type="number" step="any" placeholder="valor" />
+            <span class="replica-unit">${unitHtml(r.unit)}</span>
+          </div>
+        </label>${uField}
+      </div>
+    </fieldset>`;
+}
+
+/** Sección opcional para que el alumno cargue sus resultados finales (valor ± U). `finals`
+ *  por defecto son todos los de la definición; se puede pasar un subconjunto (p. ej. los que
+ *  no quedaron ya incrustados en una sección temática, ver `renderMeasurementFields`). */
+function finalResultSectionHtml(definition, finals) {
+  const rows = finals ?? (definition.results ?? []).filter((r) => r.is_final);
+  if (!rows.length) return "";
   return `
     <div class="measurement-section final-results-section">
       <h4 class="measurement-section-title">Resultado final <span class="submission-meta">— opcional</span></h4>
       <p class="submission-meta">Si ya calculaste tu resultado, cargalo acá. Podés dejarlo para más adelante; el docente puede cargarlo después.</p>
-      ${rows}
+      ${rows.map(finalResultRowHtml).join("")}
     </div>
   `;
 }
