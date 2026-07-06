@@ -443,9 +443,12 @@ export function renderMeasurementFields() {
       // de una sección: gana la primera (mismo orden que PRACTICE_SECTIONS).
       const secFinals = allFinals.filter((r) => !embedded.has(r.symbol) && (sec.results ?? []).includes(r.symbol));
       secFinals.forEach((r) => embedded.add(r.symbol));
+      // Se pasa `sec.id` explícito: es la sección donde esta fila realmente queda en el DOM, que
+      // puede no coincidir con lo que `partForResult` (usada por el fallback de `leftoverFinals`)
+      // encontraría si la sección "dueña" del símbolo en PRACTICE_SECTIONS no llegó a renderizar.
       const finalsHtml = secFinals.length
         ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
-           ${secFinals.map(finalResultRowHtml).join("")}`
+           ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
         : "";
       return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
@@ -547,9 +550,12 @@ function partForResult(symbol) {
 }
 
 /** Fila de un resultado final (valor ± U), p. ej. `g`. Los resultados con `has_uncertainty:
- *  false` se entregan sin incertidumbre (sin campo U). */
-function finalResultRowHtml(r) {
-  const part = partForResult(r.symbol);
+ *  false` se entregan sin incertidumbre (sin campo U). `sectionId` es la parte donde se está
+ *  incrustando esta fila (si el caller ya sabe en qué `<div data-section>` la está poniendo);
+ *  sin ese dato se cae a `partForResult`, que puede no coincidir con dónde termina embebida si
+ *  una sección "dueña" del símbolo no llegó a renderizar (ver `renderMeasurementFields`). */
+function finalResultRowHtml(r, sectionId) {
+  const part = sectionId !== undefined ? sectionId : partForResult(r.symbol);
   const uField = !hasUncertainty(r)
     ? ""
     : `
@@ -585,7 +591,7 @@ function finalResultSectionHtml(definition, finals) {
     <div class="measurement-section final-results-section">
       <h4 class="measurement-section-title">Resultado final <span class="submission-meta">— opcional</span></h4>
       <p class="submission-meta">Si ya calculaste tu resultado, cargalo acá. Podés dejarlo para más adelante; el docente puede cargarlo después.</p>
-      ${rows.map(finalResultRowHtml).join("")}
+      ${rows.map((r) => finalResultRowHtml(r)).join("")}
     </div>
   `;
 }
