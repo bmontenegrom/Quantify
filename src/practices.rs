@@ -1364,24 +1364,29 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
     if !quantity_missing(pool, "p2-cc", "R").await?
         && quantity_missing(pool, "p2-cc", "Vg_s").await?
     {
+        // Una sola transacción: si el proceso muere a mitad de camino, no queda un estado
+        // parcial (p. ej. `practice_quantities` ya vacía pero `practice_results` todavía con
+        // las filas viejas, que chocarían con `UNIQUE(practice_id, symbol)` al resembrar).
+        let mut tx = pool.begin().await?;
         sqlx::query(
             "DELETE FROM submission_measurements WHERE quantity_id IN \
              (SELECT id FROM practice_quantities WHERE practice_id = 'p2-cc')",
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
         sqlx::query("DELETE FROM practice_quantities WHERE practice_id = 'p2-cc'")
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM practice_results WHERE practice_id = 'p2-cc'")
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM practice_curves WHERE practice_id = 'p2-cc'")
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM practice_intermediates WHERE practice_id = 'p2-cc'")
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
     }
     let fresh_p2cc = seed_practice(
         pool,

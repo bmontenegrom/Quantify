@@ -13,7 +13,7 @@ import {
 } from "./lib.js";
 import {
   PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS, SERIES_LIVE_COLUMNS,
-  SYMBOL_FIRST_QUANTITIES,
+  SYMBOL_FIRST_QUANTITIES, PRACTICES_WITHOUT_CHRONO_HELPER,
 } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
@@ -439,7 +439,9 @@ export function renderMeasurementFields() {
       if (rows.length === 0) return "";
       const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
-      const secFinals = allFinals.filter((r) => (sec.results ?? []).includes(r.symbol));
+      // `!embedded.has` evita reventarlo dos veces si un símbolo quedara en el `results` de más
+      // de una sección: gana la primera (mismo orden que PRACTICE_SECTIONS).
+      const secFinals = allFinals.filter((r) => !embedded.has(r.symbol) && (sec.results ?? []).includes(r.symbol));
       secFinals.forEach((r) => embedded.add(r.symbol));
       const finalsHtml = secFinals.length
         ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
@@ -531,10 +533,10 @@ function wireChronoHelpers() {
 }
 
 /** `true` si esta magnitud se mide a mano (sin cronómetro propio) pero es un tiempo, y la
- *  práctica no tiene ya un instrumento que lea el tiempo directamente (p. ej. relajación
- *  exponencial: T_oc y tmedio se leen del osciloscopio, no se cronometran). */
+ *  práctica no está en `PRACTICES_WITHOUT_CHRONO_HELPER` (instrumento con lectura propia,
+ *  p. ej. osciloscopio: relajación exponencial no cronometra T_oc/tmedio a mano). */
 function needsChronoHelper(q) {
-  if (practiceSelect.value === "p3-relajacion") return false;
+  if (PRACTICES_WITHOUT_CHRONO_HELPER.has(practiceSelect.value)) return false;
   return q.quantity === "tiempo" && !q.repeated && !q.is_given;
 }
 
