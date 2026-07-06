@@ -1340,6 +1340,37 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
     // P = I^2*R y curva P vs R. Los finales experimentales de potencia (P_max_e / RP_max_e)
     // usan los alias de extremos del camino curva (`P_max`, `R_at_P_max`) con U = 0; por eso
     // sus formulas no son editables desde la UI admin (check_formula no conoce los alias).
+    // Migración de forma: mientras se desarrollaba la unificación (#43) algunas bases quedaron
+    // sembradas con una forma intermedia de p2-cc (símbolos con sufijo _serie/_paralelo/_potencia,
+    // p. ej. `Vg_serie`/`RA_serie`, en vez de los `_s`/`_p`/`_c` actuales). `seed_practice` es
+    // idempotente y no resiembra sobre una base que ya tiene filas, así que esas bases quedan
+    // desincronizadas de PRACTICE_SECTIONS (constants.js) para siempre: el front no encuentra los
+    // símbolos esperados, no arma `data-section` y las tabs Serie/Paralelo/Potencia dejan de
+    // separar sus campos. No hay mediciones reales bajo esa forma intermedia (era de desarrollo),
+    // así que en vez de renombrar símbolo a símbolo se limpia todo p2-cc y se deja que el seed de
+    // abajo lo siembre de cero con la forma final.
+    if !quantity_missing(pool, "p2-cc", "R").await?
+        && quantity_missing(pool, "p2-cc", "Vg_s").await?
+    {
+        sqlx::query(
+            "DELETE FROM submission_measurements WHERE quantity_id IN \
+             (SELECT id FROM practice_quantities WHERE practice_id = 'p2-cc')",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query("DELETE FROM practice_quantities WHERE practice_id = 'p2-cc'")
+            .execute(pool)
+            .await?;
+        sqlx::query("DELETE FROM practice_results WHERE practice_id = 'p2-cc'")
+            .execute(pool)
+            .await?;
+        sqlx::query("DELETE FROM practice_curves WHERE practice_id = 'p2-cc'")
+            .execute(pool)
+            .await?;
+        sqlx::query("DELETE FROM practice_intermediates WHERE practice_id = 'p2-cc'")
+            .execute(pool)
+            .await?;
+    }
     let fresh_p2cc = seed_practice(
         pool,
         "p2-cc",
