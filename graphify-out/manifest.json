@@ -1,0 +1,362 @@
+{
+  ".claude/settings.local.json": {
+    "mtime": 1781287521.2655158,
+    "ast_hash": "e72f62c05b8e4ea0c022965548d5db09",
+    "semantic_hash": "e72f62c05b8e4ea0c022965548d5db09"
+  },
+  ".vscode/extensions.json": {
+    "mtime": 1751292132.4984164,
+    "ast_hash": "a4038619f5414c01f04abbbdd4730820",
+    "semantic_hash": "a4038619f5414c01f04abbbdd4730820"
+  },
+  ".vscode/settings.json": {
+    "mtime": 1751293618.5250323,
+    "ast_hash": "c1df1cf79b411dda6b7bcec9dbaaf112",
+    "semantic_hash": "c1df1cf79b411dda6b7bcec9dbaaf112"
+  },
+  "package.json": {
+    "mtime": 1781287800.9747682,
+    "ast_hash": "f58f4bdefb97d7e43667b72324478fa5",
+    "semantic_hash": "f58f4bdefb97d7e43667b72324478fa5"
+  },
+  "scripts/dev-reset.ps1": {
+    "mtime": 1781306567.675928,
+    "ast_hash": "cc98edac86c4d98ed49fe94b4b5083af",
+    "semantic_hash": "cc98edac86c4d98ed49fe94b4b5083af"
+  },
+  "scripts/dev-reset.sh": {
+    "mtime": 1781306567.675928,
+    "ast_hash": "0a39075b50c2ed4438df9f596c0e8134",
+    "semantic_hash": "0a39075b50c2ed4438df9f596c0e8134"
+  },
+  "src/analysis.rs": {
+    "mtime": 1781306567.6796,
+    "ast_hash": "01a9faaa129e8deca914e4f214d2e99d",
+    "semantic_hash": "01a9faaa129e8deca914e4f214d2e99d"
+  },
+  "src/computation.rs": {
+    "mtime": 1783362100.8549702,
+    "ast_hash": "29c94c91c98e90285b4844ff7894f975",
+    "semantic_hash": "29c94c91c98e90285b4844ff7894f975"
+  },
+  "src/courses.rs": {
+    "mtime": 1781303989.6714482,
+    "ast_hash": "cf7135f7a2cd1873d7a12d9d47ec0db8",
+    "semantic_hash": "cf7135f7a2cd1873d7a12d9d47ec0db8"
+  },
+  "src/db.rs": {
+    "mtime": 1783370459.2995985,
+    "ast_hash": "44164cb31f2acbce08deceb8ba7da86b",
+    "semantic_hash": "44164cb31f2acbce08deceb8ba7da86b"
+  },
+  "src/error.rs": {
+    "mtime": 1783362100.8549702,
+    "ast_hash": "b6d9efdde2010b1894079d98c2e23f36",
+    "semantic_hash": "b6d9efdde2010b1894079d98c2e23f36"
+  },
+  "src/instruments.rs": {
+    "mtime": 1783362100.8619967,
+    "ast_hash": "78380dcbd5444ac12a40b307b82780fa",
+    "semantic_hash": "78380dcbd5444ac12a40b307b82780fa"
+  },
+  "src/lib.rs": {
+    "mtime": 1781303989.6755066,
+    "ast_hash": "b3141fd4b6a330348470a275d3d5b726",
+    "semantic_hash": "b3141fd4b6a330348470a275d3d5b726"
+  },
+  "src/main.rs": {
+    "mtime": 1783016953.90611,
+    "ast_hash": "acfb3cf83d4eb47b199c1ab2c706f592",
+    "semantic_hash": "acfb3cf83d4eb47b199c1ab2c706f592"
+  },
+  "src/practices.rs": {
+    "mtime": 1783370459.3061626,
+    "ast_hash": "999cb72070ccb379e9b96975f4a0d0b5",
+    "semantic_hash": "999cb72070ccb379e9b96975f4a0d0b5"
+  },
+  "src/routes/auth.rs": {
+    "mtime": 1783362100.8619967,
+    "ast_hash": "b46138257c3613114908181557418ec1",
+    "semantic_hash": "b46138257c3613114908181557418ec1"
+  },
+  "src/routes/courses.rs": {
+    "mtime": 1783362100.8619967,
+    "ast_hash": "1c64a04318c6ed7938e66e1c551e8e5f",
+    "semantic_hash": "1c64a04318c6ed7938e66e1c551e8e5f"
+  },
+  "src/routes/instruments.rs": {
+    "mtime": 1783362100.8619967,
+    "ast_hash": "e3f734f114d99360871d08da888cd019",
+    "semantic_hash": "e3f734f114d99360871d08da888cd019"
+  },
+  "src/routes/mod.rs": {
+    "mtime": 1783362100.8619967,
+    "ast_hash": "6a96519deff3805e726add08a6e9c482",
+    "semantic_hash": "6a96519deff3805e726add08a6e9c482"
+  },
+  "src/routes/practice_admin.rs": {
+    "mtime": 1783362100.8619967,
+    "ast_hash": "cacb816136cdc5555a9851825089b37a",
+    "semantic_hash": "cacb816136cdc5555a9851825089b37a"
+  },
+  "src/routes/submissions.rs": {
+    "mtime": 1783362100.8619967,
+    "ast_hash": "ccf56d7061e12b5da1152da052d95ec3",
+    "semantic_hash": "ccf56d7061e12b5da1152da052d95ec3"
+  },
+  "src/sessions.rs": {
+    "mtime": 1781319587.3597345,
+    "ast_hash": "3a334177a24e27ae1a9fb458a17a5b88",
+    "semantic_hash": "3a334177a24e27ae1a9fb458a17a5b88"
+  },
+  "src/submissions.rs": {
+    "mtime": 1783362100.8619967,
+    "ast_hash": "adbcf5a778b9176a8bd7e03147301f26",
+    "semantic_hash": "adbcf5a778b9176a8bd7e03147301f26"
+  },
+  "src/uncertainty.rs": {
+    "mtime": 1780762245.4276476,
+    "ast_hash": "0810b70b881b476e7110208cb60b52bf",
+    "semantic_hash": "0810b70b881b476e7110208cb60b52bf"
+  },
+  "src/users.rs": {
+    "mtime": 1781303989.6780229,
+    "ast_hash": "e0d4d2a50bb0ceb01755d24de5f1a2b7",
+    "semantic_hash": "e0d4d2a50bb0ceb01755d24de5f1a2b7"
+  },
+  "static/academic.js": {
+    "mtime": 1780791188.889792,
+    "ast_hash": "358888b4de905110ee0656fd3e9e0380",
+    "semantic_hash": "358888b4de905110ee0656fd3e9e0380"
+  },
+  "static/analysis.js": {
+    "mtime": 1783362100.8619967,
+    "ast_hash": "f39c6497848bc0cb954ba53de9bfca43",
+    "semantic_hash": "f39c6497848bc0cb954ba53de9bfca43"
+  },
+  "static/api.js": {
+    "mtime": 1781319587.3597345,
+    "ast_hash": "851fca2be74d657bd34ee02c107dbfde",
+    "semantic_hash": "851fca2be74d657bd34ee02c107dbfde"
+  },
+  "static/app.js": {
+    "mtime": 1783020405.473444,
+    "ast_hash": "bfb3ac374ca20ed95933d520a19e2659",
+    "semantic_hash": "bfb3ac374ca20ed95933d520a19e2659"
+  },
+  "static/auth.js": {
+    "mtime": 1781319587.3597345,
+    "ast_hash": "e0db7d2bbb962e36738a99d3b02cf4a5",
+    "semantic_hash": "e0db7d2bbb962e36738a99d3b02cf4a5"
+  },
+  "static/chronometer.js": {
+    "mtime": 1780762245.4324505,
+    "ast_hash": "243e392d112dcf1a12071538a65021e9",
+    "semantic_hash": "243e392d112dcf1a12071538a65021e9"
+  },
+  "static/constants.js": {
+    "mtime": 1783370459.3111694,
+    "ast_hash": "9663bde408c276744937955b9828a7bf",
+    "semantic_hash": "9663bde408c276744937955b9828a7bf"
+  },
+  "static/courses.js": {
+    "mtime": 1783362100.8722646,
+    "ast_hash": "69072fbaba026f9235c81696f71b724c",
+    "semantic_hash": "69072fbaba026f9235c81696f71b724c"
+  },
+  "static/dom.js": {
+    "mtime": 1783362100.8722646,
+    "ast_hash": "f727ecf7bc937db064e22d4a7e2d0630",
+    "semantic_hash": "f727ecf7bc937db064e22d4a7e2d0630"
+  },
+  "static/forms.js": {
+    "mtime": 1783370459.3146207,
+    "ast_hash": "47e9f7dd0ea83ccf1e88ebc5d9a6a512",
+    "semantic_hash": "47e9f7dd0ea83ccf1e88ebc5d9a6a512"
+  },
+  "static/gradebook.js": {
+    "mtime": 1783362100.8722646,
+    "ast_hash": "c224d30a70acd5bb56d4b6a8f5cfbcd2",
+    "semantic_hash": "c224d30a70acd5bb56d4b6a8f5cfbcd2"
+  },
+  "static/groups.js": {
+    "mtime": 1783362100.8722646,
+    "ast_hash": "feb4d3cac27a50342b017243c7fb489c",
+    "semantic_hash": "feb4d3cac27a50342b017243c7fb489c"
+  },
+  "static/instruments.js": {
+    "mtime": 1783362100.876856,
+    "ast_hash": "a71188bac84a3064aabf32c783456ca0",
+    "semantic_hash": "a71188bac84a3064aabf32c783456ca0"
+  },
+  "static/invitations.js": {
+    "mtime": 1781309907.3032837,
+    "ast_hash": "6abc819b56079204f89a73d709ed08b2",
+    "semantic_hash": "6abc819b56079204f89a73d709ed08b2"
+  },
+  "static/lib.js": {
+    "mtime": 1783362100.876856,
+    "ast_hash": "81add607624b9ed0dd947ea48d4456d9",
+    "semantic_hash": "81add607624b9ed0dd947ea48d4456d9"
+  },
+  "static/navigation.js": {
+    "mtime": 1780791188.898281,
+    "ast_hash": "6ca73f588bc31b6bf5651c68bf11190f",
+    "semantic_hash": "6ca73f588bc31b6bf5651c68bf11190f"
+  },
+  "static/practices-admin.js": {
+    "mtime": 1783362100.876856,
+    "ast_hash": "52acc4ddf1479444c68fd3a5eab9b2ee",
+    "semantic_hash": "52acc4ddf1479444c68fd3a5eab9b2ee"
+  },
+  "static/state.js": {
+    "mtime": 1783362100.8788612,
+    "ast_hash": "b99f14f3782ebe682996072c4199b907",
+    "semantic_hash": "b99f14f3782ebe682996072c4199b907"
+  },
+  "static/students.js": {
+    "mtime": 1783362100.8788612,
+    "ast_hash": "f34e6284fa8aaed69ba00f5b31ba7922",
+    "semantic_hash": "f34e6284fa8aaed69ba00f5b31ba7922"
+  },
+  "static/submissions.js": {
+    "mtime": 1783362100.8788612,
+    "ast_hash": "bd40b106c1e03087c0a8db05a3d749cf",
+    "semantic_hash": "bd40b106c1e03087c0a8db05a3d749cf"
+  },
+  "static/theme.js": {
+    "mtime": 1783020405.4804387,
+    "ast_hash": "2e74be44ea82e9fb6e9e8e214222632e",
+    "semantic_hash": "2e74be44ea82e9fb6e9e8e214222632e"
+  },
+  "static/users.js": {
+    "mtime": 1783362100.8807418,
+    "ast_hash": "4cb615d051480de679b649898e67cc0c",
+    "semantic_hash": "4cb615d051480de679b649898e67cc0c"
+  },
+  "tests/chronometer.test.js": {
+    "mtime": 1780762245.4336693,
+    "ast_hash": "f63639360fdc035a8b5c43df57a9ca6d",
+    "semantic_hash": "f63639360fdc035a8b5c43df57a9ca6d"
+  },
+  "tests/e2e/run.mjs": {
+    "mtime": 1783362100.8807418,
+    "ast_hash": "9d5ed11833aeb4e2293958aa40742e6c",
+    "semantic_hash": "9d5ed11833aeb4e2293958aa40742e6c"
+  },
+  "tests/e2e/smoke-fluidos2.mjs": {
+    "mtime": 1781399726.4278128,
+    "ast_hash": "f64e9316eb81cec41508c55778dd07a4",
+    "semantic_hash": "f64e9316eb81cec41508c55778dd07a4"
+  },
+  "tests/e2e/visual-forms.mjs": {
+    "mtime": 1783362100.881765,
+    "ast_hash": "e66460a11d31a2aceba4fc80c7813f94",
+    "semantic_hash": "e66460a11d31a2aceba4fc80c7813f94"
+  },
+  "tests/lib.test.js": {
+    "mtime": 1783362100.881765,
+    "ast_hash": "affb4f487ae8f6401e2228d757e88c1f",
+    "semantic_hash": "affb4f487ae8f6401e2228d757e88c1f"
+  },
+  "tests/stats.test.js": {
+    "mtime": 1780762245.4336693,
+    "ast_hash": "6e9140a02dd44744def931c197c0d07d",
+    "semantic_hash": "6e9140a02dd44744def931c197c0d07d"
+  },
+  ".github/workflows/ci.yml": {
+    "mtime": 1781287800.9747682,
+    "ast_hash": "05fc0b900078b9414657771baab1c1da",
+    "semantic_hash": "05fc0b900078b9414657771baab1c1da"
+  },
+  "README.md": {
+    "mtime": 1783362100.8549702,
+    "ast_hash": "fe2a79fccd2e072abb7c8dbaa6b64cc1",
+    "semantic_hash": "fe2a79fccd2e072abb7c8dbaa6b64cc1"
+  },
+  "deploy/ubuntu.md": {
+    "mtime": 1778002056.7778013,
+    "ast_hash": "4a81b1ed4644a0afb2bddebc5b2d5133",
+    "semantic_hash": "4a81b1ed4644a0afb2bddebc5b2d5133"
+  },
+  "docker-compose.yml": {
+    "mtime": 1778005300.6022377,
+    "ast_hash": "b6ae8f861f305e901200be8dd57404f6",
+    "semantic_hash": "b6ae8f861f305e901200be8dd57404f6"
+  },
+  "docs/deploy.md": {
+    "mtime": 1781319587.3555653,
+    "ast_hash": "1bc01e1f0c1dded1859098eb0e9165be",
+    "semantic_hash": "1bc01e1f0c1dded1859098eb0e9165be"
+  },
+  "docs/plan/01-estado-actual.md": {
+    "mtime": 1780100000.045015,
+    "ast_hash": "e91df93c6a40b7f0d51010ae22634a8c",
+    "semantic_hash": "e91df93c6a40b7f0d51010ae22634a8c"
+  },
+  "docs/plan/02-referencia-fisica-103.md": {
+    "mtime": 1780067760.133415,
+    "ast_hash": "22e0eb9d180fb77b9339c61be532898a",
+    "semantic_hash": "22e0eb9d180fb77b9339c61be532898a"
+  },
+  "docs/plan/03-modelo-datos-y-motor.md": {
+    "mtime": 1781306565.8723958,
+    "ast_hash": "611c0b40d90d2fc43ccc5d5b35333a66",
+    "semantic_hash": "611c0b40d90d2fc43ccc5d5b35333a66"
+  },
+  "docs/plan/04-roadmap-fases.md": {
+    "mtime": 1781407058.5861948,
+    "ast_hash": "4d68d8f75d1078a3e7f11bd6cac2399d",
+    "semantic_hash": "4d68d8f75d1078a3e7f11bd6cac2399d"
+  },
+  "docs/plan/README.md": {
+    "mtime": 1780067921.3613818,
+    "ast_hash": "b7394099ff32fb1d8cd927b06c89c76b",
+    "semantic_hash": "b7394099ff32fb1d8cd927b06c89c76b"
+  },
+  "docs/tecnicas/corriente-continua-hoja-resultados.md": {
+    "mtime": 1781407058.5882015,
+    "ast_hash": "aa48050d211e507d54a3a611eaecb01a",
+    "semantic_hash": "aa48050d211e507d54a3a611eaecb01a"
+  },
+  "docs/tecnicas/filtros-hoja-resultados.md": {
+    "mtime": 1781407058.5882015,
+    "ast_hash": "c850ef731143f31818887d42831e10ba",
+    "semantic_hash": "c850ef731143f31818887d42831e10ba"
+  },
+  "docs/tecnicas/fluidos-1-hoja-resultados.md": {
+    "mtime": 1781364062.3495395,
+    "ast_hash": "71798654f149ed74a0f2f06f564df813",
+    "semantic_hash": "71798654f149ed74a0f2f06f564df813"
+  },
+  "docs/tecnicas/fluidos-1.md": {
+    "mtime": 1781364062.3515458,
+    "ast_hash": "e65b273d0abf99ba2e0278441cf49b55",
+    "semantic_hash": "e65b273d0abf99ba2e0278441cf49b55"
+  },
+  "docs/tecnicas/fluidos-2-hoja-resultados.md": {
+    "mtime": 1781399726.4278128,
+    "ast_hash": "74e3ef5f56dfdb76888c0ee09077482b",
+    "semantic_hash": "74e3ef5f56dfdb76888c0ee09077482b"
+  },
+  "docs/tecnicas/fluidos-2.md": {
+    "mtime": 1781399726.4278128,
+    "ast_hash": "3bf49b9644c562e8ed2f74d93e18f76a",
+    "semantic_hash": "3bf49b9644c562e8ed2f74d93e18f76a"
+  },
+  "docs/tecnicas/viscosidad-hoja-resultados.md": {
+    "mtime": 1781384731.7747455,
+    "ast_hash": "26d64162256fe2afe6c57603d027976f",
+    "semantic_hash": "26d64162256fe2afe6c57603d027976f"
+  },
+  "docs/tecnicas/viscosidad.md": {
+    "mtime": 1781384731.7747455,
+    "ast_hash": "3bfbe548f8e245128116580c948e72a9",
+    "semantic_hash": "3bfbe548f8e245128116580c948e72a9"
+  },
+  "static/index.html": {
+    "mtime": 1783362100.8722646,
+    "ast_hash": "5ea57601c35a197d05e42debd9550d55",
+    "semantic_hash": "5ea57601c35a197d05e42debd9550d55"
+  }
+}
