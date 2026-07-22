@@ -928,6 +928,7 @@ mod tests {
             name: symbol.into(),
             unit: "".into(),
             formula: "slope".into(),
+            is_final: false,
         };
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),
@@ -966,6 +967,7 @@ mod tests {
             name: "x".into(),
             unit: "".into(),
             formula: formula.into(),
+            is_final: false,
         };
 
         // Válido: usa escalar compartido c, mensurando m, slope, y extremos de h (per punto) y Q.

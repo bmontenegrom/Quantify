@@ -54,6 +54,10 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "(Re_max + Re_min) / 2",
     ...statusStrings("Mensurando agregado", false),
     confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
+    // Único de esta clase: puede marcarse como resultado final (habilita "Mis cálculos" y la
+    // comparación alumno-vs-automático para el alumno), igual que `PracticeResult.is_final` pero
+    // sin incertidumbre (el motor de agregados nunca la calcula).
+    hasFinal: true,
   },
   intermediate: {
     kind: "intermediate",
@@ -82,6 +86,11 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       <label>Nombre <input name="name" value="${v("name")}" placeholder="${kind.namePlaceholder}" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" /></label>
+      ${
+        kind.hasFinal
+          ? `<label class="checkbox-field"><input name="is_final" type="checkbox" ${item?.is_final ? "checked" : ""} /> Resultado final (comparable, sin incertidumbre)</label>`
+          : ""
+      }
       <div class="detail-actions">
         <button type="submit">${item ? "Guardar" : "Agregar"}</button>
         ${item ? `<button type="button" data-cancel-${kind.dataAttr}>Cancelar</button>` : ""}
@@ -93,40 +102,45 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
 function renderSymbolFormulaList(kind, def, practiceId) {
   const items = kind.listOf(def);
   if (items.length === 0) return `<p class="submission-meta">${kind.emptyText}</p>`;
+  const colspan = kind.hasFinal ? 4 : 3;
   const rows = items.flatMap((item) => {
     const editing = isEditing(kind.kind, item.id);
+    const finalCell = kind.hasFinal ? `<td>${item.is_final ? "Sí" : "—"}</td>` : "";
     const baseRow = `
       <tr>
         <td class="directory-primary"><strong>${symbolHtml(item.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(item.name)}${item.unit ? ` (${unitHtml(item.unit)})` : " (adimensional)"}</span></td>
         <td><code>${escapeHtml(item.formula)}</code></td>
+        ${finalCell}
         <td class="directory-actions">
           <button type="button" data-edit-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">${editing ? "Cerrar" : "Editar"}</button>
           <button type="button" data-delete-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">Eliminar</button>
         </td>
       </tr>`;
     const editRow = editing
-      ? `<tr><td colspan="3" class="scale-edit-cell">${renderSymbolFormulaForm(kind, item, practiceId)}</td></tr>`
+      ? `<tr><td colspan="${colspan}" class="scale-edit-cell">${renderSymbolFormulaForm(kind, item, practiceId)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
   return `
     <div class="data-table-wrap">
       <table class="data-table">
-        <thead><tr><th>Símbolo</th><th>Fórmula</th><th>Acciones</th></tr></thead>
+        <thead><tr><th>Símbolo</th><th>Fórmula</th>${kind.hasFinal ? "<th>Final</th>" : ""}<th>Acciones</th></tr></thead>
         <tbody>${rows.join("")}</tbody>
       </table>
     </div>
   `;
 }
 
-function symbolFormulaPayloadFromForm(form) {
+function symbolFormulaPayloadFromForm(form, kind) {
   const raw = Object.fromEntries(new FormData(form).entries());
-  return {
+  const payload = {
     symbol: raw.symbol,
     name: raw.name || "",
     unit: raw.unit || "",
     formula: raw.formula,
   };
+  if (kind.hasFinal) payload.is_final = raw.is_final === "on";
+  return payload;
 }
 
 async function saveNewSymbolFormulaRow(kind, event) {
@@ -134,7 +148,7 @@ async function saveNewSymbolFormulaRow(kind, event) {
   const form = event.currentTarget;
   const practiceId = form.querySelector('[name="practice_id"]').value;
   try {
-    await postJson(`/api/practices/${practiceId}/${kind.urlSegment}`, symbolFormulaPayloadFromForm(form));
+    await postJson(`/api/practices/${practiceId}/${kind.urlSegment}`, symbolFormulaPayloadFromForm(form, kind));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editing = { kind: null, id: null };
     state.practiceActionStatus = kind.statusCreate;
@@ -151,7 +165,7 @@ async function saveEditSymbolFormulaRow(kind, event) {
   const practiceId = form.querySelector('[name="practice_id"]').value;
   const id = form.querySelector(`[name="${kind.idParam}"]`).value;
   try {
-    await postJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`, symbolFormulaPayloadFromForm(form));
+    await postJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`, symbolFormulaPayloadFromForm(form, kind));
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     state.editing = { kind: null, id: null };
     state.practiceActionStatus = kind.statusUpdate;
