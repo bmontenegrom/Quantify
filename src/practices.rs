@@ -188,6 +188,10 @@ pub struct PracticeAggregate {
     pub name: String,
     pub unit: String,
     pub formula: String,
+    /// `true` si es un resultado central que el alumno debe entregar (para comparar contra el
+    /// valor automático): habilita el campo en "Mis cálculos" igual que `PracticeResult::is_final`.
+    #[serde(default)]
+    pub is_final: bool,
 }
 
 /// Datos para crear o actualizar un mensurando agregado.
@@ -197,6 +201,8 @@ pub struct AggregateInput {
     pub name: String,
     pub unit: String,
     pub formula: String,
+    #[serde(default)]
+    pub is_final: bool,
 }
 
 /// Fila cruda con la configuración de análisis de una práctica.
@@ -254,10 +260,6 @@ trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Sen
 
 impl SymbolFormulaRow for PracticePointResult {
     const TABLE: &'static str = "practice_point_results";
-}
-
-impl SymbolFormulaRow for PracticeAggregate {
-    const TABLE: &'static str = "practice_aggregates";
 }
 
 impl SymbolFormulaRow for PracticeIntermediate {
@@ -436,11 +438,29 @@ pub async fn delete_point_result(
 }
 
 /// Lee los mensurandos agregados de una práctica (Motor F), ordenados por posición.
+/// (No usa el `SymbolFormulaRow` genérico: a diferencia de intermedias/point-results, tiene la
+/// columna extra `is_final`.)
 pub async fn aggregates_for(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeAggregate>> {
-    symbol_formula_rows_for(pool, practice_id).await
+    Ok(sqlx::query_as::<_, PracticeAggregate>(
+        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final \
+         FROM practice_aggregates WHERE practice_id = ?1 ORDER BY position, id",
+    )
+    .bind(practice_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+async fn fetch_aggregate(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeAggregate> {
+    Ok(sqlx::query_as::<_, PracticeAggregate>(
+        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final \
+         FROM practice_aggregates WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?)
 }
 
 /// Crea un mensurando agregado; asigna la siguiente posición. Símbolo y fórmula obligatorios.
@@ -454,15 +474,24 @@ pub async fn create_aggregate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("el mensurando agregado necesita símbolo y fórmula");
     }
-    create_symbol_formula_row(
-        pool,
-        practice_id,
-        symbol,
-        input.name.trim(),
-        input.unit.trim(),
-        formula,
+    let position = next_position(pool, "practice_aggregates", "practice_id", practice_id).await?;
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO practice_aggregates \
+         (id, practice_id, position, symbol, name, unit, formula, is_final) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )
-    .await
+    .bind(&id)
+    .bind(practice_id)
+    .bind(position)
+    .bind(symbol)
+    .bind(input.name.trim())
+    .bind(input.unit.trim())
+    .bind(formula)
+    .bind(input.is_final)
+    .execute(pool)
+    .await?;
+    fetch_aggregate(pool, &id).await
 }
 
 /// Actualiza un mensurando agregado de esa práctica. Devuelve `None` si no existe.
@@ -477,16 +506,24 @@ pub async fn update_aggregate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("el mensurando agregado necesita símbolo y fórmula");
     }
-    update_symbol_formula_row(
-        pool,
-        practice_id,
-        aggregate_id,
-        symbol,
-        input.name.trim(),
-        input.unit.trim(),
-        formula,
+    let result = sqlx::query(
+        "UPDATE practice_aggregates \
+         SET symbol = ?3, name = ?4, unit = ?5, formula = ?6, is_final = ?7 \
+         WHERE id = ?1 AND practice_id = ?2",
     )
-    .await
+    .bind(aggregate_id)
+    .bind(practice_id)
+    .bind(symbol)
+    .bind(input.name.trim())
+    .bind(input.unit.trim())
+    .bind(formula)
+    .bind(input.is_final)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+    Ok(Some(fetch_aggregate(pool, aggregate_id).await?))
 }
 
 /// Elimina un mensurando agregado de esa práctica por id. Devuelve `true` si existía.
@@ -495,7 +532,12 @@ pub async fn delete_aggregate(
     practice_id: &str,
     aggregate_id: &str,
 ) -> anyhow::Result<bool> {
-    delete_symbol_formula_row::<PracticeAggregate>(pool, practice_id, aggregate_id).await
+    let result = sqlx::query("DELETE FROM practice_aggregates WHERE id = ?1 AND practice_id = ?2")
+        .bind(aggregate_id)
+        .bind(practice_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Lee las magnitudes intermedias por punto de una práctica (Motor C), ordenadas por posición.
@@ -1713,13 +1755,18 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("R_recip", "Radio del recipiente", "m", "longitud"),
             qty_given("g", "Aceleracion de la gravedad", "m/s2", "aceleracion"),
             qty_shared("rho", "Densidad del agua", "kg/m3", "densidad"),
-            qty_shared(
+            no_u(qty_shared(
                 "mu_agua",
                 "Viscosidad del agua (de tabla segun T)",
                 "Pa.s",
                 "viscosidad",
-            ),
-            qty_shared("kp", "Factor geometrico K (def. 0.78)", "", "adimensional"),
+            )),
+            no_u(qty_shared(
+                "kp",
+                "Factor geometrico K (def. 0.78)",
+                "",
+                "adimensional",
+            )),
             qty_shared(
                 "Temp",
                 "Temperatura del agua (referencia)",
@@ -1748,6 +1795,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
                 formula:
                     "2*rho*((h_first - h_first2)/(t_first2 - t_first))*(R_recip^2/(mu_agua*R_cap))"
                         .into(),
+                is_final: true,
             },
             AggregateInput {
                 symbol: "Re_min".into(),
@@ -1756,23 +1804,40 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
                 formula:
                     "2*rho*((h_last2 - h_last)/(t_last - t_last2))*(R_recip^2/(mu_agua*R_cap))"
                         .into(),
+                is_final: true,
             },
             AggregateInput {
                 symbol: "Re_medio".into(),
                 name: "Numero de Reynolds medio".into(),
                 unit: "".into(),
                 formula: "(Re_max + Re_min)/2".into(),
+                is_final: true,
             },
             AggregateInput {
                 symbol: "M_teorico".into(),
                 name: "Coeficiente de perdidas teorico".into(),
                 unit: "".into(),
                 formula: "kp + 4*(L_cap/(2*R_cap))*(16/Re_medio)".into(),
+                is_final: true,
             },
         ] {
             create_aggregate(pool, "fluidos-2", input).await?;
         }
     }
+    // Auto-curación: re-aplica en cada boot para bases que hayan quedado a medio migrar.
+    sqlx::query(
+        "UPDATE practice_quantities SET has_uncertainty = 0 \
+         WHERE practice_id = 'fluidos-2' AND symbol IN ('mu_agua', 'kp') AND has_uncertainty = 1",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "UPDATE practice_aggregates SET is_final = 1 \
+         WHERE practice_id = 'fluidos-2' \
+         AND symbol IN ('Re_max', 'Re_min', 'Re_medio', 'M_teorico') AND is_final = 0",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -2377,6 +2442,7 @@ mod tests {
                 name: "Ma".into(),
                 unit: "".into(),
                 formula: "slope".into(),
+                is_final: false,
             },
         )
         .await
@@ -2419,6 +2485,7 @@ mod tests {
             name: symbol.into(),
             unit: "".into(),
             formula: formula.into(),
+            is_final: false,
         };
         let a = create_aggregate(&pool, "p1-estadistica", mk("Re_max", "slope"))
             .await
@@ -3149,6 +3216,14 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["Re_max", "Re_min", "Re_medio", "M_teorico"],
         );
+        assert!(
+            def.aggregates.iter().all(|a| a.is_final),
+            "los 4 agregados deben ser comparables (is_final)"
+        );
+        for symbol in ["mu_agua", "kp"] {
+            let q = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
+            assert!(!q.has_uncertainty, "{symbol} no debe pedir incertidumbre");
+        }
 
         let id = |sym: &str| {
             def.quantities

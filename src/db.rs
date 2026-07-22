@@ -858,6 +858,18 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
+    // Igual que `practice_results.is_final`, pero para mensurandos agregados (Motor F): habilita
+    // "Mis cálculos"/comparación alumno-vs-automático para agregados puntuales (p. ej. Re_max en
+    // Fluidos II). El backfill para prácticas ya sembradas vive en `seed_fluidos2` (auto-curación
+    // en cada boot), no acá.
+    add_column_if_missing(
+        pool,
+        "practice_aggregates",
+        "is_final",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+
     // `has_uncertainty` (magnitudes dadas y mensurandos): generaliza el antiguo hack de ocultar la
     // U de ciertos símbolos a mano en el frontend (`RESULTS_WITHOUT_U`). En `false`, la magnitud
     // dada no pide U al alumno (queda en 0, sin campo) y el mensurando se muestra sin ±U aunque el

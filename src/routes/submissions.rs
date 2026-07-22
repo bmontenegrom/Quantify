@@ -324,6 +324,13 @@ pub(super) async fn set_student_results(
         .results
         .iter()
         .map(|r| r.symbol.as_str())
+        .chain(
+            definition
+                .aggregates
+                .iter()
+                .filter(|a| a.is_final)
+                .map(|a| a.symbol.as_str()),
+        )
         .collect();
     for result in &body.results {
         if !valid.contains(result.symbol.trim()) {

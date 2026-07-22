@@ -1608,6 +1608,13 @@ pub async fn validate_student_results(
         .results
         .iter()
         .map(|r| r.symbol.as_str())
+        .chain(
+            definition
+                .aggregates
+                .iter()
+                .filter(|a| a.is_final)
+                .map(|a| a.symbol.as_str()),
+        )
         .collect();
     for result in results {
         if !valid.contains(result.symbol.trim()) {
@@ -1704,6 +1711,44 @@ mod tests {
         db::seed_users(&pool).await.unwrap();
         crate::practices::seed_definitions(&pool).await.unwrap();
         (pool, dir)
+    }
+
+    /// `validate_student_results` acepta agregados (Motor F) marcados `is_final` además de
+    /// resultados comunes: Re_max/M_teorico en Fluidos II son agregados, no `practice_results`.
+    #[tokio::test]
+    async fn validate_student_results_accepts_final_aggregates() {
+        let (pool, _dir) = setup().await;
+        validate_student_results(
+            &pool,
+            "fluidos-2",
+            &[
+                db::StudentResultInput {
+                    symbol: "Re_max".into(),
+                    value: 55000.0,
+                    u_expanded: None,
+                },
+                db::StudentResultInput {
+                    symbol: "M_teorico".into(),
+                    value: 0.86,
+                    u_expanded: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+        let err = validate_student_results(
+            &pool,
+            "fluidos-2",
+            &[db::StudentResultInput {
+                symbol: "no_existe".into(),
+                value: 1.0,
+                u_expanded: None,
+            }],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("no_existe"));
     }
 
     fn quantity(symbol: &str) -> PracticeQuantity {
@@ -3245,6 +3290,7 @@ mod tests {
             name: symbol.into(),
             unit: "".into(),
             formula: formula.into(),
+            is_final: false,
         };
         let aggregates = vec![
             agg("ep", "px_first + px_last"),
@@ -3295,6 +3341,7 @@ mod tests {
             name: "Agregado roto".into(),
             unit: "".into(),
             formula: "1 / (px_first - px_first)".into(),
+            is_final: false,
         }];
         let measurements = vec![
             measurement("px", &[1.0, 2.0]),
@@ -3337,6 +3384,7 @@ mod tests {
             name: symbol.into(),
             unit: "".into(),
             formula: formula.into(),
+            is_final: false,
         };
         let aggregates = vec![
             agg("z_end", "z_last"),
@@ -3401,6 +3449,7 @@ mod tests {
             name: "s".into(),
             unit: "".into(),
             formula: "slope".into(), // no toca z_first/z_last/...
+            is_final: false,
         }];
         let measurements = vec![
             measurement("px", &[1.0, 2.0, 3.0]),

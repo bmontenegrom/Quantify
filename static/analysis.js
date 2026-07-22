@@ -17,8 +17,16 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     if (submission.analysis) {
       body += formAnalysisMarkup(submission.analysis);
       if (studentResults.length && !hasOperators) {
+        // Agregados (Motor F) marcados is_final en la definición: comparables igual que un
+        // resultado final común, pero sin incertidumbre (el motor de agregados no la calcula).
+        const finalAggregateSymbols = new Set(
+          (definition?.aggregates ?? []).filter((a) => a.is_final).map((a) => a.symbol),
+        );
+        const comparableAggregates = (submission.analysis.aggregates ?? [])
+          .filter((a) => finalAggregateSymbols.has(a.symbol))
+          .map((a) => ({ ...a, u_expanded: 0, has_uncertainty: false }));
         body += comparisonMarkup(
-          submission.analysis.derived ?? [],
+          [...(submission.analysis.derived ?? []), ...comparableAggregates],
           studentResults,
           submission.result_tolerances ?? {},
         );
@@ -515,7 +523,16 @@ function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
 }
 
 function studentResultsFormMarkup(submission, definition, isTeacher = false) {
-  const measurands = (definition?.results ?? []).filter((r) => r.is_final);
+  // Los agregados (Motor F: Re_max/Re_min/Re_medio/M_teorico en Fluidos II) no tienen
+  // incertidumbre propia (no existe el campo en el motor); se tratan como `has_uncertainty: false`
+  // al mezclarlos con los resultados finales comunes.
+  const finalAggregates = (definition?.aggregates ?? [])
+    .filter((a) => a.is_final)
+    .map((a) => ({ ...a, has_uncertainty: false }));
+  const measurands = [
+    ...(definition?.results ?? []).filter((r) => r.is_final),
+    ...finalAggregates,
+  ];
   if (!measurands.length) return "";
   const locked = submission.results_visible_to_student && !isTeacher;
   const saved = new Map((submission.student_results ?? []).map((s) => [s.symbol, s]));
