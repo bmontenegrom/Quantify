@@ -1780,11 +1780,50 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
 async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
     // Filtros — barrido en frecuencia de un circuito RLC. Por punto: f (frecuencia fijada por el
     // alumno), VRpp y Vgpp (tensiones pico a pico medidas), a y b (semiejes de la figura de
-    // Lissajous). Componentes dados por la catedra: R, C1, C2, L. Intermedias: omega=2*pi*f
-    // (rad/s), razon=VRpp/Vgpp (adimensional), phi=asin(b/a) (rad). Dos curvas (Motor B):
-    // razon vs omega (amplitud) y phi vs omega (desfasaje), ambas con eje x logaritmico.
-    // Mensurandos teoricos: fpasaje=1/(2*pi*sqrt(L*(C1+C2))) y fbloqueo=1/(2*pi*sqrt(L*C2)).
-    // Topologia confirmada: C2||L en serie con C1 y R.
+    // Lissajous). R, C1 y C2 se miden una vez con instrumento (no son dados); fpasaje_exp y
+    // fbloqueo_exp tambien se miden una vez, con el osciloscopio (frecuencia de pasaje/bloqueo
+    // observada). El unico dato dado por la catedra es L. Intermedias: omega=2*pi*f (rad/s),
+    // razon=VRpp/Vgpp (adimensional), phi=asin(b/a) (rad). Dos curvas (Motor B): razon vs omega
+    // (amplitud) y phi vs omega (desfasaje), ambas con eje x logaritmico. Mensurandos teoricos,
+    // comparables contra la frecuencia experimental medida (is_final): fpasaje=1/(2*pi*sqrt(L*
+    // (C1+C2))) y fbloqueo=1/(2*pi*sqrt(L*C2)). Topologia confirmada: C2||L en serie con C1 y R.
+    //
+    // Migración de forma: la práctica quedó sembrada originalmente con R/C1/C2 como `qty_given`
+    // (valor ± U cargado a mano) cuando en realidad son medidos por el alumno con instrumento, y
+    // sin fpasaje_exp/fbloqueo_exp. `seed_practice` no resiembra sobre una base ya presente, así
+    // que se limpia y se resiembra con la forma final (no hay mediciones reales bajo la forma
+    // vieja, la práctica es reciente).
+    if !quantity_missing(pool, "filtros", "L").await? {
+        let given_r: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM practice_quantities \
+             WHERE practice_id = 'filtros' AND symbol = 'R' AND is_given = 1",
+        )
+        .fetch_one(pool)
+        .await?;
+        let missing_exp = quantity_missing(pool, "filtros", "fpasaje_exp").await?;
+        if given_r.0 > 0 || missing_exp {
+            let mut tx = pool.begin().await?;
+            sqlx::query(
+                "DELETE FROM submission_measurements WHERE quantity_id IN \
+                 (SELECT id FROM practice_quantities WHERE practice_id = 'filtros')",
+            )
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query("DELETE FROM practice_quantities WHERE practice_id = 'filtros'")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM practice_results WHERE practice_id = 'filtros'")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM practice_curves WHERE practice_id = 'filtros'")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM practice_intermediates WHERE practice_id = 'filtros'")
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
+    }
     let fresh_filtros = seed_practice(
         pool,
         "filtros",
@@ -1800,22 +1839,34 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
             ),
             qty("a", "Semieje mayor de Lissajous", "V", false, "tension"),
             qty("b", "Semieje menor de Lissajous", "V", false, "tension"),
-            qty_given("R", "Resistencia", "ohm", "resistencia"),
-            qty_given("C1", "Capacitor 1", "F", "capacitancia"),
-            qty_given("C2", "Capacitor 2", "F", "capacitancia"),
+            qty_shared("R", "Resistencia", "ohm", "resistencia"),
+            qty_shared("C1", "Capacitor C_1", "F", "capacitancia"),
+            qty_shared("C2", "Capacitor C_2", "F", "capacitancia"),
+            qty_shared(
+                "fpasaje_exp",
+                "Frecuencia de pasaje experimental",
+                "Hz",
+                "frecuencia",
+            ),
+            qty_shared(
+                "fbloqueo_exp",
+                "Frecuencia de bloqueo experimental",
+                "Hz",
+                "frecuencia",
+            ),
             qty_given("L", "Inductor", "H", "inductancia"),
         ],
         &[
             // Topología: C2||L en serie con C1 y R.
             // Resonancia serie (pasaje): f = 1/(2π√(L(C1+C2)))
             // Resonancia paralelo del tanque (bloqueo): f = 1/(2π√(LC2))
-            res(
+            res_final(
                 "fpasaje",
                 "Frecuencia de pasaje teorica",
                 "Hz",
                 "1/(2*pi*math::sqrt(L*(C1+C2)))",
             ),
-            res(
+            res_final(
                 "fbloqueo",
                 "Frecuencia de bloqueo teorica",
                 "Hz",
@@ -1854,6 +1905,38 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
             )
             .await?;
         }
+    }
+    // Auto-curación: re-aplica el flag correcto en cada boot para bases que hayan quedado a
+    // medio migrar (p. ej. la migración de forma de arriba ya corrió una vez, pero R/C1/C2 o
+    // fpasaje/fbloqueo quedaron con el flag viejo por algún otro motivo).
+    sqlx::query(
+        "UPDATE practice_quantities SET is_given = 0 \
+         WHERE practice_id = 'filtros' AND symbol IN ('R', 'C1', 'C2') AND is_given = 1",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "UPDATE practice_results SET is_final = 1 \
+         WHERE practice_id = 'filtros' AND symbol IN ('fpasaje', 'fbloqueo') AND is_final = 0",
+    )
+    .execute(pool)
+    .await?;
+    // Nombres corregidos después del alta (subíndice de los capacitores, sin sufijo de
+    // instrumento en las frecuencias experimentales): se resincronizan en cada boot.
+    for (sym, name) in [
+        ("C1", "Capacitor C_1"),
+        ("C2", "Capacitor C_2"),
+        ("fpasaje_exp", "Frecuencia de pasaje experimental"),
+        ("fbloqueo_exp", "Frecuencia de bloqueo experimental"),
+    ] {
+        sqlx::query(
+            "UPDATE practice_quantities SET name = ?2 \
+             WHERE practice_id = 'filtros' AND symbol = ?1 AND name != ?2",
+        )
+        .bind(sym)
+        .bind(name)
+        .execute(pool)
+        .await?;
     }
 
     Ok(())
@@ -3163,15 +3246,22 @@ mod tests {
         );
     }
 
-    /// La definición sembrada de Filtros tiene 9 magnitudes, 2 mensurandos escalares
-    /// (fpasaje, fbloqueo), 3 intermedias y 2 curvas con x_log.
+    /// La definición sembrada de Filtros tiene 11 magnitudes (R/C1/C2/fpasaje_exp/fbloqueo_exp
+    /// medidos, L dado), 2 mensurandos finales (fpasaje/fbloqueo teoricos), 3 intermedias
+    /// y 2 curvas con x_log.
     #[tokio::test]
     async fn seeded_filtros_populates_and_computes() {
         let (pool, _dir) = setup().await;
         seed_definitions(&pool).await.unwrap();
         let def = definition(&pool, "filtros").await.unwrap().unwrap();
 
-        assert_eq!(def.quantities.len(), 9);
+        assert_eq!(def.quantities.len(), 11);
+        for symbol in ["R", "C1", "C2", "fpasaje_exp", "fbloqueo_exp"] {
+            let q = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
+            assert!(!q.is_given, "{symbol} debe ser medido, no dado");
+        }
+        let l = def.quantities.iter().find(|q| q.symbol == "L").unwrap();
+        assert!(l.is_given, "L debe seguir siendo dado");
         assert_eq!(
             def.results
                 .iter()
@@ -3179,6 +3269,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["fpasaje", "fbloqueo"],
         );
+        for symbol in ["fpasaje", "fbloqueo"] {
+            let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
+            assert!(r.is_final, "{symbol} debe ser resultado final");
+        }
         assert_eq!(
             def.intermediates
                 .iter()
@@ -3227,6 +3321,8 @@ mod tests {
             pt("R", vec![100.0]),
             pt("C1", vec![1e-6]),
             pt("C2", vec![1e-6]),
+            pt("fpasaje_exp", vec![1000.0]),
+            pt("fbloqueo_exp", vec![5000.0]),
             pt("L", vec![1e-3]),
         ];
         let curves: Vec<crate::computation::CurveSpec> = def
@@ -3454,6 +3550,8 @@ mod tests {
             pt("R", vec![r]),
             pt("C1", vec![c1]),
             pt("C2", vec![c2]),
+            pt("fpasaje_exp", vec![5000.0]),
+            pt("fbloqueo_exp", vec![10000.0]),
             pt("L", vec![l]),
         ];
 

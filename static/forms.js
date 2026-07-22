@@ -1149,11 +1149,11 @@ function renderSeriesTable(definition) {
         return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}</div>`;
       });
     if (rest.length) {
-      blocks.push(`<div class="shared-quantities"><h4>Datos compartidos</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
+      blocks.push(`<div class="shared-quantities"><h4>Medidas</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
     }
     sharedSection = blocks.join("");
   } else if (shared.length) {
-    sharedSection = `<div class="shared-quantities"><h4>Datos compartidos</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
+    sharedSection = `<div class="shared-quantities"><h4>Medidas</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
   }
   const partsNote = PRACTICE_PARTS[practiceSelect.value]
     ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
@@ -1167,7 +1167,11 @@ function renderSeriesTable(definition) {
     ${partsNote}
     ${sharedSection}
     <div${seriesSectionAttr}>
-      <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
+      <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. ${
+        definition.analysis_kind === "curva"
+          ? "Hacen falta al menos 2 puntos para graficar la curva."
+          : "Hacen falta al menos 2 puntos para el ajuste."
+      }</p>
       <div class="data-table-wrap">
         <table class="series-table data-table">
           <thead><tr>${header}<th></th></tr></thead>
