@@ -590,6 +590,27 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
             )],
         ),
         (
+            instrument(
+                "Osciloscopio GW Instek GDS-1052-U (frecuencia)",
+                "digital",
+                "frecuencia",
+                "Hz",
+            ),
+            // Frecuencia de pasaje/bloqueo (Tecnica de Filtros): U = 1% de la medida, mismo
+            // criterio que el eje X (tiempo). Solo termino porcentual.
+            vec![fab(
+                "frecuencia (1% de la medida)",
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                None,
+                None,
+                None,
+                "Hz",
+            )],
+        ),
+        (
             // Tester UA78A — hoja de especificaciones, tabla "Capacidad".
             // U = pct%·|C| + 1·step (1 dg); unidades SI (F).
             instrument("Tester UA78A (capacidad)", "digital", "capacitancia", "F"),
