@@ -1167,7 +1167,11 @@ function renderSeriesTable(definition) {
     ${partsNote}
     ${sharedSection}
     <div${seriesSectionAttr}>
-      <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. Hacen falta al menos 2 puntos para el ajuste.</p>
+      <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. ${
+        definition.analysis_kind === "curva"
+          ? "Hacen falta al menos 2 puntos para graficar la curva."
+          : "Hacen falta al menos 2 puntos para el ajuste."
+      }</p>
       <div class="data-table-wrap">
         <table class="series-table data-table">
           <thead><tr>${header}<th></th></tr></thead>
