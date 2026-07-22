@@ -29,6 +29,7 @@ import {
   compareResults,
   compareMeasuredVsTheoretical,
   pointPower,
+  flowRate,
   draftMeasurementsByQuantity,
   SI_PREFIXES,
   prefixFactor,
@@ -440,6 +441,12 @@ test("pointPower calcula P = I²·R", () => {
   assert.equal(pointPower(200, 0), 0);
   // I negativa (sentido de la corriente) no cambia la potencia disipada.
   assert.equal(pointPower(100, -0.5), 25);
+});
+
+test("flowRate calcula Q = V/t", () => {
+  assert.equal(flowRate(1e-3, 10), 1e-4);
+  assert.equal(flowRate(0, 10), 0);
+  assert.equal(flowRate(1e-3, 0), Infinity);
 });
 
 test("draftMeasurementsByQuantity: columna de un valor por punto", () => {

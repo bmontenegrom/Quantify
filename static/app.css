@@ -547,6 +547,15 @@ textarea {
   gap: 10px;
   margin: 10px 0;
   max-width: none;
+  min-width: 0;
+}
+
+/* Los hijos de un grid no se achican por debajo de su contenido mínimo por default: sin esto,
+   una tabla ancha (p. ej. columnas en vivo extra) empuja todo el grid en vez de scrollear
+   dentro de `.data-table-wrap`, y el resto de los campos (cronómetro, medidas, resultado
+   final) queda visualmente "afuera" de la card. */
+.measurement-fields > * {
+  min-width: 0;
 }
 
 /* Ocupa todo el ancho de la card (no va en .form-grid, que es de 3 columnas para
