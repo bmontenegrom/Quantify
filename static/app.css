@@ -547,6 +547,15 @@ textarea {
   gap: 10px;
   margin: 10px 0;
   max-width: none;
+  min-width: 0;
+}
+
+/* Los hijos de un grid no se achican por debajo de su contenido mínimo por default: sin esto,
+   una tabla ancha (p. ej. columnas en vivo extra) empuja todo el grid en vez de scrollear
+   dentro de `.data-table-wrap`, y el resto de los campos (cronómetro, medidas, resultado
+   final) queda visualmente "afuera" de la card. */
+.measurement-fields > * {
+  min-width: 0;
 }
 
 /* Ocupa todo el ancho de la card (no va en .form-grid, que es de 3 columnas para
@@ -1276,8 +1285,11 @@ textarea {
   vertical-align: top;
 }
 
+/* Ancho mínimo según la cantidad real de réplicas (`--replicas`, seteado inline por fila),
+   en vez de un fijo pensado para el caso de más réplicas (5, en Viscosidad): con solo 2
+   réplicas (p. ej. V/t en Fluidos I) no hace falta reservar tanto ancho. */
 .series-cell--replicas {
-  min-width: min(520px, 70vw);
+  min-width: min(calc(52px + var(--replicas, 2) * 96px), 70vw);
 }
 
 .series-input-wrap {

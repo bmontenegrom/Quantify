@@ -477,6 +477,11 @@ export function pointPower(r, i) {
   return i * i * r;
 }
 
+/** Caudal instantáneo: Q = V/t. Función pura para las columnas en vivo de Fluidos I. */
+export function flowRate(v, t) {
+  return v / t;
+}
+
 /**
  * Convierte la forma *agrupada por magnitud* que devuelve `collectMeasurements()` (una fila por
  * magnitud, con `values`/`point_replicas`/`operator_replicas`) al mismo `Map` que ya espera el

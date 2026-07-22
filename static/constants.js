@@ -56,9 +56,15 @@ export const PRACTICE_SECTIONS = {
 
 // Columnas calculadas en vivo en la tabla de series (solo lectura, el cliente las computa al
 // tipear): `inputs` son los símbolos de las columnas de entrada, en el orden que espera `fn`
-// de lib.js (hoy solo pointPower).
+// de lib.js (hoy solo pointPower). fluidos-1 es un caso especial manejado a mano en
+// `updateSeriesLive` (V y t tienen 2 réplicas cada una: Q_1=V1/t1, Q_2=V2/t2, Q_medio=su media).
 export const SERIES_LIVE_COLUMNS = {
   "p2-cc": [{ symbol: "P", unit: "W", inputs: ["R", "I"] }],
+  "fluidos-1": [
+    { symbol: "Q_1", unit: "m3/s" },
+    { symbol: "Q_2", unit: "m3/s" },
+    { symbol: "Q_medio", unit: "m3/s" },
+  ],
 };
 
 // Prácticas cuyas magnitudes de tiempo de medida única se leen directo de un instrumento con

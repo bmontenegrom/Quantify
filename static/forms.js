@@ -7,7 +7,7 @@ import {
 import { fetchJson, postJson, deleteJson } from "./api.js";
 import {
   escapeHtml, symbolHtml, inlineMathHtml, unitHtml, canReview, format,
-  compatibleInstruments, SI_PREFIXES, prefixFactor, pointPower,
+  compatibleInstruments, SI_PREFIXES, prefixFactor, pointPower, flowRate,
   seriesStats, histogram, normalCurve, validateMeasurements,
   draftMeasurementsByQuantity, hasUncertainty,
 } from "./lib.js";
@@ -1285,7 +1285,7 @@ function seriesRowHtml(cols) {
       const n = q.repeated ? Number(q.replicas_per_point) || 0 : 0;
       if (n > 0) {
         const inputs = Array.from({ length: n }, (_, k) => replicaInputHtml(q.id, k)).join("");
-        return `<td class="series-cell series-cell--replicas"><div class="series-input-wrap">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div></div><span class="series-mean submission-meta">x̄ —</span></td>`;
+        return `<td class="series-cell series-cell--replicas" style="--replicas: ${n}"><div class="series-input-wrap">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div></div><span class="series-mean submission-meta">x̄ —</span></td>`;
       }
       return `<td class="series-cell"><div class="series-input-wrap">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" /></div></td>`;
     })
@@ -1363,19 +1363,44 @@ function seriesCellValue(row, quantityId) {
   return Number(raw) * factor;
 }
 
-/** Recalcula las columnas en vivo (p. ej. P = I²·R) de cada fila de la tabla de series. */
+/** Valor numérico (con prefijo SI aplicado) de la réplica `k` (0-based) de una magnitud repetida. */
+function replicaValueAt(row, quantityId, k) {
+  const cell = row.querySelector(`.series-replica[data-quantity-id="${CSS.escape(quantityId)}"]`)?.closest(".series-cell--replicas");
+  const input = cell?.querySelectorAll(".series-replica")[k];
+  if (!input) return NaN;
+  const raw = input.value.trim();
+  if (raw === "") return NaN;
+  return Number(raw) * prefixFactor(cell.querySelector(".prefix-select").value);
+}
+
+/** fluidos-1: Q_1=V1/t1, Q_2=V2/t2, Q_medio=media(Q_1,Q_2) (V y t tienen 2 réplicas cada una). */
+function fluidosCaudalLiveValue(symbol, row, idBySymbol) {
+  const q1 = flowRate(replicaValueAt(row, idBySymbol.get("V") ?? "", 0), replicaValueAt(row, idBySymbol.get("t") ?? "", 0));
+  const q2 = flowRate(replicaValueAt(row, idBySymbol.get("V") ?? "", 1), replicaValueAt(row, idBySymbol.get("t") ?? "", 1));
+  if (symbol === "Q_1") return q1;
+  if (symbol === "Q_2") return q2;
+  if (symbol === "Q_medio") return Number.isFinite(q1) && Number.isFinite(q2) ? (q1 + q2) / 2 : NaN;
+  return NaN;
+}
+
+/** Recalcula las columnas en vivo (p. ej. P = I²·R, Q = V/t) de cada fila de la tabla de series. */
 function updateSeriesLive() {
   const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
   if (!liveCols.length) return;
   const quantities = state.practiceForm?.definition?.quantities ?? [];
   const idBySymbol = new Map(quantities.map((q) => [q.symbol, q.id]));
+  const isFluidos1 = practiceSelect.value === "fluidos-1";
   measurementFields.querySelectorAll(".series-row").forEach((row) => {
     for (const col of liveCols) {
       const cell = row.querySelector(`.series-live[data-live-symbol="${CSS.escape(col.symbol)}"]`);
       const out = cell?.querySelector(".series-live-value");
       if (!out) continue;
-      const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
-      const value = args.every(Number.isFinite) ? pointPower(...args) : NaN;
+      const value = isFluidos1
+        ? fluidosCaudalLiveValue(col.symbol, row, idBySymbol)
+        : (() => {
+            const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
+            return args.every(Number.isFinite) ? pointPower(...args) : NaN;
+          })();
       out.textContent = Number.isFinite(value) ? format(value) : "—";
     }
   });
