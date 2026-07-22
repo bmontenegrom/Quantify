@@ -28,7 +28,7 @@ export const PRACTICE_SECTIONS = {
     { id: "op1", title: "Operador 1 — Períodos", symbols: ["T1"], results: ["g1"] },
     { id: "op2", title: "Operador 2 — Períodos (opcional)", symbols: ["T2"], results: ["g2"] },
     { id: "op3", title: "Operador 3 — Períodos (opcional)", symbols: ["T3"], results: ["g3"] },
-    { title: "Datos compartidos", symbols: ["L", "t_med"], results: ["gamma", "Q"] },
+    { title: "Medidas", symbols: ["L", "t_med"], results: ["gamma", "Q"] },
   ],
   "p2-cc": [
     { title: "Resistencias (medidas una vez, valen para las tres partes)", symbols: ["R1", "R2", "R3"] },

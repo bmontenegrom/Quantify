@@ -1149,11 +1149,11 @@ function renderSeriesTable(definition) {
         return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}</div>`;
       });
     if (rest.length) {
-      blocks.push(`<div class="shared-quantities"><h4>Datos compartidos</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
+      blocks.push(`<div class="shared-quantities"><h4>Medidas</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
     }
     sharedSection = blocks.join("");
   } else if (shared.length) {
-    sharedSection = `<div class="shared-quantities"><h4>Datos compartidos</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
+    sharedSection = `<div class="shared-quantities"><h4>Medidas</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
   }
   const partsNote = PRACTICE_PARTS[practiceSelect.value]
     ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
