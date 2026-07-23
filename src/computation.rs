@@ -1814,6 +1814,72 @@ mod tests {
         }
     }
 
+    /// `check_student_result_symbols` (pura): acepta resultados finales, agregados `is_final` y
+    /// resultados por corrida `Re#k`; rechaza agregados no finales, símbolos desconocidos, bases que
+    /// no son point_result e índices de corrida no numéricos. Lista vacía siempre válida.
+    #[test]
+    fn check_student_result_symbols_accepts_finals_and_per_run() {
+        use crate::practices::{PracticeAggregate, PracticeDefinition, PracticePointResult};
+        let aggregate = |symbol: &str, is_final: bool| PracticeAggregate {
+            id: symbol.into(),
+            practice_id: "viscosidad".into(),
+            position: 0,
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "".into(),
+            formula: "slope".into(),
+            is_final,
+        };
+        let definition = PracticeDefinition {
+            practice_id: "viscosidad".into(),
+            analysis_kind: Some("regresion_lineal".into()),
+            x_formula: None,
+            y_formula: None,
+            quantities: vec![],
+            results: vec![db::PracticeResult {
+                id: "mu".into(),
+                practice_id: "viscosidad".into(),
+                symbol: "mu".into(),
+                name: "Viscosidad".into(),
+                unit: "Pa.s".into(),
+                formula: "slope".into(),
+                position: 0,
+                tolerance: None,
+                is_final: true,
+                has_uncertainty: true,
+            }],
+            curves: vec![],
+            operator_count: None,
+            intermediates: vec![],
+            point_results: vec![PracticePointResult {
+                id: "Re".into(),
+                practice_id: "viscosidad".into(),
+                position: 0,
+                symbol: "Re".into(),
+                name: "Reynolds".into(),
+                unit: "".into(),
+                formula: "rho_f*(dx/t)*2*R/mu".into(),
+            }],
+            aggregates: vec![aggregate("Re_medio", true), aggregate("Re_min", false)],
+        };
+        let sr = |symbol: &str| db::StudentResultInput {
+            symbol: symbol.into(),
+            value: 1.0,
+            u_expanded: None,
+        };
+
+        assert!(check_student_result_symbols(
+            &definition,
+            &[sr("mu"), sr("Re_medio"), sr("Re#0"), sr("Re#12")],
+        )
+        .is_ok());
+        assert!(check_student_result_symbols(&definition, &[]).is_ok());
+        for bad in ["Re_min", "nope", "Q#0", "Re#x"] {
+            let err = check_student_result_symbols(&definition, &[sr(bad)]).unwrap_err();
+            assert!(err.contains(bad), "{bad} debe rechazarse");
+        }
+    }
+
     fn quantity(symbol: &str) -> PracticeQuantity {
         PracticeQuantity {
             id: format!("q-{symbol}"),
