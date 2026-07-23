@@ -1224,9 +1224,14 @@ function renderSeriesTable(definition) {
   });
   // Los escalares compartidos también entran en las fórmulas de eje: refrescá la vista previa al
   // editarlos (sus filas viven fuera de la tabla de la serie; puede haber varios bloques).
+  // Además, algunas columnas en vivo dependen de una compartida (viscosidad: v_medio = dx/t̄).
   measurementFields.querySelectorAll(".shared-quantities").forEach((sharedEl) => {
-    sharedEl.addEventListener("input", schedulePreview);
-    sharedEl.addEventListener("change", schedulePreview);
+    const refresh = () => {
+      schedulePreview();
+      updateSeriesLive();
+    };
+    sharedEl.addEventListener("input", refresh);
+    sharedEl.addEventListener("change", refresh);
   });
   updateSeriesMeans();
   updateSeriesLive();
@@ -1383,24 +1388,53 @@ function fluidosCaudalLiveValue(symbol, row, idBySymbol) {
   return NaN;
 }
 
+/** Valor (con prefijo) de una magnitud compartida de medida única (fuera de la tabla de series). */
+function sharedSingleValue(quantityId) {
+  const replica = measurementFields
+    .querySelector(`.measurement-row[data-quantity-id="${CSS.escape(quantityId)}"]`)
+    ?.querySelector(".replica");
+  const raw = replica?.querySelector(".measure-value").value.trim();
+  if (!raw) return NaN;
+  return Number(raw) * prefixFactor(replica.querySelector(".prefix-select").value);
+}
+
+/** Media de las réplicas de una magnitud repetida dentro de una fila de la serie. */
+function rowReplicaMean(row, quantityId) {
+  const cell = row
+    .querySelector(`.series-replica[data-quantity-id="${CSS.escape(quantityId)}"]`)
+    ?.closest(".series-cell--replicas");
+  const reps = cell ? cellReplicaValues(cell) : [];
+  return reps.length ? reps.reduce((a, b) => a + b, 0) / reps.length : NaN;
+}
+
+/** viscosidad: v_medio = dx (compartida) / t̄ (media de réplicas de t del punto). */
+function viscosidadVelocityLiveValue(row, idBySymbol) {
+  const dx = sharedSingleValue(idBySymbol.get("dx") ?? "");
+  const tMean = rowReplicaMean(row, idBySymbol.get("t") ?? "");
+  return Number.isFinite(dx) && Number.isFinite(tMean) && tMean !== 0 ? dx / tMean : NaN;
+}
+
 /** Recalcula las columnas en vivo (p. ej. P = I²·R, Q = V/t) de cada fila de la tabla de series. */
 function updateSeriesLive() {
   const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
   if (!liveCols.length) return;
   const quantities = state.practiceForm?.definition?.quantities ?? [];
   const idBySymbol = new Map(quantities.map((q) => [q.symbol, q.id]));
-  const isFluidos1 = practiceSelect.value === "fluidos-1";
+  const practice = practiceSelect.value;
   measurementFields.querySelectorAll(".series-row").forEach((row) => {
     for (const col of liveCols) {
       const cell = row.querySelector(`.series-live[data-live-symbol="${CSS.escape(col.symbol)}"]`);
       const out = cell?.querySelector(".series-live-value");
       if (!out) continue;
-      const value = isFluidos1
-        ? fluidosCaudalLiveValue(col.symbol, row, idBySymbol)
-        : (() => {
-            const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
-            return args.every(Number.isFinite) ? pointPower(...args) : NaN;
-          })();
+      let value;
+      if (practice === "fluidos-1") {
+        value = fluidosCaudalLiveValue(col.symbol, row, idBySymbol);
+      } else if (practice === "viscosidad") {
+        value = viscosidadVelocityLiveValue(row, idBySymbol);
+      } else {
+        const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
+        value = args.every(Number.isFinite) ? pointPower(...args) : NaN;
+      }
       out.textContent = Number.isFinite(value) ? format(value) : "—";
     }
   });

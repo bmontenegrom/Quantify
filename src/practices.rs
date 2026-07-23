@@ -1699,7 +1699,7 @@ async fn seed_viscosidad(pool: &SqlitePool) -> anyhow::Result<()> {
             qty("R", "Radio de la esfera", "m", false, "longitud"),
             qty_replicas("t", "Tiempo de caida", "s", "tiempo", 5),
             qty_shared("dx", "Distancia recorrida", "m", "longitud"),
-            qty_shared("rho_e", "Densidad del acero", "kg/m3", "densidad"),
+            qty_given("rho_e", "Densidad del acero", "kg/m3", "densidad"),
             qty_shared("rho_f", "Densidad de la glicerina", "kg/m3", "densidad"),
             qty_given("g", "Aceleracion de la gravedad", "m/s2", "aceleracion"),
             qty_shared(
@@ -1730,6 +1730,14 @@ async fn seed_viscosidad(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         .await?;
     }
+    // Auto-curación: rho_e (densidad del acero) es un dato dado con incertidumbre, no una medida
+    // con instrumento. Re-aplica en cada boot para bases sembradas antes del cambio.
+    sqlx::query(
+        "UPDATE practice_quantities SET is_given = 1 \
+         WHERE practice_id = 'viscosidad' AND symbol = 'rho_e' AND is_given = 0",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

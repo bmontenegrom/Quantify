@@ -65,6 +65,8 @@ export const SERIES_LIVE_COLUMNS = {
     { symbol: "Q_2", unit: "m3/s" },
     { symbol: "Q_medio", unit: "m3/s" },
   ],
+  // Velocidad media por punto = dx / t̄ (dx compartida, t con réplicas por punto).
+  viscosidad: [{ symbol: "v_medio", unit: "m/s" }],
 };
 
 // Prácticas cuyas magnitudes de tiempo de medida única se leen directo de un instrumento con
