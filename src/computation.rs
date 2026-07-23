@@ -1604,6 +1604,17 @@ pub async fn validate_student_results(
     let definition = crate::practices::definition(pool, practice_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("practica no encontrada"))?;
+    check_student_result_symbols(&definition, results).map_err(|e| anyhow::anyhow!(e))
+}
+
+/// Verifica que cada símbolo de `results` sea un mensurando comparable de la práctica: resultado
+/// final, agregado `is_final`, o resultado por corrida `Re#k` (Motor E). Función **pura** (sin IO):
+/// devuelve el mensaje amigable en `Err` para que cada caller elija el código HTTP (400 símbolo
+/// inválido vs. 500/404 al resolver la definición).
+pub fn check_student_result_symbols(
+    definition: &crate::practices::PracticeDefinition,
+    results: &[db::StudentResultInput],
+) -> Result<(), String> {
     let valid: std::collections::HashSet<&str> = definition
         .results
         .iter()
@@ -1632,7 +1643,9 @@ pub async fn validate_student_results(
         } else if valid.contains(symbol) {
             continue;
         }
-        anyhow::bail!("el simbolo \"{symbol}\" no es un mensurando de esta practica");
+        return Err(format!(
+            "el simbolo \"{symbol}\" no es un mensurando de esta practica"
+        ));
     }
     Ok(())
 }
