@@ -578,7 +578,10 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
   `;
 }
 
-/** Número de corridas (puntos) que cargó el alumno, tomado del máximo point_index de las lecturas. */
+/** Número de corridas (puntos) que cargó el alumno, tomado del máximo point_index de las lecturas.
+ *  Invariante: el motor calcula un valor de point_result por corrida completa, así que este conteo
+ *  coincide con `analysis.point_results[*].values.length` y con el índice `k` de los `Re#k`
+ *  guardados. Si alguna vez un point_result descartara puntos, habría que alinear ambos caminos. */
 function corridaCount(submission) {
   const idx = (submission.measurements ?? []).map((m) => m.point_index ?? 0);
   return idx.length ? Math.max(...idx) + 1 : 0;

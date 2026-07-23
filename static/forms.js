@@ -1447,7 +1447,7 @@ function sharedSingleValue(quantityId) {
   const replica = measurementFields
     .querySelector(`.measurement-row[data-quantity-id="${CSS.escape(quantityId)}"]`)
     ?.querySelector(".replica");
-  const raw = replica?.querySelector(".measure-value").value.trim();
+  const raw = replica?.querySelector(".measure-value")?.value.trim();
   if (!raw) return NaN;
   return Number(raw) * prefixFactor(replica.querySelector(".prefix-select").value);
 }
