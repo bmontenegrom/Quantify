@@ -1616,13 +1616,23 @@ pub async fn validate_student_results(
                 .map(|a| a.symbol.as_str()),
         )
         .collect();
+    // Resultados por corrida (Motor E): el alumno carga su Reynolds de cada punto con el símbolo
+    // compuesto "<base>#<indice>" (p. ej. "Re#0"). Se comparan por corrida contra el automático.
+    let point_symbols: std::collections::HashSet<&str> = definition
+        .point_results
+        .iter()
+        .map(|p| p.symbol.as_str())
+        .collect();
     for result in results {
-        if !valid.contains(result.symbol.trim()) {
-            anyhow::bail!(
-                "el simbolo \"{}\" no es un mensurando de esta practica",
-                result.symbol.trim()
-            );
+        let symbol = result.symbol.trim();
+        if let Some((base, idx)) = symbol.split_once('#') {
+            if point_symbols.contains(base) && idx.parse::<usize>().is_ok() {
+                continue;
+            }
+        } else if valid.contains(symbol) {
+            continue;
         }
+        anyhow::bail!("el simbolo \"{symbol}\" no es un mensurando de esta practica");
     }
     Ok(())
 }
@@ -1749,6 +1759,46 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("no_existe"));
+    }
+
+    /// `validate_student_results` acepta resultados por corrida (Motor E) con símbolo compuesto
+    /// `Re#k`, y rechaza índices no numéricos o bases que no son point_result.
+    #[tokio::test]
+    async fn validate_student_results_accepts_point_results_per_run() {
+        let (pool, _dir) = setup().await;
+        validate_student_results(
+            &pool,
+            "viscosidad",
+            &[
+                db::StudentResultInput {
+                    symbol: "Re#0".into(),
+                    value: 0.4,
+                    u_expanded: None,
+                },
+                db::StudentResultInput {
+                    symbol: "Re#3".into(),
+                    value: 0.9,
+                    u_expanded: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+        for bad in ["Re#x", "Nope#0"] {
+            let err = validate_student_results(
+                &pool,
+                "viscosidad",
+                &[db::StudentResultInput {
+                    symbol: bad.into(),
+                    value: 1.0,
+                    u_expanded: None,
+                }],
+            )
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains(bad));
+        }
     }
 
     fn quantity(symbol: &str) -> PracticeQuantity {

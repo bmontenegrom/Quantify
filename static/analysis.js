@@ -30,6 +30,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
           studentResults,
           submission.result_tolerances ?? {},
         );
+        body += pointResultsComparisonMarkup(submission.analysis, studentResults);
       }
     } else {
       body += `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
@@ -570,10 +571,82 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
           <tbody>${rows}</tbody>
         </table>
       </div>
+      ${pointResultsEntryMarkup(submission, definition, saved, locked)}
       <span class="student-results-status submission-meta"></span>
       ${locked ? "" : `<div class="detail-actions"><button type="submit">Guardar</button></div>`}
     </form>
   `;
+}
+
+/** Número de corridas (puntos) que cargó el alumno, tomado del máximo point_index de las lecturas. */
+function corridaCount(submission) {
+  const idx = (submission.measurements ?? []).map((m) => m.point_index ?? 0);
+  return idx.length ? Math.max(...idx) + 1 : 0;
+}
+
+/** Tabla de entrada de los resultados por corrida (Motor E): una fila por corrida, símbolo `Re#k`.
+ *  Reusa la clase `.student-value` para que `saveStudentResults` los recolecte sin cambios. */
+function pointResultsEntryMarkup(submission, definition, saved, locked) {
+  const pointResults = definition?.point_results ?? [];
+  const n = corridaCount(submission);
+  if (!pointResults.length || n <= 0) return "";
+  const dis = locked ? "disabled" : "";
+  const headCells = pointResults
+    .map((p) => `<th>${symbolHtml(p.symbol)}${p.unit ? ` <span class="submission-meta">(${unitHtml(p.unit)})</span>` : ""}</th>`)
+    .join("");
+  const bodyRows = Array.from({ length: n }, (_, k) => {
+    const cells = pointResults
+      .map((p) => {
+        const sym = `${p.symbol}#${k}`;
+        const s = saved.get(sym);
+        const v = s ? escapeHtml(String(s.value)) : "";
+        return `<td><input class="student-value" data-symbol="${escapeHtml(sym)}" type="number" step="any" value="${v}" ${dis} placeholder="valor" /></td>`;
+      })
+      .join("");
+    return `<tr><td class="directory-primary">Corrida ${k + 1}</td>${cells}</tr>`;
+  }).join("");
+  return `
+    <p class="submission-meta">Tus cálculos por corrida (se comparan con el valor automático de cada punto):</p>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Corrida</th>${headCells}</tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>`;
+}
+
+/** Comparación por corrida: valor automático de cada punto vs. el que cargó el alumno (`Re#k`). */
+function pointResultsComparisonMarkup(analysis, studentResults) {
+  const pointResults = analysis.point_results ?? [];
+  if (!pointResults.length) return "";
+  const byStudent = new Map((studentResults ?? []).map((s) => [s.symbol, s]));
+  const n = Math.max(0, ...pointResults.map((p) => p.values.length));
+  const hasAny = pointResults.some((p) => p.values.some((_, k) => byStudent.has(`${p.symbol}#${k}`)));
+  if (!hasAny) return "";
+  const num = (v) => (v == null || !Number.isFinite(v) ? "—" : escapeHtml(format(v)));
+  const headCells = pointResults
+    .map((p) => `<th>${symbolHtml(p.symbol)} auto</th><th>tuyo</th><th>Δ %</th>`)
+    .join("");
+  const rows = Array.from({ length: n }, (_, k) => {
+    const cells = pointResults
+      .map((p) => {
+        const auto = p.values[k];
+        const s = byStudent.get(`${p.symbol}#${k}`);
+        const sv = s ? s.value : null;
+        const pct = sv != null && auto ? ((sv - auto) / auto) * 100 : null;
+        return `<td>${num(auto)}</td><td>${num(sv)}</td><td>${pct == null ? "—" : `${num(pct)} %`}</td>`;
+      })
+      .join("");
+    return `<tr><td class="directory-primary">Corrida ${k + 1}</td>${cells}</tr>`;
+  }).join("");
+  return `
+    <h3>Comparación por corrida: tus cálculos vs automático</h3>
+    <div class="data-table-wrap">
+      <table class="data-table compare-table">
+        <thead><tr><th>Corrida</th>${headCells}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 function membersEditorMarkup(submission) {
