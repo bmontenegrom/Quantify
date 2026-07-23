@@ -1755,13 +1755,13 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("R_recip", "Radio del recipiente", "m", "longitud"),
             qty_given("g", "Aceleracion de la gravedad", "m/s2", "aceleracion"),
             qty_shared("rho", "Densidad del agua", "kg/m3", "densidad"),
-            no_u(qty_shared(
+            no_u(qty_given(
                 "mu_agua",
                 "Viscosidad del agua (de tabla segun T)",
                 "Pa.s",
                 "viscosidad",
             )),
-            no_u(qty_shared(
+            no_u(qty_given(
                 "kp",
                 "Factor geometrico K (def. 0.78)",
                 "",
@@ -1826,8 +1826,9 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
     }
     // Auto-curación: re-aplica en cada boot para bases que hayan quedado a medio migrar.
     sqlx::query(
-        "UPDATE practice_quantities SET has_uncertainty = 0 \
-         WHERE practice_id = 'fluidos-2' AND symbol IN ('mu_agua', 'kp') AND has_uncertainty = 1",
+        "UPDATE practice_quantities SET has_uncertainty = 0, is_given = 1 \
+         WHERE practice_id = 'fluidos-2' AND symbol IN ('mu_agua', 'kp') \
+         AND (has_uncertainty = 1 OR is_given = 0)",
     )
     .execute(pool)
     .await?;
@@ -3223,6 +3224,7 @@ mod tests {
         for symbol in ["mu_agua", "kp"] {
             let q = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
             assert!(!q.has_uncertainty, "{symbol} no debe pedir incertidumbre");
+            assert!(q.is_given, "{symbol} es dato de tabla, sin instrumento");
         }
 
         let id = |sym: &str| {
