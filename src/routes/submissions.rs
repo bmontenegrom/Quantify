@@ -316,30 +316,15 @@ pub(super) async fn set_student_results(
             "no podes modificar tus calculos una vez que el docente habilito los resultados",
         ));
     }
-    // Los símbolos deben corresponder a mensurandos de la práctica.
+    // Los símbolos deben corresponder a mensurandos de la práctica (resultados finales, agregados
+    // is_final y resultados por corrida `Re#k`). Se resuelve la definición acá (un fallo real de DB
+    // sube como 500 vía `?`, sin filtrar detalles) y se valida con la misma lógica pura que la
+    // entrega por formulario, para no desincronizar los dos caminos.
     let definition = practices::definition(&state.pool, &submission.practice_id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
-    let valid: std::collections::HashSet<&str> = definition
-        .results
-        .iter()
-        .map(|r| r.symbol.as_str())
-        .chain(
-            definition
-                .aggregates
-                .iter()
-                .filter(|a| a.is_final)
-                .map(|a| a.symbol.as_str()),
-        )
-        .collect();
-    for result in &body.results {
-        if !valid.contains(result.symbol.trim()) {
-            return Err(AppError::bad_request(format!(
-                "el simbolo \"{}\" no es un mensurando de esta practica",
-                result.symbol.trim()
-            )));
-        }
-    }
+    computation::check_student_result_symbols(&definition, &body.results)
+        .map_err(AppError::bad_request)?;
     db::save_student_results(&state.pool, &id, &body.results).await?;
     let updated = db::submission_detail(&state.pool, &id)
         .await?

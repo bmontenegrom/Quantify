@@ -1604,6 +1604,17 @@ pub async fn validate_student_results(
     let definition = crate::practices::definition(pool, practice_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("practica no encontrada"))?;
+    check_student_result_symbols(&definition, results).map_err(|e| anyhow::anyhow!(e))
+}
+
+/// Verifica que cada símbolo de `results` sea un mensurando comparable de la práctica: resultado
+/// final, agregado `is_final`, o resultado por corrida `Re#k` (Motor E). Función **pura** (sin IO):
+/// devuelve el mensaje amigable en `Err` para que cada caller elija el código HTTP (400 símbolo
+/// inválido vs. 500/404 al resolver la definición).
+pub fn check_student_result_symbols(
+    definition: &crate::practices::PracticeDefinition,
+    results: &[db::StudentResultInput],
+) -> Result<(), String> {
     let valid: std::collections::HashSet<&str> = definition
         .results
         .iter()
@@ -1616,13 +1627,25 @@ pub async fn validate_student_results(
                 .map(|a| a.symbol.as_str()),
         )
         .collect();
+    // Resultados por corrida (Motor E): el alumno carga su Reynolds de cada punto con el símbolo
+    // compuesto "<base>#<indice>" (p. ej. "Re#0"). Se comparan por corrida contra el automático.
+    let point_symbols: std::collections::HashSet<&str> = definition
+        .point_results
+        .iter()
+        .map(|p| p.symbol.as_str())
+        .collect();
     for result in results {
-        if !valid.contains(result.symbol.trim()) {
-            anyhow::bail!(
-                "el simbolo \"{}\" no es un mensurando de esta practica",
-                result.symbol.trim()
-            );
+        let symbol = result.symbol.trim();
+        if let Some((base, idx)) = symbol.split_once('#') {
+            if point_symbols.contains(base) && idx.parse::<usize>().is_ok() {
+                continue;
+            }
+        } else if valid.contains(symbol) {
+            continue;
         }
+        return Err(format!(
+            "el simbolo \"{symbol}\" no es un mensurando de esta practica"
+        ));
     }
     Ok(())
 }
@@ -1749,6 +1772,112 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("no_existe"));
+    }
+
+    /// `validate_student_results` acepta resultados por corrida (Motor E) con símbolo compuesto
+    /// `Re#k`, y rechaza índices no numéricos o bases que no son point_result.
+    #[tokio::test]
+    async fn validate_student_results_accepts_point_results_per_run() {
+        let (pool, _dir) = setup().await;
+        validate_student_results(
+            &pool,
+            "viscosidad",
+            &[
+                db::StudentResultInput {
+                    symbol: "Re#0".into(),
+                    value: 0.4,
+                    u_expanded: None,
+                },
+                db::StudentResultInput {
+                    symbol: "Re#3".into(),
+                    value: 0.9,
+                    u_expanded: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+        for bad in ["Re#x", "Nope#0"] {
+            let err = validate_student_results(
+                &pool,
+                "viscosidad",
+                &[db::StudentResultInput {
+                    symbol: bad.into(),
+                    value: 1.0,
+                    u_expanded: None,
+                }],
+            )
+            .await
+            .unwrap_err();
+            assert!(err.to_string().contains(bad));
+        }
+    }
+
+    /// `check_student_result_symbols` (pura): acepta resultados finales, agregados `is_final` y
+    /// resultados por corrida `Re#k`; rechaza agregados no finales, símbolos desconocidos, bases que
+    /// no son point_result e índices de corrida no numéricos. Lista vacía siempre válida.
+    #[test]
+    fn check_student_result_symbols_accepts_finals_and_per_run() {
+        use crate::practices::{PracticeAggregate, PracticeDefinition, PracticePointResult};
+        let aggregate = |symbol: &str, is_final: bool| PracticeAggregate {
+            id: symbol.into(),
+            practice_id: "viscosidad".into(),
+            position: 0,
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "".into(),
+            formula: "slope".into(),
+            is_final,
+        };
+        let definition = PracticeDefinition {
+            practice_id: "viscosidad".into(),
+            analysis_kind: Some("regresion_lineal".into()),
+            x_formula: None,
+            y_formula: None,
+            quantities: vec![],
+            results: vec![db::PracticeResult {
+                id: "mu".into(),
+                practice_id: "viscosidad".into(),
+                symbol: "mu".into(),
+                name: "Viscosidad".into(),
+                unit: "Pa.s".into(),
+                formula: "slope".into(),
+                position: 0,
+                tolerance: None,
+                is_final: true,
+                has_uncertainty: true,
+            }],
+            curves: vec![],
+            operator_count: None,
+            intermediates: vec![],
+            point_results: vec![PracticePointResult {
+                id: "Re".into(),
+                practice_id: "viscosidad".into(),
+                position: 0,
+                symbol: "Re".into(),
+                name: "Reynolds".into(),
+                unit: "".into(),
+                formula: "rho_f*(dx/t)*2*R/mu".into(),
+            }],
+            aggregates: vec![aggregate("Re_medio", true), aggregate("Re_min", false)],
+        };
+        let sr = |symbol: &str| db::StudentResultInput {
+            symbol: symbol.into(),
+            value: 1.0,
+            u_expanded: None,
+        };
+
+        assert!(check_student_result_symbols(
+            &definition,
+            &[sr("mu"), sr("Re_medio"), sr("Re#0"), sr("Re#12")],
+        )
+        .is_ok());
+        assert!(check_student_result_symbols(&definition, &[]).is_ok());
+        for bad in ["Re_min", "nope", "Q#0", "Re#x"] {
+            let err = check_student_result_symbols(&definition, &[sr(bad)]).unwrap_err();
+            assert!(err.contains(bad), "{bad} debe rechazarse");
+        }
     }
 
     fn quantity(symbol: &str) -> PracticeQuantity {

@@ -598,7 +598,7 @@ function finalResultSectionHtml(definition, finals) {
 
 /** Recolecta los resultados finales cargados por el alumno junto con la entrega (si los hay). */
 function collectFinalResults() {
-  return [...measurementFields.querySelectorAll('[data-final-result="1"]')].reduce((acc, row) => {
+  const scalar = [...measurementFields.querySelectorAll('[data-final-result="1"]')].reduce((acc, row) => {
     const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
     const rawVal = row.querySelector(".final-result-value").value.trim();
     if (rawVal === "") return acc;
@@ -610,6 +610,7 @@ function collectFinalResults() {
     acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
     return acc;
   }, []);
+  return [...scalar, ...collectSeriesPointResults()];
 }
 
 function prefixSelectHtml() {
@@ -989,6 +990,16 @@ function applyFinalResultsPrefillFrom(results) {
     const uInput = row.querySelector(".final-result-u");
     if (uInput && s.u_expanded != null) uInput.value = s.u_expanded;
   });
+  // Re por corrida (`Re#k`): k = índice entre filas completas, igual que al recolectar.
+  let k = -1;
+  measurementFields.querySelectorAll(".series-row").forEach((row) => {
+    if (!seriesRowComplete(row)) return;
+    k += 1;
+    row.querySelectorAll(".series-point-result").forEach((input) => {
+      const s = saved.get(`${input.dataset.symbol}#${k}`);
+      if (s) input.value = s.value;
+    });
+  });
 }
 
 /** Restaura una entrega en edición (`applyPrefill`) desde `state.editPrefill*`. */
@@ -1126,6 +1137,8 @@ function renderSeriesTable(definition) {
     .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${symbolHtml(q.symbol)}${q.unit ? ` <span class="submission-meta">(${unitHtml(q.unit)})</span>` : ""}</th>`)
     .join("") + liveCols
     .map((c) => `<th>${symbolHtml(c.symbol)}${c.unit ? ` <span class="submission-meta">(${unitHtml(c.unit)})</span>` : ""}</th>`)
+    .join("") + seriesPointResultCols()
+    .map((p) => `<th>${symbolHtml(p.symbol)}${p.unit ? ` <span class="submission-meta">(${unitHtml(p.unit)})</span>` : ""}</th>`)
     .join("");
   const INITIAL_ROWS = 3;
   const body = Array.from({ length: INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
@@ -1224,9 +1237,14 @@ function renderSeriesTable(definition) {
   });
   // Los escalares compartidos también entran en las fórmulas de eje: refrescá la vista previa al
   // editarlos (sus filas viven fuera de la tabla de la serie; puede haber varios bloques).
+  // Además, algunas columnas en vivo dependen de una compartida (viscosidad: v_medio = dx/t̄).
   measurementFields.querySelectorAll(".shared-quantities").forEach((sharedEl) => {
-    sharedEl.addEventListener("input", schedulePreview);
-    sharedEl.addEventListener("change", schedulePreview);
+    const refresh = () => {
+      schedulePreview();
+      updateSeriesLive();
+    };
+    sharedEl.addEventListener("input", refresh);
+    sharedEl.addEventListener("change", refresh);
   });
   updateSeriesMeans();
   updateSeriesLive();
@@ -1295,7 +1313,48 @@ function seriesRowHtml(cols) {
   const liveCells = (SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [])
     .map((c) => `<td class="series-live" data-live-symbol="${escapeHtml(c.symbol)}"><span class="series-live-value submission-meta">—</span></td>`)
     .join("");
-  return `<tr class="series-row">${cells}${liveCells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
+  // Resultado por corrida cargado a mano por el alumno (Motor E): editable, sin clase `series-cell`
+  // para que collectMeasurements no lo cuente como medición. Se recolecta como `Re#k` al entregar.
+  const pointResultCells = seriesPointResultCols()
+    .map((p) => `<td class="series-point-result-cell"><input class="series-point-result" data-symbol="${escapeHtml(p.symbol)}" type="number" step="any" placeholder="${escapeHtml(p.symbol)}" /></td>`)
+    .join("");
+  return `<tr class="series-row">${cells}${liveCells}${pointResultCells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
+}
+
+/** Resultados derivados por punto (Motor E) de la práctica actual; el alumno carga uno por corrida. */
+function seriesPointResultCols() {
+  return state.practiceForm?.definition?.point_results ?? [];
+}
+
+/** ¿La fila de la serie tiene todas sus celdas de medición completas? Mismo criterio que
+ *  collectMeasurements (fila incompleta = punto ignorado), para alinear el índice de corrida. */
+function seriesRowComplete(row) {
+  return [...row.querySelectorAll(".series-cell")].every((cell) => {
+    if (cell.querySelector(".series-replica")) {
+      const reps = cellReplicaValues(cell);
+      return reps.length > 0 && reps.every(Number.isFinite);
+    }
+    const raw = cell.querySelector(".series-value").value.trim();
+    return raw !== "" && Number.isFinite(Number(raw));
+  });
+}
+
+/** Re por corrida cargado en la tabla: `Re#k`, con k = índice entre las filas completas (mismo
+ *  orden que las mediciones, para que la comparación empareje con el valor automático). */
+function collectSeriesPointResults() {
+  const out = [];
+  let k = -1;
+  measurementFields.querySelectorAll(".series-row").forEach((row) => {
+    if (!seriesRowComplete(row)) return;
+    k += 1;
+    row.querySelectorAll(".series-point-result").forEach((input) => {
+      const raw = input.value.trim();
+      if (raw === "") return;
+      const value = Number(raw);
+      if (Number.isFinite(value)) out.push({ symbol: `${input.dataset.symbol}#${k}`, value, u_expanded: null });
+    });
+  });
+  return out;
 }
 
 /// HTML de una fila de escalar compartido (Motor E): dato de cátedra (valor ± U) o medida única
@@ -1383,24 +1442,53 @@ function fluidosCaudalLiveValue(symbol, row, idBySymbol) {
   return NaN;
 }
 
+/** Valor (con prefijo) de una magnitud compartida de medida única (fuera de la tabla de series). */
+function sharedSingleValue(quantityId) {
+  const replica = measurementFields
+    .querySelector(`.measurement-row[data-quantity-id="${CSS.escape(quantityId)}"]`)
+    ?.querySelector(".replica");
+  const raw = replica?.querySelector(".measure-value")?.value.trim();
+  if (!raw) return NaN;
+  return Number(raw) * prefixFactor(replica.querySelector(".prefix-select").value);
+}
+
+/** Media de las réplicas de una magnitud repetida dentro de una fila de la serie. */
+function rowReplicaMean(row, quantityId) {
+  const cell = row
+    .querySelector(`.series-replica[data-quantity-id="${CSS.escape(quantityId)}"]`)
+    ?.closest(".series-cell--replicas");
+  const reps = cell ? cellReplicaValues(cell) : [];
+  return reps.length ? reps.reduce((a, b) => a + b, 0) / reps.length : NaN;
+}
+
+/** viscosidad: v_medio = dx (compartida) / t̄ (media de réplicas de t del punto). */
+function viscosidadVelocityLiveValue(row, idBySymbol) {
+  const dx = sharedSingleValue(idBySymbol.get("dx") ?? "");
+  const tMean = rowReplicaMean(row, idBySymbol.get("t") ?? "");
+  return Number.isFinite(dx) && Number.isFinite(tMean) && tMean !== 0 ? dx / tMean : NaN;
+}
+
 /** Recalcula las columnas en vivo (p. ej. P = I²·R, Q = V/t) de cada fila de la tabla de series. */
 function updateSeriesLive() {
   const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
   if (!liveCols.length) return;
   const quantities = state.practiceForm?.definition?.quantities ?? [];
   const idBySymbol = new Map(quantities.map((q) => [q.symbol, q.id]));
-  const isFluidos1 = practiceSelect.value === "fluidos-1";
+  const practice = practiceSelect.value;
   measurementFields.querySelectorAll(".series-row").forEach((row) => {
     for (const col of liveCols) {
       const cell = row.querySelector(`.series-live[data-live-symbol="${CSS.escape(col.symbol)}"]`);
       const out = cell?.querySelector(".series-live-value");
       if (!out) continue;
-      const value = isFluidos1
-        ? fluidosCaudalLiveValue(col.symbol, row, idBySymbol)
-        : (() => {
-            const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
-            return args.every(Number.isFinite) ? pointPower(...args) : NaN;
-          })();
+      let value;
+      if (practice === "fluidos-1") {
+        value = fluidosCaudalLiveValue(col.symbol, row, idBySymbol);
+      } else if (practice === "viscosidad") {
+        value = viscosidadVelocityLiveValue(row, idBySymbol);
+      } else {
+        const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
+        value = args.every(Number.isFinite) ? pointPower(...args) : NaN;
+      }
       out.textContent = Number.isFinite(value) ? format(value) : "—";
     }
   });
