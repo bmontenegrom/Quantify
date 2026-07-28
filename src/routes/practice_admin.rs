@@ -139,9 +139,7 @@ pub(super) async fn create_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
-    validate_symbol_format(&input.symbol)?;
-    validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &id,
         &input.symbol,
@@ -151,10 +149,7 @@ pub(super) async fn create_quantity(
         None,
         None,
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     Ok(Json(
         practices::create_quantity(&state.pool, &id, input).await?,
     ))
@@ -169,9 +164,7 @@ pub(super) async fn update_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
-    validate_symbol_format(&input.symbol)?;
-    validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &practice_id,
         &input.symbol,
@@ -181,10 +174,7 @@ pub(super) async fn update_quantity(
         None,
         None,
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     let updated = practices::update_quantity(&state.pool, &qid, input)
         .await?
         .ok_or_else(|| AppError::not_found("magnitud no encontrada"))?;
@@ -268,7 +258,7 @@ pub(super) async fn create_intermediate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_intermediate(&def, &input, None)?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &id,
         &input.symbol,
@@ -278,10 +268,7 @@ pub(super) async fn create_intermediate(
         None,
         None,
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     Ok(Json(
         practices::create_intermediate(&state.pool, &id, input).await?,
     ))
@@ -299,7 +286,7 @@ pub(super) async fn update_intermediate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_intermediate(&def, &input, Some(&iid))?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &id,
         &input.symbol,
@@ -309,10 +296,7 @@ pub(super) async fn update_intermediate(
         None,
         None,
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     let updated = practices::update_intermediate(&state.pool, &id, &iid, input)
         .await?
         .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
@@ -386,7 +370,7 @@ pub(super) async fn create_point_result(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_point_result(&def, &input)?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &id,
         &input.symbol,
@@ -396,10 +380,7 @@ pub(super) async fn create_point_result(
         None,
         None,
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     Ok(Json(
         practices::create_point_result(&state.pool, &id, input).await?,
     ))
@@ -417,7 +398,7 @@ pub(super) async fn update_point_result(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_point_result(&def, &input)?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &id,
         &input.symbol,
@@ -427,10 +408,7 @@ pub(super) async fn update_point_result(
         Some(&pid),
         None,
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     let updated = practices::update_point_result(&state.pool, &id, &pid, input)
         .await?
         .ok_or_else(|| AppError::not_found("magnitud derivada por punto no encontrada"))?;
@@ -492,7 +470,7 @@ pub(super) async fn create_aggregate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_aggregate(&def, &input, None)?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &id,
         &input.symbol,
@@ -502,10 +480,7 @@ pub(super) async fn create_aggregate(
         None,
         None,
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     Ok(Json(
         practices::create_aggregate(&state.pool, &id, input).await?,
     ))
@@ -523,7 +498,7 @@ pub(super) async fn update_aggregate(
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
     validate_aggregate(&def, &input, Some(&aid))?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &id,
         &input.symbol,
@@ -533,10 +508,7 @@ pub(super) async fn update_aggregate(
         None,
         Some(&aid),
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     let updated = practices::update_aggregate(&state.pool, &id, &aid, input)
         .await?
         .ok_or_else(|| AppError::not_found("mensurando agregado no encontrado"))?;
@@ -651,9 +623,7 @@ pub(super) async fn create_result(
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
-    validate_symbol_format(&input.symbol)?;
-    validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &id,
         &input.symbol,
@@ -663,10 +633,7 @@ pub(super) async fn create_result(
         None,
         None,
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     Ok(Json(
         practices::create_result(&state.pool, &id, input).await?,
     ))
@@ -681,9 +648,7 @@ pub(super) async fn update_result(
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_result(&input)?;
-    validate_symbol_format(&input.symbol)?;
-    validate_symbol_not_reserved(&input.symbol)?;
-    if practices::symbol_taken_in_practice(
+    guard_symbol(
         &state.pool,
         &practice_id,
         &input.symbol,
@@ -693,10 +658,7 @@ pub(super) async fn update_result(
         None,
         None,
     )
-    .await?
-    {
-        return Err(duplicate_symbol_error(&input.symbol));
-    }
+    .await?;
     let updated = practices::update_result(&state.pool, &rid, input)
         .await?
         .ok_or_else(|| AppError::not_found("mensurando no encontrado"))?;
@@ -804,6 +766,40 @@ fn duplicate_symbol_error(symbol: &str) -> AppError {
         "Ya existe una magnitud o mensurando con el simbolo \"{}\" en esta practica. Elegi otro simbolo.",
         symbol.trim()
     ))
+}
+
+/// Valida el trío formato + no-reservado + no-duplicado de un símbolo, repetido en las 10 rutas
+/// de alta/edición de quantities/results/intermediates/point-results/aggregates. Los `exclude_*`
+/// son los mismos slots que [`practices::symbol_taken_in_practice`]: la propia fila al editar, para
+/// no chocar con su propio símbolo.
+#[allow(clippy::too_many_arguments)]
+async fn guard_symbol(
+    pool: &sqlx::SqlitePool,
+    practice_id: &str,
+    symbol: &str,
+    exclude_quantity_id: Option<&str>,
+    exclude_result_id: Option<&str>,
+    exclude_intermediate_id: Option<&str>,
+    exclude_point_result_id: Option<&str>,
+    exclude_aggregate_id: Option<&str>,
+) -> Result<(), AppError> {
+    validate_symbol_format(symbol)?;
+    validate_symbol_not_reserved(symbol)?;
+    if practices::symbol_taken_in_practice(
+        pool,
+        practice_id,
+        symbol,
+        exclude_quantity_id,
+        exclude_result_id,
+        exclude_intermediate_id,
+        exclude_point_result_id,
+        exclude_aggregate_id,
+    )
+    .await?
+    {
+        return Err(duplicate_symbol_error(symbol));
+    }
+    Ok(())
 }
 
 /// Valida los campos de una magnitud: símbolo y nombre no vacíos. La unidad **puede** ir vacía:

@@ -82,7 +82,9 @@ Nota (2026-07-28, cont. 3): **`courses.rs` → hecho**, split por entidad como p
 
 Nota (2026-07-28, cont. 4): **`instruments.rs` → hecho**, exactamente como proponía el plan: `instruments/mod.rs` (DTOs + `list_instruments`/CRUD de instrumentos y escalas + helpers `insert_instrument`/`insert_scale`, `pub(super)` porque los usan `import_export.rs` y `seed.rs`), `instruments/import_export.rs` (`export_course`/`import_course`), `instruments/seed.rs` (`seed_instruments`, el catálogo real de instrumentos). Tests quedan inline en `mod.rs`.
 
-Con esto, de PR3 solo falta el dedup de `guard_symbol` en `routes/practice_admin.rs`.
+Nota (2026-07-28, cont. 5): **dedup de `guard_symbol` → hecho.** El patrón formato+reservado+duplicado (`validate_symbol_format` + `validate_symbol_not_reserved` + `symbol_taken_in_practice`/`duplicate_symbol_error`) estaba repetido inline en 10 handlers (quantities/results/intermediates/point-results/aggregates × create+update), no 7 como estimaba el plan. `guard_symbol(pool, practice_id, symbol, exclude_quantity_id, exclude_result_id, exclude_intermediate_id, exclude_point_result_id, exclude_aggregate_id)` los colapsa en un único helper. Las validaciones de formato/reservado que viven además dentro de `validate_intermediate`/`validate_point_result`/`validate_aggregate` (para las fórmulas permitidas) se dejaron intactas — las cubren tests directos (`validate_intermediate(&def, &input("pi", ...), ...)`) y tocarlas rompía esa cobertura.
+
+Con esto, **PR3 (data/routes) queda completo**: `db.rs`, `submissions.rs`, `courses.rs`, `instruments.rs` divididos, y el dedup de `guard_symbol` hecho. No quedan ítems pendientes del plan de modularización (frontend PR1, motor Rust PR2 — con el split productivo de `computation.rs` diferido a propósito —, y data/routes PR3).
 
 ## Fuera de alcance (por ahora)
 - **Gatear seeds de dev** (`seed_users`/`seed_academic`/`seed_submissions`) con `#[cfg(debug_assertions)]`: requiere criterio prod-vs-dev y `seed_practices`/`seed_definitions`/`seed_instruments` son catálogo real. Ítem separado si se decide después.
