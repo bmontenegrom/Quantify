@@ -5,7 +5,7 @@ import { PRACTICES_WITHOUT_CHRONO_HELPER } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 
 /** Markup interno (sin fieldset) del widget de cronómetro: display, controles y modo. */
-function chronoWidgetInnerHtml() {
+export function chronoWidgetInnerHtml() {
   return `
     <div class="chrono-widget">
       <div class="chrono-display">0.000 s</div>

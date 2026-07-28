@@ -22,7 +22,7 @@ import {
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
-  wireChronometerWidget,
+  wireChronometerWidget, chronoWidgetInnerHtml,
 } from "./forms-chrono.js";
 import { renderSeriesTable, collectSeriesPointResults } from "./forms-series.js";
 import { loadDraft, clearDraft, scheduleDraftSave } from "./forms-draft.js";
