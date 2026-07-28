@@ -1,8 +1,12 @@
 import { state } from "./state.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, formatDate, measureText, regressionPlot, scatterPlot, compareResults, compareMeasuredVsTheoretical, cssEscape, allStudents, hasUncertainty } from "./lib.js";
+import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
+import { measuredVsTheoreticalMarkup, comparisonMarkup, pointResultsComparisonMarkup } from "./analysis-compare.js";
+import { membersEditorMarkup, wireMembersEditor } from "./analysis-members.js";
+import { regressionMarkup, scatterMarkup } from "./analysis-plots.js";
+export { regressionMarkup, scatterMarkup };
 
 export function renderAnalysis(target, submission, includeReview = false, definition = null) {
   target.classList.remove("detail-empty");
@@ -349,179 +353,7 @@ function formAnalysisMarkup(analysis) {
   `;
 }
 
-export function regressionMarkup(regression) {
-  const plot = regressionPlot(regression.points ?? [], regression.slope, regression.intercept);
-  return `
-    <div class="metrics">
-      <div class="metric">
-        <div class="metric-label">Pendiente</div>
-        <div class="metric-value metric-text">${escapeHtml(measureText(regression.slope, regression.u_slope))}</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Intercepto</div>
-        <div class="metric-value metric-text">${escapeHtml(measureText(regression.intercept, regression.u_intercept))}</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">R²</div>
-        <div class="metric-value">${format(regression.r_squared)}</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Puntos</div>
-        <div class="metric-value">${(regression.points ?? []).length}</div>
-      </div>
-    </div>
-    ${plot ? regressionSvg(plot, regression.x_label, regression.y_label) : `<p class="submission-meta">No se puede graficar: el rango de los datos es nulo.</p>`}
-  `;
-}
 
-/**
- * Markup SVG común a los gráficos de ajuste y de dispersión: ejes, puntos y rótulos.
- * `lineMarkup` inyecta la recta del ajuste (vacío para scatter); `xText`/`yLabel`/`ariaLabel`
- * deben venir ya escapados por el llamador.
- */
-function plotSvg(plot, { ariaLabel, lineMarkup = "", xText, yLabel }) {
-  const f = (n) => n.toFixed(1);
-  const points = plot.scatter
-    .map((p) => `<circle cx="${f(p.cx)}" cy="${f(p.cy)}" r="3" class="reg-point" />`)
-    .join("");
-  const axisY = plot.height - plot.pad;
-  return `
-    <svg class="reg-plot" viewBox="0 0 ${plot.width} ${plot.height}" role="img" aria-label="${ariaLabel}">
-      <line class="reg-axis" x1="${plot.pad}" y1="${axisY}" x2="${plot.width - plot.pad}" y2="${axisY}" />
-      <line class="reg-axis" x1="${plot.pad}" y1="${plot.pad}" x2="${plot.pad}" y2="${axisY}" />
-      ${lineMarkup}
-      ${points}
-      <text class="reg-label" x="${plot.width - plot.pad}" y="${plot.height - 8}" text-anchor="end">${xText}</text>
-      <text class="reg-label" x="${plot.pad}" y="${plot.pad - 12}" text-anchor="start">y: ${yLabel}</text>
-    </svg>
-  `;
-}
-
-function regressionSvg(plot, xLabel = "x", yLabel = "y") {
-  const f = (n) => n.toFixed(1);
-  const lineMarkup = `<line class="reg-line" x1="${f(plot.line.x1)}" y1="${f(plot.line.y1)}" x2="${f(plot.line.x2)}" y2="${f(plot.line.y2)}" />`;
-  return plotSvg(plot, {
-    ariaLabel: `Gráfico del ajuste lineal de ${escapeHtml(yLabel)} contra ${escapeHtml(xLabel)}`,
-    lineMarkup,
-    xText: `x: ${escapeHtml(xLabel)}`,
-    yLabel: escapeHtml(yLabel),
-  });
-}
-
-export function scatterMarkup(scatter) {
-  const points = scatter.points ?? [];
-  const plot = scatterPlot(points, { xLog: scatter.x_log });
-  const xHeader = scatter.x_log ? `${escapeHtml(scatter.x_label)} (log)` : escapeHtml(scatter.x_label);
-  const table = `
-    <div class="data-table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr><th>#</th><th>${xHeader}</th><th>${escapeHtml(scatter.y_label)}</th></tr>
-        </thead>
-        <tbody>
-          ${points
-            .map((p, i) => `<tr><td>${i + 1}</td><td>${format(p[0])}</td><td>${format(p[1])}</td></tr>`)
-            .join("")}
-        </tbody>
-      </table>
-    </div>`;
-  const graph = plot
-    ? scatterSvg(plot, scatter.x_label, scatter.y_label)
-    : `<p class="submission-meta">No se puede graficar: el rango de los datos es nulo${scatter.x_log ? " o hay un x ≤ 0 con eje logarítmico" : ""}.</p>`;
-  return `${graph}${table}`;
-}
-
-function scatterSvg(plot, xLabel = "x", yLabel = "y") {
-  const xText = plot.xLog ? `x: ${escapeHtml(xLabel)} (log)` : `x: ${escapeHtml(xLabel)}`;
-  return plotSvg(plot, {
-    ariaLabel: `Gráfico de dispersión de ${escapeHtml(yLabel)} contra ${escapeHtml(xLabel)}`,
-    xText,
-    yLabel: escapeHtml(yLabel),
-  });
-}
-
-/** Tabla "Medido vs teórico": magnitudes medidas (`X`) contra su derivado automático (`X_t`). */
-function measuredVsTheoreticalMarkup(quantities, derived) {
-  const rows = compareMeasuredVsTheoretical(quantities, derived);
-  if (!rows.length) return "";
-  const num = (v) => (v == null ? "—" : escapeHtml(format(v)));
-  const pct = (v) => (v == null ? "—" : `${escapeHtml(format(v))} %`);
-  return `
-    <h3>Medido vs teórico (automático)</h3>
-    <p class="submission-meta">Cada magnitud medida comparada con el valor teórico que calcula el programa (con su U propagada).</p>
-    <div class="data-table-wrap">
-      <table class="data-table compare-table">
-        <thead>
-          <tr>
-            <th>Magnitud</th><th>Medido (±U)</th><th>Teórico (±U)</th>
-            <th>Δ valor</th><th>Δ valor (%)</th><th>Δ U</th><th>Δ U (%)</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows
-            .map(
-              (r) => `
-            <tr>
-              <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong> <span class="submission-meta">${unitHtml(r.unit)}</span></td>
-              <td>${escapeHtml(measureText(r.exp.value, r.exp.u))}</td>
-              <td>${escapeHtml(measureText(r.teo.value, r.teo.u))}</td>
-              <td>${num(r.dValue)}</td>
-              <td>${pct(r.dValuePct)}</td>
-              <td>${num(r.dU)}</td>
-              <td>${pct(r.dUPct)}</td>
-            </tr>`,
-            )
-            .join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
-  const rows = compareResults(autoDerived, studentResults, tolerances);
-  if (!rows.length) return "";
-  const num = (v) => (v == null ? "—" : escapeHtml(format(v)));
-  const pct = (v) => (v == null ? "—" : `${escapeHtml(format(v))} %`);
-  const hasVerdicts = rows.some((r) => r.verdict != null);
-  const verdictCell = (r) => {
-    if (!hasVerdicts) return "";
-    if (r.verdict === "pass") return `<td class="verdict-pass">✓</td>`;
-    if (r.verdict === "fail") return `<td class="verdict-fail">✗</td>`;
-    return `<td class="verdict-none">—</td>`;
-  };
-  return `
-    <h3>Comparación: tus cálculos vs automático</h3>
-    <div class="data-table-wrap">
-      <table class="data-table compare-table">
-        <thead>
-          <tr>
-            <th>Mensurando</th><th>Automático</th><th>Tus cálculos</th>
-            <th>Δ valor</th><th>Δ valor (%)</th><th>Δ U</th><th>Δ U (%)</th>
-            ${hasVerdicts ? "<th>Veredicto</th>" : ""}
-          </tr>
-        </thead>
-        <tbody>
-          ${rows
-            .map(
-              (r) => `
-            <tr>
-              <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong> <span class="submission-meta">${unitHtml(r.unit)}</span></td>
-              <td>${escapeHtml(measureText(r.auto.value, r.hasUncertainty ? r.auto.u : null))}</td>
-              <td>${r.student ? escapeHtml(measureText(r.student.value, r.hasUncertainty ? r.student.u : null)) : "—"}</td>
-              <td>${num(r.dValue)}</td>
-              <td>${pct(r.dValuePct)}</td>
-              <td>${num(r.dU)}</td>
-              <td>${pct(r.dUPct)}</td>
-              ${verdictCell(r)}
-            </tr>`,
-            )
-            .join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
 
 function studentResultsFormMarkup(submission, definition, isTeacher = false) {
   // Los agregados (Motor F: Re_max/Re_min/Re_medio/M_teorico en Fluidos II) no tienen
@@ -578,20 +410,16 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
   `;
 }
 
-/** Número de corridas (puntos) que cargó el alumno, tomado del máximo point_index de las lecturas.
- *  Invariante: el motor calcula un valor de point_result por corrida completa, así que este conteo
- *  coincide con `analysis.point_results[*].values.length` y con el índice `k` de los `Re#k`
- *  guardados. Si alguna vez un point_result descartara puntos, habría que alinear ambos caminos. */
-function corridaCount(submission) {
-  const idx = (submission.measurements ?? []).map((m) => m.point_index ?? 0);
-  return idx.length ? Math.max(...idx) + 1 : 0;
-}
-
 /** Tabla de entrada de los resultados por corrida (Motor E): una fila por corrida, símbolo `Re#k`.
  *  Reusa la clase `.student-value` para que `saveStudentResults` los recolecte sin cambios. */
 function pointResultsEntryMarkup(submission, definition, saved, locked) {
   const pointResults = definition?.point_results ?? [];
-  const n = corridaCount(submission);
+  // Número de corridas (puntos) que cargó el alumno, tomado del máximo point_index de las
+  // lecturas. Invariante: el motor calcula un valor de point_result por corrida completa, así
+  // que este conteo coincide con `analysis.point_results[*].values.length` y con el índice `k`
+  // de los `Re#k` guardados.
+  const idx = (submission.measurements ?? []).map((m) => m.point_index ?? 0);
+  const n = idx.length ? Math.max(...idx) + 1 : 0;
   if (!pointResults.length || n <= 0) return "";
   const dis = locked ? "disabled" : "";
   const headCells = pointResults
@@ -616,116 +444,6 @@ function pointResultsEntryMarkup(submission, definition, saved, locked) {
         <tbody>${bodyRows}</tbody>
       </table>
     </div>`;
-}
-
-/** Comparación por corrida: valor automático de cada punto vs. el que cargó el alumno (`Re#k`). */
-function pointResultsComparisonMarkup(analysis, studentResults) {
-  const pointResults = analysis.point_results ?? [];
-  if (!pointResults.length) return "";
-  const byStudent = new Map((studentResults ?? []).map((s) => [s.symbol, s]));
-  const n = Math.max(0, ...pointResults.map((p) => p.values.length));
-  const hasAny = pointResults.some((p) => p.values.some((_, k) => byStudent.has(`${p.symbol}#${k}`)));
-  if (!hasAny) return "";
-  const num = (v) => (v == null || !Number.isFinite(v) ? "—" : escapeHtml(format(v)));
-  const headCells = pointResults
-    .map((p) => `<th>${symbolHtml(p.symbol)} auto</th><th>tuyo</th><th>Δ %</th>`)
-    .join("");
-  const rows = Array.from({ length: n }, (_, k) => {
-    const cells = pointResults
-      .map((p) => {
-        const auto = p.values[k];
-        const s = byStudent.get(`${p.symbol}#${k}`);
-        const sv = s ? s.value : null;
-        const pct = sv != null && auto ? ((sv - auto) / auto) * 100 : null;
-        return `<td>${num(auto)}</td><td>${num(sv)}</td><td>${pct == null ? "—" : `${num(pct)} %`}</td>`;
-      })
-      .join("");
-    return `<tr><td class="directory-primary">Corrida ${k + 1}</td>${cells}</tr>`;
-  }).join("");
-  return `
-    <h3>Comparación por corrida: tus cálculos vs automático</h3>
-    <div class="data-table-wrap">
-      <table class="data-table compare-table">
-        <thead><tr><th>Corrida</th>${headCells}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-}
-
-function membersEditorMarkup(submission) {
-  const members = submission.members ?? [];
-  if (!members.length) return "";
-  const students = allStudents(state.academic);
-  const memberIds = new Set(members.map((m) => m.user_id));
-  const available = students.filter((s) => !memberIds.has(s.id));
-  const rows = members
-    .map(
-      (m) => `
-      <tr>
-        <td class="directory-primary">${escapeHtml(m.display_name)}</td>
-        <td>${m.role === "owner" ? "★ owner" : "miembro"}</td>
-        <td><span class="status ${escapeHtml(m.status)}">${escapeHtml(m.status)}</span></td>
-        <td class="submission-meta">${m.accepted_at ? escapeHtml(formatDate(m.accepted_at)) : "—"}</td>
-        <td><button type="button" class="remove-member-btn" data-user-id="${escapeHtml(m.user_id)}">Quitar</button></td>
-      </tr>`,
-    )
-    .join("");
-  const addOptions = available.length
-    ? available.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.display_name)}</option>`).join("")
-    : `<option value="" disabled>Sin alumnos disponibles</option>`;
-  return `
-    <section class="panel members-editor">
-      <h4>Integrantes del informe</h4>
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead><tr><th>Nombre</th><th>Rol</th><th>Estado</th><th>Aceptado</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <div class="members-add-row">
-        <select class="add-member-select">
-          <option value="">— Agregar alumno —</option>
-          ${addOptions}
-        </select>
-        <button type="button" class="add-member-btn">Agregar</button>
-        <span class="members-status submission-meta"></span>
-      </div>
-    </section>
-  `;
-}
-
-function wireMembersEditor(target, submissionId) {
-  const editor = target.querySelector(".members-editor");
-  if (!editor) return;
-  const statusEl = editor.querySelector(".members-status");
-  const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
-
-  editor.querySelectorAll(".remove-member-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      setStatus("Quitando...");
-      try {
-        await postJson(`/api/submissions/${submissionId}/members/remove`, { user_id: btn.dataset.userId });
-        await openSubmissionWorkspace(submissionId);
-      } catch (error) {
-        setStatus(error.message);
-        btn.disabled = false;
-      }
-    });
-  });
-
-  editor.querySelector(".add-member-btn")?.addEventListener("click", async () => {
-    const select = editor.querySelector(".add-member-select");
-    const userId = select?.value;
-    if (!userId) { setStatus("Seleccioná un alumno."); return; }
-    setStatus("Agregando...");
-    try {
-      await postJson(`/api/submissions/${submissionId}/members`, { user_id: userId, force_accept: true });
-      await openSubmissionWorkspace(submissionId);
-    } catch (error) {
-      setStatus(error.message);
-    }
-  });
 }
 
 async function saveStudentResults(event, submissionId) {

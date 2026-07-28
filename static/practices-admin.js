@@ -143,20 +143,33 @@ function symbolFormulaPayloadFromForm(form, kind) {
   return payload;
 }
 
+/** Wrapper único para el patrón try/postJson-o-deleteJson/refetch-definition/status/render que
+ *  se repite en cada acción del admin de prácticas. `resetEditing` cierra la fila en edición
+ *  (alta/edición/borrado); las acciones de nivel práctica (tipo de análisis, operadores,
+ *  fórmulas de eje, mover curva) no tocan `state.editing`. */
+async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) {
+  try {
+    await fn();
+    if (resetEditing) state.editing = { kind: null, id: null };
+    state.practiceActionStatus = successMsg;
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+  }
+  renderPracticesPage();
+}
+
 async function saveNewSymbolFormulaRow(kind, event) {
   event.preventDefault();
   const form = event.currentTarget;
   const practiceId = form.querySelector('[name="practice_id"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/${kind.urlSegment}`, symbolFormulaPayloadFromForm(form, kind));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = kind.statusCreate;
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await postJson(`/api/practices/${practiceId}/${kind.urlSegment}`, symbolFormulaPayloadFromForm(form, kind));
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    kind.statusCreate,
+    { resetEditing: true },
+  );
 }
 
 async function saveEditSymbolFormulaRow(kind, event) {
@@ -164,30 +177,26 @@ async function saveEditSymbolFormulaRow(kind, event) {
   const form = event.currentTarget;
   const practiceId = form.querySelector('[name="practice_id"]').value;
   const id = form.querySelector(`[name="${kind.idParam}"]`).value;
-  try {
-    await postJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`, symbolFormulaPayloadFromForm(form, kind));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = kind.statusUpdate;
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await postJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`, symbolFormulaPayloadFromForm(form, kind));
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    kind.statusUpdate,
+    { resetEditing: true },
+  );
 }
 
 async function deleteSymbolFormulaRow(kind, id, practiceId) {
   if (!window.confirm(kind.confirmDelete)) return;
-  try {
-    await deleteJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = kind.statusDelete;
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await deleteJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`);
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    kind.statusDelete,
+    { resetEditing: true },
+  );
 }
 
 export function renderPracticesPage() {
@@ -732,50 +741,35 @@ export function closePracticeWorkspace() {
 async function savePracticeKind(event) {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
-  try {
+  await runPracticeAction(async () => {
     await postJson(`/api/practices/${payload.practice_id}/analysis-kind`, {
       analysis_kind: payload.analysis_kind,
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
     state.practices = await fetchJson("/api/practices");
-    state.practiceActionStatus = "Tipo de análisis guardado";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  }, "Tipo de análisis guardado");
 }
 
 async function savePracticeOperatorCount(event) {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
   const count = Number(payload.operator_count) || 0;
-  try {
+  await runPracticeAction(async () => {
     await postJson(`/api/practices/${payload.practice_id}/operator-count`, { count });
     state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
-    state.practiceActionStatus = "Operadores actualizados";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  }, "Operadores actualizados");
 }
 
 async function savePracticeRegressionFormulas(event) {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
-  try {
+  await runPracticeAction(async () => {
     await postJson(`/api/practices/${payload.practice_id}/regression-formulas`, {
       x_formula: payload.x_formula ?? "",
       y_formula: payload.y_formula ?? "",
     });
     state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
-    state.practiceActionStatus = "Fórmulas de ajuste guardadas";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  }, "Fórmulas de ajuste guardadas");
 }
 
 function quantityPayloadFromForm(form) {
@@ -802,16 +796,14 @@ async function saveNewQuantity(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const practiceId = form.querySelector('[name="practice_id"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/quantities`, quantityPayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = "Magnitud agregada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await postJson(`/api/practices/${practiceId}/quantities`, quantityPayloadFromForm(form));
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    "Magnitud agregada",
+    { resetEditing: true },
+  );
 }
 
 async function saveEditQuantity(event) {
@@ -819,30 +811,26 @@ async function saveEditQuantity(event) {
   const form = event.currentTarget;
   const practiceId = form.querySelector('[name="practice_id"]').value;
   const qid = form.querySelector('[name="qid"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/quantities/${qid}`, quantityPayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = "Magnitud actualizada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await postJson(`/api/practices/${practiceId}/quantities/${qid}`, quantityPayloadFromForm(form));
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    "Magnitud actualizada",
+    { resetEditing: true },
+  );
 }
 
 async function deletePracticeQuantity(qid, practiceId) {
   if (!window.confirm("¿Eliminar esta magnitud? Esta accion no se puede deshacer.")) return;
-  try {
-    await deleteJson(`/api/practices/${practiceId}/quantities/${qid}`);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = "Magnitud eliminada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await deleteJson(`/api/practices/${practiceId}/quantities/${qid}`);
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    "Magnitud eliminada",
+    { resetEditing: true },
+  );
 }
 
 function curvePayloadFromForm(form) {
@@ -858,16 +846,14 @@ async function saveNewCurve(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const practiceId = form.querySelector('[name="practice_id"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/curves`, curvePayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = "Curva agregada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await postJson(`/api/practices/${practiceId}/curves`, curvePayloadFromForm(form));
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    "Curva agregada",
+    { resetEditing: true },
+  );
 }
 
 async function saveEditCurve(event) {
@@ -875,41 +861,33 @@ async function saveEditCurve(event) {
   const form = event.currentTarget;
   const practiceId = form.querySelector('[name="practice_id"]').value;
   const cid = form.querySelector('[name="cid"]').value;
-  try {
-    await postJson(`/api/practices/${practiceId}/curves/${cid}`, curvePayloadFromForm(form));
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = "Curva actualizada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await postJson(`/api/practices/${practiceId}/curves/${cid}`, curvePayloadFromForm(form));
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    "Curva actualizada",
+    { resetEditing: true },
+  );
 }
 
 async function movePracticeCurve(cid, practiceId, dir) {
-  try {
+  await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/curves/${cid}/move`, { up: dir === "up" });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  }, state.practiceActionStatus);
 }
 
 async function deletePracticeCurve(cid, practiceId) {
   if (!window.confirm("¿Eliminar esta curva? Esta accion no se puede deshacer.")) return;
-  try {
-    await deleteJson(`/api/practices/${practiceId}/curves/${cid}`);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = "Curva eliminada";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await deleteJson(`/api/practices/${practiceId}/curves/${cid}`);
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    "Curva eliminada",
+    { resetEditing: true },
+  );
 }
 
 /** Parsea el campo tolerancia del formulario: número ≥ 0 o null si vacío/negativo. */
@@ -923,24 +901,22 @@ async function saveNewResult(event) {
   const form = event.currentTarget;
   const practiceId = form.querySelector('[name="practice_id"]').value;
   const raw = Object.fromEntries(new FormData(form).entries());
-  try {
-    await postJson(`/api/practices/${practiceId}/results`, {
-      symbol: raw.symbol,
-      name: raw.name,
-      unit: raw.unit,
-      formula: raw.formula,
-      tolerance: parseTolerance(raw.tolerance ?? ""),
-      is_final: raw.is_final === "on",
-      has_uncertainty: raw.has_uncertainty === "on",
-    });
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = "Mensurando agregado";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await postJson(`/api/practices/${practiceId}/results`, {
+        symbol: raw.symbol,
+        name: raw.name,
+        unit: raw.unit,
+        formula: raw.formula,
+        tolerance: parseTolerance(raw.tolerance ?? ""),
+        is_final: raw.is_final === "on",
+        has_uncertainty: raw.has_uncertainty === "on",
+      });
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    "Mensurando agregado",
+    { resetEditing: true },
+  );
 }
 
 async function saveEditResult(event) {
@@ -949,38 +925,34 @@ async function saveEditResult(event) {
   const practiceId = form.querySelector('[name="practice_id"]').value;
   const rid = form.querySelector('[name="rid"]').value;
   const raw = Object.fromEntries(new FormData(form).entries());
-  try {
-    await postJson(`/api/practices/${practiceId}/results/${rid}`, {
-      symbol: raw.symbol,
-      name: raw.name,
-      unit: raw.unit,
-      formula: raw.formula,
-      tolerance: parseTolerance(raw.tolerance ?? ""),
-      is_final: raw.is_final === "on",
-      has_uncertainty: raw.has_uncertainty === "on",
-    });
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = "Mensurando actualizado";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await postJson(`/api/practices/${practiceId}/results/${rid}`, {
+        symbol: raw.symbol,
+        name: raw.name,
+        unit: raw.unit,
+        formula: raw.formula,
+        tolerance: parseTolerance(raw.tolerance ?? ""),
+        is_final: raw.is_final === "on",
+        has_uncertainty: raw.has_uncertainty === "on",
+      });
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    "Mensurando actualizado",
+    { resetEditing: true },
+  );
 }
 
 async function deletePracticeResult(rid, practiceId) {
   if (!window.confirm("¿Eliminar este mensurando? Esta accion no se puede deshacer.")) return;
-  try {
-    await deleteJson(`/api/practices/${practiceId}/results/${rid}`);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.editing = { kind: null, id: null };
-    state.practiceActionStatus = "Mensurando eliminado";
-    renderPracticesPage();
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-    renderPracticesPage();
-  }
+  await runPracticeAction(
+    async () => {
+      await deleteJson(`/api/practices/${practiceId}/results/${rid}`);
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    },
+    "Mensurando eliminado",
+    { resetEditing: true },
+  );
 }
 
 function withPracticeStatus(message) {

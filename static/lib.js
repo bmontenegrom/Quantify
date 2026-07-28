@@ -78,6 +78,16 @@ export function format(value) {
   return Number(value).toLocaleString("es-UY", { maximumSignificantDigits: 5 });
 }
 
+/** Formatea un número (o "—" si es null) para una celda de tabla de comparación. */
+export function num(value) {
+  return value == null ? "—" : escapeHtml(format(value));
+}
+
+/** Formatea un porcentaje (o "—" si es null) para una celda de tabla de comparación. */
+export function pct(value) {
+  return value == null ? "—" : `${escapeHtml(format(value))} %`;
+}
+
 /** Formatea un timestamp (ISO o Date) como fecha y hora cortas en locale es-UY. */
 export function formatDate(value) {
   return new Date(value).toLocaleString("es-UY", {
