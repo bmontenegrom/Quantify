@@ -15,27 +15,19 @@ import {
   PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS, SERIES_LIVE_COLUMNS,
   SYMBOL_FIRST_QUANTITIES, PRACTICES_WITHOUT_CHRONO_HELPER,
 } from "./constants.js";
-import { Chronometer } from "./chronometer.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
+import {
+  groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
+  replicaInputHtml, cellReplicaValues,
+} from "./forms-shared.js";
+import {
+  chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
+  wireChronometerWidget, chronoWidgetInnerHtml,
+} from "./forms-chrono.js";
+import { renderSeriesTable, collectSeriesPointResults } from "./forms-series.js";
+import { loadDraft, clearDraft, scheduleDraftSave } from "./forms-draft.js";
 
-/** Agrupa `items` (con `.id`/`.symbol`) según `sections[].symbols`, en el mismo orden que las
- *  secciones. Devuelve, por sección, sus `rows` encontrados, y aparte los `items` que no entraron
- *  en ninguna sección (`rest`). Común al render de magnitudes (Motor D) y al de la serie (Motor E),
- *  que solo difieren en cómo pintan cada fila/bloque, no en el matching contra PRACTICE_SECTIONS. */
-function groupBySections(items, sections) {
-  const used = new Set();
-  const grouped = sections.map((sec) => {
-    const rows = (sec.symbols ?? [])
-      .map((sym) => items.find((q) => q.symbol === sym))
-      .filter(Boolean);
-    rows.forEach((q) => used.add(q.id));
-    return { sec, rows };
-  });
-  const rest = items.filter((q) => !used.has(q.id));
-  return { grouped, rest };
-}
-
-function quantityNameHtml(q) {
+export function quantityNameHtml(q) {
   const base = inlineMathHtml(q.name);
   if (SYMBOL_FIRST_QUANTITIES.has(q.symbol)) {
     return `${symbolHtml(q.symbol)} <span class="submission-meta">${base}</span>`;
@@ -46,10 +38,6 @@ function quantityNameHtml(q) {
     return `${base} ${symbolHtml(q.symbol)}`;
   }
   return base;
-}
-
-function formatSeriesStat(value) {
-  return Number(value).toLocaleString("es-UY", { maximumSignificantDigits: 10 });
 }
 
 export function renderStudentSelectors() {
@@ -489,60 +477,6 @@ export function renderMeasurementFields() {
   });
 }
 
-/** Markup interno (sin fieldset) del widget de cronómetro: display, controles y modo. */
-function chronoWidgetInnerHtml() {
-  return `
-    <div class="chrono-widget">
-      <div class="chrono-display">0.000 s</div>
-      <div class="chrono-info"><span class="chrono-count">0 marcas</span></div>
-      <div class="chrono-controls">
-        <button type="button" class="chrono-start">▶ Iniciar</button>
-        <button type="button" class="chrono-mark" disabled>● Marcar</button>
-        <button type="button" class="chrono-stop" disabled>■ Detener</button>
-        <button type="button" class="chrono-reset">↺ Reiniciar</button>
-      </div>
-      <label class="chrono-mode-label">Modo:
-        <select class="chrono-mode">
-          <option value="periodo">Período (pares t₂-t₁, t₄-t₃… → técnica de Estadística)</option>
-          <option value="consecutivo">Consecutivo (una marca por período)</option>
-          <option value="pares">Pares solapados (marca cada T/2)</option>
-          <option value="absoluto">Absoluto (tiempos desde inicio)</option>
-        </select>
-      </label>
-      <div class="chrono-readings-preview"></div>
-    </div>
-  `;
-}
-
-/**
- * Cronómetro suelto de apoyo (no atado a ninguna magnitud): ayuda a tomar el tiempo para
- * después tipearlo a mano en el input que corresponda. No entra en `collectMeasurements`
- * (usa `.measurement-section`, no `.measurement-row`).
- */
-function chronoHelperSectionHtml() {
-  return `
-    <div class="measurement-section chrono-helper" data-chrono-helper="1">
-      <h4 class="measurement-section-title">Cronómetro <span class="submission-meta">— ayuda para tomar tiempos</span></h4>
-      ${chronoWidgetInnerHtml()}
-    </div>
-  `;
-}
-
-/** Cablea todos los `.chrono-helper` presentes en el form con una clave única por instancia. */
-function wireChronoHelpers() {
-  measurementFields.querySelectorAll(".chrono-helper").forEach((el, i) => {
-    wireChronometerWidget(el, `__chrono_helper__${i}`);
-  });
-}
-
-/** `true` si esta magnitud se mide a mano (sin cronómetro propio) pero es un tiempo, y la
- *  práctica no está en `PRACTICES_WITHOUT_CHRONO_HELPER` (instrumento con lectura propia,
- *  p. ej. osciloscopio: relajación exponencial no cronometra T_oc/tmedio a mano). */
-function needsChronoHelper(q) {
-  if (PRACTICES_WITHOUT_CHRONO_HELPER.has(practiceSelect.value)) return false;
-  return q.quantity === "tiempo" && !q.repeated && !q.is_given;
-}
-
 /** Parte temática (id de PRACTICE_PARTS) a la que pertenece un resultado final, o `null`. */
 function partForResult(symbol) {
   const sections = PRACTICE_SECTIONS[practiceSelect.value] ?? [];
@@ -597,7 +531,7 @@ function finalResultSectionHtml(definition, finals) {
 }
 
 /** Recolecta los resultados finales cargados por el alumno junto con la entrega (si los hay). */
-function collectFinalResults() {
+export function collectFinalResults() {
   const scalar = [...measurementFields.querySelectorAll('[data-final-result="1"]')].reduce((acc, row) => {
     const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
     const rawVal = row.querySelector(".final-result-value").value.trim();
@@ -613,31 +547,7 @@ function collectFinalResults() {
   return [...scalar, ...collectSeriesPointResults()];
 }
 
-function prefixSelectHtml() {
-  const opts = SI_PREFIXES.map(
-    (p) => `<option value="${escapeHtml(p.label)}" ${p.label === "" ? "selected" : ""}>${p.label || "—"}</option>`
-  ).join("");
-  return `<select class="prefix-select" title="Prefijo SI">${opts}</select>`;
-}
-
-/** Clave del cronómetro de una fila: por operador (`qid#i`) si tiene `data-operator-index`. */
-function chronoKeyFor(row) {
-  const op = row.dataset.operatorIndex;
-  return op != null ? `${row.dataset.quantityId}#${op}` : row.dataset.quantityId;
-}
-
-export function renderReplicaInput(unit) {
-  return `
-    <div class="replica">
-      ${prefixSelectHtml()}
-      <input class="measure-value" type="number" step="any" placeholder="valor" data-unit="${escapeHtml(unit)}" />
-      <span class="replica-unit">${unitHtml(unit)}</span>
-      <button type="button" class="remove-replica" title="Quitar">✕</button>
-    </div>
-  `;
-}
-
-function wireRemoveReplica(row) {
+export function wireRemoveReplica(row) {
   const replicas = row.querySelectorAll(".replica");
   row.querySelectorAll(".remove-replica").forEach((btn) => {
     btn.onclick = () => {
@@ -651,17 +561,6 @@ function wireRemoveReplica(row) {
   } else {
     row.querySelectorAll(".remove-replica").forEach((b) => (b.style.visibility = "visible"));
   }
-}
-
-export function populateScaleOptions(row) {
-  const instrumentId = row.querySelector(".measure-instrument").value;
-  const scaleSelect = row.querySelector(".measure-scale");
-  const instrument = state.practiceForm?.instruments.find((i) => i.id === instrumentId);
-  const scales = instrument?.scales ?? [];
-  scaleSelect.innerHTML = [`<option value="">— sin escala —</option>`]
-    .concat(scales.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label)} (${escapeHtml(s.unit)})</option>`))
-    .join("");
-  if (scales.length === 1) scaleSelect.value = scales[0].id;
 }
 
 export function collectMeasurements() {
@@ -802,10 +701,6 @@ function collectMeta() {
   return Object.keys(meta).length ? meta : null;
 }
 
-function setSubmissionBusy(busy) {
-  if (submitButton) submitButton.disabled = busy;
-}
-
 function buildMetaMap(measurements) {
   const map = {};
   const quantities = state.practiceForm?.definition?.quantities ?? [];
@@ -841,7 +736,7 @@ export async function submitFormSubmission() {
     return;
   }
 
-  setSubmissionBusy(true);
+  if (submitButton) submitButton.disabled = true;
   const editingId = state.editingSubmissionId;
   submitStatus.textContent = editingId ? "Guardando cambios..." : "Entregando...";
   try {
@@ -883,7 +778,7 @@ export async function submitFormSubmission() {
   } catch (error) {
     submitStatus.textContent = error.message;
   } finally {
-    setSubmissionBusy(false);
+    if (submitButton) submitButton.disabled = false;
   }
 }
 
@@ -1125,668 +1020,6 @@ function fillReplicaRow(row, e, values) {
   container.querySelectorAll(".measure-value").forEach((input, i) => {
     if (values[i] != null) input.value = values[i];
   });
-}
-
-function renderSeriesTable(definition) {
-  // Motor E: separa las magnitudes que se miden por punto (van en la serie) de los escalares
-  // compartidos (datos de cátedra / medida única), que se cargan una sola vez.
-  const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
-  const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
-  const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
-  const header = cols
-    .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${symbolHtml(q.symbol)}${q.unit ? ` <span class="submission-meta">(${unitHtml(q.unit)})</span>` : ""}</th>`)
-    .join("") + liveCols
-    .map((c) => `<th>${symbolHtml(c.symbol)}${c.unit ? ` <span class="submission-meta">(${unitHtml(c.unit)})</span>` : ""}</th>`)
-    .join("") + seriesPointResultCols()
-    .map((p) => `<th>${symbolHtml(p.symbol)}${p.unit ? ` <span class="submission-meta">(${unitHtml(p.unit)})</span>` : ""}</th>`)
-    .join("");
-  const INITIAL_ROWS = 3;
-  const body = Array.from({ length: INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
-  // Secciones temáticas (PRACTICE_SECTIONS): agrupa los escalares por sección, con `data-section`
-  // para que las tabs de partes las muestren/oculten. Sin secciones, un solo bloque como siempre.
-  const sections = PRACTICE_SECTIONS[practiceSelect.value];
-  let sharedSection = "";
-  let seriesSectionAttr = "";
-  if (sections && shared.length) {
-    // La sección `series: true` no agrupa magnitudes: solo marca dónde va la tabla por punto.
-    const seriesSec = sections.find((sec) => sec.series);
-    if (seriesSec?.id) seriesSectionAttr = ` data-section="${escapeHtml(seriesSec.id)}"`;
-    const { grouped, rest } = groupBySections(
-      shared,
-      sections.filter((sec) => !sec.series),
-    );
-    const blocks = grouped
-      .filter(({ rows }) => rows.length)
-      .map(({ sec, rows }) => {
-        const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
-        return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}</div>`;
-      });
-    if (rest.length) {
-      blocks.push(`<div class="shared-quantities"><h4>Medidas</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
-    }
-    sharedSection = blocks.join("");
-  } else if (shared.length) {
-    sharedSection = `<div class="shared-quantities"><h4>Medidas</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
-  }
-  const partsNote = PRACTICE_PARTS[practiceSelect.value]
-    ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
-    : "";
-  // Si alguna columna es una serie de tiempos con réplicas (p. ej. tiempo de caída en
-  // viscosidad), ofrecemos un cronómetro de apoyo suelto arriba de la tabla.
-  const hasReplicatedTime = [...cols, ...shared].some((q) => q.repeated && q.quantity === "tiempo");
-  const chronoHelper = hasReplicatedTime ? chronoHelperSectionHtml() : "";
-  measurementFields.innerHTML = `
-    ${chronoHelper}
-    ${partsNote}
-    ${sharedSection}
-    <div${seriesSectionAttr}>
-      <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. ${
-        definition.analysis_kind === "curva"
-          ? "Hacen falta al menos 2 puntos para graficar la curva."
-          : "Hacen falta al menos 2 puntos para el ajuste."
-      }</p>
-      <div class="data-table-wrap">
-        <table class="series-table data-table">
-          <thead><tr>${header}<th></th></tr></thead>
-          <tbody>${body}</tbody>
-        </table>
-      </div>
-      <button type="button" class="add-series-row">＋ agregar punto</button>
-      <section class="series-preview panel" aria-live="polite"></section>
-    </div>
-  `;
-  // Wiring de las filas compartidas de medida única: instrumento → escalas compatibles.
-  measurementFields.querySelectorAll(".shared-quantities .measurement-row").forEach((row) => {
-    if (row.dataset.isGiven === "1") return;
-    const inst = row.querySelector(".measure-instrument");
-    if (inst) {
-      inst.addEventListener("change", () => populateScaleOptions(row));
-      populateScaleOptions(row);
-    }
-    // Oculta el botón ✕ de la única réplica (medida única: no se quitan ni agregan réplicas).
-    wireRemoveReplica(row);
-  });
-  measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
-    measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
-    wireSeriesRemove();
-    updateSeriesLive();
-    schedulePreview();
-  });
-  wireSeriesRemove();
-
-  let previewTimer = null;
-  const schedulePreview = () => {
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(updateRegressionPreview, 350);
-  };
-  measurementFields.querySelector(".series-table").addEventListener("input", (e) => {
-    if (
-      e.target.classList.contains("series-value") ||
-      e.target.classList.contains("series-replica") ||
-      e.target.classList.contains("prefix-select")
-    ) {
-      updateSeriesMeans();
-      updateSeriesLive();
-      schedulePreview();
-    }
-  });
-  measurementFields.querySelector(".series-table").addEventListener("change", () => {
-    updateSeriesMeans();
-    updateSeriesLive();
-    schedulePreview();
-  });
-  // Los escalares compartidos también entran en las fórmulas de eje: refrescá la vista previa al
-  // editarlos (sus filas viven fuera de la tabla de la serie; puede haber varios bloques).
-  // Además, algunas columnas en vivo dependen de una compartida (viscosidad: v_medio = dx/t̄).
-  measurementFields.querySelectorAll(".shared-quantities").forEach((sharedEl) => {
-    const refresh = () => {
-      schedulePreview();
-      updateSeriesLive();
-    };
-    sharedEl.addEventListener("input", refresh);
-    sharedEl.addEventListener("change", refresh);
-  });
-  updateSeriesMeans();
-  updateSeriesLive();
-  wireChronoHelpers();
-}
-
-async function updateRegressionPreview() {
-  const container = measurementFields.querySelector(".series-preview");
-  if (!container) return;
-  const measurements = collectMeasurements();
-  const points = measurements.reduce(
-    (n, m) => Math.max(n, m.point_replicas?.length ?? m.values.length),
-    0,
-  );
-  if (points < 2) {
-    container.innerHTML = `<p class="submission-meta">Cargá al menos 2 puntos completos para ver la vista previa.</p>`;
-    return;
-  }
-  try {
-    const analysis = await postJson(
-      `/api/practices/${encodeURIComponent(practiceSelect.value)}/analyze-preview`,
-      { measurements }
-    );
-    if (analysis.regression) {
-      const { regressionMarkup } = await import("./analysis.js");
-      container.innerHTML = `<h4>Vista previa del ajuste</h4>${regressionMarkup(analysis.regression)}`;
-      return;
-    }
-    const scatters = analysis.scatters ?? [];
-    if (scatters.length) {
-      const { scatterMarkup, derivedBlockMarkup } = await import("./analysis.js");
-      const blocks = scatters
-        .map((s) => {
-          const heading = scatters.length > 1
-            ? `<h5>${escapeHtml(s.y_label)} vs ${escapeHtml(s.x_label)}${s.x_log ? " (x log)" : ""}</h5>`
-            : "";
-          return `${heading}${scatterMarkup(s)}`;
-        })
-        .join("");
-      const title = scatters.length > 1 ? "Vista previa de las curvas" : "Vista previa de la curva";
-      // Solo docentes ven los mensurandos derivados en la vista previa; los alumnos los
-      // descubren tras la entrega, cuando el docente habilita results_visible_to_student.
-      const derivedHtml = canReview(state.user) ? derivedBlockMarkup(analysis.derived ?? []) : "";
-      container.innerHTML = `<h4>${title}</h4>${blocks}${derivedHtml}`;
-    } else {
-      container.innerHTML = "";
-    }
-  } catch {
-    container.innerHTML = `<p class="submission-meta">No se pudo calcular la vista previa con los datos actuales.</p>`;
-  }
-}
-
-function seriesRowHtml(cols) {
-  const cells = cols
-    .map((q) => {
-      const n = q.repeated ? Number(q.replicas_per_point) || 0 : 0;
-      if (n > 0) {
-        const inputs = Array.from({ length: n }, (_, k) => replicaInputHtml(q.id, k)).join("");
-        return `<td class="series-cell series-cell--replicas" style="--replicas: ${n}"><div class="series-input-wrap">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div></div><span class="series-mean submission-meta">x̄ —</span></td>`;
-      }
-      return `<td class="series-cell"><div class="series-input-wrap">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" /></div></td>`;
-    })
-    .join("");
-  // Columnas calculadas en vivo: solo lectura y sin clase `series-cell`, para que
-  // collectMeasurements no las cuente como parte del punto.
-  const liveCells = (SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [])
-    .map((c) => `<td class="series-live" data-live-symbol="${escapeHtml(c.symbol)}"><span class="series-live-value submission-meta">—</span></td>`)
-    .join("");
-  // Resultado por corrida cargado a mano por el alumno (Motor E): editable, sin clase `series-cell`
-  // para que collectMeasurements no lo cuente como medición. Se recolecta como `Re#k` al entregar.
-  const pointResultCells = seriesPointResultCols()
-    .map((p) => `<td class="series-point-result-cell"><input class="series-point-result" data-symbol="${escapeHtml(p.symbol)}" type="number" step="any" placeholder="${escapeHtml(p.symbol)}" /></td>`)
-    .join("");
-  return `<tr class="series-row">${cells}${liveCells}${pointResultCells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
-}
-
-/** Resultados derivados por punto (Motor E) de la práctica actual; el alumno carga uno por corrida. */
-function seriesPointResultCols() {
-  return state.practiceForm?.definition?.point_results ?? [];
-}
-
-/** ¿La fila de la serie tiene todas sus celdas de medición completas? Mismo criterio que
- *  collectMeasurements (fila incompleta = punto ignorado), para alinear el índice de corrida. */
-function seriesRowComplete(row) {
-  return [...row.querySelectorAll(".series-cell")].every((cell) => {
-    if (cell.querySelector(".series-replica")) {
-      const reps = cellReplicaValues(cell);
-      return reps.length > 0 && reps.every(Number.isFinite);
-    }
-    const raw = cell.querySelector(".series-value").value.trim();
-    return raw !== "" && Number.isFinite(Number(raw));
-  });
-}
-
-/** Re por corrida cargado en la tabla: `Re#k`, con k = índice entre las filas completas (mismo
- *  orden que las mediciones, para que la comparación empareje con el valor automático). */
-function collectSeriesPointResults() {
-  const out = [];
-  let k = -1;
-  measurementFields.querySelectorAll(".series-row").forEach((row) => {
-    if (!seriesRowComplete(row)) return;
-    k += 1;
-    row.querySelectorAll(".series-point-result").forEach((input) => {
-      const raw = input.value.trim();
-      if (raw === "") return;
-      const value = Number(raw);
-      if (Number.isFinite(value)) out.push({ symbol: `${input.dataset.symbol}#${k}`, value, u_expanded: null });
-    });
-  });
-  return out;
-}
-
-/// HTML de una fila de escalar compartido (Motor E): dato de cátedra (valor ± U) o medida única
-/// (instrumento/escala + un valor). Se cargan una sola vez, fuera de la tabla de la serie.
-function sharedRowHtml(q) {
-  if (q.is_given) {
-    const uField = !hasUncertainty(q)
-      ? ""
-      : `<label>Incertidumbre U (expandida)
-            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
-          </label>`;
-    return `
-      <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
-        <legend>${quantityNameHtml(q)}</legend>
-        <div class="form-grid">
-          <label>Valor
-            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-value" type="number" step="any" placeholder="valor" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
-          </label>
-          ${uField}
-        </div>
-      </fieldset>`;
-  }
-  const instruments = state.practiceForm?.instruments ?? [];
-  const options = compatibleInstruments(instruments, q.quantity);
-  const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
-    .concat(options.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`))
-    .join("");
-  return `
-    <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
-      <legend>${quantityNameHtml(q)}</legend>
-      <div class="measure-body">
-        <div class="measure-selectors">
-          <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
-          <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
-        </div>
-        <div class="measure-sep"></div>
-        <div class="measure-right">
-          <div class="measure-values" data-repeated="0">${renderReplicaInput(q.unit)}</div>
-        </div>
-      </div>
-    </fieldset>`;
-}
-
-/** HTML de un input de réplica (índice 0-based `k`) para la magnitud `quantityId`. */
-function replicaInputHtml(quantityId, k) {
-  return `<input class="series-replica" type="number" step="any" data-quantity-id="${escapeHtml(quantityId)}" placeholder="valor ${k + 1}" />`;
-}
-
-/** Lee las réplicas no vacías de una celda de réplicas, aplicando el prefijo SI de la celda. */
-function cellReplicaValues(cell) {
-  const factor = prefixFactor(cell.querySelector(".prefix-select").value);
-  return [...cell.querySelectorAll(".series-replica")]
-    .map((input) => input.value.trim())
-    .filter((raw) => raw !== "")
-    .map((raw) => Number(raw) * factor);
-}
-
-/** Valor numérico (con prefijo SI aplicado) del input de una magnitud dentro de una fila. */
-function seriesCellValue(row, quantityId) {
-  const input = row.querySelector(`.series-value[data-quantity-id="${CSS.escape(quantityId)}"]`);
-  if (!input) return NaN;
-  const raw = input.value.trim();
-  if (raw === "") return NaN;
-  const factor = prefixFactor(input.closest(".series-cell").querySelector(".prefix-select").value);
-  return Number(raw) * factor;
-}
-
-/** Valor numérico (con prefijo SI aplicado) de la réplica `k` (0-based) de una magnitud repetida. */
-function replicaValueAt(row, quantityId, k) {
-  const cell = row.querySelector(`.series-replica[data-quantity-id="${CSS.escape(quantityId)}"]`)?.closest(".series-cell--replicas");
-  const input = cell?.querySelectorAll(".series-replica")[k];
-  if (!input) return NaN;
-  const raw = input.value.trim();
-  if (raw === "") return NaN;
-  return Number(raw) * prefixFactor(cell.querySelector(".prefix-select").value);
-}
-
-/** fluidos-1: Q_1=V1/t1, Q_2=V2/t2, Q_medio=media(Q_1,Q_2) (V y t tienen 2 réplicas cada una). */
-function fluidosCaudalLiveValue(symbol, row, idBySymbol) {
-  const q1 = flowRate(replicaValueAt(row, idBySymbol.get("V") ?? "", 0), replicaValueAt(row, idBySymbol.get("t") ?? "", 0));
-  const q2 = flowRate(replicaValueAt(row, idBySymbol.get("V") ?? "", 1), replicaValueAt(row, idBySymbol.get("t") ?? "", 1));
-  if (symbol === "Q_1") return q1;
-  if (symbol === "Q_2") return q2;
-  if (symbol === "Q_medio") return Number.isFinite(q1) && Number.isFinite(q2) ? (q1 + q2) / 2 : NaN;
-  return NaN;
-}
-
-/** Valor (con prefijo) de una magnitud compartida de medida única (fuera de la tabla de series). */
-function sharedSingleValue(quantityId) {
-  const replica = measurementFields
-    .querySelector(`.measurement-row[data-quantity-id="${CSS.escape(quantityId)}"]`)
-    ?.querySelector(".replica");
-  const raw = replica?.querySelector(".measure-value")?.value.trim();
-  if (!raw) return NaN;
-  return Number(raw) * prefixFactor(replica.querySelector(".prefix-select").value);
-}
-
-/** Media de las réplicas de una magnitud repetida dentro de una fila de la serie. */
-function rowReplicaMean(row, quantityId) {
-  const cell = row
-    .querySelector(`.series-replica[data-quantity-id="${CSS.escape(quantityId)}"]`)
-    ?.closest(".series-cell--replicas");
-  const reps = cell ? cellReplicaValues(cell) : [];
-  return reps.length ? reps.reduce((a, b) => a + b, 0) / reps.length : NaN;
-}
-
-/** viscosidad: v_medio = dx (compartida) / t̄ (media de réplicas de t del punto). */
-function viscosidadVelocityLiveValue(row, idBySymbol) {
-  const dx = sharedSingleValue(idBySymbol.get("dx") ?? "");
-  const tMean = rowReplicaMean(row, idBySymbol.get("t") ?? "");
-  return Number.isFinite(dx) && Number.isFinite(tMean) && tMean !== 0 ? dx / tMean : NaN;
-}
-
-/** Recalcula las columnas en vivo (p. ej. P = I²·R, Q = V/t) de cada fila de la tabla de series. */
-function updateSeriesLive() {
-  const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
-  if (!liveCols.length) return;
-  const quantities = state.practiceForm?.definition?.quantities ?? [];
-  const idBySymbol = new Map(quantities.map((q) => [q.symbol, q.id]));
-  const practice = practiceSelect.value;
-  measurementFields.querySelectorAll(".series-row").forEach((row) => {
-    for (const col of liveCols) {
-      const cell = row.querySelector(`.series-live[data-live-symbol="${CSS.escape(col.symbol)}"]`);
-      const out = cell?.querySelector(".series-live-value");
-      if (!out) continue;
-      let value;
-      if (practice === "fluidos-1") {
-        value = fluidosCaudalLiveValue(col.symbol, row, idBySymbol);
-      } else if (practice === "viscosidad") {
-        value = viscosidadVelocityLiveValue(row, idBySymbol);
-      } else {
-        const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
-        value = args.every(Number.isFinite) ? pointPower(...args) : NaN;
-      }
-      out.textContent = Number.isFinite(value) ? format(value) : "—";
-    }
-  });
-}
-
-/** Actualiza el promedio (x̄) mostrado en cada celda de réplicas de la tabla de series. */
-function updateSeriesMeans() {
-  measurementFields.querySelectorAll(".series-cell--replicas").forEach((cell) => {
-    const meanEl = cell.querySelector(".series-mean");
-    if (!meanEl) return;
-    const reps = cellReplicaValues(cell);
-    const valid = reps.filter((n) => Number.isFinite(n));
-    if (valid.length === 0) {
-      meanEl.textContent = "x̄ —";
-      return;
-    }
-    const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
-    meanEl.textContent = `x̄ ${format(mean)} (n=${valid.length})`;
-  });
-}
-
-function wireSeriesRemove() {
-  const rows = measurementFields.querySelectorAll(".series-row");
-  measurementFields.querySelectorAll(".remove-series-row").forEach((btn) => {
-    btn.onclick = () => {
-      if (measurementFields.querySelectorAll(".series-row").length <= 1) return;
-      btn.closest(".series-row").remove();
-      wireSeriesRemove();
-    };
-    btn.style.visibility = rows.length <= 1 ? "hidden" : "visible";
-  });
-}
-
-// ── Cronómetro ────────────────────────────────────────────────────────────────
-
-function formatElapsed(seconds) {
-  const total = Math.max(0, seconds);
-  const m = Math.floor(total / 60);
-  const s = Math.floor(total % 60);
-  const ms = Math.round((total % 1) * 1000);
-  return m > 0
-    ? `${m}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")} s`
-    : `${s}.${String(ms).padStart(3, "0")} s`;
-}
-
-function wireChronometerWidget(row, quantityId) {
-  if (!state.chronometers.has(quantityId)) {
-    state.chronometers.set(quantityId, new Chronometer());
-  }
-  const chrono = state.chronometers.get(quantityId);
-
-  const display = row.querySelector(".chrono-display");
-  const countEl = row.querySelector(".chrono-count");
-  const startBtn = row.querySelector(".chrono-start");
-  const markBtn = row.querySelector(".chrono-mark");
-  const stopBtn = row.querySelector(".chrono-stop");
-  const resetBtn = row.querySelector(".chrono-reset");
-  const modeSelect = row.querySelector(".chrono-mode");
-  const preview = row.querySelector(".chrono-readings-preview");
-
-  let rafId = null;
-
-  function updateButtons() {
-    const s = chrono.state;
-    startBtn.disabled = s !== "idle";
-    markBtn.disabled = s !== "running";
-    stopBtn.disabled = s !== "running";
-    resetBtn.disabled = s === "running";
-  }
-
-  function updatePreview() {
-    const mode = modeSelect.value;
-    const r = chrono.readings(mode);
-    countEl.textContent = `${chrono.count} marca${chrono.count !== 1 ? "s" : ""} → ${r.length} lectura${r.length !== 1 ? "s" : ""}`;
-    if (r.length === 0) {
-      preview.textContent = "";
-      return;
-    }
-    const shown = r.slice(0, 8).map((v) => v.toFixed(3)).join(", ");
-    preview.textContent = r.length > 8 ? `${shown} … (+${r.length - 8} más)` : shown;
-  }
-
-  function tick() {
-    display.textContent = formatElapsed(chrono.elapsed);
-    updatePreview();
-    if (chrono.state === "running") {
-      rafId = requestAnimationFrame(tick);
-    }
-  }
-
-  function stopRaf() {
-    if (rafId !== null) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
-    }
-  }
-
-  const debugContainer = row.querySelector(".series-debug");
-  function refreshDebug() {
-    renderSeriesDebug(row, quantityId, chrono.readings(modeSelect.value));
-  }
-
-  display.textContent = formatElapsed(chrono.elapsed);
-  updateButtons();
-  updatePreview();
-  if (chrono.state === "running") rafId = requestAnimationFrame(tick);
-  else refreshDebug();
-
-  startBtn.addEventListener("click", () => {
-    chrono.start();
-    updateButtons();
-    if (debugContainer) debugContainer.innerHTML = "";
-    rafId = requestAnimationFrame(tick);
-  });
-  markBtn.addEventListener("click", () => {
-    chrono.mark();
-    updatePreview();
-  });
-  stopBtn.addEventListener("click", () => {
-    chrono.stop();
-    stopRaf();
-    display.textContent = formatElapsed(chrono.elapsed);
-    updateButtons();
-    updatePreview();
-    refreshDebug();
-  });
-  resetBtn.addEventListener("click", () => {
-    chrono.reset();
-    stopRaf();
-    display.textContent = formatElapsed(0);
-    updateButtons();
-    updatePreview();
-    state.seriesDebug.delete(quantityId);
-    if (debugContainer) debugContainer.innerHTML = "";
-  });
-  modeSelect.addEventListener("change", () => {
-    state.seriesDebug.delete(quantityId);
-    updatePreview();
-    if (chrono.state !== "running") refreshDebug();
-  });
-
-  row._chronoKeyHandler = (e) => {
-    if (e.code === "Space" && e.target.tagName !== "BUTTON" && e.target.tagName !== "SELECT") {
-      e.preventDefault();
-      chrono.mark();
-      updatePreview();
-    }
-  };
-  document.addEventListener("keydown", row._chronoKeyHandler);
-
-  new MutationObserver(() => {
-    if (!document.contains(row)) {
-      document.removeEventListener("keydown", row._chronoKeyHandler);
-      stopRaf();
-    }
-  }).observe(measurementFields, { childList: true, subtree: false });
-}
-
-function renderSeriesDebug(row, quantityId, readings) {
-  const container = row.querySelector(".series-debug");
-  if (!container) return;
-  if (!readings || readings.length === 0) {
-    container.innerHTML = "";
-    return;
-  }
-  let dbg = state.seriesDebug.get(quantityId);
-  if (!dbg) {
-    dbg = { discarded: new Set(), bins: 0 };
-    state.seriesDebug.set(quantityId, dbg);
-  }
-  dbg.discarded = new Set([...dbg.discarded].filter((i) => i < readings.length));
-
-  const kept = readings.filter((_, i) => !dbg.discarded.has(i));
-  const stats = seriesStats(kept);
-  const defaultBins = Math.max(1, Math.min(20, Math.round(Math.sqrt(kept.length || 1))));
-  const bins = dbg.bins && dbg.bins > 0 ? dbg.bins : defaultBins;
-  const hist = kept.length > 0 ? histogram(kept, bins) : null;
-
-  const ordered = readings.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
-  const items = ordered
-    .map(({ v, i }) => {
-      const off = dbg.discarded.has(i);
-      return `<li class="series-point ${off ? "discarded" : ""}">
-        <span class="series-point-value">${v.toFixed(3)} s</span>
-        <button type="button" class="series-point-toggle" data-index="${i}">${off ? "restaurar" : "descartar"}</button>
-      </li>`;
-    })
-    .join("");
-
-  container.innerHTML = `
-    <div class="series-debug-head">
-      <strong>Depuración de la serie</strong>
-      <span class="submission-meta">n=${stats.n} · x̄=${Number.isFinite(stats.mean) ? formatSeriesStat(stats.mean) : "—"} s · s=${Number.isFinite(stats.std) ? formatSeriesStat(stats.std) : "—"} s · s/√n=${Number.isFinite(stats.stdMean) ? formatSeriesStat(stats.stdMean) : "—"} s</span>
-    </div>
-    <div class="series-debug-grid">
-      <div class="series-hist">
-        <label class="hist-bins-label">Intervalos (bins):
-          <input type="number" class="hist-bins" min="1" max="40" value="${bins}" />
-        </label>
-        ${hist ? histogramSvg(hist, stats.mean, stats.std, kept.length) : `<p class="submission-meta">Sin datos conservados.</p>`}
-      </div>
-      <ol class="series-point-list">${items}</ol>
-    </div>
-  `;
-
-  container.querySelector(".hist-bins")?.addEventListener("change", (e) => {
-    const n = Math.round(Number(e.target.value));
-    dbg.bins = Number.isFinite(n) && n >= 1 ? n : 0;
-    renderSeriesDebug(row, quantityId, readings);
-  });
-  container.querySelectorAll(".series-point-toggle").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const i = Number(btn.dataset.index);
-      if (dbg.discarded.has(i)) dbg.discarded.delete(i);
-      else dbg.discarded.add(i);
-      renderSeriesDebug(row, quantityId, readings);
-    });
-  });
-}
-
-function histogramSvg(hist, mean, std, n) {
-  const W = 340;
-  const H = 180;
-  const pad = 28;
-  const innerW = W - 2 * pad;
-  const innerH = H - 2 * pad;
-  const { min, max, width, counts } = hist;
-  const curve = std > 0 ? normalCurve(mean, std, min, max, 80) : [];
-  const curveCounts = curve.map(([x, y]) => [x, y * n * width]);
-  const maxCount = Math.max(...counts, ...curveCounts.map((p) => p[1]), 1);
-  const spanX = max - min || 1;
-  const sx = (x) => pad + ((x - min) / spanX) * innerW;
-  const sy = (c) => H - pad - (c / maxCount) * innerH;
-  const bars = counts
-    .map((c, i) => {
-      const x0 = sx(min + i * width);
-      const x1 = sx(min + (i + 1) * width);
-      const y = sy(c);
-      const w = Math.max(0, x1 - x0 - 1);
-      return `<rect x="${x0.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${(H - pad - y).toFixed(1)}" class="hist-bar" />`;
-    })
-    .join("");
-  const poly = curveCounts.map(([x, c]) => `${sx(x).toFixed(1)},${sy(c).toFixed(1)}`).join(" ");
-  const curveEl = poly ? `<polyline points="${poly}" class="normal-curve" fill="none" />` : "";
-  return `<svg viewBox="0 0 ${W} ${H}" class="histogram" role="img" aria-label="Histograma con curva normal">
-    ${bars}${curveEl}
-    <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" class="hist-axis" />
-  </svg>`;
-}
-
-// ── Borrador local ───────────────────────────────────────────────────────────
-// Autoguarda lo que el alumno va tipeando en una entrega NUEVA (no enviada aún) para que un
-// cambio de práctica/curso/grupo accidental, o un refresh de página, no pierda los valores.
-// No aplica mientras se edita/restaura una entrega existente (`applyPrefill` cubre esos casos).
-
-function draftKey() {
-  // Sin la mesa: `updateTableSelector()` reconstruye #table-select en cada cambio de práctica y
-  // vuelve al valor por defecto (asignación/perfil), así que no es estable mientras se compone.
-  const uid = state.user?.id ?? "anon";
-  return `quantify-draft:${uid}:${courseSelect.value}:${groupSelect.value}:${practiceSelect.value}`;
-}
-
-function saveDraft() {
-  if (state.editingSubmissionId || state.restoringCancelledSubmission || !state.practiceForm) return;
-  const draft = {
-    measurements: collectMeasurements(),
-    finalResults: collectFinalResults(),
-    comment: studentComment?.value ?? "",
-    savedAt: Date.now(),
-  };
-  try {
-    localStorage.setItem(draftKey(), JSON.stringify(draft));
-  } catch {
-    // localStorage puede fallar (cuota, modo privado); el borrador es best-effort.
-  }
-}
-
-function loadDraft() {
-  try {
-    const raw = localStorage.getItem(draftKey());
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function clearDraft() {
-  try {
-    localStorage.removeItem(draftKey());
-  } catch {
-    // no-op
-  }
-}
-
-let draftSaveTimer = null;
-function scheduleDraftSave() {
-  clearTimeout(draftSaveTimer);
-  draftSaveTimer = setTimeout(saveDraft, 350);
 }
 
 // ── Listeners top-level ────────────────────────────────────────────────────────
