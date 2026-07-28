@@ -60,7 +60,7 @@ Extraer a lo largo de bloques ya cohesivos:
 - `src/computation.rs` (4071) → `computation/formula.rs` (`compile_formula`/`check_formula`/`eval_compiled`/`CONSTANTS`, `L212–303`), `computation/engines.rs` (los motores, `L304–1103`), `computation/submission.rs` (IO/CRUD de entregas, `L1289–1706`), `mod.rs` (DTOs + `analyze`). Tests se mueven con cada módulo.
 - Cada archivo Rust es 42–58% tests; moverlos con su módulo es la mayor baja mecánica.
 
-Nota (2026-07-28): los tests de `practices.rs` ya se extrajeron a `src/practices/tests.rs` (PR #51) antes de que este plan se recuperara. El split de `seed.rs`/`crud.rs`/`mod.rs` sigue pendiente.
+Nota (2026-07-28): los tests de `practices.rs` ya se extrajeron a `src/practices/tests.rs` (PR #51) antes de que este plan se recuperara. El split de `seed.rs`/`crud.rs`/`mod.rs` se hizo en el PR de Fase 16 PR2 (`refactor/pr2-practices-split`).
 
 ## PR 3 — Rust data/routes (siguiente tanda, esbozo)
 
