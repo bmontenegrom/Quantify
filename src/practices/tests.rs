@@ -1,6 +1,6 @@
 use super::*;
 use crate::db;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use tempfile::TempDir;
 
