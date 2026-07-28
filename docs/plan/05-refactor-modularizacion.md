@@ -72,7 +72,9 @@ Nota (2026-07-28, cont.): los tests de `computation.rs` (2364 líneas, 58% del a
 - `src/instruments.rs` → `instruments/seed.rs` (~300) + `instruments/import_export.rs`.
 - Dedup: helper `guard_symbol` en `routes/practice_admin.rs` (trío format+reserved+duplicate repetido en 7 handlers); mover validadores puros a `practice_admin/validation.rs`.
 
-Nota (2026-07-28): `routes.rs` ya estaba dividido por dominio desde antes de este plan (commit `5896801`, `src/routes/{auth,courses,instruments,practice_admin,submissions,mod}.rs`). Falta el resto: `db.rs`, `submissions.rs` → `gradebook.rs`, `courses.rs`, `instruments.rs`, y el dedup de `guard_symbol`.
+Nota (2026-07-28): `routes.rs` ya estaba dividido por dominio desde antes de este plan (commit `5896801`, `src/routes/{auth,courses,instruments,practice_admin,submissions,mod}.rs`).
+
+Nota (2026-07-28, cont.): **`db.rs` → hecho** (`db/mod.rs` con DTOs+queries+facade de `courses`/`sessions`/`submissions`/`users`, `db/schema.rs` con `migrate`/`add_column_if_missing`, `db/password.rs` con `hash_password`/`verify_password`/`digest_password`/`VerifyResult`). Tests quedaron inline en `db/mod.rs` (son solo ~17% del archivo, no ameritaba extraerlos aparte). Falta: `submissions.rs` → `gradebook.rs`, `courses.rs` → `courses/{course,group,subgroup}.rs`, `instruments.rs` → `instruments/seed.rs` + `import_export.rs`, y el dedup de `guard_symbol`.
 
 ## Fuera de alcance (por ahora)
 - **Gatear seeds de dev** (`seed_users`/`seed_academic`/`seed_submissions`) con `#[cfg(debug_assertions)]`: requiere criterio prod-vs-dev y `seed_practices`/`seed_definitions`/`seed_instruments` son catálogo real. Ítem separado si se decide después.
