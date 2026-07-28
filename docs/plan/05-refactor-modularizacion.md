@@ -62,6 +62,8 @@ Extraer a lo largo de bloques ya cohesivos:
 
 Nota (2026-07-28): los tests de `practices.rs` ya se extrajeron a `src/practices/tests.rs` (PR #51) antes de que este plan se recuperara. El split de `seed.rs`/`crud.rs`/`mod.rs` se hizo en el PR de Fase 16 PR2 (`refactor/pr2-practices-split`).
 
+Nota (2026-07-28, cont.): los tests de `computation.rs` (2364 líneas, 58% del archivo) ya se extrajeron a `src/computation/tests.rs` (rama `refactor/pr2b-computation-split`), reduciendo `computation.rs` a ~1700 líneas. El split productivo en `formula.rs`/`engines.rs`/`submission.rs` queda pendiente: requiere resolver dependencias cruzadas (p. ej. `CONSTANTS` se usa en `compute`, `build_points` y `derive_results`, que caerían en módulos distintos) y no se hizo en esta tanda para no arriesgar una migración grande sin verificación exhaustiva.
+
 ## PR 3 — Rust data/routes (siguiente tanda, esbozo)
 
 - `src/db.rs` → `db/schema.rs` (migraciones/DDL ~700), `db/password.rs` (hash/verify), deja DTOs+queries.
