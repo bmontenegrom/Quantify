@@ -1,4 +1,4 @@
-import { escapeHtml, measureText, regressionPlot, scatterPlot } from "./lib.js";
+import { escapeHtml, format, measureText, regressionPlot, scatterPlot } from "./lib.js";
 
 export function regressionMarkup(regression) {
   const plot = regressionPlot(regression.points ?? [], regression.slope, regression.intercept);

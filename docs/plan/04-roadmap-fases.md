@@ -481,7 +481,7 @@ derivados por medida es aceptable vs derivar del promedio de entradas.
 Orden de ejecución de Fase 15: motor A (réplicas/punto) → motor B (lista de curvas) → motor D
 (operadores en estadística) → siembra de las 6 prácticas + P2-parte2.
 
-## Fase 17 (P2) — Cobertura E2E (Playwright) ampliada
+## Fase 17 (P2) — Cobertura E2E (Playwright) ampliada ✅ HECHA
 
 Retoma y reemplaza la mejora #4 ("E2E de navegador en CI") con un plan acotado.
 Insumo: hoy `npm run test:e2e` corre **solo** `tests/e2e/run.mjs` (flujo P1); el
@@ -493,23 +493,42 @@ mantener). Apuntar a las **costuras** que ningún unit test cubre: el gating ser
 del formulario por tipo de análisis, auth/CSRF/ruteo por rol, y que el pipeline de cálculo llegue
 a la pantalla. El grueso de la cobertura sigue en los tests rápidos (Rust + `node --test`).
 
-Pasos por orden de valor:
-1. **Harness compartido + wire a CI**: extraer `tests/e2e/lib.mjs` con bootstrap/login/server
-   (hoy `run.mjs` y `smoke-fluidos2.mjs` lo duplican ~70 líneas c/u) y hacer que `test:e2e`
-   corra **todos** los `tests/e2e/*.mjs` (rescata fluidos-2 en CI). Baja el costo de cada flujo
-   nuevo a ~20 líneas.
-2. **Un flujo por tipo de análisis**: estadístico (ya: P1), regresión (ya: fluidos-2),
-   **curva (falta)**.
-3. **Auth + ruteo por rol**: login falla/bloqueo, logout, el alumno no ve vistas de docente.
-4. **CRUD admin round-trip**: crear magnitud/mensurando/agregado y verlo — 1 flujo, no uno por
-   entidad.
+Pasos por orden de valor (2026-07-31, todos hechos):
+1. **Harness compartido + wire a CI** ✅: `tests/e2e/lib.mjs` extrae build/arranque del server,
+   login, `step`/`assert` y el try/finally de limpieza + screenshot-on-fail (antes duplicado
+   ~70-100 líneas por script, incluyendo `visual-forms.mjs` que el plan original no nombraba pero
+   tenía el mismo problema). `tests/e2e/run-all.mjs` corre todos los `tests/e2e/*.mjs` en
+   secuencia (cada uno con su propio puerto/DB); `test:e2e` apunta ahí. `run.mjs`,
+   `smoke-fluidos2.mjs` y `visual-forms.mjs` quedaron reescritos sobre el harness sin cambiar su
+   comportamiento (fluidos-2 y visual-forms ya corren en CI, dejaron de estar huérfanos).
+2. **Un flujo por tipo de análisis** ✅: `tests/e2e/smoke-curva.mjs` nuevo, sobre la práctica
+   `filtros` (dos curvas, eje x log).
+3. **Auth + ruteo por rol** ✅: `tests/e2e/smoke-auth-roles.mjs` nuevo (login con contraseña
+   incorrecta, estudiante no ve `.teacher-only`, logout, docente sí los ve).
+4. **CRUD admin round-trip** ✅: `tests/e2e/smoke-admin-crud.mjs` nuevo (crea magnitud +
+   mensurando + agregado encadenados en un solo flujo, sobre `fluidos-2`).
+
+**Bugs reales encontrados al ejercitar por primera vez estos caminos** (ninguno introducido por
+esta fase, todos preexistentes y sin cobertura):
+- `static/analysis-plots.js` no importaba `format` de `lib.js` (roto desde el refactor de
+  modularización del frontend, PR #52) — `regressionMarkup`/`scatterMarkup` tiraban
+  `ReferenceError` al renderizar. Nunca se detectó porque ningún test llegaba a ese render.
+  Corregido.
+- `smoke-fluidos2.mjs` (huérfano, nunca verificado en CI) tenía dos aserciones desactualizadas
+  frente a cambios reales del producto: el form ya no muestra el símbolo como texto plano (ahora
+  el nombre completo), y `mu_agua`/`kp` pasaron a ser `qty_given` sin incertidumbre en vez de
+  escalares compartidos. `visual-forms.mjs` (también huérfano) esperaba que los resultados
+  finales de potencia NO tuvieran input U, pero el seed nunca les puso `has_uncertainty: false`
+  (el comentario del código hablaba de otra cosa: por qué su fórmula no es editable en el admin,
+  no de incertidumbre). Las tres aserciones se corrigieron para reflejar el comportamiento real
+  actual, sin tocar producción salvo el fix genuino de `format`.
 
 **No automatizar en E2E** (más mantenimiento que valor): matemática de fórmulas/incertidumbre
 (unit Rust), funciones JS puras (`node --test`), cada permutación de CRUD. Costos a vigilar:
 flakiness (usar `waitFor*`, nunca sleep fijo), selectores frágiles (evaluar `data-testid`),
 mantenimiento continuo.
 
-**Aceptación**: `test:e2e` corre todos los smokes en CI; los 4 journeys críticos quedan cubiertos.
+**Aceptación**: `test:e2e` corre los 6 smokes en CI; los 4 journeys críticos quedan cubiertos.
 
 ## Orden propuesto
 
