@@ -9,94 +9,16 @@
 //   4. Login del estudiante de nuevo: ve el análisis, la comparación
 //      auto-vs-alumno y el comentario del docente.
 //
-// Uso: `npm run test:e2e`. Variables opcionales:
+// Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables opcionales:
 //   E2E_PORT        puerto del server (default 8123)
 //   E2E_SKIP_BUILD  "1" para no correr `cargo build` (CI ya compiló)
 //   E2E_HEADED      "1" para ver el navegador
-//
-// No lo descubre `node --test` a propósito (no matchea *.test.js): necesita
-// un server corriendo y se ejecuta como job aparte en CI.
 
-import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { STUDENT, TEACHER, assert, step, withE2E } from "./lib.mjs";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PORT = process.env.E2E_PORT ?? "8123";
-const BASE = `http://127.0.0.1:${PORT}`;
-const ARTIFACTS = join(ROOT, "tests", "e2e", "artifacts");
-
-const STUDENT = { email: "estudiante@quantify.local", password: "estudiante123" };
-const TEACHER = { email: "docente@quantify.local", password: "docente123" };
 const REVIEW_COMMENT = "Muy buen trabajo (E2E)";
 const STUDENT_COMMENT = "No pude tomar réplicas extra por falta de tiempo (E2E)";
-
-let currentStep = "(inicio)";
-function step(name) {
-  currentStep = name;
-  console.log(`→ ${name}`);
-}
-
-function assert(condition, message) {
-  if (!condition) throw new Error(`Falló la verificación: ${message}`);
-}
-
-function buildServer() {
-  if (process.env.E2E_SKIP_BUILD === "1") return;
-  step("cargo build --locked");
-  const result = spawnSync("cargo", ["build", "--locked"], { cwd: ROOT, stdio: "inherit", shell: false });
-  if (result.status !== 0) throw new Error("cargo build falló");
-}
-
-function startServer(dataDir) {
-  const binary = join(ROOT, "target", "debug", process.platform === "win32" ? "quantify.exe" : "quantify");
-  const dbPath = join(dataDir, "quantify-e2e.db").replaceAll("\\", "/");
-  const child = spawn(binary, [], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      DATABASE_URL: `sqlite:${dbPath}`,
-      APP_BIND_ADDR: `127.0.0.1:${PORT}`,
-      UPLOAD_DIR: join(dataDir, "uploads"),
-    },
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  child.on("error", (error) => {
-    console.error(`No se pudo lanzar el server (${binary}):`, error.message);
-  });
-  return child;
-}
-
-async function waitForServer(timeoutMs = 30_000) {
-  step(`esperando al server en ${BASE}`);
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(BASE);
-      if (response.ok) return;
-    } catch {
-      // todavía no levantó
-    }
-    await new Promise((resolveSleep) => setTimeout(resolveSleep, 250));
-  }
-  throw new Error(`El server no respondió en ${BASE} tras ${timeoutMs} ms`);
-}
-
-/** Crea un contexto nuevo (cookies limpias), registra errores JS y hace login. */
-async function loginAs(browser, pageErrors, { email, password }) {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  page.on("pageerror", (error) => pageErrors.push(`${email}: ${error.message}`));
-  await page.goto(BASE);
-  await page.fill('#login-form input[name="email"]', email);
-  await page.fill('#login-form input[name="password"]', password);
-  await page.click('#login-form button[type="submit"]');
-  await page.waitForSelector("#app-shell:not(.hidden)");
-  return { context, page };
-}
 
 async function studentSubmitsP1(page) {
   step("estudiante: abre la práctica P1 (péndulo, tratamiento estadístico)");
@@ -208,65 +130,31 @@ async function studentSeesResults(page) {
   assert((statusBadge ?? "").includes("aprobada"), `la entrega debía figurar aprobada (vi: "${statusBadge}")`);
 }
 
-async function main() {
-  buildServer();
-  mkdirSync(ARTIFACTS, { recursive: true });
-  const dataDir = mkdtempSync(join(tmpdir(), "quantify-e2e-"));
-  const server = startServer(dataDir);
-  const pageErrors = [];
-  let browser;
-  let lastPage = null;
-  try {
-    await waitForServer();
-    browser = await chromium.launch({ headless: process.env.E2E_HEADED !== "1" });
-
-    // Sesión 1: el estudiante entrega y carga sus cálculos.
-    {
-      const { context, page } = await loginAs(browser, pageErrors, STUDENT);
-      lastPage = page;
-      await studentSubmitsP1(page);
-      await studentSavesOwnResults(page);
-      step("estudiante: cierra sesión");
-      await page.click("#logout-button");
-      await page.waitForSelector("#login-screen:not(.hidden)");
-      await context.close();
-    }
-
-    // Sesión 2: el docente revisa y habilita los resultados.
-    {
-      const { context, page } = await loginAs(browser, pageErrors, TEACHER);
-      lastPage = page;
-      await teacherReviews(page);
-      await context.close();
-    }
-
-    // Sesión 3: el estudiante verifica lo habilitado.
-    {
-      const { context, page } = await loginAs(browser, pageErrors, STUDENT);
-      lastPage = page;
-      await studentSeesResults(page);
-      await context.close();
-    }
-
-    lastPage = null;
-    assert(pageErrors.length === 0, `hubo errores de JS en la página:\n${pageErrors.join("\n")}`);
-    console.log("✓ E2E verde: entrega, revisión con visibilidad y comparación funcionan de punta a punta.");
-  } catch (error) {
-    console.error(`✗ E2E falló en el paso: ${currentStep}`);
-    console.error(error);
-    if (lastPage) {
-      const shot = join(ARTIFACTS, "failure.png");
-      await lastPage.screenshot({ path: shot, fullPage: true }).catch(() => {});
-      console.error(`Captura del fallo: ${shot}`);
-    }
-    process.exitCode = 1;
-  } finally {
-    await browser?.close();
-    server.kill();
-    // En Windows el proceso puede tardar en soltar el archivo de la DB.
-    await new Promise((resolveSleep) => setTimeout(resolveSleep, 500));
-    rmSync(dataDir, { recursive: true, force: true, maxRetries: 5 });
+await withE2E({ port: PORT, dbName: "quantify-e2e.db" }, async ({ login }) => {
+  // Sesión 1: el estudiante entrega y carga sus cálculos.
+  {
+    const { context, page } = await login(STUDENT, "estudiante");
+    await studentSubmitsP1(page);
+    await studentSavesOwnResults(page);
+    step("estudiante: cierra sesión");
+    await page.click("#logout-button");
+    await page.waitForSelector("#login-screen:not(.hidden)");
+    await context.close();
   }
-}
 
-await main();
+  // Sesión 2: el docente revisa y habilita los resultados.
+  {
+    const { context, page } = await login(TEACHER, "docente");
+    await teacherReviews(page);
+    await context.close();
+  }
+
+  // Sesión 3: el estudiante verifica lo habilitado.
+  {
+    const { context, page } = await login(STUDENT, "estudiante");
+    await studentSeesResults(page);
+    await context.close();
+  }
+
+  console.log("✓ entrega, revisión con visibilidad y comparación funcionan de punta a punta.");
+});
