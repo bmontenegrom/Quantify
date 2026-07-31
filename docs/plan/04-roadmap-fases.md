@@ -425,18 +425,21 @@ agregar código nuevo ya se siente incómodo. Orden sugerido por retorno/riesgo:
 
 **Aceptación**: `cargo test` verde, `cargo clippy` limpio, ningún comportamiento cambia.
 
-## Fase 16 (P2) — Rediseño visual (moderno, vistoso, eficiente)
+## Fase 16 (P2) — Rediseño visual (moderno, vistoso, eficiente) ✅ HECHA
 
-Mantener vanilla JS/CSS (sin framework). Candidatos, a validar con screenshots Playwright:
-1. **Design tokens**: consolidar paleta/espaciado/radios en `:root` (hoy hay vars sueltas),
-   modo oscuro con `prefers-color-scheme` + toggle.
-2. **Tipografía e identidad**: stack tipográfico mejorado (Inter/variable), jerarquía de
-   títulos, marca simple para login y sidebar.
-3. **Componentes**: tarjetas con sombras suaves y hover, tablas con sticky header y zebra,
-   estados vacíos, toasts para feedback (hoy: texto inline), skeletons de carga.
-4. **Navegación**: sidebar colapsable con iconos, breadcrumbs en vistas de detalle,
-   transiciones de vista discretas.
-5. **Accesibilidad/eficiencia**: focus visible consistente, contraste AA, `prefers-reduced-motion`.
+Mantener vanilla JS/CSS (sin framework). Al revisar (2026-07-31) resultó que tokens/dark-mode/
+tipografía ya estaban resueltos desde antes (`:root` en `static/app.css`, toggle en
+`static/theme.js`, stack Inter, `:focus-visible`); se cerraron los gaps reales:
+1. ~~Design tokens~~ — ya existían, solo se ajustaron valores de sombra/paleta.
+2. ~~Tipografía e identidad~~ — ya resuelto (Inter + jerarquía de `h1`/`h2`/`h3`).
+3. **Componentes** ✅: tablas con sticky header + zebra + hover (`static/app.css`), toasts
+   (`static/toast.js`, div fijo simple, sin Popover API — el contenedor cuelga de `<body>` sin
+   ancestro que lo recorte), skeletons CSS-only (shimmer) para el estado de carga de entregas,
+   firma visual de grilla milimetrada sutil en el fondo.
+4. **Navegación** ✅: iconos SVG inline por vista en el sidebar (vía CSS `mask`, sin librería);
+   breadcrumbs resueltos restilizando el `.back-link` existente (ya cumplía esa función) en vez
+   de crear un componente nuevo.
+5. **Accesibilidad** ✅: `prefers-reduced-motion` agregado (ya existía `:focus-visible`).
 
 ## Descartado
 
