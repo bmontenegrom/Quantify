@@ -205,7 +205,11 @@ export async function openSubmissionWorkspace(id) {
   const { selectView } = await import("./navigation.js");
   selectView("submissions");
   renderSubmissionsPage();
-  submissionWorkspace.innerHTML = `<p class="submission-meta">Cargando...</p>`;
+  submissionWorkspace.innerHTML = `
+    <span class="skeleton skeleton-line" style="width: 55%"></span>
+    <span class="skeleton skeleton-line"></span>
+    <span class="skeleton skeleton-line" style="width: 80%"></span>
+  `;
 
   const submission = await fetchJson(`/api/submissions/${id}`);
   state.activeSubmission = submission;

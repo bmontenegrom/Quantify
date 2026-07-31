@@ -52,14 +52,15 @@ export function renderSeriesTable(definition) {
     ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
     : "";
   // Si alguna columna es una serie de tiempos con réplicas (p. ej. tiempo de caída en
-  // viscosidad), ofrecemos un cronómetro de apoyo suelto arriba de la tabla.
+  // viscosidad), ofrecemos un cronómetro de apoyo justo arriba de la tabla de puntos, donde
+  // se va a usar (no arriba de todo el formulario, lejos de las filas que carga).
   const hasReplicatedTime = [...cols, ...shared].some((q) => q.repeated && q.quantity === "tiempo");
   const chronoHelper = hasReplicatedTime ? chronoHelperSectionHtml() : "";
   measurementFields.innerHTML = `
-    ${chronoHelper}
     ${partsNote}
     ${sharedSection}
     <div${seriesSectionAttr}>
+      ${chronoHelper}
       <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. ${
         definition.analysis_kind === "curva"
           ? "Hacen falta al menos 2 puntos para graficar la curva."
