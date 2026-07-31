@@ -1,6 +1,7 @@
 /target
 /data/*.db
 /data/*.db-*
+/data/backups/
 /data/*.bak*
 /data/uploads
 /data/*.out
