@@ -1673,6 +1673,13 @@ textarea {
   flex-wrap: wrap;
 }
 
+/* Mismo problema de especificidad que `.nav .tab` vs `.hidden`: una sola clase empata con
+   `.hidden` y gana por orden de declaración, así que el filtro quedaba visible para el
+   estudiante pese al `classList.toggle("hidden", ...)` de app.js. */
+.submission-filters.hidden {
+  display: none;
+}
+
 .submission-filters label {
   display: flex;
   align-items: center;
