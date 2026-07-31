@@ -2358,3 +2358,100 @@ async fn analyze_curva_without_curves_errors() {
     let result = analyze(&pool, "p1-estadistica", &[]).await;
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn analyze_ca_rlc_matches_series_rlc_theory() {
+    let (pool, _dir) = setup().await;
+    // RLC serie sintetico: R=100, L=0.1, C=1uF, Vg=5V, f=1000Hz. Los pico a pico y los semiejes
+    // de Lissajous se eligen para que cada canal experimental coincida con su teorico (verifica
+    // que las formulas expandidas del seed son consistentes entre si, no solo que "compilan").
+    let def = crate::practices::definition(&pool, "ca-rlc")
+        .await
+        .unwrap()
+        .unwrap();
+    let omega = 2.0 * std::f64::consts::PI * 1000.0;
+    let xl = omega * 0.1;
+    let xc = 1.0 / (omega * 1e-6);
+    let z = ((100.0f64).powi(2) + (xl - xc).powi(2)).sqrt();
+    let i_teo = 5.0 / z;
+    let phi_teo = ((xl - xc) / 100.0).atan();
+    let sin_r = -phi_teo.sin();
+    let sin_c = -(phi_teo + std::f64::consts::FRAC_PI_2).sin();
+    let sin_l = (std::f64::consts::FRAC_PI_2 - phi_teo).sin();
+
+    let mut measurements = Vec::new();
+    let mut push = |symbol: &str, value: f64| {
+        let id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == symbol)
+            .unwrap()
+            .id
+            .clone();
+        measurements.push(MeasurementInput {
+            quantity_id: id,
+            instrument_id: None,
+            scale_id: None,
+            values: vec![value],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        });
+    };
+    push("R", 100.0);
+    push("C", 1e-6);
+    push("L", 0.1);
+    push("Vg", 5.0);
+    push("f_trabajo", 1000.0);
+    push("VRpp", 2.0 * i_teo * 100.0);
+    push("VCpp", 2.0 * i_teo * xc);
+    push("VLpp", 2.0 * i_teo * xl);
+    push("a_R", 1.0);
+    push("b_R", sin_r);
+    push("a_C", 1.0);
+    push("b_C", sin_c);
+    push("a_L", 1.0);
+    push("b_L", sin_l);
+
+    let analysis = analyze(&pool, "ca-rlc", &measurements).await.unwrap();
+    let get = |symbol: &str| -> f64 {
+        analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == symbol)
+            .unwrap()
+            .value
+    };
+
+    assert!(close(
+        get("f_res"),
+        1.0 / (2.0 * std::f64::consts::PI * (0.1f64 * 1e-6).sqrt()),
+        1e-6
+    ));
+    assert!(close(get("I_teo"), i_teo, 1e-9));
+    assert!(close(get("I_exp"), i_teo, 1e-9));
+    assert!(close(get("VR_teo"), i_teo * 100.0, 1e-9));
+    assert!(close(get("VR_exp"), i_teo * 100.0, 1e-9));
+    assert!(close(get("VC_teo"), i_teo * xc, 1e-9));
+    assert!(close(get("VC_exp"), i_teo * xc, 1e-9));
+    assert!(close(get("VL_teo"), i_teo * xl, 1e-9));
+    assert!(close(get("VL_exp"), i_teo * xl, 1e-9));
+    // phiR_teo cae en el rango de asin ([-pi/2, pi/2]), asi que phiR_exp lo recupera exacto.
+    // phiC_teo/phiL_teo no (estan a +-90 grados de fase respecto a R), asi que asin(b/a) solo
+    // puede devolver su valor principal — la ambiguedad de cuadrante de Lissajous es real, no un
+    // bug del seed; queda anotada en el plan para confirmar con el docente.
+    assert!(close(get("phiR_teo"), -phi_teo, 1e-9));
+    assert!(close(get("phiR_exp"), -phi_teo, 1e-6));
+    assert!(close(
+        get("phiC_teo"),
+        -phi_teo - std::f64::consts::FRAC_PI_2,
+        1e-9
+    ));
+    assert!(close(get("phiC_exp"), sin_c.asin(), 1e-6));
+    assert!(close(
+        get("phiL_teo"),
+        -phi_teo + std::f64::consts::FRAC_PI_2,
+        1e-9
+    ));
+    assert!(close(get("phiL_exp"), sin_l.asin(), 1e-6));
+}

@@ -1057,6 +1057,116 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Siembra CA/RLC (ver [`seed_definitions`]).
+async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
+    // CA (RLC) — circuito serie con generador Vg y componentes R, C, L (R, C y Vg medidos con
+    // instrumento; L dato de catedra). Por canal (R, C, L) se mide la tension pico a pico
+    // (VRpp/VCpp/VLpp) y los semiejes de Lissajous (a_X/b_X) para el desfasaje experimental
+    // phiX_exp = asin(b_X/a_X). El motor `estadistico` no encadena mensurandos entre si (cada
+    // `ResultInput` se evalua solo contra las magnitudes), asi que cada formula de abajo va
+    // expandida completa en terminos de R/C/L/Vg/f_trabajo — no hay `omega`/`Z` intermedios
+    // reutilizables. Topologia RLC serie estandar; formulas de fase con signo a confirmar con
+    // el docente (no hay hoja real de esta practica, a diferencia de las otras 6 de Fase 15).
+    let omega = "(2*pi*f_trabajo)";
+    let xl = format!("({omega}*L)");
+    let xc = format!("(1/({omega}*C))");
+    let z = format!("math::sqrt(R*R + (({xl})-({xc}))*(({xl})-({xc})))");
+    let i_teo = format!("(Vg/({z}))");
+    let phi_teo = format!("math::atan((({xl})-({xc}))/R)");
+    seed_practice(
+        pool,
+        "ca-rlc",
+        &[
+            qty_shared("R", "Resistencia", "ohm", "resistencia"),
+            qty_shared("C", "Capacitor", "F", "capacitancia"),
+            qty_given("L", "Inductor", "H", "inductancia"),
+            qty_shared("Vg", "Tension del generador", "V", "tension"),
+            qty_shared("f_trabajo", "Frecuencia de trabajo", "Hz", "frecuencia"),
+            qty_shared("VRpp", "Tension pico a pico en R", "V", "tension"),
+            qty_shared("VCpp", "Tension pico a pico en C", "V", "tension"),
+            qty_shared("VLpp", "Tension pico a pico en L", "V", "tension"),
+            qty_shared("a_R", "Semieje mayor de Lissajous - R", "V", "tension"),
+            qty_shared("b_R", "Semieje menor de Lissajous - R", "V", "tension"),
+            qty_shared("a_C", "Semieje mayor de Lissajous - C", "V", "tension"),
+            qty_shared("b_C", "Semieje menor de Lissajous - C", "V", "tension"),
+            qty_shared("a_L", "Semieje mayor de Lissajous - L", "V", "tension"),
+            qty_shared("b_L", "Semieje menor de Lissajous - L", "V", "tension"),
+        ],
+        &[
+            res("XL", "Reactancia inductiva", "ohm", &xl),
+            res("XC", "Reactancia capacitiva", "ohm", &xc),
+            res("Z", "Impedancia", "ohm", &z),
+            res_final(
+                "f_res",
+                "Frecuencia de resonancia teorica",
+                "Hz",
+                "1/(2*pi*math::sqrt(L*C))",
+            ),
+            res_final("I_teo", "Corriente teorica", "A", &i_teo),
+            res_final("I_exp", "Corriente experimental", "A", "VRpp/(2*R)"),
+            res_final(
+                "VR_teo",
+                "Tension teorica en R",
+                "V",
+                &format!("({i_teo})*R"),
+            ),
+            res_final("VR_exp", "Tension experimental en R", "V", "VRpp/2"),
+            res_final(
+                "VC_teo",
+                "Tension teorica en C",
+                "V",
+                &format!("({i_teo})*({xc})"),
+            ),
+            res_final("VC_exp", "Tension experimental en C", "V", "VCpp/2"),
+            res_final(
+                "VL_teo",
+                "Tension teorica en L",
+                "V",
+                &format!("({i_teo})*({xl})"),
+            ),
+            res_final("VL_exp", "Tension experimental en L", "V", "VLpp/2"),
+            res_final(
+                "phiR_teo",
+                "Desfasaje teorico en R",
+                "rad",
+                &format!("-({phi_teo})"),
+            ),
+            res_final(
+                "phiR_exp",
+                "Desfasaje experimental en R",
+                "rad",
+                "math::asin(b_R/a_R)",
+            ),
+            res_final(
+                "phiC_teo",
+                "Desfasaje teorico en C",
+                "rad",
+                &format!("-({phi_teo})-pi/2"),
+            ),
+            res_final(
+                "phiC_exp",
+                "Desfasaje experimental en C",
+                "rad",
+                "math::asin(b_C/a_C)",
+            ),
+            res_final(
+                "phiL_teo",
+                "Desfasaje teorico en L",
+                "rad",
+                &format!("-({phi_teo})+pi/2"),
+            ),
+            res_final(
+                "phiL_exp",
+                "Desfasaje experimental en L",
+                "rad",
+                "math::asin(b_L/a_L)",
+            ),
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
 /// Siembra las definiciones iniciales de las prácticas (idempotente por práctica, ver
 /// [`seed_practice`]). Las magnitudes/fórmulas salen de las técnicas de trabajo de Física 103.
 /// Cada práctica es independiente (no comparten estado entre sí); una función por práctica
@@ -1070,5 +1180,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_viscosidad(pool).await?;
     seed_fluidos2(pool).await?;
     seed_filtros(pool).await?;
+    seed_ca_rlc(pool).await?;
     Ok(())
 }
