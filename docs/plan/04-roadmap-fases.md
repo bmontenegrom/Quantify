@@ -343,17 +343,21 @@ Prácticas nuevas a modelar (6):
 | **Hidrostática y TS** | estadístico | masa goma, ρ fluido, g; 3 medidas de pesas/posiciones; marco: m, d, d₁ | E (empuje), ρ_goma por medida y promedio; γ por medida y promedio |
 | **Viscosidad (Stokes)** | regresión | ρ acero, ρ fluido, g, distancia; por esfera: radio, tiempos (réplicas) | velocidad límite por esfera, Reynolds; ajuste v_lím vs R² → viscosidad de la glicerina |
 
-## Fase 13 (P0) — Seguridad multi-PC y despliegue
+## Fase 13 (P0) — Seguridad multi-PC y despliegue ✅ HECHA
 
 Prerequisito del uso real desde varias PCs; antes de exponer el server a la red.
 
-1. **CSRF**: token por sesión (devuelto en `/api/session`), header `X-CSRF-Token` exigido en
-   todo POST/DELETE; `fetchJson`/`postJson` lo agregan centralizadamente en `api.js`.
-2. **Cookies**: `Secure` (detrás de TLS) y `HttpOnly` (verificar), `SameSite=Lax` se mantiene.
-3. **Despliegue LAN**: documentar topología (server en una máquina, clientes por IP), bind
-   configurable (`0.0.0.0`), reverse proxy con TLS (caddy local o autofirmado); script de
-   arranque. Backups: copia programada de `data/quantify.db`.
-4. **Hardening login**: rate-limit básico de intentos por IP/usuario (en memoria).
+1. **CSRF** ✅: token HMAC-SHA256 por sesión (`compute_csrf`, `src/routes/mod.rs`), devuelto en
+   login/`GET /api/auth/me`, header `X-CSRF-Token` exigido en todo POST/PUT/PATCH/DELETE
+   (excepto login/logout); `static/api.js` lo agrega centralizadamente.
+2. **Cookies** ✅: `HttpOnly` + `SameSite=Lax` siempre, `Secure` gateado por
+   `APP_SECURE_COOKIES` (`session_cookie()` en `src/routes/mod.rs`).
+3. **Despliegue LAN** ✅: `docs/deploy.md` documenta bind configurable (`APP_BIND_ADDR`),
+   topología LAN sin TLS y reverse proxy con TLS. Backup: `scripts/backup-db.{sh,ps1}` copia
+   `data/quantify.db` a `data/backups/` con timestamp (correr a mano o vía cron/Task Scheduler).
+4. **Hardening login** ✅: rate-limit de 5 intentos fallidos por email, bloqueo de 15 min
+   (`src/db/mod.rs`, `src/routes/auth.rs`). Nota: es por email, no por IP — suficiente para el
+   uso de laboratorio actual.
 
 ## Fase 14 (P1) — `analysis_kind = "curva"` (puntos sin ajuste)
 
