@@ -424,6 +424,20 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
+        // CA (RLC): circuito serie con generador Vg, R, C, L; por canal (R, C, L) se mide la
+        // tension pico a pico y los semiejes de Lissajous (a/b) para el desfasaje experimental.
+        // Mensurandos teoricos (impedancia de un RLC serie) comparados visualmente contra los
+        // experimentales, sin veredicto (mismo patron que Filtros). Magnitudes/mensurandos
+        // separados por canal (no motor de operadores): los desfasajes de R/C/L son
+        // independientes entre si, no repeticiones de la misma medida.
+        (
+            "ca-rlc",
+            "Corriente Alterna (RLC)",
+            "Circuito RLC serie en corriente alterna: impedancia, corriente y tensiones teoricas vs experimentales por canal (R, C, L), y desfasaje phi = asin(b/a) por canal contra el teorico.",
+            "estadistico",
+            None,
+            None,
+        ),
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
@@ -561,6 +575,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "viscosidad",
         "fluidos-2",
         "filtros",
+        "ca-rlc",
     ] {
         sqlx::query(
             r#"
@@ -897,7 +912,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 8);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 9);
     }
 
     #[test]

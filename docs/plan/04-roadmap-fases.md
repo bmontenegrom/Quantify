@@ -404,7 +404,20 @@ Decisión pendiente con el docente: operadores múltiples en Estadística.
 | Práctica | Motor | Notas |
 |---|---|---|
 | Hidrostática y TS | D (estadístico) | Decisión de modelado pendiente con docente |
-| CA (RLC) | estadístico | Teórico vs experimental; `asin` verificado en `evalexpr` |
+
+**CA (RLC)** ✅ sembrada (2026-07-31), `estadistico`, sin motor de operadores: los 3 canales
+(R, C, L) se modelaron como magnitudes/mensurandos separados (`a_R/b_R`, `a_C/b_C`, `a_L/b_L` →
+`phiR/phiC/phiL`, patrón T1/T2/T3 de P1), no con `operator_count` — los desfasajes de cada canal
+son independientes entre sí, no repeticiones de la misma medida. El motor `estadistico` no
+encadena mensurandos entre sí, así que cada fórmula de `Z`/`I_teo`/`VR_teo`/etc. va expandida
+completa en `src/practices/seed.rs::seed_ca_rlc`. ⚠️ **Pendiente confirmar con el docente**: no hay
+hoja real de esta práctica (a diferencia de las otras 6) — se asumió topología RLC serie estándar;
+los signos de `phiR_teo/phiC_teo/phiL_teo` y si las tensiones se miden pico a pico o amplitud
+(factor `/2`) quedan por validar. Nota física: `phiC_exp`/`phiL_exp` (vía `asin(b/a)`) solo pueden
+devolver el valor principal en `[-π/2, π/2]`, mientras que sus teóricos caen fuera de ese rango
+(±90° respecto a R) — ambigüedad de cuadrante inherente a la técnica de Lissajous con un solo
+`asin`, no un bug del seed; test `analyze_ca_rlc_matches_series_rlc_theory` en
+`src/computation/tests.rs` lo deja documentado.
 
 ## Fase 16 (P1) — Refactor de módulos grandes ✅ HECHA
 
