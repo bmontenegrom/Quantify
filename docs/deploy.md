@@ -49,6 +49,15 @@ export APP_SECURE_COOKIES="false"                 # HTTP plano dentro de la LAN
 
 Las PCs cliente acceden a `http://<ip-del-server>:8080`.
 
+## Backups
+
+`scripts/backup-db.sh` (o `.ps1` en Windows) usa `sqlite3 <db> ".backup"` (backup online de SQLite,
+seguro con el server corriendo y con `-wal` pendiente) para copiar la base a
+`data/backups/quantify-<timestamp>.db`. Respeta `DATABASE_URL` si está definida. Requiere el
+binario `sqlite3` en el PATH de la máquina de backup. Para un deploy LAN, programalo diario con
+cron (`0 3 * * * bash /ruta/a/quantify/scripts/backup-db.sh`) o una tarea del Task Scheduler
+equivalente.
+
 ## Ejemplo: detrás de un reverse proxy con TLS
 
 Si terminás TLS en nginx/Caddy y servís por HTTPS:
