@@ -64,6 +64,25 @@ Nota (2026-07-28): los tests de `practices.rs` ya se extrajeron a `src/practices
 
 Nota (2026-07-28, cont.): los tests de `computation.rs` (2364 líneas, 58% del archivo) ya se extrajeron a `src/computation/tests.rs` (rama `refactor/pr2b-computation-split`), reduciendo `computation.rs` a ~1700 líneas. El split productivo en `formula.rs`/`engines.rs`/`submission.rs` queda pendiente: requiere resolver dependencias cruzadas (p. ej. `CONSTANTS` se usa en `compute`, `build_points` y `derive_results`, que caerían en módulos distintos) y no se hizo en esta tanda para no arriesgar una migración grande sin verificación exhaustiva.
 
+Nota (2026-07-31): **split productivo → hecho** (rama `refactor/fase16p1-computation-split`). Se
+evaluaron 3 opciones antes de encarar: no hacer nada (el archivo ya bajó de un tamaño molesto solo
+con la extracción de tests), el split literal de este plan (dejando `analyze` en `mod.rs`, lo que
+forzaba subir a `pub(crate)` 3 funciones privadas sin necesidad real porque `analyze` les pega
+desde afuera), o mover `analyze` a `engines.rs`. Se eligió la tercera: con `analyze` viviendo en
+`engines.rs` (tiene más sentido ahí, orquesta los motores), la única dependencia cruzada real
+queda en una sola dirección — `engines.rs` usa `compile_formula`/`eval_compiled`/`CONSTANTS` de
+`formula.rs` (subidos a `pub(crate)`, esperable ya que `engines` depende de `formula`, no al
+revés) — sin módulo "cajón de misceláneos" ni visibilidad ensanchada sin uso real.
+`computation.rs` quedó con los DTOs compartidos + los `pub use` que mantienen los paths públicos
+de siempre (`computation::analyze`, `computation::compute`, etc.); ningún caller externo
+(`routes/practice_admin.rs`, `routes/submissions.rs`, `practices/tests.rs`) cambió sus imports.
+`src/computation/tests.rs` necesitó dos ajustes: reemplazar el `use super::*` implícito por
+imports explícitos de los tipos que antes le llegaban gratis desde el `use` combinado del viejo
+`computation.rs` (`HashMap`, `PracticeAggregate`, `PracticeIntermediate`, `BModel`, etc.), y un
+`use super::formula::compile_formula;` explícito (el único helper `pub(crate)` que el propio
+`tests.rs` llama directo, no solo a través de los motores). 150 tests de lib + 20 doctests en
+verde, `cargo clippy -- -D warnings` limpio.
+
 ## PR 3 — Rust data/routes (siguiente tanda, esbozo)
 
 - `src/db.rs` → `db/schema.rs` (migraciones/DDL ~700), `db/password.rs` (hash/verify), deja DTOs+queries.
@@ -84,7 +103,7 @@ Nota (2026-07-28, cont. 4): **`instruments.rs` → hecho**, exactamente como pro
 
 Nota (2026-07-28, cont. 5): **dedup de `guard_symbol` → hecho.** El patrón formato+reservado+duplicado (`validate_symbol_format` + `validate_symbol_not_reserved` + `symbol_taken_in_practice`/`duplicate_symbol_error`) estaba repetido inline en 10 handlers (quantities/results/intermediates/point-results/aggregates × create+update), no 7 como estimaba el plan. `guard_symbol(pool, practice_id, symbol, exclude_quantity_id, exclude_result_id, exclude_intermediate_id, exclude_point_result_id, exclude_aggregate_id)` los colapsa en un único helper. Las validaciones de formato/reservado que viven además dentro de `validate_intermediate`/`validate_point_result`/`validate_aggregate` (para las fórmulas permitidas) se dejaron intactas — las cubren tests directos (`validate_intermediate(&def, &input("pi", ...), ...)`) y tocarlas rompía esa cobertura.
 
-Con esto, **PR3 (data/routes) queda completo**: `db.rs`, `submissions.rs`, `courses.rs`, `instruments.rs` divididos, y el dedup de `guard_symbol` hecho. No quedan ítems pendientes del plan de modularización (frontend PR1, motor Rust PR2 — con el split productivo de `computation.rs` diferido a propósito —, y data/routes PR3).
+Con esto, **PR3 (data/routes) queda completo**: `db.rs`, `submissions.rs`, `courses.rs`, `instruments.rs` divididos, y el dedup de `guard_symbol` hecho. Con el split productivo de `computation.rs` hecho (nota 2026-07-31 arriba), no quedan ítems pendientes del plan de modularización: frontend PR1, motor Rust PR2 y data/routes PR3 completos.
 
 ## Fuera de alcance (por ahora)
 - **Gatear seeds de dev** (`seed_users`/`seed_academic`/`seed_submissions`) con `#[cfg(debug_assertions)]`: requiere criterio prod-vs-dev y `seed_practices`/`seed_definitions`/`seed_instruments` son catálogo real. Ítem separado si se decide después.

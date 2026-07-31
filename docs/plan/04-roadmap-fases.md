@@ -406,22 +406,24 @@ Decisión pendiente con el docente: operadores múltiples en Estadística.
 | Hidrostática y TS | D (estadístico) | Decisión de modelado pendiente con docente |
 | CA (RLC) | estadístico | Teórico vs experimental; `asin` verificado en `evalexpr` |
 
-## Fase 16 (P1) — Refactor de módulos grandes
+## Fase 16 (P1) — Refactor de módulos grandes ✅ HECHA
 
-Tres módulos superan las 2 400 líneas (estado al 2026-06-13). No es bloqueante hoy, pero
-agregar código nuevo ya se siente incómodo. Orden sugerido por retorno/riesgo:
+Tres módulos superaban las 2 400 líneas (estado al 2026-06-13). Los tres quedaron resueltos:
 
-1. **`practices.rs` (≈2 900 líneas)** — el módulo `#[cfg(test)]` representa ≈1 500 líneas.
-   Extraer los tests a `tests/practices_integration.rs` (o `src/practices/tests.rs`).
-   Bajo riesgo: no toca lógica productiva.
+1. **`practices.rs`** ✅ — tests extraídos a `src/practices/tests.rs`; el módulo productivo
+   se dividió en `practices/{mod,crud,seed}.rs`.
 
-2. **`routes.rs` (≈2 400 líneas)** — router monolítico con handlers de todos los recursos.
-   Split natural por dominio: `routes/practices.rs`, `routes/submissions.rs`,
-   `routes/courses.rs`, `routes/instruments.rs`; un `routes/mod.rs` reexporta el router.
+2. **`routes.rs`** ✅ — ya estaba dividido por dominio desde antes de este plan
+   (`routes/{auth,courses,instruments,practice_admin,submissions,mod}.rs`).
 
-3. **`computation.rs` (≈3 200 líneas)** — posponer hasta que se agregue un motor nuevo
-   (regresión no-lineal, exportación). En ese momento extraer
-   `computation/curva.rs` y `computation/statistics.rs`.
+3. **`computation.rs`** ✅ (2026-07-31) — tests extraídos primero a `src/computation/tests.rs`
+   (bajó de ~4071 a 1708 líneas, ya por debajo del umbral "molesto"). Split productivo
+   completado en `computation/{formula,engines,submission}.rs` + `computation.rs` con los DTOs
+   compartidos y los re-exports que mantienen los paths públicos `computation::X` de siempre
+   (ningún caller externo cambió). Decisión de diseño: `analyze` se movió a `engines.rs` (no
+   quedó en el archivo de DTOs) para que la única dependencia cruzada fuera en una sola
+   dirección (`engines` → `formula`), evitando subir a `pub(crate)` funciones sin necesidad
+   real. Ver `docs/plan/05-refactor-modularizacion.md` para el detalle de la decisión.
 
 **Aceptación**: `cargo test` verde, `cargo clippy` limpio, ningún comportamiento cambia.
 
