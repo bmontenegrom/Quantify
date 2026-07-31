@@ -5,6 +5,7 @@ import {
   practicaTitle, practicePartTabs, submissionForm, studentComment,
 } from "./dom.js";
 import { fetchJson, postJson, deleteJson } from "./api.js";
+import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, inlineMathHtml, unitHtml, canReview, format,
   compatibleInstruments, SI_PREFIXES, prefixFactor, pointPower, flowRate,
@@ -748,6 +749,7 @@ export async function submitFormSubmission() {
         student_comment: studentComment?.value.trim() || null,
       });
       submitStatus.textContent = "Cambios guardados";
+      showToast("Cambios guardados", "success");
       exitEditMode();
       await loadSubmissions();
       openSubmissionWorkspace(editingId);
@@ -770,6 +772,7 @@ export async function submitFormSubmission() {
       student_comment: studentComment?.value.trim() || null,
     });
     submitStatus.textContent = "Entrega guardada";
+    showToast("Entrega guardada", "success");
     clearDraft();
     const { renderAnalysis } = await import("./analysis.js");
     renderAnalysis(latestResult, submission);
@@ -777,6 +780,7 @@ export async function submitFormSubmission() {
     await loadSubmissions();
   } catch (error) {
     submitStatus.textContent = error.message;
+    showToast(error.message, "error");
   } finally {
     if (submitButton) submitButton.disabled = false;
   }

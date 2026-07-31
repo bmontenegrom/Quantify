@@ -7,6 +7,7 @@ import {
 } from "./dom.js";
 import { postJson, setCsrfToken, errorText } from "./api.js";
 import { escapeHtml, canReview } from "./lib.js";
+import { showToast } from "./toast.js";
 
 const accountDefaultGroup = () => document.querySelector("#account-default-group");
 const accountDefaultTable = () => document.querySelector("#account-default-table");
@@ -95,6 +96,7 @@ export function setupAuth(onLogin) {
       await onLogin();
     } catch (error) {
       loginStatus.textContent = error.message;
+      showToast(error.message, "error");
     }
   });
 
@@ -112,8 +114,10 @@ export function setupAuth(onLogin) {
       await postJson("/api/auth/password", Object.fromEntries(new FormData(passwordForm).entries()));
       passwordForm.reset();
       passwordStatus.textContent = "Contrasena actualizada. Volve a iniciar sesion.";
+      showToast("Contrasena actualizada", "success");
     } catch (error) {
       passwordStatus.textContent = error.message;
+      showToast(error.message, "error");
     }
   });
 
@@ -139,8 +143,10 @@ export function setupAuth(onLogin) {
       renderSessionUser();
       renderAccount();
       accountStatus.textContent = "Cambios guardados";
+      showToast("Cambios guardados", "success");
     } catch (error) {
       accountStatus.textContent = error.message;
+      showToast(error.message, "error");
     }
   });
 }
