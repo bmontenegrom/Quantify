@@ -13,10 +13,14 @@ if (-not (Test-Path $dbPath)) {
     throw "No existe $dbPath; nada para respaldar."
 }
 
+if (-not (Get-Command sqlite3 -ErrorAction SilentlyContinue)) {
+    throw "Falta el binario sqlite3 en PATH; instalalo (necesario para un backup consistente, un copy crudo puede quedar incompleto si hay -wal pendiente)."
+}
+
 $backupDir = "data/backups"
 New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$dest = Join-Path $backupDir "quantify-$timestamp.db"
+$dest = (Join-Path (Resolve-Path $backupDir) "quantify-$timestamp.db") -replace '\\', '/'
 
-Copy-Item $dbPath $dest
+sqlite3 $dbPath ".backup '$dest'"
 Write-Host "Backup creado: $dest"

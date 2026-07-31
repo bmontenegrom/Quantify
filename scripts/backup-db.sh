@@ -15,10 +15,15 @@ if [ ! -e "$db_path" ]; then
   exit 1
 fi
 
+if ! command -v sqlite3 >/dev/null 2>&1; then
+  echo "Falta el binario sqlite3 en PATH; instalalo (necesario para un backup consistente, un cp crudo puede quedar incompleto si hay -wal pendiente)." >&2
+  exit 1
+fi
+
 backup_dir="data/backups"
 mkdir -p "$backup_dir"
 timestamp="$(date +%Y%m%d-%H%M%S)"
 dest="$backup_dir/quantify-$timestamp.db"
 
-cp "$db_path" "$dest"
+sqlite3 "$db_path" ".backup '$dest'"
 echo "Backup creado: $dest"
