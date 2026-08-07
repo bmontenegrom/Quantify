@@ -2439,7 +2439,8 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
     // phiR_teo cae en el rango de asin ([-pi/2, pi/2]), asi que phiR_exp lo recupera exacto.
     // phiC_teo/phiL_teo no (estan a +-90 grados de fase respecto a R), asi que asin(b/a) solo
     // puede devolver su valor principal — la ambiguedad de cuadrante de Lissajous es real, no un
-    // bug del seed; queda anotada en el plan para confirmar con el docente.
+    // bug del seed; el docente confirmo los signos de fase y que las tensiones se miden pico a
+    // pico, sabiendo que esta ambiguedad de asin persiste.
     assert!(close(get("phiR_teo"), -phi_teo, 1e-9));
     assert!(close(get("phiR_exp"), -phi_teo, 1e-6));
     assert!(close(

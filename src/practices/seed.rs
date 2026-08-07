@@ -1065,8 +1065,9 @@ async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
     // phiX_exp = asin(b_X/a_X). El motor `estadistico` no encadena mensurandos entre si (cada
     // `ResultInput` se evalua solo contra las magnitudes), asi que cada formula de abajo va
     // expandida completa en terminos de R/C/L/Vg/f_trabajo — no hay `omega`/`Z` intermedios
-    // reutilizables. Topologia RLC serie estandar; formulas de fase con signo a confirmar con
-    // el docente (no hay hoja real de esta practica, a diferencia de las otras 6 de Fase 15).
+    // reutilizables. Topologia RLC serie estandar; tensiones pico a pico y signos de fase
+    // confirmados con el docente (no hay hoja real de esta practica, a diferencia de las otras
+    // 6 de Fase 15, pero se validaron directamente).
     let omega = "(2*pi*f_trabajo)";
     let xl = format!("({omega}*L)");
     let xc = format!("(1/({omega}*C))");

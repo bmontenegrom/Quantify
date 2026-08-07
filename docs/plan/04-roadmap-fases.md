@@ -410,10 +410,11 @@ Decisión pendiente con el docente: operadores múltiples en Estadística.
 `phiR/phiC/phiL`, patrón T1/T2/T3 de P1), no con `operator_count` — los desfasajes de cada canal
 son independientes entre sí, no repeticiones de la misma medida. El motor `estadistico` no
 encadena mensurandos entre sí, así que cada fórmula de `Z`/`I_teo`/`VR_teo`/etc. va expandida
-completa en `src/practices/seed.rs::seed_ca_rlc`. ⚠️ **Pendiente confirmar con el docente**: no hay
-hoja real de esta práctica (a diferencia de las otras 6) — se asumió topología RLC serie estándar;
-los signos de `phiR_teo/phiC_teo/phiL_teo` y si las tensiones se miden pico a pico o amplitud
-(factor `/2`) quedan por validar. Nota física: `phiC_exp`/`phiL_exp` (vía `asin(b/a)`) solo pueden
+completa en `src/practices/seed.rs::seed_ca_rlc`. **Confirmado con el docente (2026-08-07)**: no
+hay hoja real de esta práctica (a diferencia de las otras 6), pero se validó directamente que la
+topología RLC serie estándar es correcta, que las tensiones se miden **siempre pico a pico**
+(`VRpp/VCpp/VLpp`, con `/2` para pasar a amplitud) y que los signos de `phiR_teo/phiC_teo/phiL_teo`
+son los ya sembrados. Nota física: `phiC_exp`/`phiL_exp` (vía `asin(b/a)`) solo pueden
 devolver el valor principal en `[-π/2, π/2]`, mientras que sus teóricos caen fuera de ese rango
 (±90° respecto a R) — ambigüedad de cuadrante inherente a la técnica de Lissajous con un solo
 `asin`, no un bug del seed; test `analyze_ca_rlc_matches_series_rlc_theory` en
