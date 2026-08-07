@@ -1058,7 +1058,7 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 /// Siembra CA/RLC (ver [`seed_definitions`]).
-async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
+pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
     // CA (RLC) — circuito serie con generador Vg y componentes R, C, L (R, C y Vg medidos con
     // instrumento; L dato de catedra). Por canal (R, C, L) se mide el voltaje pico a pico
     // (VRpp/VCpp/VLpp) y los semiejes de Lissajous (a_X/b_X, con el osciloscopio) para el
@@ -1146,42 +1146,116 @@ async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
             res_final(
                 "phiR_teo",
                 "Desfasaje teorico en R",
-                "rad",
-                &format!("-({phi_teo})"),
+                "°",
+                &format!("(-({phi_teo}))*180/pi"),
             ),
             res_final(
                 "phiR_exp",
                 "Desfasaje experimental en R",
-                "rad",
-                "math::asin(b_R/a_R)",
+                "°",
+                "math::asin(b_R/a_R)*180/pi",
             ),
             res_final(
                 "phiC_teo",
                 "Desfasaje teorico en C",
-                "rad",
-                &format!("-({phi_teo})-pi/2"),
+                "°",
+                &format!("(-({phi_teo})-pi/2)*180/pi"),
             ),
             res_final(
                 "phiC_exp",
                 "Desfasaje experimental en C",
-                "rad",
-                "math::asin(b_C/a_C)",
+                "°",
+                "math::asin(b_C/a_C)*180/pi",
             ),
             res_final(
                 "phiL_teo",
                 "Desfasaje teorico en L",
-                "rad",
-                &format!("-({phi_teo})+pi/2"),
+                "°",
+                &format!("(-({phi_teo})+pi/2)*180/pi"),
             ),
             res_final(
                 "phiL_exp",
                 "Desfasaje experimental en L",
-                "rad",
-                "math::asin(b_L/a_L)",
+                "°",
+                "math::asin(b_L/a_L)*180/pi",
             ),
         ],
     )
     .await?;
+    Ok(())
+}
+
+/// Corrige en bases ya sembradas (antes del 2026-08-07) los nombres/fórmulas de CA/RLC que
+/// cambiaron de "Tension" a "Voltaje" y de radianes a grados en los desfasajes (`seed_ca_rlc` es
+/// idempotente y no re-siembra una práctica que ya tiene magnitudes). Solo toca filas que todavía
+/// están en el estado viejo (`quantity = 'tension'`, `unit = 'rad'`), así que no pisa ediciones
+/// del docente sobre estos mismos campos.
+pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
+    let quantity_renames = [
+        ("Vg", "Voltaje en el generador"),
+        ("VRpp", "Voltaje en la resistencia"),
+        ("VCpp", "Voltaje en el capacitor"),
+        ("VLpp", "Voltaje en el inductor"),
+        ("a_R", "Semieje mayor de Lissajous - R (a)"),
+        ("b_R", "Semieje menor de Lissajous - R (b)"),
+        ("a_C", "Semieje mayor de Lissajous - C (a)"),
+        ("b_C", "Semieje menor de Lissajous - C (b)"),
+        ("a_L", "Semieje mayor de Lissajous - L (a)"),
+        ("b_L", "Semieje menor de Lissajous - L (b)"),
+    ];
+    for (symbol, new_name) in quantity_renames {
+        sqlx::query(
+            "UPDATE practice_quantities SET name = ?1, quantity = 'voltaje' \
+             WHERE practice_id = 'ca-rlc' AND symbol = ?2 AND quantity = 'tension'",
+        )
+        .bind(new_name)
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
+
+    let result_renames = [
+        ("VR_teo", "Voltaje teorico en la resistencia"),
+        ("VR_exp", "Voltaje experimental en la resistencia"),
+        ("VC_teo", "Voltaje teorico en el capacitor"),
+        ("VC_exp", "Voltaje experimental en el capacitor"),
+        ("VL_teo", "Voltaje teorico en el inductor"),
+        ("VL_exp", "Voltaje experimental en el inductor"),
+    ];
+    for (symbol, new_name) in result_renames {
+        sqlx::query(
+            "UPDATE practice_results SET name = ?1 WHERE practice_id = 'ca-rlc' AND symbol = ?2",
+        )
+        .bind(new_name)
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
+
+    // Desfasajes: rad -> grados, misma formula que en seed_ca_rlc (ver alli el detalle de
+    // omega/xl/xc/phi_teo). Se gatea en `unit = 'rad'` (marca de que todavia no se migro).
+    let omega = "(2*pi*f_trabajo)";
+    let xl = format!("({omega}*L)");
+    let xc = format!("(1/({omega}*C))");
+    let phi_teo = format!("math::atan((({xl})-({xc}))/R)");
+    let phase_updates = [
+        ("phiR_teo", format!("(-({phi_teo}))*180/pi")),
+        ("phiR_exp", "math::asin(b_R/a_R)*180/pi".to_string()),
+        ("phiC_teo", format!("(-({phi_teo})-pi/2)*180/pi")),
+        ("phiC_exp", "math::asin(b_C/a_C)*180/pi".to_string()),
+        ("phiL_teo", format!("(-({phi_teo})+pi/2)*180/pi")),
+        ("phiL_exp", "math::asin(b_L/a_L)*180/pi".to_string()),
+    ];
+    for (symbol, formula) in phase_updates {
+        sqlx::query(
+            "UPDATE practice_results SET formula = ?1, unit = '°' \
+             WHERE practice_id = 'ca-rlc' AND symbol = ?2 AND unit = 'rad'",
+        )
+        .bind(formula)
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
     Ok(())
 }
 
@@ -1199,5 +1273,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_fluidos2(pool).await?;
     seed_filtros(pool).await?;
     seed_ca_rlc(pool).await?;
+    fix_ca_rlc_labels(pool).await?;
     Ok(())
 }

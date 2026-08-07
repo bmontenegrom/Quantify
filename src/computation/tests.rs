@@ -2440,19 +2440,20 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
     // phiC_teo/phiL_teo no (estan a +-90 grados de fase respecto a R), asi que asin(b/a) solo
     // puede devolver su valor principal — la ambiguedad de cuadrante de Lissajous es real, no un
     // bug del seed; el docente confirmo los signos de fase y que las tensiones se miden pico a
-    // pico, sabiendo que esta ambiguedad de asin persiste.
-    assert!(close(get("phiR_teo"), -phi_teo, 1e-9));
-    assert!(close(get("phiR_exp"), -phi_teo, 1e-6));
+    // pico, sabiendo que esta ambiguedad de asin persiste. Los desfasajes se muestran en grados.
+    let to_deg = 180.0 / std::f64::consts::PI;
+    assert!(close(get("phiR_teo"), -phi_teo * to_deg, 1e-6));
+    assert!(close(get("phiR_exp"), -phi_teo * to_deg, 1e-4));
     assert!(close(
         get("phiC_teo"),
-        -phi_teo - std::f64::consts::FRAC_PI_2,
-        1e-9
+        (-phi_teo - std::f64::consts::FRAC_PI_2) * to_deg,
+        1e-6
     ));
-    assert!(close(get("phiC_exp"), sin_c.asin(), 1e-6));
+    assert!(close(get("phiC_exp"), sin_c.asin() * to_deg, 1e-4));
     assert!(close(
         get("phiL_teo"),
-        -phi_teo + std::f64::consts::FRAC_PI_2,
-        1e-9
+        (-phi_teo + std::f64::consts::FRAC_PI_2) * to_deg,
+        1e-6
     ));
-    assert!(close(get("phiL_exp"), sin_l.asin(), 1e-6));
+    assert!(close(get("phiL_exp"), sin_l.asin() * to_deg, 1e-4));
 }

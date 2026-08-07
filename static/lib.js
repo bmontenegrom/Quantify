@@ -34,8 +34,9 @@ export function symbolHtml(value) {
     // el resto de las magnitudes (R1, rho_e, VR1...) para que la tipografía sea coherente.
     Vg: "V<sub>G</sub>",
     RA: "R<sub>A</sub>",
-    // CA (RLC): voltajes pico a pico (sin guion bajo) y teo/exp (subíndice de 3 letras, fuera
-    // del regex genérico de 1-2 caracteres); phi se muestra con el símbolo φ, no la palabra.
+    // CA (RLC): voltajes pico a pico (sin guion bajo) y teo/exp/res (subíndice de 3 letras,
+    // fuera del regex genérico de 1-2 caracteres); phi se muestra con el símbolo φ, no la palabra.
+    f_res: "f<sub>res</sub>",
     VRpp: "V<sub>R,PP</sub>",
     VCpp: "V<sub>C,PP</sub>",
     VLpp: "V<sub>L,PP</sub>",

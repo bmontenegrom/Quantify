@@ -1,5 +1,6 @@
 use super::*;
 use crate::db;
+use seed::{fix_ca_rlc_labels, seed_ca_rlc};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use tempfile::TempDir;
@@ -1507,4 +1508,63 @@ fn result_input_tolerance_serde_variants() {
         Some(Some(5.0)),
         "número debe ser Some(Some(v))"
     );
+}
+
+/// `fix_ca_rlc_labels` corrige filas dejadas por una siembra vieja (`quantity = 'tension'`,
+/// `unit = 'rad'`) sin pisar filas que ya están en el estado nuevo o que el docente editó.
+#[tokio::test]
+async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
+    let (pool, _dir) = setup().await;
+    seed_ca_rlc(&pool).await.unwrap();
+
+    // Simula una base sembrada antes del cambio: Vg en "tension" (nombre viejo) y phiR_teo en rad.
+    sqlx::query(
+        "UPDATE practice_quantities SET name = 'Tension del generador', quantity = 'tension' \
+         WHERE practice_id = 'ca-rlc' AND symbol = 'Vg'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE practice_results SET unit = 'rad', formula = '-(math::atan(0))' \
+         WHERE practice_id = 'ca-rlc' AND symbol = 'phiR_teo'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Una edición del docente sobre un campo ya migrado: no debe tocarse.
+    sqlx::query(
+        "UPDATE practice_quantities SET name = 'Voltaje de la fuente (editado)' \
+         WHERE practice_id = 'ca-rlc' AND symbol = 'VRpp'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    fix_ca_rlc_labels(&pool).await.unwrap();
+
+    let vg_name: (String,) = sqlx::query_as(
+        "SELECT name FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'Vg'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(vg_name.0, "Voltaje en el generador");
+
+    let (phi_unit, phi_formula): (String, String) = sqlx::query_as(
+        "SELECT unit, formula FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'phiR_teo'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(phi_unit, "°");
+    assert!(phi_formula.contains("180/pi"));
+
+    let vrpp_name: (String,) = sqlx::query_as(
+        "SELECT name FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'VRpp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(vrpp_name.0, "Voltaje de la fuente (editado)");
 }
