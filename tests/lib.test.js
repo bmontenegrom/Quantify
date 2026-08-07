@@ -125,6 +125,25 @@ test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)"
   assert.equal(symbolHtml("h_max"), "h_max");
 });
 
+test("symbolHtml renderiza los símbolos de CA (RLC): voltajes pp, teo/exp y phi", () => {
+  assert.equal(symbolHtml("VRpp"), "V<sub>R,PP</sub>");
+  assert.equal(symbolHtml("VCpp"), "V<sub>C,PP</sub>");
+  assert.equal(symbolHtml("VLpp"), "V<sub>L,PP</sub>");
+  assert.equal(symbolHtml("VR_teo"), "V<sub>R,teo</sub>");
+  assert.equal(symbolHtml("VR_exp"), "V<sub>R,exp</sub>");
+  assert.equal(symbolHtml("I_teo"), "I<sub>teo</sub>");
+  assert.equal(symbolHtml("I_exp"), "I<sub>exp</sub>");
+  // Los semiejes de Lissajous (a_R, b_R...) no necesitan caso especial: el regex genérico
+  // de subíndice de 1 carácter ya los cubre.
+  assert.equal(symbolHtml("a_R"), "a<sub>R</sub>");
+  assert.equal(symbolHtml("b_R"), "b<sub>R</sub>");
+  // phi se muestra con el símbolo φ, nunca con la palabra "phi".
+  assert.equal(symbolHtml("phiR_teo"), "φ<sub>R,teo</sub>");
+  assert.equal(symbolHtml("phiR_exp"), "φ<sub>R,exp</sub>");
+  assert.equal(symbolHtml("phiC_teo"), "φ<sub>C,teo</sub>");
+  assert.equal(symbolHtml("phiL_exp"), "φ<sub>L,exp</sub>");
+});
+
 test("inlineMathHtml y unitHtml formatean subíndices y superíndices visibles", () => {
   assert.equal(inlineMathHtml("Resistencia R3"), "Resistencia R<sub>3</sub>");
   assert.equal(inlineMathHtml("Tiempo t1/2 y T_oc"), "Tiempo t<sub>1/2</sub> y T<sub>OC</sub>");

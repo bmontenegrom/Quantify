@@ -34,6 +34,25 @@ export function symbolHtml(value) {
     // el resto de las magnitudes (R1, rho_e, VR1...) para que la tipografía sea coherente.
     Vg: "V<sub>G</sub>",
     RA: "R<sub>A</sub>",
+    // CA (RLC): voltajes pico a pico (sin guion bajo) y teo/exp (subíndice de 3 letras, fuera
+    // del regex genérico de 1-2 caracteres); phi se muestra con el símbolo φ, no la palabra.
+    VRpp: "V<sub>R,PP</sub>",
+    VCpp: "V<sub>C,PP</sub>",
+    VLpp: "V<sub>L,PP</sub>",
+    I_teo: "I<sub>teo</sub>",
+    I_exp: "I<sub>exp</sub>",
+    VR_teo: "V<sub>R,teo</sub>",
+    VR_exp: "V<sub>R,exp</sub>",
+    VC_teo: "V<sub>C,teo</sub>",
+    VC_exp: "V<sub>C,exp</sub>",
+    VL_teo: "V<sub>L,teo</sub>",
+    VL_exp: "V<sub>L,exp</sub>",
+    phiR_teo: "φ<sub>R,teo</sub>",
+    phiR_exp: "φ<sub>R,exp</sub>",
+    phiC_teo: "φ<sub>C,teo</sub>",
+    phiC_exp: "φ<sub>C,exp</sub>",
+    phiL_teo: "φ<sub>L,teo</sub>",
+    phiL_exp: "φ<sub>L,exp</sub>",
   };
   const raw = String(value);
   if (specials[raw]) return specials[raw];

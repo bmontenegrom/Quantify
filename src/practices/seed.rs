@@ -1060,8 +1060,9 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
 /// Siembra CA/RLC (ver [`seed_definitions`]).
 async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
     // CA (RLC) — circuito serie con generador Vg y componentes R, C, L (R, C y Vg medidos con
-    // instrumento; L dato de catedra). Por canal (R, C, L) se mide la tension pico a pico
-    // (VRpp/VCpp/VLpp) y los semiejes de Lissajous (a_X/b_X) para el desfasaje experimental
+    // instrumento; L dato de catedra). Por canal (R, C, L) se mide el voltaje pico a pico
+    // (VRpp/VCpp/VLpp) y los semiejes de Lissajous (a_X/b_X, con el osciloscopio) para el
+    // desfasaje experimental
     // phiX_exp = asin(b_X/a_X). El motor `estadistico` no encadena mensurandos entre si (cada
     // `ResultInput` se evalua solo contra las magnitudes), asi que cada formula de abajo va
     // expandida completa en terminos de R/C/L/Vg/f_trabajo — no hay `omega`/`Z` intermedios
@@ -1081,17 +1082,18 @@ async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("R", "Resistencia", "ohm", "resistencia"),
             qty_shared("C", "Capacitor", "F", "capacitancia"),
             qty_given("L", "Inductor", "H", "inductancia"),
-            qty_shared("Vg", "Tension del generador", "V", "tension"),
+            qty_shared("Vg", "Voltaje en el generador", "V", "voltaje"),
             qty_shared("f_trabajo", "Frecuencia de trabajo", "Hz", "frecuencia"),
-            qty_shared("VRpp", "Tension pico a pico en R", "V", "tension"),
-            qty_shared("VCpp", "Tension pico a pico en C", "V", "tension"),
-            qty_shared("VLpp", "Tension pico a pico en L", "V", "tension"),
-            qty_shared("a_R", "Semieje mayor de Lissajous - R", "V", "tension"),
-            qty_shared("b_R", "Semieje menor de Lissajous - R", "V", "tension"),
-            qty_shared("a_C", "Semieje mayor de Lissajous - C", "V", "tension"),
-            qty_shared("b_C", "Semieje menor de Lissajous - C", "V", "tension"),
-            qty_shared("a_L", "Semieje mayor de Lissajous - L", "V", "tension"),
-            qty_shared("b_L", "Semieje menor de Lissajous - L", "V", "tension"),
+            qty_shared("VRpp", "Voltaje en la resistencia", "V", "voltaje"),
+            qty_shared("VCpp", "Voltaje en el capacitor", "V", "voltaje"),
+            qty_shared("VLpp", "Voltaje en el inductor", "V", "voltaje"),
+            // a/b: semiejes de Lissajous medidos con el osciloscopio; phi_exp = asin(b/a).
+            qty_shared("a_R", "Semieje mayor de Lissajous - R (a)", "V", "voltaje"),
+            qty_shared("b_R", "Semieje menor de Lissajous - R (b)", "V", "voltaje"),
+            qty_shared("a_C", "Semieje mayor de Lissajous - C (a)", "V", "voltaje"),
+            qty_shared("b_C", "Semieje menor de Lissajous - C (b)", "V", "voltaje"),
+            qty_shared("a_L", "Semieje mayor de Lissajous - L (a)", "V", "voltaje"),
+            qty_shared("b_L", "Semieje menor de Lissajous - L (b)", "V", "voltaje"),
         ],
         &[
             res("XL", "Reactancia inductiva", "ohm", &xl),
@@ -1107,25 +1109,40 @@ async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
             res_final("I_exp", "Corriente experimental", "A", "VRpp/(2*R)"),
             res_final(
                 "VR_teo",
-                "Tension teorica en R",
+                "Voltaje teorico en la resistencia",
                 "V",
                 &format!("({i_teo})*R"),
             ),
-            res_final("VR_exp", "Tension experimental en R", "V", "VRpp/2"),
+            res_final(
+                "VR_exp",
+                "Voltaje experimental en la resistencia",
+                "V",
+                "VRpp/2",
+            ),
             res_final(
                 "VC_teo",
-                "Tension teorica en C",
+                "Voltaje teorico en el capacitor",
                 "V",
                 &format!("({i_teo})*({xc})"),
             ),
-            res_final("VC_exp", "Tension experimental en C", "V", "VCpp/2"),
+            res_final(
+                "VC_exp",
+                "Voltaje experimental en el capacitor",
+                "V",
+                "VCpp/2",
+            ),
             res_final(
                 "VL_teo",
-                "Tension teorica en L",
+                "Voltaje teorico en el inductor",
                 "V",
                 &format!("({i_teo})*({xl})"),
             ),
-            res_final("VL_exp", "Tension experimental en L", "V", "VLpp/2"),
+            res_final(
+                "VL_exp",
+                "Voltaje experimental en el inductor",
+                "V",
+                "VLpp/2",
+            ),
             res_final(
                 "phiR_teo",
                 "Desfasaje teorico en R",
