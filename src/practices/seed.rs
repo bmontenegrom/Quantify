@@ -1084,6 +1084,14 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_given("L", "Inductor", "H", "inductancia"),
             qty_shared("Vg", "Voltaje en el generador", "V", "voltaje"),
             qty_shared("f_trabajo", "Frecuencia de trabajo", "Hz", "frecuencia"),
+            // Frecuencia de resonancia experimental: se mide con el osciloscopio (barriendo
+            // f_trabajo hasta la condicion de resonancia), no se deriva de otras magnitudes.
+            qty_shared(
+                "f_res_exp",
+                "Frecuencia de resonancia experimental",
+                "Hz",
+                "frecuencia",
+            ),
             qty_shared("VRpp", "Voltaje en la resistencia", "V", "voltaje"),
             qty_shared("VCpp", "Voltaje en el capacitor", "V", "voltaje"),
             qty_shared("VLpp", "Voltaje en el inductor", "V", "voltaje"),
@@ -1106,7 +1114,6 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "1/(2*pi*math::sqrt(L*C))",
             ),
             res_final("I_teo", "Corriente teorica", "A", &i_teo),
-            res_final("I_exp", "Corriente experimental", "A", "VRpp/(2*R)"),
             res_final(
                 "VR_teo",
                 "Voltaje teorico en la resistencia",
@@ -1189,8 +1196,36 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
 /// cambiaron de "Tension" a "Voltaje" y de radianes a grados en los desfasajes (`seed_ca_rlc` es
 /// idempotente y no re-siembra una práctica que ya tiene magnitudes). Solo toca filas que todavía
 /// están en el estado viejo (`quantity = 'tension'`, `unit = 'rad'`), así que no pisa ediciones
-/// del docente sobre estos mismos campos.
+/// del docente sobre estos mismos campos. También borra `I_exp`: la corriente no se mide en el
+/// circuito, solo se deriva (`I_teo`); no tiene FK entrante (no aparece en mediciones ni en
+/// `submission_student_results`, que referencian por símbolo texto, no por id).
 pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'I_exp'")
+        .execute(pool)
+        .await?;
+
+    // f_res_exp: magnitud nueva (se mide con el osciloscopio), no existia en la siembra original.
+    if quantity_missing(pool, "ca-rlc", "f_res_exp").await? {
+        let base_pos: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(MAX(position), 0) FROM practice_quantities WHERE practice_id = 'ca-rlc'",
+        )
+        .fetch_one(pool)
+        .await?;
+        let mut conn = pool.acquire().await?;
+        insert_quantity(
+            &mut conn,
+            "ca-rlc",
+            base_pos.0 + 1,
+            &qty_shared(
+                "f_res_exp",
+                "Frecuencia de resonancia experimental",
+                "Hz",
+                "frecuencia",
+            ),
+        )
+        .await?;
+    }
+
     let quantity_renames = [
         ("Vg", "Voltaje en el generador"),
         ("VRpp", "Voltaje en la resistencia"),

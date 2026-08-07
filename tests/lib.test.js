@@ -133,7 +133,6 @@ test("symbolHtml renderiza los símbolos de CA (RLC): voltajes pp, teo/exp y phi
   assert.equal(symbolHtml("VR_teo"), "V<sub>R,teo</sub>");
   assert.equal(symbolHtml("VR_exp"), "V<sub>R,exp</sub>");
   assert.equal(symbolHtml("I_teo"), "I<sub>teo</sub>");
-  assert.equal(symbolHtml("I_exp"), "I<sub>exp</sub>");
   // Los semiejes de Lissajous (a_R, b_R...) no necesitan caso especial: el regex genérico
   // de subíndice de 1 carácter ya los cubre.
   assert.equal(symbolHtml("a_R"), "a<sub>R</sub>");

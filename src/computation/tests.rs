@@ -2429,7 +2429,6 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
         1e-6
     ));
     assert!(close(get("I_teo"), i_teo, 1e-9));
-    assert!(close(get("I_exp"), i_teo, 1e-9));
     assert!(close(get("VR_teo"), i_teo * 100.0, 1e-9));
     assert!(close(get("VR_exp"), i_teo * 100.0, 1e-9));
     assert!(close(get("VC_teo"), i_teo * xc, 1e-9));

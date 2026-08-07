@@ -1540,8 +1540,52 @@ async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
     .execute(&pool)
     .await
     .unwrap();
+    // Simula una siembra vieja: I_exp existia (se elimino, la corriente no se mide) y
+    // f_res_exp no existia todavia (magnitud nueva, se mide con el osciloscopio).
+    sqlx::query(
+        "INSERT INTO practice_results (id, practice_id, symbol, name, unit, formula, position) \
+         VALUES ('r-i-exp', 'ca-rlc', 'I_exp', 'Corriente experimental', 'A', 'VRpp/(2*R)', 99)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "DELETE FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     fix_ca_rlc_labels(&pool).await.unwrap();
+
+    let i_exp_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'I_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        i_exp_count.0, 0,
+        "I_exp debe borrarse (la corriente no se mide)"
+    );
+
+    let f_res_exp_name: (String,) = sqlx::query_as(
+        "SELECT name FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(f_res_exp_name.0, "Frecuencia de resonancia experimental");
+
+    // Idempotente: correrla de nuevo no debe fallar ni duplicar f_res_exp.
+    fix_ca_rlc_labels(&pool).await.unwrap();
+    let f_res_exp_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(f_res_exp_count.0, 1);
 
     let vg_name: (String,) = sqlx::query_as(
         "SELECT name FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'Vg'",

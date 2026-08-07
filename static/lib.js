@@ -41,7 +41,6 @@ export function symbolHtml(value) {
     VCpp: "V<sub>C,PP</sub>",
     VLpp: "V<sub>L,PP</sub>",
     I_teo: "I<sub>teo</sub>",
-    I_exp: "I<sub>exp</sub>",
     VR_teo: "V<sub>R,teo</sub>",
     VR_exp: "V<sub>R,exp</sub>",
     VC_teo: "V<sub>C,teo</sub>",
