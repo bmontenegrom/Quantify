@@ -1095,13 +1095,15 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("VRpp", "Voltaje en la resistencia", "V", "voltaje"),
             qty_shared("VCpp", "Voltaje en el capacitor", "V", "voltaje"),
             qty_shared("VLpp", "Voltaje en el inductor", "V", "voltaje"),
-            // a/b: semiejes de Lissajous medidos con el osciloscopio; phi_exp = asin(b/a).
-            qty_shared("a_R", "Semieje mayor de Lissajous - R (a)", "V", "voltaje"),
-            qty_shared("b_R", "Semieje menor de Lissajous - R (b)", "V", "voltaje"),
-            qty_shared("a_C", "Semieje mayor de Lissajous - C (a)", "V", "voltaje"),
-            qty_shared("b_C", "Semieje menor de Lissajous - C (b)", "V", "voltaje"),
-            qty_shared("a_L", "Semieje mayor de Lissajous - L (a)", "V", "voltaje"),
-            qty_shared("b_L", "Semieje menor de Lissajous - L (b)", "V", "voltaje"),
+            // a/b: semiejes de Lissajous medidos con el osciloscopio; phi_exp = asin(b/a). El
+            // símbolo (a_R/b_R...) ya se muestra antes del nombre en el formulario
+            // (SYMBOL_FIRST_QUANTITIES en constants.js), así que el nombre no repite la letra.
+            qty_shared("a_R", "Semieje mayor de Lissajous - R", "V", "voltaje"),
+            qty_shared("b_R", "Semieje menor de Lissajous - R", "V", "voltaje"),
+            qty_shared("a_C", "Semieje mayor de Lissajous - C", "V", "voltaje"),
+            qty_shared("b_C", "Semieje menor de Lissajous - C", "V", "voltaje"),
+            qty_shared("a_L", "Semieje mayor de Lissajous - L", "V", "voltaje"),
+            qty_shared("b_L", "Semieje menor de Lissajous - L", "V", "voltaje"),
         ],
         &[
             res("XL", "Reactancia inductiva", "ohm", &xl),
@@ -1234,17 +1236,58 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
+    // Reordena f_res_exp arriba de f_trabajo si quedo mal ubicada: una version anterior de esta
+    // migracion la insertaba al final en vez de antes de f_trabajo.
+    let stray_position: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT fre.position, ft.position \
+         FROM practice_quantities fre, practice_quantities ft \
+         WHERE fre.practice_id = 'ca-rlc' AND fre.symbol = 'f_res_exp' \
+           AND ft.practice_id = 'ca-rlc' AND ft.symbol = 'f_trabajo' \
+           AND fre.position > ft.position",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if let Some((f_res_exp_pos, f_trabajo_pos)) = stray_position {
+        sqlx::query(
+            "UPDATE practice_quantities SET position = position + 1 \
+             WHERE practice_id = 'ca-rlc' AND position >= ?1 AND position < ?2",
+        )
+        .bind(f_trabajo_pos)
+        .bind(f_res_exp_pos)
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "UPDATE practice_quantities SET position = ?1 \
+             WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+        )
+        .bind(f_trabajo_pos)
+        .execute(pool)
+        .await?;
+    }
+
+    // Quita el "(a)"/"(b)" que una version anterior de esta migracion agrego al nombre: quedo
+    // redundante en cuanto el símbolo se empezó a mostrar antes del nombre en el formulario.
+    for symbol in ["a_R", "b_R", "a_C", "b_C", "a_L", "b_L"] {
+        sqlx::query(
+            "UPDATE practice_quantities SET name = REPLACE(REPLACE(name, ' (a)', ''), ' (b)', '') \
+             WHERE practice_id = 'ca-rlc' AND symbol = ?1",
+        )
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
+
     let quantity_renames = [
         ("Vg", "Voltaje en el generador"),
         ("VRpp", "Voltaje en la resistencia"),
         ("VCpp", "Voltaje en el capacitor"),
         ("VLpp", "Voltaje en el inductor"),
-        ("a_R", "Semieje mayor de Lissajous - R (a)"),
-        ("b_R", "Semieje menor de Lissajous - R (b)"),
-        ("a_C", "Semieje mayor de Lissajous - C (a)"),
-        ("b_C", "Semieje menor de Lissajous - C (b)"),
-        ("a_L", "Semieje mayor de Lissajous - L (a)"),
-        ("b_L", "Semieje menor de Lissajous - L (b)"),
+        ("a_R", "Semieje mayor de Lissajous - R"),
+        ("b_R", "Semieje menor de Lissajous - R"),
+        ("a_C", "Semieje mayor de Lissajous - C"),
+        ("b_C", "Semieje menor de Lissajous - C"),
+        ("a_L", "Semieje mayor de Lissajous - L"),
+        ("b_L", "Semieje menor de Lissajous - L"),
     ];
     for (symbol, new_name) in quantity_renames {
         sqlx::query(

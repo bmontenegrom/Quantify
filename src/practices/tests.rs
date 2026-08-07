@@ -1627,3 +1627,52 @@ async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
     .unwrap();
     assert_eq!(vrpp_name.0, "Voltaje de la fuente (editado)");
 }
+
+/// Una version anterior de `fix_ca_rlc_labels` insertaba `f_res_exp` al final en vez de arriba
+/// de `f_trabajo`; una corrida posterior debe reordenarla sin duplicarla ni romper las demás.
+#[tokio::test]
+async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
+    let (pool, _dir) = setup().await;
+    seed_ca_rlc(&pool).await.unwrap();
+    fix_ca_rlc_labels(&pool).await.unwrap();
+
+    // Simula el bug viejo: mueve f_res_exp al final (posicion mas alta de la practica).
+    let max_pos: (i64,) = sqlx::query_as(
+        "SELECT MAX(position) FROM practice_quantities WHERE practice_id = 'ca-rlc'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET position = ?1 \
+         WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .bind(max_pos.0 + 1)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    fix_ca_rlc_labels(&pool).await.unwrap();
+
+    let f_res_exp_pos: (i64,) = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let f_trabajo_pos: (i64,) = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(f_res_exp_pos.0 < f_trabajo_pos.0);
+
+    // Ninguna otra magnitud se duplico ni se perdio en el reordenamiento.
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'ca-rlc'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count.0, 15);
+}
