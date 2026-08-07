@@ -82,6 +82,9 @@ export const PRACTICES_WITHOUT_CHRONO_HELPER = new Set(["p3-relajacion"]);
 export const SYMBOL_FIRST_QUANTITIES = new Set([
   ...PRACTICE_SECTIONS["p2-cc"].filter((sec) => sec.id).flatMap((sec) => sec.symbols ?? []),
   // CA (RLC): voltajes (generador y pico a pico por canal) y semiejes de Lissajous — mismo
-  // criterio, el símbolo no es obvio a simple vista en el nombre.
+  // criterio, el símbolo no es obvio a simple vista en el nombre. Hardcodeados (no derivados
+  // de una sección como p2-cc) porque esta práctica no tiene entrada en PRACTICE_SECTIONS: no
+  // usa sub-partes, es un único bloque estadístico. Si se renombra alguno de estos símbolos en
+  // `seed_ca_rlc` (src/practices/seed.rs), actualizar también acá.
   "Vg", "VRpp", "VCpp", "VLpp", "a_R", "b_R", "a_C", "b_C", "a_L", "b_L",
 ]);

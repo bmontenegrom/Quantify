@@ -1202,9 +1202,15 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
 /// circuito, solo se deriva (`I_teo`); no tiene FK entrante (no aparece en mediciones ni en
 /// `submission_student_results`, que referencian por símbolo texto, no por id).
 pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'I_exp'")
+    // Gateado por result_missing (patrón del resto del archivo): una vez borrada, esta rama
+    // deja de ejecutarse en cada boot.
+    if !result_missing(pool, "ca-rlc", "I_exp").await? {
+        sqlx::query(
+            "DELETE FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'I_exp'",
+        )
         .execute(pool)
         .await?;
+    }
 
     // f_res_exp: magnitud nueva (se mide con el osciloscopio), no existia en la siembra original.
     // Va arriba de f_trabajo: se corre +1 la posicion de f_trabajo en adelante y se inserta ahi.
@@ -1238,6 +1244,11 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
 
     // Reordena f_res_exp arriba de f_trabajo si quedo mal ubicada: una version anterior de esta
     // migracion la insertaba al final en vez de antes de f_trabajo.
+    // ponytail: a diferencia de las otras ramas de esta funcion, esta no tiene un flag de "ya
+    // migrado" que la desactive sola (comparar posiciones es la unica forma de saber si sigue
+    // mal ordenada) — el SELECT corre en cada boot, pero es un self-join de 2 filas en una
+    // tabla de ~15 filas por practica: costo despreciable. Toda `fix_ca_rlc_labels` es temporal
+    // (ver doc de la funcion) y se borra junto con el resto en una limpieza futura.
     let stray_position: Option<(i64, i64)> = sqlx::query_as(
         "SELECT fre.position, ft.position \
          FROM practice_quantities fre, practice_quantities ft \
