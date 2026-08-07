@@ -1083,7 +1083,6 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("C", "Capacitor", "F", "capacitancia"),
             qty_given("L", "Inductor", "H", "inductancia"),
             qty_shared("Vg", "Voltaje en el generador", "V", "voltaje"),
-            qty_shared("f_trabajo", "Frecuencia de trabajo", "Hz", "frecuencia"),
             // Frecuencia de resonancia experimental: se mide con el osciloscopio (barriendo
             // f_trabajo hasta la condicion de resonancia), no se deriva de otras magnitudes.
             qty_shared(
@@ -1092,6 +1091,7 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "Hz",
                 "frecuencia",
             ),
+            qty_shared("f_trabajo", "Frecuencia de trabajo", "Hz", "frecuencia"),
             qty_shared("VRpp", "Voltaje en la resistencia", "V", "voltaje"),
             qty_shared("VCpp", "Voltaje en el capacitor", "V", "voltaje"),
             qty_shared("VLpp", "Voltaje en el inductor", "V", "voltaje"),
@@ -1205,17 +1205,25 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
 
     // f_res_exp: magnitud nueva (se mide con el osciloscopio), no existia en la siembra original.
+    // Va arriba de f_trabajo: se corre +1 la posicion de f_trabajo en adelante y se inserta ahi.
     if quantity_missing(pool, "ca-rlc", "f_res_exp").await? {
-        let base_pos: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(MAX(position), 0) FROM practice_quantities WHERE practice_id = 'ca-rlc'",
+        let f_trabajo_pos: (i64,) = sqlx::query_as(
+            "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
         )
         .fetch_one(pool)
+        .await?;
+        sqlx::query(
+            "UPDATE practice_quantities SET position = position + 1 \
+             WHERE practice_id = 'ca-rlc' AND position >= ?1",
+        )
+        .bind(f_trabajo_pos.0)
+        .execute(pool)
         .await?;
         let mut conn = pool.acquire().await?;
         insert_quantity(
             &mut conn,
             "ca-rlc",
-            base_pos.0 + 1,
+            f_trabajo_pos.0,
             &qty_shared(
                 "f_res_exp",
                 "Frecuencia de resonancia experimental",

@@ -1577,6 +1577,21 @@ async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
     .unwrap();
     assert_eq!(f_res_exp_name.0, "Frecuencia de resonancia experimental");
 
+    // f_res_exp debe insertarse arriba de f_trabajo (su posicion vieja), no al final.
+    let f_res_exp_pos: (i64,) = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let f_trabajo_pos: (i64,) = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(f_res_exp_pos.0 < f_trabajo_pos.0);
+
     // Idempotente: correrla de nuevo no debe fallar ni duplicar f_res_exp.
     fix_ca_rlc_labels(&pool).await.unwrap();
     let f_res_exp_count: (i64,) = sqlx::query_as(

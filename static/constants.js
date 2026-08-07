@@ -79,6 +79,9 @@ export const PRACTICES_WITHOUT_CHRONO_HELPER = new Set(["p3-relajacion"]);
 // teórica (VR1 medida vs VR1 teórica). Se derivan de las secciones por parte (serie/paralelo/
 // potencia, identificadas por su `id`) en vez de mantener una lista aparte: son exactamente esas
 // magnitudes, no las compartidas (Resistencias) que quedan fuera de una parte.
-export const SYMBOL_FIRST_QUANTITIES = new Set(
-  PRACTICE_SECTIONS["p2-cc"].filter((sec) => sec.id).flatMap((sec) => sec.symbols ?? []),
-);
+export const SYMBOL_FIRST_QUANTITIES = new Set([
+  ...PRACTICE_SECTIONS["p2-cc"].filter((sec) => sec.id).flatMap((sec) => sec.symbols ?? []),
+  // CA (RLC): voltajes (generador y pico a pico por canal) y semiejes de Lissajous — mismo
+  // criterio, el símbolo no es obvio a simple vista en el nombre.
+  "Vg", "VRpp", "VCpp", "VLpp", "a_R", "b_R", "a_C", "b_C", "a_L", "b_L",
+]);
