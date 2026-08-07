@@ -127,6 +127,7 @@ test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)"
 
 test("symbolHtml renderiza los símbolos de CA (RLC): voltajes pp, teo/exp y phi", () => {
   assert.equal(symbolHtml("f_res"), "f<sub>res</sub>");
+  assert.equal(symbolHtml("f_res_exp"), "f<sub>res,exp</sub>");
   assert.equal(symbolHtml("VRpp"), "V<sub>R,PP</sub>");
   assert.equal(symbolHtml("VCpp"), "V<sub>C,PP</sub>");
   assert.equal(symbolHtml("VLpp"), "V<sub>L,PP</sub>");

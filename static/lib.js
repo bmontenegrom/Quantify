@@ -37,6 +37,7 @@ export function symbolHtml(value) {
     // CA (RLC): voltajes pico a pico (sin guion bajo) y teo/exp/res (subíndice de 3 letras,
     // fuera del regex genérico de 1-2 caracteres); phi se muestra con el símbolo φ, no la palabra.
     f_res: "f<sub>res</sub>",
+    f_res_exp: "f<sub>res,exp</sub>",
     VRpp: "V<sub>R,PP</sub>",
     VCpp: "V<sub>C,PP</sub>",
     VLpp: "V<sub>L,PP</sub>",
