@@ -1058,15 +1058,17 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 /// Siembra CA/RLC (ver [`seed_definitions`]).
-async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
+pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
     // CA (RLC) — circuito serie con generador Vg y componentes R, C, L (R, C y Vg medidos con
-    // instrumento; L dato de catedra). Por canal (R, C, L) se mide la tension pico a pico
-    // (VRpp/VCpp/VLpp) y los semiejes de Lissajous (a_X/b_X) para el desfasaje experimental
+    // instrumento; L dato de catedra). Por canal (R, C, L) se mide el voltaje pico a pico
+    // (VRpp/VCpp/VLpp) y los semiejes de Lissajous (a_X/b_X, con el osciloscopio) para el
+    // desfasaje experimental
     // phiX_exp = asin(b_X/a_X). El motor `estadistico` no encadena mensurandos entre si (cada
     // `ResultInput` se evalua solo contra las magnitudes), asi que cada formula de abajo va
     // expandida completa en terminos de R/C/L/Vg/f_trabajo — no hay `omega`/`Z` intermedios
-    // reutilizables. Topologia RLC serie estandar; formulas de fase con signo a confirmar con
-    // el docente (no hay hoja real de esta practica, a diferencia de las otras 6 de Fase 15).
+    // reutilizables. Topologia RLC serie estandar; tensiones pico a pico y signos de fase
+    // confirmados con el docente (no hay hoja real de esta practica, a diferencia de las otras
+    // 6 de Fase 15, pero se validaron directamente).
     let omega = "(2*pi*f_trabajo)";
     let xl = format!("({omega}*L)");
     let xc = format!("(1/({omega}*C))");
@@ -1080,17 +1082,28 @@ async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("R", "Resistencia", "ohm", "resistencia"),
             qty_shared("C", "Capacitor", "F", "capacitancia"),
             qty_given("L", "Inductor", "H", "inductancia"),
-            qty_shared("Vg", "Tension del generador", "V", "tension"),
+            qty_shared("Vg", "Voltaje en el generador", "V", "voltaje"),
+            // Frecuencia de resonancia experimental: se mide con el osciloscopio (barriendo
+            // f_trabajo hasta la condicion de resonancia), no se deriva de otras magnitudes.
+            qty_shared(
+                "f_res_exp",
+                "Frecuencia de resonancia experimental",
+                "Hz",
+                "frecuencia",
+            ),
             qty_shared("f_trabajo", "Frecuencia de trabajo", "Hz", "frecuencia"),
-            qty_shared("VRpp", "Tension pico a pico en R", "V", "tension"),
-            qty_shared("VCpp", "Tension pico a pico en C", "V", "tension"),
-            qty_shared("VLpp", "Tension pico a pico en L", "V", "tension"),
-            qty_shared("a_R", "Semieje mayor de Lissajous - R", "V", "tension"),
-            qty_shared("b_R", "Semieje menor de Lissajous - R", "V", "tension"),
-            qty_shared("a_C", "Semieje mayor de Lissajous - C", "V", "tension"),
-            qty_shared("b_C", "Semieje menor de Lissajous - C", "V", "tension"),
-            qty_shared("a_L", "Semieje mayor de Lissajous - L", "V", "tension"),
-            qty_shared("b_L", "Semieje menor de Lissajous - L", "V", "tension"),
+            qty_shared("VRpp", "Voltaje en la resistencia", "V", "voltaje"),
+            qty_shared("VCpp", "Voltaje en el capacitor", "V", "voltaje"),
+            qty_shared("VLpp", "Voltaje en el inductor", "V", "voltaje"),
+            // a/b: semiejes de Lissajous medidos con el osciloscopio; phi_exp = asin(b/a). El
+            // símbolo (a_R/b_R...) ya se muestra antes del nombre en el formulario
+            // (SYMBOL_FIRST_QUANTITIES en constants.js), así que el nombre no repite la letra.
+            qty_shared("a_R", "Semieje mayor de Lissajous - R", "V", "voltaje"),
+            qty_shared("b_R", "Semieje menor de Lissajous - R", "V", "voltaje"),
+            qty_shared("a_C", "Semieje mayor de Lissajous - C", "V", "voltaje"),
+            qty_shared("b_C", "Semieje menor de Lissajous - C", "V", "voltaje"),
+            qty_shared("a_L", "Semieje mayor de Lissajous - L", "V", "voltaje"),
+            qty_shared("b_L", "Semieje menor de Lissajous - L", "V", "voltaje"),
         ],
         &[
             res("XL", "Reactancia inductiva", "ohm", &xl),
@@ -1103,67 +1116,243 @@ async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "1/(2*pi*math::sqrt(L*C))",
             ),
             res_final("I_teo", "Corriente teorica", "A", &i_teo),
-            res_final("I_exp", "Corriente experimental", "A", "VRpp/(2*R)"),
             res_final(
                 "VR_teo",
-                "Tension teorica en R",
+                "Voltaje teorico en la resistencia",
                 "V",
                 &format!("({i_teo})*R"),
             ),
-            res_final("VR_exp", "Tension experimental en R", "V", "VRpp/2"),
+            res_final(
+                "VR_exp",
+                "Voltaje experimental en la resistencia",
+                "V",
+                "VRpp/2",
+            ),
             res_final(
                 "VC_teo",
-                "Tension teorica en C",
+                "Voltaje teorico en el capacitor",
                 "V",
                 &format!("({i_teo})*({xc})"),
             ),
-            res_final("VC_exp", "Tension experimental en C", "V", "VCpp/2"),
+            res_final(
+                "VC_exp",
+                "Voltaje experimental en el capacitor",
+                "V",
+                "VCpp/2",
+            ),
             res_final(
                 "VL_teo",
-                "Tension teorica en L",
+                "Voltaje teorico en el inductor",
                 "V",
                 &format!("({i_teo})*({xl})"),
             ),
-            res_final("VL_exp", "Tension experimental en L", "V", "VLpp/2"),
+            res_final(
+                "VL_exp",
+                "Voltaje experimental en el inductor",
+                "V",
+                "VLpp/2",
+            ),
             res_final(
                 "phiR_teo",
                 "Desfasaje teorico en R",
-                "rad",
-                &format!("-({phi_teo})"),
+                "°",
+                &format!("(-({phi_teo}))*180/pi"),
             ),
             res_final(
                 "phiR_exp",
                 "Desfasaje experimental en R",
-                "rad",
-                "math::asin(b_R/a_R)",
+                "°",
+                "math::asin(b_R/a_R)*180/pi",
             ),
             res_final(
                 "phiC_teo",
                 "Desfasaje teorico en C",
-                "rad",
-                &format!("-({phi_teo})-pi/2"),
+                "°",
+                &format!("(-({phi_teo})-pi/2)*180/pi"),
             ),
             res_final(
                 "phiC_exp",
                 "Desfasaje experimental en C",
-                "rad",
-                "math::asin(b_C/a_C)",
+                "°",
+                "math::asin(b_C/a_C)*180/pi",
             ),
             res_final(
                 "phiL_teo",
                 "Desfasaje teorico en L",
-                "rad",
-                &format!("-({phi_teo})+pi/2"),
+                "°",
+                &format!("(-({phi_teo})+pi/2)*180/pi"),
             ),
             res_final(
                 "phiL_exp",
                 "Desfasaje experimental en L",
-                "rad",
-                "math::asin(b_L/a_L)",
+                "°",
+                "math::asin(b_L/a_L)*180/pi",
             ),
         ],
     )
     .await?;
+    Ok(())
+}
+
+/// Corrige en bases ya sembradas (antes del 2026-08-07) los nombres/fórmulas de CA/RLC que
+/// cambiaron de "Tension" a "Voltaje" y de radianes a grados en los desfasajes (`seed_ca_rlc` es
+/// idempotente y no re-siembra una práctica que ya tiene magnitudes). Solo toca filas que todavía
+/// están en el estado viejo (`quantity = 'tension'`, `unit = 'rad'`), así que no pisa ediciones
+/// del docente sobre estos mismos campos. También borra `I_exp`: la corriente no se mide en el
+/// circuito, solo se deriva (`I_teo`); no tiene FK entrante (no aparece en mediciones ni en
+/// `submission_student_results`, que referencian por símbolo texto, no por id).
+pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
+    // Gateado por result_missing (patrón del resto del archivo): una vez borrada, esta rama
+    // deja de ejecutarse en cada boot.
+    if !result_missing(pool, "ca-rlc", "I_exp").await? {
+        sqlx::query(
+            "DELETE FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'I_exp'",
+        )
+        .execute(pool)
+        .await?;
+    }
+
+    // f_res_exp: magnitud nueva (se mide con el osciloscopio), no existia en la siembra original.
+    // Va arriba de f_trabajo: se corre +1 la posicion de f_trabajo en adelante y se inserta ahi.
+    if quantity_missing(pool, "ca-rlc", "f_res_exp").await? {
+        let f_trabajo_pos: (i64,) = sqlx::query_as(
+            "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
+        )
+        .fetch_one(pool)
+        .await?;
+        sqlx::query(
+            "UPDATE practice_quantities SET position = position + 1 \
+             WHERE practice_id = 'ca-rlc' AND position >= ?1",
+        )
+        .bind(f_trabajo_pos.0)
+        .execute(pool)
+        .await?;
+        let mut conn = pool.acquire().await?;
+        insert_quantity(
+            &mut conn,
+            "ca-rlc",
+            f_trabajo_pos.0,
+            &qty_shared(
+                "f_res_exp",
+                "Frecuencia de resonancia experimental",
+                "Hz",
+                "frecuencia",
+            ),
+        )
+        .await?;
+    }
+
+    // Reordena f_res_exp arriba de f_trabajo si quedo mal ubicada: una version anterior de esta
+    // migracion la insertaba al final en vez de antes de f_trabajo.
+    // ponytail: a diferencia de las otras ramas de esta funcion, esta no tiene un flag de "ya
+    // migrado" que la desactive sola (comparar posiciones es la unica forma de saber si sigue
+    // mal ordenada) — el SELECT corre en cada boot, pero es un self-join de 2 filas en una
+    // tabla de ~15 filas por practica: costo despreciable. Toda `fix_ca_rlc_labels` es temporal
+    // (ver doc de la funcion) y se borra junto con el resto en una limpieza futura.
+    let stray_position: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT fre.position, ft.position \
+         FROM practice_quantities fre, practice_quantities ft \
+         WHERE fre.practice_id = 'ca-rlc' AND fre.symbol = 'f_res_exp' \
+           AND ft.practice_id = 'ca-rlc' AND ft.symbol = 'f_trabajo' \
+           AND fre.position > ft.position",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if let Some((f_res_exp_pos, f_trabajo_pos)) = stray_position {
+        sqlx::query(
+            "UPDATE practice_quantities SET position = position + 1 \
+             WHERE practice_id = 'ca-rlc' AND position >= ?1 AND position < ?2",
+        )
+        .bind(f_trabajo_pos)
+        .bind(f_res_exp_pos)
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "UPDATE practice_quantities SET position = ?1 \
+             WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+        )
+        .bind(f_trabajo_pos)
+        .execute(pool)
+        .await?;
+    }
+
+    // Quita el "(a)"/"(b)" que una version anterior de esta migracion agrego al nombre: quedo
+    // redundante en cuanto el símbolo se empezó a mostrar antes del nombre en el formulario.
+    for symbol in ["a_R", "b_R", "a_C", "b_C", "a_L", "b_L"] {
+        sqlx::query(
+            "UPDATE practice_quantities SET name = REPLACE(REPLACE(name, ' (a)', ''), ' (b)', '') \
+             WHERE practice_id = 'ca-rlc' AND symbol = ?1",
+        )
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
+
+    let quantity_renames = [
+        ("Vg", "Voltaje en el generador"),
+        ("VRpp", "Voltaje en la resistencia"),
+        ("VCpp", "Voltaje en el capacitor"),
+        ("VLpp", "Voltaje en el inductor"),
+        ("a_R", "Semieje mayor de Lissajous - R"),
+        ("b_R", "Semieje menor de Lissajous - R"),
+        ("a_C", "Semieje mayor de Lissajous - C"),
+        ("b_C", "Semieje menor de Lissajous - C"),
+        ("a_L", "Semieje mayor de Lissajous - L"),
+        ("b_L", "Semieje menor de Lissajous - L"),
+    ];
+    for (symbol, new_name) in quantity_renames {
+        sqlx::query(
+            "UPDATE practice_quantities SET name = ?1, quantity = 'voltaje' \
+             WHERE practice_id = 'ca-rlc' AND symbol = ?2 AND quantity = 'tension'",
+        )
+        .bind(new_name)
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
+
+    let result_renames = [
+        ("VR_teo", "Voltaje teorico en la resistencia"),
+        ("VR_exp", "Voltaje experimental en la resistencia"),
+        ("VC_teo", "Voltaje teorico en el capacitor"),
+        ("VC_exp", "Voltaje experimental en el capacitor"),
+        ("VL_teo", "Voltaje teorico en el inductor"),
+        ("VL_exp", "Voltaje experimental en el inductor"),
+    ];
+    for (symbol, new_name) in result_renames {
+        sqlx::query(
+            "UPDATE practice_results SET name = ?1 WHERE practice_id = 'ca-rlc' AND symbol = ?2",
+        )
+        .bind(new_name)
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
+
+    // Desfasajes: rad -> grados, misma formula que en seed_ca_rlc (ver alli el detalle de
+    // omega/xl/xc/phi_teo). Se gatea en `unit = 'rad'` (marca de que todavia no se migro).
+    let omega = "(2*pi*f_trabajo)";
+    let xl = format!("({omega}*L)");
+    let xc = format!("(1/({omega}*C))");
+    let phi_teo = format!("math::atan((({xl})-({xc}))/R)");
+    let phase_updates = [
+        ("phiR_teo", format!("(-({phi_teo}))*180/pi")),
+        ("phiR_exp", "math::asin(b_R/a_R)*180/pi".to_string()),
+        ("phiC_teo", format!("(-({phi_teo})-pi/2)*180/pi")),
+        ("phiC_exp", "math::asin(b_C/a_C)*180/pi".to_string()),
+        ("phiL_teo", format!("(-({phi_teo})+pi/2)*180/pi")),
+        ("phiL_exp", "math::asin(b_L/a_L)*180/pi".to_string()),
+    ];
+    for (symbol, formula) in phase_updates {
+        sqlx::query(
+            "UPDATE practice_results SET formula = ?1, unit = '°' \
+             WHERE practice_id = 'ca-rlc' AND symbol = ?2 AND unit = 'rad'",
+        )
+        .bind(formula)
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
     Ok(())
 }
 
@@ -1181,5 +1370,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_fluidos2(pool).await?;
     seed_filtros(pool).await?;
     seed_ca_rlc(pool).await?;
+    fix_ca_rlc_labels(pool).await?;
     Ok(())
 }

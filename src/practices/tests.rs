@@ -1,5 +1,6 @@
 use super::*;
 use crate::db;
+use seed::{fix_ca_rlc_labels, seed_ca_rlc};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use tempfile::TempDir;
@@ -1507,4 +1508,171 @@ fn result_input_tolerance_serde_variants() {
         Some(Some(5.0)),
         "número debe ser Some(Some(v))"
     );
+}
+
+/// `fix_ca_rlc_labels` corrige filas dejadas por una siembra vieja (`quantity = 'tension'`,
+/// `unit = 'rad'`) sin pisar filas que ya están en el estado nuevo o que el docente editó.
+#[tokio::test]
+async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
+    let (pool, _dir) = setup().await;
+    seed_ca_rlc(&pool).await.unwrap();
+
+    // Simula una base sembrada antes del cambio: Vg en "tension" (nombre viejo) y phiR_teo en rad.
+    sqlx::query(
+        "UPDATE practice_quantities SET name = 'Tension del generador', quantity = 'tension' \
+         WHERE practice_id = 'ca-rlc' AND symbol = 'Vg'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE practice_results SET unit = 'rad', formula = '-(math::atan(0))' \
+         WHERE practice_id = 'ca-rlc' AND symbol = 'phiR_teo'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Una edición del docente sobre un campo ya migrado: no debe tocarse.
+    sqlx::query(
+        "UPDATE practice_quantities SET name = 'Voltaje de la fuente (editado)' \
+         WHERE practice_id = 'ca-rlc' AND symbol = 'VRpp'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Simula una siembra vieja: I_exp existia (se elimino, la corriente no se mide) y
+    // f_res_exp no existia todavia (magnitud nueva, se mide con el osciloscopio).
+    sqlx::query(
+        "INSERT INTO practice_results (id, practice_id, symbol, name, unit, formula, position) \
+         VALUES ('r-i-exp', 'ca-rlc', 'I_exp', 'Corriente experimental', 'A', 'VRpp/(2*R)', 99)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "DELETE FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    fix_ca_rlc_labels(&pool).await.unwrap();
+
+    let i_exp_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'I_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        i_exp_count.0, 0,
+        "I_exp debe borrarse (la corriente no se mide)"
+    );
+
+    let f_res_exp_name: (String,) = sqlx::query_as(
+        "SELECT name FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(f_res_exp_name.0, "Frecuencia de resonancia experimental");
+
+    // f_res_exp debe insertarse arriba de f_trabajo (su posicion vieja), no al final.
+    let f_res_exp_pos: (i64,) = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let f_trabajo_pos: (i64,) = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(f_res_exp_pos.0 < f_trabajo_pos.0);
+
+    // Idempotente: correrla de nuevo no debe fallar ni duplicar f_res_exp.
+    fix_ca_rlc_labels(&pool).await.unwrap();
+    let f_res_exp_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(f_res_exp_count.0, 1);
+
+    let vg_name: (String,) = sqlx::query_as(
+        "SELECT name FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'Vg'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(vg_name.0, "Voltaje en el generador");
+
+    let (phi_unit, phi_formula): (String, String) = sqlx::query_as(
+        "SELECT unit, formula FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'phiR_teo'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(phi_unit, "°");
+    assert!(phi_formula.contains("180/pi"));
+
+    let vrpp_name: (String,) = sqlx::query_as(
+        "SELECT name FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'VRpp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(vrpp_name.0, "Voltaje de la fuente (editado)");
+}
+
+/// Una version anterior de `fix_ca_rlc_labels` insertaba `f_res_exp` al final en vez de arriba
+/// de `f_trabajo`; una corrida posterior debe reordenarla sin duplicarla ni romper las demás.
+#[tokio::test]
+async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
+    let (pool, _dir) = setup().await;
+    seed_ca_rlc(&pool).await.unwrap();
+    fix_ca_rlc_labels(&pool).await.unwrap();
+
+    // Simula el bug viejo: mueve f_res_exp al final (posicion mas alta de la practica).
+    let max_pos: (i64,) = sqlx::query_as(
+        "SELECT MAX(position) FROM practice_quantities WHERE practice_id = 'ca-rlc'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET position = ?1 \
+         WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .bind(max_pos.0 + 1)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    fix_ca_rlc_labels(&pool).await.unwrap();
+
+    let f_res_exp_pos: (i64,) = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let f_trabajo_pos: (i64,) = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(f_res_exp_pos.0 < f_trabajo_pos.0);
+
+    // Ninguna otra magnitud se duplico ni se perdio en el reordenamiento.
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'ca-rlc'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count.0, 15);
 }
