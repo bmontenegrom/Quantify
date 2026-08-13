@@ -17,6 +17,8 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         spec_pct_reading: None,
         spec_step_coeff: None,
         spec_fixed: None,
+        u_cal_pct: None,
+        u_cal_fixed: None,
         unit: unit.into(),
     };
     // Escala digital simple (resolución).
@@ -31,6 +33,8 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         spec_pct_reading: None,
         spec_step_coeff: None,
         spec_fixed: None,
+        u_cal_pct: None,
+        u_cal_fixed: None,
         unit: unit.into(),
     };
     // Escala con especificación de fabricante: U = pct*|v| + coef*step + fijo.
@@ -54,7 +58,17 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         spec_pct_reading: Some(pct),
         spec_step_coeff: Some(coeff),
         spec_fixed: Some(fixed),
+        u_cal_pct: None,
+        u_cal_fixed: None,
         unit: unit.into(),
+    };
+
+    // Agrega calibracion (en cuadratura sobre el modelo base) a una escala ya construida:
+    // `pct` en % del valor leido, `fixed` en unidad base. Tecnica de Hidrostatica.
+    let cal = |scale: ScaleInput, pct: f64, fixed: f64| ScaleInput {
+        u_cal_pct: Some(pct),
+        u_cal_fixed: Some(fixed),
+        ..scale
     };
 
     let instrument = |name: &str, kind: &str, quantity: &str, unit: &str| CreateInstrument {
@@ -81,7 +95,27 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         ),
         (
             instrument("Balanza digital", "digital", "masa", "g"),
-            vec![reso("0.01 g", 0.01, None, "g")],
+            vec![
+                reso("0.01 g", 0.01, None, "g"),
+                // Tecnica de Hidrostatica: truncamiento R = 0.1 g y calibracion 3 % de la medida.
+                cal(reso("0.1 g (calibracion 3 %)", 0.1, None, "g"), 3.0, 0.0),
+            ],
+        ),
+        (
+            // Tecnica de Hidrostatica: lectura por apreciacion mas u_calibracion fija de
+            // 0.001 g/cm3 (la escala es un papel pegado al vastago: puede estar corrida).
+            instrument("Densimetro", "analogico", "densidad", "g/cm3"),
+            vec![cal(
+                apre("0.001 g/cm3", 0.001, 0.001, None, "g/cm3"),
+                0.0,
+                0.001,
+            )],
+        ),
+        (
+            // Brazos de la balanza de Mohr: solo calibracion (u = 0.5 mm), el operador no
+            // aprecia la medida porque las muescas estan grabadas.
+            instrument("Balanza de Mohr (brazos)", "analogico", "longitud", "m"),
+            vec![cal(reso("muescas", 0.0, None, "m"), 0.0, 0.0005)],
         ),
         (
             instrument("Tester A830L (corriente)", "digital", "corriente", "A"),

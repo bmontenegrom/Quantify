@@ -48,6 +48,12 @@ pub struct ScaleInput {
     pub spec_pct_reading: Option<f64>,
     pub spec_step_coeff: Option<f64>,
     pub spec_fixed: Option<f64>,
+    /// Calibración sumada en cuadratura sobre el modelo base: porcentaje del valor leído.
+    #[serde(default)]
+    pub u_cal_pct: Option<f64>,
+    /// Calibración sumada en cuadratura sobre el modelo base: término fijo en unidad base.
+    #[serde(default)]
+    pub u_cal_fixed: Option<f64>,
     pub unit: String,
 }
 
@@ -80,7 +86,8 @@ const INSTRUMENT_COLS: &str = "id, course_id, name, kind, quantity, unit";
 
 /// Columnas de una escala usadas en los `SELECT` (sin `created_at`).
 const SCALE_COLS: &str = "id, instrument_id, label, full_scale, step, appreciation, internal_res, \
-    internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, unit, position";
+    internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, u_cal_pct, \
+    u_cal_fixed, unit, position";
 
 /// Lista los instrumentos de un curso (ordenados por nombre) con sus escalas.
 pub async fn list_instruments(
@@ -169,8 +176,8 @@ pub(super) async fn insert_scale(
     sqlx::query(
         "INSERT INTO instrument_scales (id, instrument_id, label, full_scale, step, appreciation, \
          internal_res, internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, \
-         unit, position, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+         u_cal_pct, u_cal_fixed, unit, position, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
     )
     .bind(&id)
     .bind(instrument_id)
@@ -184,6 +191,8 @@ pub(super) async fn insert_scale(
     .bind(input.spec_pct_reading)
     .bind(input.spec_step_coeff)
     .bind(input.spec_fixed)
+    .bind(input.u_cal_pct.unwrap_or(0.0))
+    .bind(input.u_cal_fixed.unwrap_or(0.0))
     .bind(input.unit.trim())
     .bind(position)
     .bind(Utc::now())
@@ -264,7 +273,8 @@ pub async fn update_scale(
     let result = sqlx::query(
         "UPDATE instrument_scales SET label = ?2, full_scale = ?3, step = ?4, appreciation = ?5, \
          internal_res = ?6, internal_res_u = ?7, b_model = ?8, spec_pct_reading = ?9, \
-         spec_step_coeff = ?10, spec_fixed = ?11, unit = ?12 WHERE id = ?1",
+         spec_step_coeff = ?10, spec_fixed = ?11, u_cal_pct = ?12, u_cal_fixed = ?13, \
+         unit = ?14 WHERE id = ?1",
     )
     .bind(scale_id)
     .bind(input.label.trim())
@@ -277,6 +287,8 @@ pub async fn update_scale(
     .bind(input.spec_pct_reading)
     .bind(input.spec_step_coeff)
     .bind(input.spec_fixed)
+    .bind(input.u_cal_pct.unwrap_or(0.0))
+    .bind(input.u_cal_fixed.unwrap_or(0.0))
     .bind(input.unit.trim())
     .execute(pool)
     .await?;
@@ -352,6 +364,8 @@ mod tests {
             spec_pct_reading: Some(1.0),
             spec_step_coeff: Some(5.0),
             spec_fixed: Some(0.0),
+            u_cal_pct: None,
+            u_cal_fixed: None,
             unit: "A".into(),
         }
     }
@@ -443,6 +457,8 @@ mod tests {
                 spec_pct_reading: Some(2.0),
                 spec_step_coeff: Some(5.0),
                 spec_fixed: Some(0.0),
+                u_cal_pct: None,
+                u_cal_fixed: None,
                 unit: "A".into(),
             },
         )

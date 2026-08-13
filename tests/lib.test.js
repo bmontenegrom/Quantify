@@ -207,6 +207,8 @@ test("scalePayload convierte vacíos a null y step a número", () => {
     spec_fixed: "",
     internal_res: "1002",
     internal_res_u: "",
+    u_cal_pct: "3",
+    u_cal_fixed: "",
   };
   const payload = scalePayload(raw);
   assert.equal(payload.label, "200 uA");
@@ -219,6 +221,8 @@ test("scalePayload convierte vacíos a null y step a número", () => {
   assert.equal(payload.spec_fixed, null);
   assert.equal(payload.internal_res, 1002);
   assert.equal(payload.internal_res_u, null);
+  assert.equal(payload.u_cal_pct, 3);
+  assert.equal(payload.u_cal_fixed, null);
 });
 
 test("canReview es true solo para docente/admin", () => {

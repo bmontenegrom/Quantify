@@ -254,6 +254,14 @@ pub struct InstrumentScale {
     pub spec_step_coeff: Option<f64>,
     /// Fabricante: término fijo en unidad base (p. ej. 0.001 V = 1 mV).
     pub spec_fixed: Option<f64>,
+    /// Calibración: porcentaje del valor leído sumado **en cuadratura** sobre el modelo base
+    /// (3.0 = 3 %, balanza digital de Hidrostática). Es una `u`, no se divide por k.
+    #[sqlx(default)]
+    pub u_cal_pct: f64,
+    /// Calibración: término fijo en unidad base sumado **en cuadratura** sobre el modelo base
+    /// (0.001 g/cm3 del densímetro, 0.5 mm de los brazos de la balanza de Mohr).
+    #[sqlx(default)]
+    pub u_cal_fixed: f64,
     pub unit: String,
     pub position: i64,
 }

@@ -250,6 +250,8 @@ fn fab_scale() -> InstrumentScale {
         spec_pct_reading: Some(1.0),
         spec_step_coeff: Some(5.0),
         spec_fixed: Some(0.0),
+        u_cal_pct: 0.0,
+        u_cal_fixed: 0.0,
         unit: "A".into(),
         position: 1,
     }

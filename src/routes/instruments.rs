@@ -217,6 +217,8 @@ mod tests {
             spec_pct_reading: None,
             spec_step_coeff: None,
             spec_fixed: None,
+            u_cal_pct: None,
+            u_cal_fixed: None,
             unit: "u".into(),
         }
     }
