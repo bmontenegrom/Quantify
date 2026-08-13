@@ -25,11 +25,15 @@ export function prefixSelectHtml() {
   return `<select class="prefix-select" title="Prefijo SI">${opts}</select>`;
 }
 
-export function renderReplicaInput(unit) {
+/** `defaultValue` (opcional) precarga el campo: lo usan las magnitudes con `default_value` en la
+ *  definición (Hidrostática: ranuras vacías de la balanza de Mohr en 0). Las réplicas agregadas a
+ *  mano después no lo llevan. */
+export function renderReplicaInput(unit, defaultValue = null) {
+  const value = defaultValue != null ? ` value="${escapeHtml(String(defaultValue))}"` : "";
   return `
     <div class="replica">
       ${prefixSelectHtml()}
-      <input class="measure-value" type="number" step="any" placeholder="valor" data-unit="${escapeHtml(unit)}" />
+      <input class="measure-value" type="number" step="any" placeholder="valor"${value} data-unit="${escapeHtml(unit)}" />
       <span class="replica-unit">${unitHtml(unit)}</span>
       <button type="button" class="remove-replica" title="Quitar">✕</button>
     </div>

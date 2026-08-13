@@ -191,6 +191,7 @@ fn quantity(symbol: &str) -> PracticeQuantity {
         per_point: true,
         has_uncertainty: true,
         optional: false,
+        default_value: None,
     }
 }
 
@@ -2457,4 +2458,97 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
         1e-6
     ));
     assert!(close(get("phiL_exp"), sin_l.asin() * to_deg, 1e-4));
+}
+
+/// Hidrostatica sobre la practica real: el empuje y la densidad de la goma salen del balance de
+/// torques de la balanza de Mohr, y la tension superficial del metodo de Wilhelmy. Las 9 ranuras
+/// se cargan siempre: solo dos con masa y el resto en 0 (las vacias no deben aportar al torque).
+/// Las 3 determinaciones se cargan iguales, asi que cada promedio tiene que dar la determinacion.
+#[tokio::test]
+async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Teoria a mano: pesas de 1 g en la ranura 3 y 2 g en la ranura 7, brazo del empuje 10 cm.
+    let g_ac = 9.80;
+    let m_goma = 12.5; // g
+    let rho_f = 0.998; // g/cm3
+    let torque = 1.0 * 3.0 + 2.0 * 7.0; // g*cm
+    let empuje = (torque / 10.0) * g_ac / 1000.0; // N
+    let rho_goma = rho_f * m_goma * 10.0 / torque; // g/cm3
+                                                   // Wilhelmy: pesa de 0.5 g a 4 cm de la cruz, marco de 5 cm colgado a 8 cm.
+    let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 8.0 * 1000.0); // N/m
+
+    let mut measurements = Vec::new();
+    let mut push = |symbol: &str, value: f64| {
+        let id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == symbol)
+            .unwrap_or_else(|| panic!("falta la magnitud {symbol}"))
+            .id
+            .clone();
+        measurements.push(MeasurementInput {
+            quantity_id: id,
+            instrument_id: None,
+            scale_id: None,
+            values: vec![value],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        });
+    };
+    push("m_goma", m_goma);
+    push("rho_f", rho_f);
+    push("g_ac", g_ac);
+    push("b_E", 10.0);
+    for i in 1..=9 {
+        push(&format!("b{i}"), i as f64);
+    }
+    for k in 1..=3 {
+        for i in 1..=9 {
+            let masa = match i {
+                3 => 1.0,
+                7 => 2.0,
+                _ => 0.0,
+            };
+            push(&format!("m{k}_{i}"), masa);
+        }
+    }
+    push("l", 5.0);
+    push("d", 8.0);
+    for k in 1..=3 {
+        push(&format!("mw{k}"), 0.5);
+        push(&format!("dw{k}"), 4.0);
+    }
+
+    let analysis = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    assert!(
+        analysis.warnings.is_empty(),
+        "no deberia haber advertencias: {:?}",
+        analysis.warnings
+    );
+    let get = |symbol: &str| -> f64 {
+        analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == symbol)
+            .unwrap_or_else(|| panic!("falta el mensurando {symbol}"))
+            .value
+    };
+
+    for k in 1..=3 {
+        assert!(close(get(&format!("E{k}")), empuje, 1e-12));
+        assert!(close(get(&format!("rho{k}")), rho_goma, 1e-12));
+        assert!(close(get(&format!("gamma{k}")), gamma, 1e-12));
+    }
+    // Con las 3 determinaciones iguales, el promedio es la determinacion.
+    assert!(close(get("E_medio"), empuje, 1e-12));
+    assert!(close(get("rho_medio"), rho_goma, 1e-12));
+    assert!(close(get("gamma_medio"), gamma, 1e-12));
+    // La goma es mas densa que el agua en este caso (control de sanidad del orden de magnitud).
+    assert!(rho_goma > rho_f);
 }

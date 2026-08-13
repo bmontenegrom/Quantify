@@ -35,6 +35,7 @@ fn sample_quantity() -> QuantityInput {
         per_point: true,
         has_uncertainty: true,
         optional: false,
+        default_value: None,
     }
 }
 
@@ -91,6 +92,7 @@ async fn update_and_delete_quantity() {
             per_point: true,
             has_uncertainty: true,
             optional: false,
+            default_value: None,
         },
     )
     .await
@@ -676,6 +678,69 @@ async fn seed_definitions_populates_p1_and_is_idempotent() {
     let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     assert_eq!(def2.quantities.len(), 5);
     assert_eq!(def2.results.len(), 5);
+}
+
+#[tokio::test]
+async fn seed_definitions_populates_hidrostatica_and_is_idempotent() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let def = definition(&pool, "hidrostatica").await.unwrap().unwrap();
+    assert_eq!(def.analysis_kind.as_deref(), Some("estadistico"));
+
+    // Parte 1: m_goma + rho_f + g_ac + b_E + 9 brazos + 3x9 masas = 40.
+    // Parte 2: l + d + 3x(mw, dw) = 8. Total 48.
+    assert_eq!(def.quantities.len(), 48);
+
+    // Los brazos vienen precargados con su valor (1 cm .. 9 cm) y el fijo con 10 cm.
+    let by_symbol = |s: &str| def.quantities.iter().find(|q| q.symbol == s).unwrap();
+    assert_eq!(by_symbol("b_E").default_value, Some(10.0));
+    for i in 1..=9 {
+        let b = by_symbol(&format!("b{i}"));
+        assert!(b.is_given, "b{i} deberia ser dato de catedra");
+        assert_eq!(b.default_value, Some(i as f64));
+    }
+    // Las masas de las ranuras arrancan en 0: la ranura no usada no aporta al torque.
+    for k in 1..=3 {
+        for i in 1..=9 {
+            let m = by_symbol(&format!("m{k}_{i}"));
+            assert!(!m.is_given && !m.repeated);
+            assert_eq!(m.default_value, Some(0.0));
+        }
+    }
+    // g_ac es un dato sin incertidumbre propia.
+    assert!(!by_symbol("g_ac").has_uncertainty);
+
+    // 3 empujes + 3 densidades + 3 gammas + los 3 promedios.
+    assert_eq!(def.results.len(), 12);
+    let res_by = |s: &str| def.results.iter().find(|r| r.symbol == s).unwrap();
+    for symbol in ["E_medio", "rho_medio", "gamma_medio"] {
+        assert!(res_by(symbol).is_final, "{symbol} deberia ser final");
+    }
+    // La tecnica indica que la tension superficial no se informa con incertidumbre.
+    for symbol in ["gamma1", "gamma2", "gamma3", "gamma_medio"] {
+        assert!(
+            !res_by(symbol).has_uncertainty,
+            "{symbol} no deberia mostrar incertidumbre"
+        );
+    }
+    for symbol in ["E1", "rho1", "E_medio", "rho_medio"] {
+        assert!(
+            res_by(symbol).has_uncertainty,
+            "{symbol} deberia mostrar incertidumbre"
+        );
+    }
+    // El torque suma las 9 ranuras de la medida correspondiente, no de otra.
+    let e1 = &res_by("E1").formula;
+    for i in 1..=9 {
+        assert!(e1.contains(&format!("m1_{i}*b{i}")), "E1 sin la ranura {i}");
+    }
+    assert!(!e1.contains("m2_"), "E1 no deberia usar la medida 2");
+
+    // Segunda pasada: no duplica.
+    seed_definitions(&pool).await.unwrap();
+    let def2 = definition(&pool, "hidrostatica").await.unwrap().unwrap();
+    assert_eq!(def2.quantities.len(), 48);
+    assert_eq!(def2.results.len(), 12);
 }
 
 /// Extremo a extremo sobre la práctica real (no un fixture sintético): Operador 1 con datos,

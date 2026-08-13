@@ -188,6 +188,10 @@ pub struct PracticeQuantity {
     /// `true` si la magnitud puede quedar sin lecturas sin bloquear el envío del formulario
     /// (p. ej. el operador 2/3 de una práctica donde solo el operador 1 es obligatorio).
     pub optional: bool,
+    /// Valor con el que el formulario inicializa el campo (Hidrostática: las ranuras vacías de la
+    /// balanza de Mohr arrancan en masa 0). `None` = input vacío.
+    #[sqlx(default)]
+    pub default_value: Option<f64>,
 }
 
 /// Mensurando derivado de una práctica (determinación indirecta).
@@ -446,6 +450,18 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
+        // Hidrostatica y Tension Superficial: densidad de una goma por Arquimedes con balanza de
+        // Mohr (3 determinaciones independientes con pesas en ranuras distintas, promediadas) y
+        // tension superficial por el metodo de Wilhelmy (3 determinaciones, sin incertidumbre por
+        // indicacion de la tecnica).
+        (
+            "hidrostatica",
+            "Hidrostatica y Tension Superficial",
+            "Densidad de una pieza de goma por el principio de Arquimedes con balanza de Mohr (empuje y densidad por medida, promediados) y tension superficial de una solucion jabonosa por el metodo de Wilhelmy.",
+            "estadistico",
+            None,
+            None,
+        ),
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
@@ -584,6 +600,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "fluidos-2",
         "filtros",
         "ca-rlc",
+        "hidrostatica",
     ] {
         sqlx::query(
             r#"
@@ -920,7 +937,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 9);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
     }
 
     #[test]

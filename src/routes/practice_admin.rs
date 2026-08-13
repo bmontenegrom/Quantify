@@ -854,6 +854,7 @@ mod tests {
             per_point: true,
             has_uncertainty: true,
             optional: false,
+            default_value: None,
         };
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),
@@ -911,6 +912,7 @@ mod tests {
             per_point: true,
             has_uncertainty: true,
             optional: false,
+            default_value: None,
         };
         let mut c = h.clone();
         c.id = "q-c".into();
@@ -1017,6 +1019,7 @@ mod tests {
             per_point: false,
             has_uncertainty: true,
             optional: false,
+            default_value: None,
         };
         // Unidad vacía (o solo espacios) → magnitud adimensional, válida.
         assert!(validate_quantity(&q("")).is_ok());

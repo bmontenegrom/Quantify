@@ -392,7 +392,7 @@ export function renderMeasurementFields() {
           <div class="measure-sep"></div>
           <div class="measure-right">
             <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
-              ${renderReplicaInput(q.unit)}
+              ${renderReplicaInput(q.unit, q.default_value)}
             </div>
             ${q.repeated ? `<button type="button" class="add-replica">＋ agregar réplica</button>` : ""}
           </div>
