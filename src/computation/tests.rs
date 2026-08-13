@@ -2460,6 +2460,56 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
     assert!(close(get("phiL_exp"), sin_l.asin() * to_deg, 1e-4));
 }
 
+/// Con todas las masas en su default de 0 el torque es 0: la densidad no puede calcularse. No es
+/// un caso especial de esta practica — el guard de mensurandos no finitos es compartido — pero al
+/// venir precargadas en 0 es el camino de menor resistencia, asi que se fija el comportamiento:
+/// warnings explicitos por mensurando y `analysis_json` serializable (los no finitos van a null).
+#[tokio::test]
+async fn analyze_hidrostatica_torque_cero_avisa_sin_romper_la_serializacion() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
+        .await
+        .unwrap()
+        .unwrap();
+    // Cada magnitud con su default (masas en 0, brazos en 1..9/10); las demas con un valor valido.
+    let measurements: Vec<MeasurementInput> = def
+        .quantities
+        .iter()
+        .map(|q| MeasurementInput {
+            quantity_id: q.id.clone(),
+            instrument_id: None,
+            scale_id: None,
+            values: vec![q.default_value.unwrap_or(1.0)],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        })
+        .collect();
+
+    let analysis = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    for symbol in ["rho1", "rho2", "rho3", "rho_medio"] {
+        assert!(
+            analysis
+                .warnings
+                .iter()
+                .any(|w| w.contains(&format!("({symbol} ="))),
+            "falta la advertencia de valor no finito para {symbol}: {:?}",
+            analysis.warnings
+        );
+        let derived = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == symbol)
+            .unwrap();
+        assert!(!derived.value.is_finite());
+    }
+    // El empuje si es calculable con torque 0 (es 0, no una division): no debe avisar.
+    assert!(!analysis.warnings.iter().any(|w| w.contains("(E1 =")));
+    // La entrega se puede persistir: serde_json escribe los no finitos como null, no falla.
+    let json = serde_json::to_string(&analysis).unwrap();
+    assert!(json.contains("rho_medio"));
+}
+
 /// Hidrostatica sobre la practica real: el empuje y la densidad de la goma salen del balance de
 /// torques de la balanza de Mohr, y la tension superficial del metodo de Wilhelmy. Las 9 ranuras
 /// se cargan siempre: solo dos con masa y el resto en 0 (las vacias no deben aportar al torque).

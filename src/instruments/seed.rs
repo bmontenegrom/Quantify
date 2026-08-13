@@ -111,12 +111,9 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
                 0.001,
             )],
         ),
-        (
-            // Brazos de la balanza de Mohr: solo calibracion (u = 0.5 mm), el operador no
-            // aprecia la medida porque las muescas estan grabadas.
-            instrument("Balanza de Mohr (brazos)", "analogico", "longitud", "m"),
-            vec![cal(reso("muescas", 0.0, None, "m"), 0.0, 0.0005)],
-        ),
+        // Los brazos de la balanza de Mohr no llevan instrumento: son datos de catedra
+        // (`qty_given` b1..b9/b_E en el seed de hidrostatica) y el alumno carga su U de
+        // calibracion (u = 0.5 mm => U = 0.1 cm) junto al valor precargado.
         (
             instrument("Tester A830L (corriente)", "digital", "corriente", "A"),
             vec![
@@ -318,17 +315,30 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
     ];
 
     for (inst, scales) in catalog {
-        // Aditivo: solo inserta si el instrumento aún no existe en el curso.
+        // Aditivo por instrumento **y por escala**: si el instrumento ya existe en el curso (base
+        // sembrada por una version anterior) igual se le agregan las escalas nuevas del catalogo,
+        // que de otro modo nunca llegarian a los cursos existentes. Solo se insertan las que faltan
+        // por etiqueta, asi que no duplica ni pisa las que el docente edito.
         let existing: Option<(String,)> =
             sqlx::query_as("SELECT id FROM instruments WHERE course_id = ?1 AND name = ?2")
                 .bind(&inst.course_id)
                 .bind(inst.name.trim())
                 .fetch_optional(pool)
                 .await?;
-        if existing.is_none() {
-            let created = create_instrument(pool, inst).await?;
-            for scale in scales {
-                create_scale(pool, &created.id, scale).await?;
+        let instrument_id = match existing {
+            Some((id,)) => id,
+            None => create_instrument(pool, inst).await?.id,
+        };
+        for scale in scales {
+            let already: Option<(String,)> = sqlx::query_as(
+                "SELECT id FROM instrument_scales WHERE instrument_id = ?1 AND label = ?2",
+            )
+            .bind(&instrument_id)
+            .bind(scale.label.trim())
+            .fetch_optional(pool)
+            .await?;
+            if already.is_none() {
+                create_scale(pool, &instrument_id, scale).await?;
             }
         }
     }

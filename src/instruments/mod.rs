@@ -600,4 +600,71 @@ mod tests {
         assert_eq!(ua78a.scales.len(), 4);
         assert!(ua78a.scales.iter().all(|s| s.b_model == "fabricante"));
     }
+
+    /// Una base sembrada por una version anterior ya tiene el instrumento pero no sus escalas
+    /// nuevas: el seed debe agregarselas (antes salteaba el instrumento entero y la escala
+    /// calibrada de Hidrostatica nunca llegaba a los cursos existentes).
+    #[tokio::test]
+    async fn seed_instruments_agrega_escalas_nuevas_a_instrumentos_existentes() {
+        let (pool, _dir, course_id) = setup().await;
+        // Simula la base vieja: la balanza existe con una sola escala (la de 0.01 g).
+        let balanza = create_instrument(
+            &pool,
+            CreateInstrument {
+                course_id: course_id.clone(),
+                name: "Balanza digital".into(),
+                kind: "digital".into(),
+                quantity: "masa".into(),
+                unit: "g".into(),
+            },
+        )
+        .await
+        .unwrap();
+        create_scale(
+            &pool,
+            &balanza.id,
+            ScaleInput {
+                label: "0.01 g".into(),
+                full_scale: None,
+                step: 0.01,
+                appreciation: None,
+                internal_res: None,
+                internal_res_u: None,
+                b_model: "resolucion".into(),
+                spec_pct_reading: None,
+                spec_step_coeff: None,
+                spec_fixed: None,
+                u_cal_pct: None,
+                u_cal_fixed: None,
+                unit: "g".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+        seed_instruments(&pool, &course_id).await.unwrap();
+
+        let list = list_instruments(&pool, &course_id).await.unwrap();
+        let balanzas: Vec<_> = list
+            .iter()
+            .filter(|i| i.instrument.name == "Balanza digital")
+            .collect();
+        assert_eq!(balanzas.len(), 1, "no debe duplicar el instrumento");
+        let calibrada = balanzas[0]
+            .scales
+            .iter()
+            .find(|s| s.u_cal_pct > 0.0)
+            .expect("falta la escala calibrada de Hidrostatica");
+        assert_eq!(calibrada.step, 0.1);
+        assert_eq!(calibrada.u_cal_pct, 3.0);
+        // La escala vieja sigue ahi, sin duplicarse.
+        assert_eq!(
+            balanzas[0]
+                .scales
+                .iter()
+                .filter(|s| s.label == "0.01 g")
+                .count(),
+            1
+        );
+    }
 }
