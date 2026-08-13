@@ -399,11 +399,26 @@ Decisión pendiente con el docente: operadores múltiples en Estadística.
 | Filtros (barrido RLC) | #40 | B (2 curvas, x_log) | ✓ Sembrada |
 | P2-parte2 (curva de potencia) | #40 | B + E (curva + escalares) | ✓ Sembrada |
 
-**Pendientes de sembrar:**
+**Pendientes de sembrar:** ninguna — las 7 prácticas nuevas están sembradas.
 
-| Práctica | Motor | Notas |
-|---|---|---|
-| Hidrostática y TS | D (estadístico) | Decisión de modelado pendiente con docente |
+**Hidrostática y TS** ✅ sembrada (2026-08-13), `estadistico`, sin motor de operadores. Las 3
+determinaciones se modelaron como **símbolos separados por medida + mensurando promedio** (patrón de
+canales de `ca-rlc`): son medidas independientes (pesas y posiciones distintas), no réplicas, y la
+técnica pide justamente promediar los derivados de cada repetición. Parte 1 (Arquímedes con balanza
+de Mohr): `E = (Σ mᵢbᵢ)·g/b_E` y `ρ_goma = ρ_f·m_goma·b_E/(Σ mᵢbᵢ)` sobre las **9 ranuras**
+(`b1..b9` = 1..9 cm, más el brazo fijo `b_E` = 10 cm); la ranura sin pesa queda en **masa 0** y sin
+instrumento, así que no aporta valor ni incertidumbre. Parte 2 (Wilhelmy):
+`γ = mw·g·dw/(2·l·d)`, **sin incertidumbre** por indicación expresa de la técnica (`res_no_u`).
+Ecuaciones tomadas de la técnica de trabajo y de la Cuaderneta 2023 (§Hidrostática/§Tensión
+Superficial). Habilitantes que salieron de esta siembra:
+
+- **Calibración en cuadratura por escala** (`instrument_scales.u_cal_pct`/`u_cal_fixed`):
+  `u_B = √(base² + (pct·|v|)² + fijo²)`. La técnica pide tipo B combinadas (balanza = truncamiento
+  `R = 0,1 g` ⊕ 3 % de calibración; densímetro = apreciación ⊕ `0,001 g/cm³`) que el catálogo, con
+  un único modelo por escala, no podía expresar. Default 0 = comportamiento previo.
+- **`practice_quantities.default_value`**: valor inicial del campo en el formulario (brazos
+  precargados en 1..9 y 10 cm, masas de las ranuras en 0). No se expone en el editor del admin y
+  queda fuera del `UPDATE` de magnitudes para que editar otro campo no lo borre.
 
 **CA (RLC)** ✅ sembrada (2026-07-31), `estadistico`, sin motor de operadores: los 3 canales
 (R, C, L) se modelaron como magnitudes/mensurandos separados (`a_R/b_R`, `a_C/b_C`, `a_L/b_L` →
@@ -488,9 +503,11 @@ exigían decisiones de modelado o extensiones. Decisiones:
 - **`evalexpr` soporta** `math::asin/sin/cos/atan/sqrt/ln` (verificado) → `φ = asin(b/a)` de RLC
   es viable.
 
-Pendiente de confirmar con el docente al sembrar: Hidrostática deriva E/ρ_goma/γ **por medida y
-luego promedia** (3 determinaciones independientes, no réplicas) — evaluar si el promedio de
-derivados por medida es aceptable vs derivar del promedio de entradas.
+**Resuelto (2026-08-13):** Hidrostática deriva E/ρ_goma/γ **por medida y luego promedia** (3
+determinaciones independientes, no réplicas) — es lo que pide la técnica ("la incertidumbre del
+promedio deberá calcularse por propagación a partir de los valores e incertidumbres obtenidas en
+cada repetición"), no se deriva del promedio de las entradas. A confirmar con el docente al usarla:
+la apreciación real del densímetro (sembrada en 0,001 g/cm³).
 
 Orden de ejecución de Fase 15: motor A (réplicas/punto) → motor B (lista de curvas) → motor D
 (operadores en estadística) → siembra de las 6 prácticas + P2-parte2.

@@ -116,6 +116,10 @@ para **compararlos** con el cálculo automático (tabla de diferencias absolutas
 | `p2-cc` | Corriente continua (serie + paralelo + curva de potencia, una sola entrega) | curva |
 | `p3-relajacion` | Relajación Exponencial (parte 1 — medida directa de τ) | estadístico |
 | `p3-relajacion-desfasaje` | Relajación Exponencial (parte 2 — desfasaje) | regresión lineal |
+| `hidrostatica` | Hidrostática y Tensión Superficial | estadístico |
+
+> Las prácticas `fluidos-1`, `fluidos-2`, `viscosidad`, `filtros` y `ca-rlc` también están
+> sembradas; su documentación en detalle queda pendiente (Fase 6).
 
 > **Migración**: las prácticas viejas `p2-serie`, `p2-corriente-continua` y `p2-potencia` ya no se
 > siembran (las reemplaza `p2-cc`). En una base de desarrollo existente, borrá `data/quantify.db`
@@ -211,6 +215,42 @@ El ajuste `tg φ = ω·RC` es lineal en ω con `b_intercept = 0`; la **pendiente
 
 Mensurando derivado: `tau = slope` (s).
 
+### Hidrostática y Tensión Superficial (`hidrostatica`, una sola entrega, dos partes)
+
+#### Parte 1 — Densidad de la goma por Arquímedes (balanza de Mohr)
+
+Se pesa la goma (`m_goma`, balanza digital) y se mide la densidad del fluido (`rho_f`,
+densímetro). Con la goma sumergida se reequilibra la balanza colocando pesas en las **9 ranuras
+calibradas** (`b1..b9` = 1 cm .. 9 cm; el brazo fijo del que pende la goma es `b_E` = 10 cm). El
+balance de torques da:
+
+```
+E · b_E = Σ mᵢ · g · bᵢ        ⇒  E = (Σ mᵢ·bᵢ) · g / b_E
+E / P = ρ_f / ρ_goma           ⇒  ρ_goma = ρ_f · m_goma · b_E / (Σ mᵢ·bᵢ)
+```
+
+El procedimiento se repite **3 veces** con pesas y posiciones distintas (`m1_i`, `m2_i`, `m3_i`):
+son determinaciones independientes, no réplicas. Salida: `E1..E3` y `rho1..rho3` por medida, más
+`E_medio` y `rho_medio` (su U sale por propagación desde las tres, como pide la técnica).
+
+Las 9 ranuras se cargan siempre: la que no se usó queda en **masa 0** (el formulario ya la trae en
+0) y sin instrumento, así que no aporta ni valor ni incertidumbre.
+
+#### Parte 2 — Tensión superficial por el método de Wilhelmy
+
+Con el marco de base `l` colgado a distancia `d` de la cruz, el torque de la película se sustituye
+por el de una pesa `mw` a distancia `dw`:
+
+```
+2·γ·l·d = mw·g·dw        ⇒  γ = mw·g·dw / (2·l·d)
+```
+
+3 determinaciones (`gamma1..gamma3`) más `gamma_medio`. La técnica indica expresamente que esta
+parte **no informa incertidumbre**, así que estos mensurandos se muestran sin ±U.
+
+> Unidades: masas en g y brazos/distancias en cm (como se leen). Las fórmulas de `E` y `γ` llevan
+> los factores de conversión a kg/m explícitos para dar N y N/m; en `rho_goma` se cancelan.
+
 ---
 
 Las definiciones de magnitudes y mensurandos son **editables** por el docente desde la pestaña
@@ -240,6 +280,17 @@ La pestaña **Instrumentos** (docente/admin) administra el catálogo de instrume
 **escalas**. Cada escala define el modelo de incertidumbre tipo B que aplica (`resolucion`,
 `apreciacion` o `fabricante`) y sus parámetros (paso, apreciación, % de lectura, etc.). El catálogo
 se puede **exportar e importar** en JSON.
+
+Sobre el modelo base, una escala puede declarar además su **calibración** (`u_cal_pct`, % del valor
+leído, y `u_cal_fixed`, término fijo), que se suma **en cuadratura**:
+
+```
+u_B = √( base² + (u_cal_pct/100 · |valor|)² + u_cal_fixed² )
+```
+
+Con ambos en 0 (el default) el resultado es el del modelo base de siempre. Lo usan los instrumentos
+de Hidrostática: balanza digital (truncamiento `R = 0,1 g` ⊕ 3 % de calibración) y densímetro
+(apreciación ⊕ `0,001 g/cm³` fijos).
 
 ## Notas
 

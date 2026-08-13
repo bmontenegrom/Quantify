@@ -344,7 +344,7 @@ export function renderMeasurementFields() {
             <label>Valor
               <div class="replica-input-wrap">
                 ${prefixSelectHtml()}
-                <input class="measure-given-value" type="number" step="any" placeholder="valor" />
+                <input class="measure-given-value" type="number" step="any" placeholder="valor"${q.default_value != null ? ` value="${escapeHtml(String(q.default_value))}"` : ""} />
                 <span class="replica-unit">${unitHtml(q.unit)}</span>
               </div>
             </label>
