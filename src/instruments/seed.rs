@@ -1,9 +1,21 @@
 use super::{create_instrument, create_scale, CreateInstrument, ScaleInput};
 use sqlx::SqlitePool;
 
-/// Siembra un catálogo inicial de instrumentos reales del curso. Idempotente: no hace nada
-/// si el curso ya tiene instrumentos. Valores tomados de las hojas de testers y de la técnica
-/// de trabajo de Física 103 (a confirmar/afinar por el docente).
+/// Etiquetas de escalas agregadas al catálogo **después** de la siembra original, que hay que
+/// llevar a los cursos ya sembrados (su instrumento ya existe, así que no alcanza con el aditivo
+/// por instrumento). Solo estas se completan en un instrumento existente.
+///
+// ponytail: la semántica es "recrear si falta", igual que el aditivo por instrumento de siempre:
+// si el docente borra o renombra una de estas escalas, el próximo arranque la vuelve a crear. Se
+// acota a esta lista para que ese efecto valga solo para las escalas nuevas y no para las ~40 del
+// catálogo. Si hace falta que un borrado sea definitivo, el upgrade es una tabla de migraciones
+// aplicadas (marcar el backfill como corrido) en vez de deducirlo del estado del catálogo.
+const BACKFILL_SCALES: &[&str] = &["0.1 g (calibracion 3 %)"];
+
+/// Siembra un catálogo inicial de instrumentos reales del curso. Aditivo: crea los instrumentos
+/// del catálogo que falten en el curso, y en los que ya existen completa solo las escalas de
+/// [`BACKFILL_SCALES`]. Valores tomados de las hojas de testers y de la técnica de trabajo de
+/// Física 103 (a confirmar/afinar por el docente).
 pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Result<()> {
     // Escala analógica (apreciación).
     let apre = |label: &str, step: f64, appr: f64, full: Option<f64>, unit: &str| ScaleInput {
@@ -315,21 +327,24 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
     ];
 
     for (inst, scales) in catalog {
-        // Aditivo por instrumento **y por escala**: si el instrumento ya existe en el curso (base
-        // sembrada por una version anterior) igual se le agregan las escalas nuevas del catalogo,
-        // que de otro modo nunca llegarian a los cursos existentes. Solo se insertan las que faltan
-        // por etiqueta, asi que no duplica ni pisa las que el docente edito.
         let existing: Option<(String,)> =
             sqlx::query_as("SELECT id FROM instruments WHERE course_id = ?1 AND name = ?2")
                 .bind(&inst.course_id)
                 .bind(inst.name.trim())
                 .fetch_optional(pool)
                 .await?;
-        let instrument_id = match existing {
-            Some((id,)) => id,
-            None => create_instrument(pool, inst).await?.id,
+        // Instrumento nuevo: se crea con todas sus escalas. Instrumento que ya estaba (base
+        // sembrada por una version anterior): se completan solo las escalas de BACKFILL_SCALES,
+        // que de otro modo nunca llegarian al curso. Las demas escalas no se tocan: si el docente
+        // renombro o borro alguna del catalogo original, queda como la dejo.
+        let (instrument_id, fresh) = match existing {
+            Some((id,)) => (id, false),
+            None => (create_instrument(pool, inst).await?.id, true),
         };
         for scale in scales {
+            if !fresh && !BACKFILL_SCALES.contains(&scale.label.trim()) {
+                continue;
+            }
             let already: Option<(String,)> = sqlx::query_as(
                 "SELECT id FROM instrument_scales WHERE instrument_id = ?1 AND label = ?2",
             )

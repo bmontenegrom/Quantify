@@ -666,5 +666,61 @@ mod tests {
                 .count(),
             1
         );
+
+        // Si el docente renombra o borra una escala del catalogo original, el proximo arranque no
+        // la recrea (el backfill se limita a las escalas nuevas, BACKFILL_SCALES).
+        let vieja = balanzas[0]
+            .scales
+            .iter()
+            .find(|s| s.label == "0.01 g")
+            .unwrap();
+        delete_scale(&pool, &vieja.id).await.unwrap();
+        let calibre = list
+            .iter()
+            .find(|i| i.instrument.name.contains("Calibre"))
+            .unwrap();
+        let renombrada = &calibre.scales[0];
+        update_scale(
+            &pool,
+            &renombrada.id,
+            ScaleInput {
+                label: "0-150 mm (nuestro calibre)".into(),
+                full_scale: renombrada.full_scale,
+                step: renombrada.step,
+                appreciation: renombrada.appreciation,
+                internal_res: None,
+                internal_res_u: None,
+                b_model: renombrada.b_model.clone(),
+                spec_pct_reading: None,
+                spec_step_coeff: None,
+                spec_fixed: None,
+                u_cal_pct: None,
+                u_cal_fixed: None,
+                unit: renombrada.unit.clone(),
+            },
+        )
+        .await
+        .unwrap();
+
+        seed_instruments(&pool, &course_id).await.unwrap();
+
+        let after = list_instruments(&pool, &course_id).await.unwrap();
+        let balanza_after = after
+            .iter()
+            .find(|i| i.instrument.name == "Balanza digital")
+            .unwrap();
+        assert!(
+            !balanza_after.scales.iter().any(|s| s.label == "0.01 g"),
+            "la escala borrada por el docente no debe reaparecer"
+        );
+        let calibre_after = after
+            .iter()
+            .find(|i| i.instrument.name.contains("Calibre"))
+            .unwrap();
+        assert_eq!(
+            calibre_after.scales.len(),
+            1,
+            "renombrar una escala no debe dejar un duplicado con la etiqueta original"
+        );
     }
 }
