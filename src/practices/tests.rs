@@ -1,6 +1,6 @@
 use super::*;
 use crate::db;
-use seed::{fix_ca_rlc_labels, seed_ca_rlc};
+use seed::{fix_ca_rlc_labels, fix_hidrostatica_densidad_unit, seed_ca_rlc, seed_hidrostatica};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use tempfile::TempDir;
@@ -1740,4 +1740,40 @@ async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
             .await
             .unwrap();
     assert_eq!(count.0, 15);
+}
+
+/// `fix_hidrostatica_densidad_unit` pasa la densidad de la goma de g/cm3 a kg/m3 en una base ya
+/// sembrada, y no vuelve a multiplicar si ya esta migrada (corre en cada boot).
+#[tokio::test]
+async fn fix_hidrostatica_densidad_unit_migrates_once() {
+    let (pool, _dir) = setup().await;
+    seed_hidrostatica(&pool).await.unwrap();
+
+    // Simula una base sembrada antes del cambio (unidad vieja y formula sin el *1000).
+    sqlx::query(
+        "UPDATE practice_results SET unit = 'g/cm3', formula = 'rho_f*m_goma*b_E/(m1_1*b1)'          WHERE practice_id = 'hidrostatica' AND symbol = 'rho1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    fix_hidrostatica_densidad_unit(&pool).await.unwrap();
+    let migrated: (String, String) = sqlx::query_as(
+        "SELECT unit, formula FROM practice_results          WHERE practice_id = 'hidrostatica' AND symbol = 'rho1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(migrated.0, "kg/m3");
+    assert_eq!(migrated.1, "(rho_f*m_goma*b_E/(m1_1*b1))*1000");
+
+    // Segunda pasada (proximo arranque): no toca nada, la unidad ya no es la vieja.
+    fix_hidrostatica_densidad_unit(&pool).await.unwrap();
+    let again: (String, String) = sqlx::query_as(
+        "SELECT unit, formula FROM practice_results          WHERE practice_id = 'hidrostatica' AND symbol = 'rho1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(again, migrated);
 }

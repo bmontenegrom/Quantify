@@ -29,44 +29,44 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
 
   step("docente: crea una magnitud nueva");
   await fillAndSubmit(page, "#new-quantity-form", {
-    symbol: "crud_test_qty",
+    symbol: "crudQty",
     name: "Magnitud de prueba CRUD",
     unit: "m",
   });
   await page.waitForFunction(
-    () => document.querySelector("#practice-workspace")?.textContent?.includes("crud_test_qty"),
+    () => document.querySelector("#practice-workspace")?.textContent?.includes("crudQty"),
     { timeout: 10_000 },
   );
 
   step("docente: crea un mensurando nuevo (usa la magnitud recién creada en la fórmula)");
   await page.waitForSelector("#new-result-form");
   await fillAndSubmit(page, "#new-result-form", {
-    symbol: "crud_test_res",
+    symbol: "crudRes",
     name: "Mensurando de prueba CRUD",
     unit: "m",
-    formula: "crud_test_qty",
+    formula: "crudQty",
   });
   await page.waitForFunction(
-    () => document.querySelector("#practice-workspace")?.textContent?.includes("crud_test_res"),
+    () => document.querySelector("#practice-workspace")?.textContent?.includes("crudRes"),
     { timeout: 10_000 },
   );
 
   step("docente: crea un agregado nuevo (referencia el mensurando recién creado)");
   await page.waitForSelector("#new-aggregate-form");
   await fillAndSubmit(page, "#new-aggregate-form", {
-    symbol: "crud_test_agg",
+    symbol: "crudAgg",
     name: "Agregado de prueba CRUD",
     unit: "m",
-    formula: "crud_test_res",
+    formula: "crudRes",
   });
   await page.waitForFunction(
-    () => document.querySelector("#practice-workspace")?.textContent?.includes("crud_test_agg"),
+    () => document.querySelector("#practice-workspace")?.textContent?.includes("crudAgg"),
     { timeout: 10_000 },
   );
 
   step("verifica que las tres entidades quedaron listadas");
   const workspaceText = (await page.locator("#practice-workspace").textContent()) ?? "";
-  for (const symbol of ["crud_test_qty", "crud_test_res", "crud_test_agg"]) {
+  for (const symbol of ["crudQty", "crudRes", "crudAgg"]) {
     assert(workspaceText.includes(symbol), `"${symbol}" debía aparecer en el workspace de la práctica`);
   }
 

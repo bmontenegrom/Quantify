@@ -1213,7 +1213,7 @@ const MOHR_RANURAS: usize = 9;
 const HIDRO_MEDIDAS: usize = 3;
 
 /// Siembra Hidrostatica y Tension Superficial (ver [`seed_definitions`]).
-async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
+pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     // Hidrostatica y Tension Superficial — dos partes en una sola entrega, ambas estadisticas.
     //
     // Parte 1 (Arquimedes con balanza de Mohr): se pesa la goma en la balanza digital (m_goma) y se
@@ -1312,8 +1312,9 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     };
     // E = sum(m_i*b_i)/b_E * g, con las masas en g -> /1000 para dar N.
     let empuje = |k: usize| format!("(({})/b_E)*g_ac/1000", torque(k));
-    // rho_goma = rho_f * m_goma * b_E / sum(m_i*b_i); las unidades se cancelan.
-    let densidad = |k: usize| format!("rho_f*m_goma*b_E/({})", torque(k));
+    // rho_goma = rho_f * m_goma * b_E / sum(m_i*b_i); las unidades se cancelan y queda en las de
+    // rho_f (g/cm3, como lo lee el densimetro), *1000 para darla en kg/m3.
+    let densidad = |k: usize| format!("rho_f*m_goma*b_E*1000/({})", torque(k));
     // gamma = mw*g*dw/(2*l*d), con mw en g (/1000) y l en cm (*100) -> N/m.
     let gamma = |k: usize| format!("mw{k}*g_ac*dw{k}*100/(2*l*d*1000)");
     let promedio = |partes: [String; HIDRO_MEDIDAS]| {
@@ -1331,7 +1332,7 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
         results.push(res(
             &format!("rho{k}"),
             &format!("Densidad de la goma - medida {k}"),
-            "g/cm3",
+            "kg/m3",
             &densidad(k),
         ));
     }
@@ -1344,7 +1345,7 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     results.push(res_final(
         "rho_medio",
         "Densidad de la goma promedio",
-        "g/cm3",
+        "kg/m3",
         &promedio([densidad(1), densidad(2), densidad(3)]),
     ));
     for k in 1..=HIDRO_MEDIDAS {
@@ -1363,6 +1364,20 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     )));
 
     seed_practice(pool, "hidrostatica", &quantities, &results).await?;
+    Ok(())
+}
+
+/// Pasa la densidad de la goma de g/cm³ a kg/m³ en bases ya sembradas (`seed_hidrostatica` es
+/// idempotente y no re-siembra). Gateada por `unit = 'g/cm3'`, así que corre una sola vez y no
+/// pisa la unidad si el docente ya la cambió a mano.
+pub(super) async fn fix_hidrostatica_densidad_unit(pool: &SqlitePool) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE practice_results SET unit = 'kg/m3', formula = '(' || formula || ')*1000' \
+         WHERE practice_id = 'hidrostatica' AND unit = 'g/cm3' \
+         AND symbol IN ('rho1', 'rho2', 'rho3', 'rho_medio')",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -1544,5 +1559,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_ca_rlc(pool).await?;
     fix_ca_rlc_labels(pool).await?;
     seed_hidrostatica(pool).await?;
+    fix_hidrostatica_densidad_unit(pool).await?;
     Ok(())
 }

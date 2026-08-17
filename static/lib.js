@@ -19,17 +19,21 @@ export function escapeHtml(value) {
 const CC_PART_SUFFIX = /_[spc](?:_t)?$/;
 const CC_BASE_SYMBOLS = new Set(["Vg", "RA", "VR1", "VR2", "VR3", "I"]);
 
+// Letras griegas escritas con su nombre en el símbolo guardado (rho_f, gamma1, mu_agua): se
+// muestran con la letra. Solo al principio del símbolo, que es donde son la magnitud.
+const GREEK_NAMES = { rho: "ρ", gamma: "γ", mu: "μ", phi: "φ", tau: "τ", omega: "ω" };
+
 /**
- * Escapa un símbolo y muestra como subíndice los dígitos pegados a letras:
- * `R1` → `R<sub>1</sub>`, `C12` → `C<sub>12</sub>`. No altera guiones bajos ni nombres largos.
+ * Escapa un símbolo y lo muestra con notación física: dígitos pegados a letras y lo que sigue a
+ * un guion bajo como subíndice (`R1` → `R<sub>1</sub>`, `E_medio` → `E<sub>medio</sub>`), y los
+ * nombres de letras griegas como la letra (`rho_medio` → `ρ<sub>medio</sub>`). Los subíndices de
+ * 1-2 caracteres van en mayúscula (`rho_f` → `ρ<sub>F</sub>`); las palabras se dejan como están.
  */
 export function symbolHtml(value) {
   const specials = {
     tmedio: "t<sub>1/2</sub>",
     T_oc: "T<sub>OC</sub>",
     T_OC: "T<sub>OC</sub>",
-    gamma: "γ",
-    mu: "μ",
     // Vg/RA no llevan guion bajo en el símbolo guardado, pero se muestran con subíndice como
     // el resto de las magnitudes (R1, rho_e, VR1...) para que la tipografía sea coherente.
     Vg: "V<sub>G</sub>",
@@ -60,8 +64,12 @@ export function symbolHtml(value) {
   const base = raw.replace(CC_PART_SUFFIX, "");
   if (base !== raw && CC_BASE_SYMBOLS.has(base)) return symbolHtml(base);
   return escapeHtml(raw)
-    .replace(/([A-Za-z])_([A-Za-z0-9/]{1,2})\b/g, (_, base, sub) => `${base}<sub>${sub.toUpperCase()}</sub>`)
-    .replace(/([A-Za-z])(\d+(?:\/\d+)?)/g, "$1<sub>$2</sub>");
+    .replace(/^(rho|gamma|mu|phi|tau|omega)/, (name) => GREEK_NAMES[name])
+    .replace(
+      /([A-Za-zα-ω])_([A-Za-z0-9/]+)\b/g,
+      (_, base, sub) => `${base}<sub>${sub.length <= 2 ? sub.toUpperCase() : sub}</sub>`,
+    )
+    .replace(/([A-Za-zα-ω])(\d+(?:\/\d+)?)/g, "$1<sub>$2</sub>");
 }
 
 /**

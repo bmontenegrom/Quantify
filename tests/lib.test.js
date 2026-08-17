@@ -103,8 +103,18 @@ test("symbolHtml escapa HTML y convierte dígitos pegados a letras en subíndice
   assert.equal(symbolHtml("C12"), "C<sub>12</sub>");
   assert.equal(symbolHtml("tmedio"), "t<sub>1/2</sub>");
   assert.equal(symbolHtml("T_oc"), "T<sub>OC</sub>");
-  assert.equal(symbolHtml("R_cap"), "R_cap");
+  assert.equal(symbolHtml("R_cap"), "R<sub>cap</sub>");
+  // Subíndices de 1-2 caracteres en mayúscula, palabras tal cual.
+  assert.equal(symbolHtml("E_medio"), "E<sub>medio</sub>");
   assert.equal(symbolHtml("<R1>"), "&lt;R<sub>1</sub>&gt;");
+});
+
+test("symbolHtml muestra los nombres de letras griegas como la letra", () => {
+  assert.equal(symbolHtml("rho_medio"), "ρ<sub>medio</sub>");
+  assert.equal(symbolHtml("rho_f"), "ρ<sub>F</sub>");
+  assert.equal(symbolHtml("gamma1"), "γ<sub>1</sub>");
+  assert.equal(symbolHtml("mu_agua"), "μ<sub>agua</sub>");
+  assert.equal(symbolHtml("tau_exp"), "τ<sub>exp</sub>");
 });
 
 test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)", () => {
@@ -121,8 +131,9 @@ test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)"
   assert.equal(symbolHtml("VR3_p_t"), "VR<sub>3</sub>");
   assert.equal(symbolHtml("I_s"), "I");
   assert.equal(symbolHtml("I_p"), "I");
-  // Sin whitelist de la base, no se toca: evita falsos positivos en otras prácticas.
-  assert.equal(symbolHtml("h_max"), "h_max");
+  // Sin whitelist de la base, no se toca el sufijo: evita falsos positivos en otras prácticas
+  // (h_max no es "h" de la parte serie, es una magnitud propia de Fluidos II).
+  assert.equal(symbolHtml("h_max"), "h<sub>max</sub>");
 });
 
 test("symbolHtml renderiza los símbolos de CA (RLC): voltajes pp, teo/exp y phi", () => {
