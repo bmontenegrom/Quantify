@@ -76,11 +76,12 @@ async function studentSavesOwnResults(page) {
   await page.waitForSelector(".student-results-form");
   await page.fill('.student-value[data-symbol="g1"]', "9.78");
   await page.fill('.student-u[data-symbol="g1"]', "0.08");
+  // Marcamos el form actual para poder esperar al que lo reemplaza: el guardado refetchea el
+  // detalle y lo re-renderiza. No sirve mirar el valor del input (es el que acabamos de tipear,
+  // matchea al toque y deja el refetch en vuelo cuando el test cierra sesión -> 401/pageerror).
+  await page.$eval(".student-results-form", (form) => { form.dataset.e2ePrev = "1"; });
   await page.click('.student-results-form button[type="submit"]');
-  // El guardado re-renderiza el detalle con los valores persistidos.
-  await page.waitForFunction(
-    () => document.querySelector('.student-value[data-symbol="g1"]')?.value === "9.78",
-  );
+  await page.waitForSelector(".student-results-form:not([data-e2e-prev])");
 }
 
 async function teacherReviews(page) {

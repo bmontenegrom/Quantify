@@ -212,6 +212,23 @@ export function renderPracticesPage() {
   }
 
   const def = state.practiceDefinition;
+  // Mientras la definición viaja, no dibujamos el editor: si lo hiciéramos, el re-render de
+  // cuando llega borra lo que el docente ya venía tipeando (y hacía flakear los smokes E2E).
+  if (!def) {
+    practiceWorkspace.innerHTML = `
+      <div class="workspace-head">
+        <div>
+          <button type="button" class="back-link" id="practice-workspace-back">Volver al listado</button>
+          <h3>${escapeHtml(practice.name)}</h3>
+          <p class="submission-meta">Cargando definición…</p>
+        </div>
+      </div>`;
+    practiceWorkspace.classList.remove("hidden");
+    practiceCatalog?.closest(".panel")?.classList.add("hidden");
+    practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", closePracticeWorkspace);
+    return;
+  }
+
   // Las curvas pueden tener mensurandos escalares (p. ej. fpasaje, RP_max); el editor los muestra.
   const resultsBlock = `
     <div class="workspace-grid">
