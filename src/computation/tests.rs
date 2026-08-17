@@ -2528,8 +2528,8 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     let rho_f = 0.998; // g/cm3
     let torque = 1.0 * 3.0 + 2.0 * 7.0; // g*cm
     let empuje = (torque / 10.0) * g_ac / 1000.0; // N
-    let rho_goma = rho_f * m_goma * 10.0 / torque; // g/cm3
-                                                   // Wilhelmy: pesa de 0.5 g a 4 cm de la cruz, marco de 5 cm colgado a 8 cm.
+    let rho_goma = rho_f * m_goma * 10.0 * 1000.0 / torque; // kg/m3
+                                                            // Wilhelmy: pesa de 0.5 g a 4 cm de la cruz, marco de 5 cm colgado a 8 cm.
     let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 8.0 * 1000.0); // N/m
 
     let mut measurements = Vec::new();
@@ -2600,5 +2600,5 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     assert!(close(get("rho_medio"), rho_goma, 1e-12));
     assert!(close(get("gamma_medio"), gamma, 1e-12));
     // La goma es mas densa que el agua en este caso (control de sanidad del orden de magnitud).
-    assert!(rho_goma > rho_f);
+    assert!(rho_goma > rho_f * 1000.0);
 }

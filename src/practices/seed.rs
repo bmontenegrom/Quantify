@@ -1213,7 +1213,7 @@ const MOHR_RANURAS: usize = 9;
 const HIDRO_MEDIDAS: usize = 3;
 
 /// Siembra Hidrostatica y Tension Superficial (ver [`seed_definitions`]).
-async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
+pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     // Hidrostatica y Tension Superficial — dos partes en una sola entrega, ambas estadisticas.
     //
     // Parte 1 (Arquimedes con balanza de Mohr): se pesa la goma en la balanza digital (m_goma) y se
@@ -1280,13 +1280,14 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
             ));
         }
     }
-    // Parte 2 (Wilhelmy): marco compartido y, por determinacion, la pesa y su distancia a la cruz.
+    // Parte 2 (Wilhelmy): sobre la misma balanza de Mohr, asi que las distancias son las ranuras
+    // calibradas, no medidas con regla. El marco cuelga del brazo fijo (10 cm, como la goma) y la
+    // pesa va en una de las 9 ranuras: el alumno anota en cual (1..9 cm), con la incertidumbre de
+    // calibracion de la balanza, no la de una regla.
     quantities.push(qty_shared("l", "Base del marco", "cm", "longitud"));
-    quantities.push(qty_shared(
-        "d",
-        "Distancia del marco a la cruz",
-        "cm",
-        "longitud",
+    quantities.push(with_default(
+        qty_given("d", "Brazo fijo del marco", "cm", "longitud"),
+        10.0,
     ));
     for k in 1..=HIDRO_MEDIDAS {
         quantities.push(qty_shared(
@@ -1295,9 +1296,9 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
             "g",
             "masa",
         ));
-        quantities.push(qty_shared(
+        quantities.push(qty_given(
             &format!("dw{k}"),
-            &format!("Medida {k} - distancia de la pesa a la cruz"),
+            &format!("Medida {k} - ranura de la pesa (1 a 9 cm)"),
             "cm",
             "longitud",
         ));
@@ -1312,8 +1313,9 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     };
     // E = sum(m_i*b_i)/b_E * g, con las masas en g -> /1000 para dar N.
     let empuje = |k: usize| format!("(({})/b_E)*g_ac/1000", torque(k));
-    // rho_goma = rho_f * m_goma * b_E / sum(m_i*b_i); las unidades se cancelan.
-    let densidad = |k: usize| format!("rho_f*m_goma*b_E/({})", torque(k));
+    // rho_goma = rho_f * m_goma * b_E / sum(m_i*b_i); las unidades se cancelan y queda en las de
+    // rho_f (g/cm3, como lo lee el densimetro), *1000 para darla en kg/m3.
+    let densidad = |k: usize| format!("rho_f*m_goma*b_E*1000/({})", torque(k));
     // gamma = mw*g*dw/(2*l*d), con mw en g (/1000) y l en cm (*100) -> N/m.
     let gamma = |k: usize| format!("mw{k}*g_ac*dw{k}*100/(2*l*d*1000)");
     let promedio = |partes: [String; HIDRO_MEDIDAS]| {
@@ -1331,7 +1333,7 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
         results.push(res(
             &format!("rho{k}"),
             &format!("Densidad de la goma - medida {k}"),
-            "g/cm3",
+            "kg/m3",
             &densidad(k),
         ));
     }
@@ -1344,7 +1346,7 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     results.push(res_final(
         "rho_medio",
         "Densidad de la goma promedio",
-        "g/cm3",
+        "kg/m3",
         &promedio([densidad(1), densidad(2), densidad(3)]),
     ));
     for k in 1..=HIDRO_MEDIDAS {
@@ -1363,6 +1365,42 @@ async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     )));
 
     seed_practice(pool, "hidrostatica", &quantities, &results).await?;
+    Ok(())
+}
+
+/// Corrige en bases ya sembradas (`seed_hidrostatica` es idempotente y no re-siembra) dos cosas:
+/// la densidad de la goma pasa de g/cm³ a kg/m³, y las distancias de la parte 2 (Wilhelmy) pasan
+/// de medirse con regla a ser las ranuras de la balanza de Mohr. Cada bloque está gateado por el
+/// estado viejo, así que corre una sola vez y no pisa ediciones del docente.
+pub(super) async fn fix_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE practice_results SET unit = 'kg/m3', formula = '(' || formula || ')*1000' \
+         WHERE practice_id = 'hidrostatica' AND unit = 'g/cm3' \
+         AND symbol IN ('rho1', 'rho2', 'rho3', 'rho_medio')",
+    )
+    .execute(pool)
+    .await?;
+
+    // Wilhelmy sobre la misma balanza de Mohr: `d` es el brazo fijo (10 cm) y `dw_k` la ranura
+    // elegida, ambos datos dados con la incertidumbre de calibración de la balanza.
+    sqlx::query(
+        "UPDATE practice_quantities \
+         SET is_given = 1, repeated = 0, per_point = 0, name = 'Brazo fijo del marco', \
+             default_value = 10.0 \
+         WHERE practice_id = 'hidrostatica' AND symbol = 'd' AND is_given = 0",
+    )
+    .execute(pool)
+    .await?;
+    for k in 1..=HIDRO_MEDIDAS {
+        sqlx::query(
+            "UPDATE practice_quantities SET is_given = 1, repeated = 0, per_point = 0, name = ?2 \
+             WHERE practice_id = 'hidrostatica' AND symbol = ?1 AND is_given = 0",
+        )
+        .bind(format!("dw{k}"))
+        .bind(format!("Medida {k} - ranura de la pesa (1 a 9 cm)"))
+        .execute(pool)
+        .await?;
+    }
     Ok(())
 }
 
@@ -1544,5 +1582,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_ca_rlc(pool).await?;
     fix_ca_rlc_labels(pool).await?;
     seed_hidrostatica(pool).await?;
+    fix_hidrostatica(pool).await?;
     Ok(())
 }
