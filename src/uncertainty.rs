@@ -41,6 +41,14 @@ pub struct ScaleSpec {
     pub spec_step_coeff: f64,
     /// Fabricante: termino fijo en unidad base (p. ej. 0.001 V = 1 mV).
     pub spec_fixed: f64,
+    /// Calibracion: porcentaje del valor leido que se suma **en cuadratura** sobre el modelo
+    /// base (p. ej. 3.0 = 3 %, balanza digital de Hidrostatica). Ya es una `u`, no se divide.
+    #[serde(default)]
+    pub u_cal_pct: f64,
+    /// Calibracion: termino fijo en unidad base que se suma **en cuadratura** sobre el modelo
+    /// base (p. ej. 0.001 g/cm3 del densimetro, 0.5 mm de los brazos de la balanza de Mohr).
+    #[serde(default)]
+    pub u_cal_fixed: f64,
 }
 
 /// Resultado de incertidumbre de una magnitud medida directamente.
@@ -90,6 +98,9 @@ pub fn type_a(values: &[f64]) -> (f64, f64, f64) {
 
 /// Incertidumbre tipo B de una lectura, evaluada en `value` (relevante para `Fabricante`).
 ///
+/// Sobre el modelo base se suman **en cuadratura** los terminos de calibracion de la escala
+/// (`u_cal_pct`, `u_cal_fixed`), que valen 0 en las escalas que no los declaran.
+///
 /// # Ejemplos
 ///
 /// ```
@@ -102,11 +113,28 @@ pub fn type_a(values: &[f64]) -> (f64, f64, f64) {
 ///     spec_pct_reading: 1.0,
 ///     spec_step_coeff: 5.0,
 ///     spec_fixed: 0.0,
+///     u_cal_pct: 0.0,
+///     u_cal_fixed: 0.0,
 /// };
 /// assert!((type_b(&spec, 100.0) - 3.0).abs() < 1e-12);
+///
+/// // Balanza de Hidrostatica: truncamiento R = 0.1 g en cuadratura con 3 % de calibracion.
+/// let balanza = ScaleSpec {
+///     b_model: BModel::Resolucion,
+///     step: 0.1,
+///     appreciation: None,
+///     spec_pct_reading: 0.0,
+///     spec_step_coeff: 0.0,
+///     spec_fixed: 0.0,
+///     u_cal_pct: 3.0,
+///     u_cal_fixed: 0.0,
+/// };
+/// let base = 0.1 / (2.0 * 3.0_f64.sqrt());
+/// let esperado = (base * base + (0.03 * 10.0) * (0.03 * 10.0)).sqrt();
+/// assert!((type_b(&balanza, 10.0) - esperado).abs() < 1e-12);
 /// ```
 pub fn type_b(spec: &ScaleSpec, value: f64) -> f64 {
-    match spec.b_model {
+    let base = match spec.b_model {
         BModel::Resolucion => spec.step / (2.0 * SQRT_3),
         BModel::Apreciacion => spec.appreciation.unwrap_or(spec.step) / SQRT_6,
         BModel::Fabricante => {
@@ -115,7 +143,9 @@ pub fn type_b(spec: &ScaleSpec, value: f64) -> f64 {
                 + spec.spec_fixed;
             u_spec / EXPANSION_K
         }
-    }
+    };
+    let u_cal = (spec.u_cal_pct / 100.0) * value.abs();
+    (base * base + u_cal * u_cal + spec.u_cal_fixed * spec.u_cal_fixed).sqrt()
 }
 
 /// Combina tipo A y tipo B en cuadratura.
@@ -269,6 +299,8 @@ mod tests {
             spec_pct_reading: 0.0,
             spec_step_coeff: 0.0,
             spec_fixed: 0.0,
+            u_cal_pct: 0.0,
+            u_cal_fixed: 0.0,
         };
         assert!(close(type_b(&spec, 1.23), 0.01 / (2.0 * SQRT_3), 1e-15));
     }
@@ -282,6 +314,8 @@ mod tests {
             spec_pct_reading: 0.0,
             spec_step_coeff: 0.0,
             spec_fixed: 0.0,
+            u_cal_pct: 0.0,
+            u_cal_fixed: 0.0,
         };
         assert!(close(type_b(&spec, 10.0), 1.0 / SQRT_6, 1e-15));
     }
@@ -296,6 +330,8 @@ mod tests {
             spec_pct_reading: 1.0,
             spec_step_coeff: 5.0,
             spec_fixed: 0.0,
+            u_cal_pct: 0.0,
+            u_cal_fixed: 0.0,
         };
         assert!(close(type_b(&spec, 100.0), 3.0, 1e-12));
     }
@@ -311,8 +347,49 @@ mod tests {
             spec_pct_reading: 3.0,
             spec_step_coeff: 0.1,
             spec_fixed: 0.001,
+            u_cal_pct: 0.0,
+            u_cal_fixed: 0.0,
         };
         assert!(close(type_b(&spec, 5.0), 0.1755, 1e-12));
+    }
+
+    #[test]
+    fn type_b_calibracion_se_suma_en_cuadratura() {
+        // Densimetro de Hidrostatica: apreciacion 0.001 g/cm3 y u_calibracion fija 0.001 g/cm3.
+        let spec = ScaleSpec {
+            b_model: BModel::Apreciacion,
+            step: 0.001,
+            appreciation: Some(0.001),
+            spec_pct_reading: 0.0,
+            spec_step_coeff: 0.0,
+            spec_fixed: 0.0,
+            u_cal_pct: 0.0,
+            u_cal_fixed: 0.001,
+        };
+        let base = 0.001 / SQRT_6;
+        let esperado = (base * base + 0.001 * 0.001_f64).sqrt();
+        assert!(close(type_b(&spec, 0.998), esperado, 1e-15));
+        // Es mayor que cualquiera de los dos terminos por separado, pero menor que su suma.
+        assert!(esperado > base && esperado > 0.001);
+        assert!(esperado < base + 0.001);
+
+        // Brazos de la balanza de Mohr: solo calibracion (0.5 mm), sin termino base.
+        let brazos = ScaleSpec {
+            step: 0.0,
+            appreciation: None,
+            b_model: BModel::Resolucion,
+            u_cal_fixed: 0.0005,
+            ..spec.clone()
+        };
+        assert!(close(type_b(&brazos, 0.09), 0.0005, 1e-15));
+
+        // Invariante: con los dos terminos en 0 el resultado es el del modelo base de siempre.
+        let sin_cal = ScaleSpec {
+            u_cal_pct: 0.0,
+            u_cal_fixed: 0.0,
+            ..spec
+        };
+        assert!(close(type_b(&sin_cal, 0.998), base, 1e-15));
     }
 
     #[test]
@@ -353,6 +430,8 @@ mod tests {
             spec_pct_reading: 0.0,
             spec_step_coeff: 0.0,
             spec_fixed: 0.0,
+            u_cal_pct: 0.0,
+            u_cal_fixed: 0.0,
         };
         // Sin tipo B (step=0): u_c == u_A, U = 2*u_A
         let r = measured_quantity(&[1.0, 2.0, 3.0], Some(&spec));

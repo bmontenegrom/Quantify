@@ -48,6 +48,12 @@ pub struct ScaleInput {
     pub spec_pct_reading: Option<f64>,
     pub spec_step_coeff: Option<f64>,
     pub spec_fixed: Option<f64>,
+    /// Calibración sumada en cuadratura sobre el modelo base: porcentaje del valor leído.
+    #[serde(default)]
+    pub u_cal_pct: Option<f64>,
+    /// Calibración sumada en cuadratura sobre el modelo base: término fijo en unidad base.
+    #[serde(default)]
+    pub u_cal_fixed: Option<f64>,
     pub unit: String,
 }
 
@@ -80,7 +86,8 @@ const INSTRUMENT_COLS: &str = "id, course_id, name, kind, quantity, unit";
 
 /// Columnas de una escala usadas en los `SELECT` (sin `created_at`).
 const SCALE_COLS: &str = "id, instrument_id, label, full_scale, step, appreciation, internal_res, \
-    internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, unit, position";
+    internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, u_cal_pct, \
+    u_cal_fixed, unit, position";
 
 /// Lista los instrumentos de un curso (ordenados por nombre) con sus escalas.
 pub async fn list_instruments(
@@ -169,8 +176,8 @@ pub(super) async fn insert_scale(
     sqlx::query(
         "INSERT INTO instrument_scales (id, instrument_id, label, full_scale, step, appreciation, \
          internal_res, internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, \
-         unit, position, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+         u_cal_pct, u_cal_fixed, unit, position, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
     )
     .bind(&id)
     .bind(instrument_id)
@@ -184,6 +191,8 @@ pub(super) async fn insert_scale(
     .bind(input.spec_pct_reading)
     .bind(input.spec_step_coeff)
     .bind(input.spec_fixed)
+    .bind(input.u_cal_pct.unwrap_or(0.0))
+    .bind(input.u_cal_fixed.unwrap_or(0.0))
     .bind(input.unit.trim())
     .bind(position)
     .bind(Utc::now())
@@ -264,7 +273,8 @@ pub async fn update_scale(
     let result = sqlx::query(
         "UPDATE instrument_scales SET label = ?2, full_scale = ?3, step = ?4, appreciation = ?5, \
          internal_res = ?6, internal_res_u = ?7, b_model = ?8, spec_pct_reading = ?9, \
-         spec_step_coeff = ?10, spec_fixed = ?11, unit = ?12 WHERE id = ?1",
+         spec_step_coeff = ?10, spec_fixed = ?11, u_cal_pct = ?12, u_cal_fixed = ?13, \
+         unit = ?14 WHERE id = ?1",
     )
     .bind(scale_id)
     .bind(input.label.trim())
@@ -277,6 +287,8 @@ pub async fn update_scale(
     .bind(input.spec_pct_reading)
     .bind(input.spec_step_coeff)
     .bind(input.spec_fixed)
+    .bind(input.u_cal_pct.unwrap_or(0.0))
+    .bind(input.u_cal_fixed.unwrap_or(0.0))
     .bind(input.unit.trim())
     .execute(pool)
     .await?;
@@ -352,6 +364,8 @@ mod tests {
             spec_pct_reading: Some(1.0),
             spec_step_coeff: Some(5.0),
             spec_fixed: Some(0.0),
+            u_cal_pct: None,
+            u_cal_fixed: None,
             unit: "A".into(),
         }
     }
@@ -443,6 +457,8 @@ mod tests {
                 spec_pct_reading: Some(2.0),
                 spec_step_coeff: Some(5.0),
                 spec_fixed: Some(0.0),
+                u_cal_pct: None,
+                u_cal_fixed: None,
                 unit: "A".into(),
             },
         )
@@ -583,5 +599,128 @@ mod tests {
         assert_eq!(ua78a.instrument.quantity, "capacitancia");
         assert_eq!(ua78a.scales.len(), 4);
         assert!(ua78a.scales.iter().all(|s| s.b_model == "fabricante"));
+    }
+
+    /// Una base sembrada por una version anterior ya tiene el instrumento pero no sus escalas
+    /// nuevas: el seed debe agregarselas (antes salteaba el instrumento entero y la escala
+    /// calibrada de Hidrostatica nunca llegaba a los cursos existentes).
+    #[tokio::test]
+    async fn seed_instruments_agrega_escalas_nuevas_a_instrumentos_existentes() {
+        let (pool, _dir, course_id) = setup().await;
+        // Simula la base vieja: la balanza existe con una sola escala (la de 0.01 g).
+        let balanza = create_instrument(
+            &pool,
+            CreateInstrument {
+                course_id: course_id.clone(),
+                name: "Balanza digital".into(),
+                kind: "digital".into(),
+                quantity: "masa".into(),
+                unit: "g".into(),
+            },
+        )
+        .await
+        .unwrap();
+        create_scale(
+            &pool,
+            &balanza.id,
+            ScaleInput {
+                label: "0.01 g".into(),
+                full_scale: None,
+                step: 0.01,
+                appreciation: None,
+                internal_res: None,
+                internal_res_u: None,
+                b_model: "resolucion".into(),
+                spec_pct_reading: None,
+                spec_step_coeff: None,
+                spec_fixed: None,
+                u_cal_pct: None,
+                u_cal_fixed: None,
+                unit: "g".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+        seed_instruments(&pool, &course_id).await.unwrap();
+
+        let list = list_instruments(&pool, &course_id).await.unwrap();
+        let balanzas: Vec<_> = list
+            .iter()
+            .filter(|i| i.instrument.name == "Balanza digital")
+            .collect();
+        assert_eq!(balanzas.len(), 1, "no debe duplicar el instrumento");
+        let calibrada = balanzas[0]
+            .scales
+            .iter()
+            .find(|s| s.u_cal_pct > 0.0)
+            .expect("falta la escala calibrada de Hidrostatica");
+        assert_eq!(calibrada.step, 0.1);
+        assert_eq!(calibrada.u_cal_pct, 3.0);
+        // La escala vieja sigue ahi, sin duplicarse.
+        assert_eq!(
+            balanzas[0]
+                .scales
+                .iter()
+                .filter(|s| s.label == "0.01 g")
+                .count(),
+            1
+        );
+
+        // Si el docente renombra o borra una escala del catalogo original, el proximo arranque no
+        // la recrea (el backfill se limita a las escalas nuevas, BACKFILL_SCALES).
+        let vieja = balanzas[0]
+            .scales
+            .iter()
+            .find(|s| s.label == "0.01 g")
+            .unwrap();
+        delete_scale(&pool, &vieja.id).await.unwrap();
+        let calibre = list
+            .iter()
+            .find(|i| i.instrument.name.contains("Calibre"))
+            .unwrap();
+        let renombrada = &calibre.scales[0];
+        update_scale(
+            &pool,
+            &renombrada.id,
+            ScaleInput {
+                label: "0-150 mm (nuestro calibre)".into(),
+                full_scale: renombrada.full_scale,
+                step: renombrada.step,
+                appreciation: renombrada.appreciation,
+                internal_res: None,
+                internal_res_u: None,
+                b_model: renombrada.b_model.clone(),
+                spec_pct_reading: None,
+                spec_step_coeff: None,
+                spec_fixed: None,
+                u_cal_pct: None,
+                u_cal_fixed: None,
+                unit: renombrada.unit.clone(),
+            },
+        )
+        .await
+        .unwrap();
+
+        seed_instruments(&pool, &course_id).await.unwrap();
+
+        let after = list_instruments(&pool, &course_id).await.unwrap();
+        let balanza_after = after
+            .iter()
+            .find(|i| i.instrument.name == "Balanza digital")
+            .unwrap();
+        assert!(
+            !balanza_after.scales.iter().any(|s| s.label == "0.01 g"),
+            "la escala borrada por el docente no debe reaparecer"
+        );
+        let calibre_after = after
+            .iter()
+            .find(|i| i.instrument.name.contains("Calibre"))
+            .unwrap();
+        assert_eq!(
+            calibre_after.scales.len(),
+            1,
+            "renombrar una escala no debe dejar un duplicado con la etiqueta original"
+        );
     }
 }

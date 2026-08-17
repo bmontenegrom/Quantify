@@ -50,6 +50,9 @@ pub struct QuantityInput {
     /// `true` si puede quedar sin lecturas sin bloquear el envío del formulario.
     #[serde(default)]
     pub optional: bool,
+    /// Valor inicial que muestra el formulario. `None` = campo vacío (comportamiento previo).
+    #[serde(default)]
+    pub default_value: Option<f64>,
 }
 
 /// Default `true` para campos booleanos opcionales (p. ej. `per_point`).

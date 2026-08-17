@@ -20,6 +20,7 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
         per_point: true,
         has_uncertainty: true,
         optional: false,
+        default_value: None,
     }
 }
 
@@ -36,6 +37,7 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
         per_point: false,
         has_uncertainty: true,
         optional: false,
+        default_value: None,
     }
 }
 
@@ -44,6 +46,13 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
 /// propia (p. ej. un tiempo leído de una tabla de referencia).
 fn no_u(mut q: QuantityInput) -> QuantityInput {
     q.has_uncertainty = false;
+    q
+}
+
+/// Valor inicial del campo en el formulario (Hidrostática: ranuras vacías de la balanza de Mohr
+/// con masa 0, para que el alumno solo cargue las que usó).
+fn with_default(mut q: QuantityInput, value: f64) -> QuantityInput {
+    q.default_value = Some(value);
     q
 }
 
@@ -72,6 +81,7 @@ fn qty_replicas(
         per_point: true,
         has_uncertainty: true,
         optional: false,
+        default_value: None,
     }
 }
 
@@ -89,6 +99,7 @@ fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityI
         per_point: false,
         has_uncertainty: true,
         optional: false,
+        default_value: None,
     }
 }
 
@@ -1194,6 +1205,167 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Cantidad de ranuras calibradas del brazo de la balanza de Mohr (1 cm .. 9 cm). La decima
+/// posicion es el brazo fijo del que pende la goma (`b_E` = 10 cm), no una ranura.
+const MOHR_RANURAS: usize = 9;
+
+/// Cantidad de determinaciones independientes de cada parte (la tecnica pide 3 y promediar).
+const HIDRO_MEDIDAS: usize = 3;
+
+/// Siembra Hidrostatica y Tension Superficial (ver [`seed_definitions`]).
+async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
+    // Hidrostatica y Tension Superficial — dos partes en una sola entrega, ambas estadisticas.
+    //
+    // Parte 1 (Arquimedes con balanza de Mohr): se pesa la goma en la balanza digital (m_goma) y se
+    // mide la densidad del fluido con densimetro (rho_f). Con la goma sumergida se reequilibra la
+    // balanza colocando pesas en las ranuras calibradas; el balance de torques da
+    //     E * b_E = sum(m_i * g * b_i)  =>  E = sum(m_i * b_i) * g / b_E
+    // y dividiendo el empuje por el peso de la goma:
+    //     rho_goma = rho_f * m_goma * b_E / sum(m_i * b_i)
+    // Se repite 3 veces con pesas y posiciones distintas y se promedia (la U del promedio sale por
+    // propagacion desde las 3 determinaciones, como pide la tecnica).
+    //
+    // Las 9 ranuras se cargan siempre: la que no se uso queda en masa 0 (`with_default`, el
+    // formulario ya la trae en 0) y sin instrumento, asi que no aporta ni valor ni incertidumbre.
+    //
+    // Parte 2 (tension superficial por el metodo de Wilhelmy): con el marco de base l colgado a
+    // distancia d de la cruz, el torque de la pelicula se sustituye por el de una pesa mw a
+    // distancia dw:  2*gamma*l*d = mw*g*dw  =>  gamma = mw*g*dw/(2*l*d). La tecnica indica
+    // explicitamente que esta parte **no informa incertidumbre**, de ahi los `res_no_u`.
+    //
+    // Unidades: masas en g y brazos/distancias en cm (como se leen), asi que las formulas de E y
+    // gamma llevan los factores de conversion a kg/m explicitos para dar N y N/m. En rho_goma las
+    // unidades se cancelan (es un cociente) y el resultado sale en las unidades de rho_f.
+    //
+    // El motor `estadistico` no encadena mensurandos entre si (cada formula se evalua solo contra
+    // las magnitudes), asi que las sumas y los promedios van expandidos, como en `seed_ca_rlc`.
+    let mut quantities = vec![
+        qty_shared("m_goma", "Masa de la goma", "g", "masa"),
+        qty_shared("rho_f", "Densidad del fluido", "g/cm3", "densidad"),
+        no_u(qty_given(
+            "g_ac",
+            "Aceleracion gravitatoria",
+            "m/s2",
+            "aceleracion",
+        )),
+        with_default(
+            qty_given("b_E", "Brazo fijo del empuje", "cm", "longitud"),
+            10.0,
+        ),
+    ];
+    // Brazos de las ranuras: dados por la balanza (1 cm .. 9 cm), con su incertidumbre de
+    // calibracion (u = 0.5 mm => U = 0.1 cm), precargados para que el alumno no los tipee.
+    for i in 1..=MOHR_RANURAS {
+        quantities.push(with_default(
+            qty_given(
+                &format!("b{i}"),
+                &format!("Brazo de la ranura {i}"),
+                "cm",
+                "longitud",
+            ),
+            i as f64,
+        ));
+    }
+    // Masas colocadas en cada ranura, por determinacion. Las no usadas quedan en 0.
+    for k in 1..=HIDRO_MEDIDAS {
+        for i in 1..=MOHR_RANURAS {
+            quantities.push(with_default(
+                qty_shared(
+                    &format!("m{k}_{i}"),
+                    &format!("Medida {k} - masa en la ranura {i}"),
+                    "g",
+                    "masa",
+                ),
+                0.0,
+            ));
+        }
+    }
+    // Parte 2 (Wilhelmy): marco compartido y, por determinacion, la pesa y su distancia a la cruz.
+    quantities.push(qty_shared("l", "Base del marco", "cm", "longitud"));
+    quantities.push(qty_shared(
+        "d",
+        "Distancia del marco a la cruz",
+        "cm",
+        "longitud",
+    ));
+    for k in 1..=HIDRO_MEDIDAS {
+        quantities.push(qty_shared(
+            &format!("mw{k}"),
+            &format!("Medida {k} - masa de la pesa (Wilhelmy)"),
+            "g",
+            "masa",
+        ));
+        quantities.push(qty_shared(
+            &format!("dw{k}"),
+            &format!("Medida {k} - distancia de la pesa a la cruz"),
+            "cm",
+            "longitud",
+        ));
+    }
+
+    // sum(m_i * b_i) de la determinacion k, en g*cm.
+    let torque = |k: usize| {
+        (1..=MOHR_RANURAS)
+            .map(|i| format!("m{k}_{i}*b{i}"))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    // E = sum(m_i*b_i)/b_E * g, con las masas en g -> /1000 para dar N.
+    let empuje = |k: usize| format!("(({})/b_E)*g_ac/1000", torque(k));
+    // rho_goma = rho_f * m_goma * b_E / sum(m_i*b_i); las unidades se cancelan.
+    let densidad = |k: usize| format!("rho_f*m_goma*b_E/({})", torque(k));
+    // gamma = mw*g*dw/(2*l*d), con mw en g (/1000) y l en cm (*100) -> N/m.
+    let gamma = |k: usize| format!("mw{k}*g_ac*dw{k}*100/(2*l*d*1000)");
+    let promedio = |partes: [String; HIDRO_MEDIDAS]| {
+        format!("(({}) + ({}) + ({}))/3", partes[0], partes[1], partes[2])
+    };
+
+    let mut results = Vec::new();
+    for k in 1..=HIDRO_MEDIDAS {
+        results.push(res(
+            &format!("E{k}"),
+            &format!("Empuje - medida {k}"),
+            "N",
+            &empuje(k),
+        ));
+        results.push(res(
+            &format!("rho{k}"),
+            &format!("Densidad de la goma - medida {k}"),
+            "g/cm3",
+            &densidad(k),
+        ));
+    }
+    results.push(res_final(
+        "E_medio",
+        "Empuje promedio",
+        "N",
+        &promedio([empuje(1), empuje(2), empuje(3)]),
+    ));
+    results.push(res_final(
+        "rho_medio",
+        "Densidad de la goma promedio",
+        "g/cm3",
+        &promedio([densidad(1), densidad(2), densidad(3)]),
+    ));
+    for k in 1..=HIDRO_MEDIDAS {
+        results.push(res_no_u(res(
+            &format!("gamma{k}"),
+            &format!("Tension superficial - medida {k}"),
+            "N/m",
+            &gamma(k),
+        )));
+    }
+    results.push(res_no_u(res_final(
+        "gamma_medio",
+        "Tension superficial promedio",
+        "N/m",
+        &promedio([gamma(1), gamma(2), gamma(3)]),
+    )));
+
+    seed_practice(pool, "hidrostatica", &quantities, &results).await?;
+    Ok(())
+}
+
 /// Corrige en bases ya sembradas (antes del 2026-08-07) los nombres/fórmulas de CA/RLC que
 /// cambiaron de "Tension" a "Voltaje" y de radianes a grados en los desfasajes (`seed_ca_rlc` es
 /// idempotente y no re-siembra una práctica que ya tiene magnitudes). Solo toca filas que todavía
@@ -1371,5 +1543,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_filtros(pool).await?;
     seed_ca_rlc(pool).await?;
     fix_ca_rlc_labels(pool).await?;
+    seed_hidrostatica(pool).await?;
     Ok(())
 }

@@ -156,6 +156,8 @@ export function scalePayload(raw) {
     spec_fixed: num("spec_fixed"),
     internal_res: num("internal_res"),
     internal_res_u: num("internal_res_u"),
+    u_cal_pct: num("u_cal_pct"),
+    u_cal_fixed: num("u_cal_fixed"),
   };
 }
 

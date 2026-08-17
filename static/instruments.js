@@ -233,6 +233,8 @@ function renderScaleForm(scale, instrumentId) {
       <label class="scale-field-apre ${isApre ? "" : "hidden"}">
         Apreciación <input name="appreciation" type="number" step="any" value="${v("appreciation")}" placeholder="0.5" />
       </label>
+      <label>Calibración % lectura <input name="u_cal_pct" type="number" step="any" value="${v("u_cal_pct")}" placeholder="0" /></label>
+      <label>Calibración fija <input name="u_cal_fixed" type="number" step="any" value="${v("u_cal_fixed")}" placeholder="0" /></label>
       <div class="scale-fields-fab ${isFab ? "" : "hidden"}">
         <label>Espec. % lectura <input name="spec_pct_reading" type="number" step="any" value="${v("spec_pct_reading")}" placeholder="1.0" /></label>
         <label>Espec. coef. paso <input name="spec_step_coeff" type="number" step="any" value="${v("spec_step_coeff")}" placeholder="5.0" /></label>

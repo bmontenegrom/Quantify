@@ -562,6 +562,10 @@ pub async fn create_quantity(
 }
 
 /// Actualiza los datos de una magnitud. Devuelve `None` si no existe.
+///
+// ponytail: `default_value` queda fuera del UPDATE a propósito. Lo pone el seed y el editor del
+// admin no lo manda, así que incluirlo aquí lo borraría al editar cualquier otro campo. Se agrega
+// al editor (y al UPDATE) si el docente necesita cambiarlo.
 pub async fn update_quantity(
     pool: &SqlitePool,
     quantity_id: &str,
@@ -797,7 +801,7 @@ async fn quantities_for(
 ) -> anyhow::Result<Vec<PracticeQuantity>> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point, per_point, has_uncertainty, optional \
+         replicas_per_point, per_point, has_uncertainty, optional, default_value \
          FROM practice_quantities WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -820,7 +824,7 @@ async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec
 async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQuantity> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point, per_point, has_uncertainty, optional \
+         replicas_per_point, per_point, has_uncertainty, optional, default_value \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -850,8 +854,8 @@ pub(super) async fn insert_quantity(
     sqlx::query(
         "INSERT INTO practice_quantities \
          (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-          replicas_per_point, per_point, has_uncertainty, optional) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+          replicas_per_point, per_point, has_uncertainty, optional, default_value) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -866,6 +870,7 @@ pub(super) async fn insert_quantity(
     .bind(input.per_point)
     .bind(input.has_uncertainty)
     .bind(input.optional)
+    .bind(input.default_value)
     .execute(&mut *conn)
     .await?;
     Ok(id)

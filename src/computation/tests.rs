@@ -191,6 +191,7 @@ fn quantity(symbol: &str) -> PracticeQuantity {
         per_point: true,
         has_uncertainty: true,
         optional: false,
+        default_value: None,
     }
 }
 
@@ -250,6 +251,8 @@ fn fab_scale() -> InstrumentScale {
         spec_pct_reading: Some(1.0),
         spec_step_coeff: Some(5.0),
         spec_fixed: Some(0.0),
+        u_cal_pct: 0.0,
+        u_cal_fixed: 0.0,
         unit: "A".into(),
         position: 1,
     }
@@ -2455,4 +2458,147 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
         1e-6
     ));
     assert!(close(get("phiL_exp"), sin_l.asin() * to_deg, 1e-4));
+}
+
+/// Con todas las masas en su default de 0 el torque es 0: la densidad no puede calcularse. No es
+/// un caso especial de esta practica — el guard de mensurandos no finitos es compartido — pero al
+/// venir precargadas en 0 es el camino de menor resistencia, asi que se fija el comportamiento:
+/// warnings explicitos por mensurando y `analysis_json` serializable (los no finitos van a null).
+#[tokio::test]
+async fn analyze_hidrostatica_torque_cero_avisa_sin_romper_la_serializacion() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
+        .await
+        .unwrap()
+        .unwrap();
+    // Cada magnitud con su default (masas en 0, brazos en 1..9/10); las demas con un valor valido.
+    let measurements: Vec<MeasurementInput> = def
+        .quantities
+        .iter()
+        .map(|q| MeasurementInput {
+            quantity_id: q.id.clone(),
+            instrument_id: None,
+            scale_id: None,
+            values: vec![q.default_value.unwrap_or(1.0)],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        })
+        .collect();
+
+    let analysis = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    for symbol in ["rho1", "rho2", "rho3", "rho_medio"] {
+        assert!(
+            analysis
+                .warnings
+                .iter()
+                .any(|w| w.contains(&format!("({symbol} ="))),
+            "falta la advertencia de valor no finito para {symbol}: {:?}",
+            analysis.warnings
+        );
+        let derived = analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == symbol)
+            .unwrap();
+        assert!(!derived.value.is_finite());
+    }
+    // El empuje si es calculable con torque 0 (es 0, no una division): no debe avisar.
+    assert!(!analysis.warnings.iter().any(|w| w.contains("(E1 =")));
+    // La entrega se puede persistir: serde_json escribe los no finitos como null, no falla.
+    let json = serde_json::to_string(&analysis).unwrap();
+    assert!(json.contains("rho_medio"));
+}
+
+/// Hidrostatica sobre la practica real: el empuje y la densidad de la goma salen del balance de
+/// torques de la balanza de Mohr, y la tension superficial del metodo de Wilhelmy. Las 9 ranuras
+/// se cargan siempre: solo dos con masa y el resto en 0 (las vacias no deben aportar al torque).
+/// Las 3 determinaciones se cargan iguales, asi que cada promedio tiene que dar la determinacion.
+#[tokio::test]
+async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Teoria a mano: pesas de 1 g en la ranura 3 y 2 g en la ranura 7, brazo del empuje 10 cm.
+    let g_ac = 9.80;
+    let m_goma = 12.5; // g
+    let rho_f = 0.998; // g/cm3
+    let torque = 1.0 * 3.0 + 2.0 * 7.0; // g*cm
+    let empuje = (torque / 10.0) * g_ac / 1000.0; // N
+    let rho_goma = rho_f * m_goma * 10.0 / torque; // g/cm3
+                                                   // Wilhelmy: pesa de 0.5 g a 4 cm de la cruz, marco de 5 cm colgado a 8 cm.
+    let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 8.0 * 1000.0); // N/m
+
+    let mut measurements = Vec::new();
+    let mut push = |symbol: &str, value: f64| {
+        let id = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == symbol)
+            .unwrap_or_else(|| panic!("falta la magnitud {symbol}"))
+            .id
+            .clone();
+        measurements.push(MeasurementInput {
+            quantity_id: id,
+            instrument_id: None,
+            scale_id: None,
+            values: vec![value],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        });
+    };
+    push("m_goma", m_goma);
+    push("rho_f", rho_f);
+    push("g_ac", g_ac);
+    push("b_E", 10.0);
+    for i in 1..=9 {
+        push(&format!("b{i}"), i as f64);
+    }
+    for k in 1..=3 {
+        for i in 1..=9 {
+            let masa = match i {
+                3 => 1.0,
+                7 => 2.0,
+                _ => 0.0,
+            };
+            push(&format!("m{k}_{i}"), masa);
+        }
+    }
+    push("l", 5.0);
+    push("d", 8.0);
+    for k in 1..=3 {
+        push(&format!("mw{k}"), 0.5);
+        push(&format!("dw{k}"), 4.0);
+    }
+
+    let analysis = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    assert!(
+        analysis.warnings.is_empty(),
+        "no deberia haber advertencias: {:?}",
+        analysis.warnings
+    );
+    let get = |symbol: &str| -> f64 {
+        analysis
+            .derived
+            .iter()
+            .find(|d| d.symbol == symbol)
+            .unwrap_or_else(|| panic!("falta el mensurando {symbol}"))
+            .value
+    };
+
+    for k in 1..=3 {
+        assert!(close(get(&format!("E{k}")), empuje, 1e-12));
+        assert!(close(get(&format!("rho{k}")), rho_goma, 1e-12));
+        assert!(close(get(&format!("gamma{k}")), gamma, 1e-12));
+    }
+    // Con las 3 determinaciones iguales, el promedio es la determinacion.
+    assert!(close(get("E_medio"), empuje, 1e-12));
+    assert!(close(get("rho_medio"), rho_goma, 1e-12));
+    assert!(close(get("gamma_medio"), gamma, 1e-12));
+    // La goma es mas densa que el agua en este caso (control de sanidad del orden de magnitud).
+    assert!(rho_goma > rho_f);
 }

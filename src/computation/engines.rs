@@ -35,6 +35,8 @@ use std::collections::HashMap;
 ///     spec_pct_reading: None,
 ///     spec_step_coeff: None,
 ///     spec_fixed: None,
+///     u_cal_pct: 0.0,
+///     u_cal_fixed: 0.0,
 ///     unit: "mm".into(),
 ///     position: 0,
 /// };
@@ -58,6 +60,8 @@ pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
         spec_pct_reading: scale.spec_pct_reading.unwrap_or(0.0),
         spec_step_coeff: scale.spec_step_coeff.unwrap_or(0.0),
         spec_fixed: scale.spec_fixed.unwrap_or(0.0),
+        u_cal_pct: scale.u_cal_pct,
+        u_cal_fixed: scale.u_cal_fixed,
     })
 }
 

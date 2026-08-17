@@ -29,6 +29,8 @@ pub async fn export_course(pool: &SqlitePool, course_id: &str) -> anyhow::Result
                     spec_pct_reading: s.spec_pct_reading,
                     spec_step_coeff: s.spec_step_coeff,
                     spec_fixed: s.spec_fixed,
+                    u_cal_pct: Some(s.u_cal_pct),
+                    u_cal_fixed: Some(s.u_cal_fixed),
                     unit: s.unit,
                 })
                 .collect(),

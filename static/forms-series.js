@@ -273,7 +273,7 @@ function sharedRowHtml(q) {
         </div>
         <div class="measure-sep"></div>
         <div class="measure-right">
-          <div class="measure-values" data-repeated="0">${renderReplicaInput(q.unit)}</div>
+          <div class="measure-values" data-repeated="0">${renderReplicaInput(q.unit, q.default_value)}</div>
         </div>
       </div>
     </fieldset>`;

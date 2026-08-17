@@ -18,7 +18,16 @@ export const PRACTICE_PARTS = {
     { id: "paralelo", label: "Paralelo" },
     { id: "potencia", label: "Curva de potencia" },
   ],
+  hidrostatica: [
+    { id: "arq", label: "Parte 1: Arquimedes" },
+    { id: "ts", label: "Parte 2: Tension superficial" },
+  ],
 };
+
+// Ranuras calibradas del brazo de la balanza de Mohr (1..9 cm) y determinaciones por parte, en
+// espejo con `MOHR_RANURAS`/`HIDRO_MEDIDAS` del seed (src/practices/seed.rs).
+const MOHR_RANURAS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+const HIDRO_MEDIDAS = [1, 2, 3];
 
 // Secciones temáticas del formulario. `symbols` agrupa magnitudes bajo un título; `results`
 // asigna resultados finales a la sección; `series: true` marca dónde va la tabla por punto.
@@ -51,6 +60,26 @@ export const PRACTICE_SECTIONS = {
       results: ["RP_max_t", "P_max_t", "P_max_e", "RP_max_e"],
     },
     { id: "potencia", series: true },
+  ],
+  hidrostatica: [
+    {
+      id: "arq",
+      title: "Goma, fluido y brazos de la balanza",
+      symbols: ["m_goma", "rho_f", "g_ac", "b_E", ...MOHR_RANURAS.map((i) => `b${i}`)],
+    },
+    ...HIDRO_MEDIDAS.map((k) => ({
+      id: "arq",
+      title: `Medida ${k} — masas por ranura (la ranura sin pesa queda en 0)`,
+      symbols: MOHR_RANURAS.map((i) => `m${k}_${i}`),
+      results: k === 3 ? ["E_medio", "rho_medio"] : [],
+    })),
+    { id: "ts", title: "Marco de Wilhelmy", symbols: ["l", "d"] },
+    ...HIDRO_MEDIDAS.map((k) => ({
+      id: "ts",
+      title: `Medida ${k} — pesa que sustituye a la pelicula`,
+      symbols: [`mw${k}`, `dw${k}`],
+      results: k === 3 ? ["gamma_medio"] : [],
+    })),
   ],
 };
 

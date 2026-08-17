@@ -477,6 +477,27 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
+    // Términos de calibración de la escala, sumados en cuadratura sobre el modelo tipo B base
+    // (Hidrostática: balanza 3 % de la medida, densímetro 0.001 g/cm3, brazos de Mohr 0.5 mm).
+    // 0 = escala sin calibración declarada, idéntico al comportamiento previo.
+    add_column_if_missing(
+        pool,
+        "instrument_scales",
+        "u_cal_pct",
+        "REAL NOT NULL DEFAULT 0",
+    )
+    .await?;
+    add_column_if_missing(
+        pool,
+        "instrument_scales",
+        "u_cal_fixed",
+        "REAL NOT NULL DEFAULT 0",
+    )
+    .await?;
+    // Valor inicial que el formulario muestra en la magnitud (Hidrostática: ranuras vacías de la
+    // balanza de Mohr con masa 0). NULL = input vacío, comportamiento previo.
+    add_column_if_missing(pool, "practice_quantities", "default_value", "REAL").await?;
+
     // Número de mesa del informe compartido (NULL en entregas legacy/CSV).
     add_column_if_missing(pool, "submissions", "table_number", "INTEGER").await?;
     // Ventana de aceptación de invitaciones (horas). Default 4. Acotada a 0..=72.
