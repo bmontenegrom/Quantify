@@ -1,6 +1,6 @@
 use super::*;
 use crate::db;
-use seed::{fix_ca_rlc_labels, fix_hidrostatica_densidad_unit, seed_ca_rlc, seed_hidrostatica};
+use seed::{fix_ca_rlc_labels, fix_hidrostatica, seed_ca_rlc, seed_hidrostatica};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use tempfile::TempDir;
@@ -1742,10 +1742,11 @@ async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     assert_eq!(count.0, 15);
 }
 
-/// `fix_hidrostatica_densidad_unit` pasa la densidad de la goma de g/cm3 a kg/m3 en una base ya
-/// sembrada, y no vuelve a multiplicar si ya esta migrada (corre en cada boot).
+/// `fix_hidrostatica` pasa la densidad de la goma de g/cm3 a kg/m3 y las distancias de Wilhelmy a
+/// ranuras en una base ya sembrada, y no vuelve a tocar nada si ya esta migrada (corre en cada
+/// boot).
 #[tokio::test]
-async fn fix_hidrostatica_densidad_unit_migrates_once() {
+async fn fix_hidrostatica_migrates_once() {
     let (pool, _dir) = setup().await;
     seed_hidrostatica(&pool).await.unwrap();
 
@@ -1757,7 +1758,31 @@ async fn fix_hidrostatica_densidad_unit_migrates_once() {
     .await
     .unwrap();
 
-    fix_hidrostatica_densidad_unit(&pool).await.unwrap();
+    // ...y con dw1/d medidos con regla (is_given = 0), como en la siembra original.
+    sqlx::query(
+        "UPDATE practice_quantities SET is_given = 0, repeated = 1, per_point = 1, \
+         default_value = NULL WHERE practice_id = 'hidrostatica' AND symbol IN ('d', 'dw1')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    fix_hidrostatica(&pool).await.unwrap();
+    let ranuras: Vec<(String, i64, Option<f64>)> = sqlx::query_as(
+        "SELECT symbol, is_given, default_value FROM practice_quantities \
+         WHERE practice_id = 'hidrostatica' AND symbol IN ('d', 'dw1') ORDER BY symbol",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        ranuras,
+        vec![
+            ("d".to_string(), 1, Some(10.0)),
+            ("dw1".to_string(), 1, None),
+        ]
+    );
+
     let migrated: (String, String) = sqlx::query_as(
         "SELECT unit, formula FROM practice_results          WHERE practice_id = 'hidrostatica' AND symbol = 'rho1'",
     )
@@ -1768,7 +1793,7 @@ async fn fix_hidrostatica_densidad_unit_migrates_once() {
     assert_eq!(migrated.1, "(rho_f*m_goma*b_E/(m1_1*b1))*1000");
 
     // Segunda pasada (proximo arranque): no toca nada, la unidad ya no es la vieja.
-    fix_hidrostatica_densidad_unit(&pool).await.unwrap();
+    fix_hidrostatica(&pool).await.unwrap();
     let again: (String, String) = sqlx::query_as(
         "SELECT unit, formula FROM practice_results          WHERE practice_id = 'hidrostatica' AND symbol = 'rho1'",
     )

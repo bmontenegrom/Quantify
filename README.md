@@ -238,8 +238,10 @@ Las 9 ranuras se cargan siempre: la que no se usó queda en **masa 0** (el formu
 
 #### Parte 2 — Tensión superficial por el método de Wilhelmy
 
-Con el marco de base `l` colgado a distancia `d` de la cruz, el torque de la película se sustituye
-por el de una pesa `mw` a distancia `dw`:
+Se hace sobre la **misma balanza de Mohr**, así que las distancias son las de sus ranuras
+calibradas, no medidas con regla: el marco de base `l` cuelga del brazo fijo `d` (10 cm, como la
+goma en la parte 1) y la pesa `mw` va en una de las 9 ranuras, `dw` = 1..9 cm. El torque de la
+película se sustituye por el de la pesa:
 
 ```
 2·γ·l·d = mw·g·dw        ⇒  γ = mw·g·dw / (2·l·d)
