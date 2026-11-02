@@ -606,7 +606,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "ca-rlc",
         "hidrostatica",
     ] {
-        // DO NOTHING: si el docente la deshabilitó, la fila sigue (con enabled = 0) y no se toca.
+        // DO NOTHING: si el docente la deshabilitó, la fila sigue (con enabled = FALSE) y no se toca.
         sqlx::query(
             r#"
             INSERT INTO course_practices (course_id, practice_id, created_at)
