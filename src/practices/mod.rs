@@ -50,9 +50,10 @@ pub struct QuantityInput {
     /// `true` si puede quedar sin lecturas sin bloquear el envío del formulario.
     #[serde(default)]
     pub optional: bool,
-    /// Valor inicial que muestra el formulario. `None` = campo vacío (comportamiento previo).
-    #[serde(default)]
-    pub default_value: Option<f64>,
+    /// Valor inicial que muestra el formulario. Ausente en el JSON = no cambiarlo al editar;
+    /// `null` = campo vacío; número = ese valor.
+    #[serde(default, deserialize_with = "double_option")]
+    pub default_value: Option<Option<f64>>,
     /// Si es `Some(n)`, el valor tiene que ser una de las `n` ranuras de un instrumento: un entero
     /// de 1 a `n` (Hidrostática: la pesa de Wilhelmy en una de las 9 ranuras de la balanza).
     #[serde(default)]

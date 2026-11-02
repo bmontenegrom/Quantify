@@ -103,6 +103,33 @@ async fn update_and_delete_quantity() {
     assert_eq!(updated.symbol, "a");
     assert!(!updated.repeated);
 
+    // `default_value`: un número lo fija, ausente lo conserva y `null` lo borra.
+    let with_default = |default_value: Option<Option<f64>>| QuantityInput {
+        symbol: "a".into(),
+        name: "Ancho".into(),
+        unit: "cm".into(),
+        repeated: false,
+        quantity: None,
+        is_given: false,
+        replicas_per_point: None,
+        per_point: true,
+        has_uncertainty: true,
+        optional: false,
+        default_value,
+        slot_count: None,
+    };
+    for (input, expected) in [
+        (Some(Some(12.0)), Some(12.0)),
+        (None, Some(12.0)),
+        (Some(None), None),
+    ] {
+        let q = update_quantity(&pool, &q.id, with_default(input))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(q.default_value, expected, "pedido {input:?}");
+    }
+
     assert!(delete_quantity(&pool, &q.id).await.unwrap());
     assert!(!delete_quantity(&pool, &q.id).await.unwrap());
 }
@@ -458,7 +485,7 @@ async fn curve_crud_roundtrip_and_ordering() {
 }
 
 #[tokio::test]
-async fn move_curve_swaps_position_with_neighbor() {
+async fn move_item_swaps_a_curve_with_its_neighbor() {
     let (pool, _dir) = setup().await;
     let mk = |y: &str| CurveInput {
         x_formula: "logw".into(),
@@ -475,18 +502,20 @@ async fn move_curve_swaps_position_with_neighbor() {
         .await
         .unwrap();
 
+    let mv = |id: String, up: bool| {
+        let pool = pool.clone();
+        async move {
+            move_item(&pool, Orderable::Curves, "p1-estadistica", &id, up)
+                .await
+                .unwrap()
+        }
+    };
     // 'a' no puede subir (ya es la primera); 'c' no puede bajar (ya es la última).
-    assert!(!move_curve(&pool, "p1-estadistica", &a.id, true)
-        .await
-        .unwrap());
-    assert!(!move_curve(&pool, "p1-estadistica", &c.id, false)
-        .await
-        .unwrap());
+    assert_eq!(mv(a.id.clone(), true).await, Some(false));
+    assert_eq!(mv(c.id.clone(), false).await, Some(false));
 
     // Bajar 'a' la intercambia con 'b' → orden b, a, c.
-    assert!(move_curve(&pool, "p1-estadistica", &a.id, false)
-        .await
-        .unwrap());
+    assert_eq!(mv(a.id.clone(), false).await, Some(true));
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     assert_eq!(
         def.curves
@@ -496,10 +525,8 @@ async fn move_curve_swaps_position_with_neighbor() {
         vec!["b", "a", "c"]
     );
 
-    // Curva inexistente devuelve false.
-    assert!(!move_curve(&pool, "p1-estadistica", "no-existe", true)
-        .await
-        .unwrap());
+    // Curva inexistente (o de otra práctica): None, el handler responde 404.
+    assert_eq!(mv("no-existe".into(), true).await, None);
 }
 
 #[tokio::test]
@@ -509,7 +536,7 @@ async fn move_item_reorders_quantities_and_results_even_with_tied_positions() {
     let symbols = |def: &PracticeDefinition| -> Vec<String> {
         def.quantities.iter().map(|q| q.symbol.clone()).collect()
     };
-    // Posiciones repetidas (como en siembras viejas): el orden sale de (position, id).
+    // Posiciones repetidas (como en siembras viejas): el orden sale de (position, symbol).
     sqlx::query("UPDATE practice_quantities SET position = 0 WHERE practice_id = 'p1-estadistica'")
         .execute(&pool)
         .await
@@ -517,15 +544,18 @@ async fn move_item_reorders_quantities_and_results_even_with_tied_positions() {
     let before = symbols(&definition(&pool, "p1-estadistica").await.unwrap().unwrap());
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     let second = def.quantities[1].id.clone();
-    assert!(move_item(
-        &pool,
-        Orderable::Quantities,
-        "p1-estadistica",
-        &second,
-        true
-    )
-    .await
-    .unwrap());
+    assert_eq!(
+        move_item(
+            &pool,
+            Orderable::Quantities,
+            "p1-estadistica",
+            &second,
+            true
+        )
+        .await
+        .unwrap(),
+        Some(true)
+    );
     let after = symbols(&definition(&pool, "p1-estadistica").await.unwrap().unwrap());
     let mut expected = before.clone();
     expected.swap(0, 1);
@@ -534,15 +564,18 @@ async fn move_item_reorders_quantities_and_results_even_with_tied_positions() {
     // Mensurandos: bajar el primero lo intercambia con el segundo.
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     let (first, second) = (def.results[0].symbol.clone(), def.results[1].symbol.clone());
-    assert!(move_item(
-        &pool,
-        Orderable::Results,
-        "p1-estadistica",
-        &def.results[0].id,
-        false
-    )
-    .await
-    .unwrap());
+    assert_eq!(
+        move_item(
+            &pool,
+            Orderable::Results,
+            "p1-estadistica",
+            &def.results[0].id,
+            false
+        )
+        .await
+        .unwrap(),
+        Some(true)
+    );
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     assert_eq!(
         (def.results[0].symbol.clone(), def.results[1].symbol.clone()),
@@ -1749,9 +1782,8 @@ async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
 async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     let (pool, _dir) = setup().await;
     seed_ca_rlc(&pool).await.unwrap();
-    fix_ca_rlc_labels(&pool).await.unwrap();
 
-    // Simula el bug viejo: mueve f_res_exp al final (posicion mas alta de la practica).
+    // Simula una base con el bug viejo: f_res_exp al final (posicion mas alta de la practica).
     let max_pos: (i64,) = sqlx::query_as(
         "SELECT MAX(position) FROM practice_quantities WHERE practice_id = 'ca-rlc'",
     )
@@ -1782,6 +1814,24 @@ async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     .await
     .unwrap();
     assert!(f_res_exp_pos.0 < f_trabajo_pos.0);
+
+    // Corre una sola vez: si despues el docente la baja a proposito, el proximo arranque no la
+    // vuelve a subir.
+    sqlx::query(
+        "UPDATE practice_quantities SET position = ?1          WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .bind(max_pos.0 + 1)
+    .execute(&pool)
+    .await
+    .unwrap();
+    fix_ca_rlc_labels(&pool).await.unwrap();
+    let kept: (i64,) = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kept.0, max_pos.0 + 1);
 
     // Ninguna otra magnitud se duplico ni se perdio en el reordenamiento.
     let count: (i64,) =

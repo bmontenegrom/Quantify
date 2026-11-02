@@ -55,7 +55,7 @@ pub async fn definition(
 /// la misma forma: `(id, practice_id, position, symbol, name, unit, formula)`, con el mismo CRUD
 /// (fetch-all/create/update/delete/fetch-by-id). Solo cambian de tabla y de tipo Rust — `curves`
 /// no entra acá porque tiene otras columnas (`x_formula`/`y_formula`/`x_log`, sin `name`/`unit`) y
-/// una operación extra (`move_curve`) que las otras tres no tienen.
+/// se reordena con `move_item`, que las otras tres no usan.
 trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin {
     const TABLE: &'static str;
 }
@@ -492,18 +492,6 @@ pub async fn delete_curve(
     Ok(result.rows_affected() > 0)
 }
 
-/// Mueve una curva una posición hacia arriba (`up = true`) o hacia abajo dentro de su práctica,
-/// intercambiando su `position` con la de la curva vecina. Devuelve `false` si la curva no existe
-/// en esa práctica o ya está en el extremo correspondiente.
-pub async fn move_curve(
-    pool: &SqlitePool,
-    practice_id: &str,
-    curve_id: &str,
-    up: bool,
-) -> anyhow::Result<bool> {
-    move_item(pool, Orderable::Curves, practice_id, curve_id, up).await
-}
-
 /// Listas de una práctica que el docente puede reordenar.
 #[derive(Debug, Clone, Copy)]
 pub enum Orderable {
@@ -525,15 +513,16 @@ impl Orderable {
 }
 
 /// Mueve un elemento de una lista de la práctica una posición arriba (`up`) o abajo. Devuelve
-/// `false` si no existe o ya está en el extremo. Renumera toda la lista (0, 1, 2…) con el
-/// intercambio aplicado, así funciona aunque haya posiciones repetidas (siembras viejas).
+/// `None` si no existe en esa práctica, `Some(false)` si ya está en el extremo y `Some(true)` si se
+/// movió. Renumera toda la lista (0, 1, 2…) con el intercambio aplicado, así funciona aunque haya
+/// posiciones repetidas (siembras viejas).
 pub async fn move_item(
     pool: &SqlitePool,
     list: Orderable,
     practice_id: &str,
     item_id: &str,
     up: bool,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<Option<bool>> {
     let (table, order) = list.table_and_order();
     // Lee y reordena dentro de la misma transacción: así dos reordenamientos concurrentes no se
     // pisan (SQLite aborta el segundo con un error de snapshot en vez de corromper el orden).
@@ -545,7 +534,7 @@ pub async fn move_item(
     .fetch_all(&mut *tx)
     .await?;
     let Some(idx) = ids.iter().position(|id| id == item_id) else {
-        return Ok(false);
+        return Ok(None);
     };
     let neighbor = if up {
         idx.checked_sub(1)
@@ -553,7 +542,7 @@ pub async fn move_item(
         Some(idx + 1).filter(|&j| j < ids.len())
     };
     let Some(j) = neighbor else {
-        return Ok(false);
+        return Ok(Some(false));
     };
     ids.swap(idx, j);
     for (position, id) in ids.iter().enumerate() {
@@ -564,7 +553,7 @@ pub async fn move_item(
             .await?;
     }
     tx.commit().await?;
-    Ok(true)
+    Ok(Some(true))
 }
 
 /// Lee una curva por su id.
@@ -592,8 +581,8 @@ pub async fn create_quantity(
     fetch_quantity(pool, &id).await
 }
 
-/// Actualiza los datos de una magnitud, incluido `default_value` (el editor del admin lo manda
-/// siempre, precargado con el actual). Devuelve `None` si no existe.
+/// Actualiza los datos de una magnitud. `default_value` solo cambia si viene en el pedido (el
+/// editor del admin lo manda siempre, precargado con el actual). Devuelve `None` si no existe.
 pub async fn update_quantity(
     pool: &SqlitePool,
     quantity_id: &str,
@@ -603,7 +592,7 @@ pub async fn update_quantity(
         "UPDATE practice_quantities \
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
              replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11, \
-             slot_count = ?12, default_value = ?13 \
+             slot_count = ?12, default_value = CASE WHEN ?13 THEN ?14 ELSE default_value END \
          WHERE id = ?1",
     )
     .bind(quantity_id)
@@ -618,7 +607,8 @@ pub async fn update_quantity(
     .bind(input.has_uncertainty)
     .bind(input.optional)
     .bind(input.slot_count)
-    .bind(input.default_value)
+    .bind(input.default_value.is_some())
+    .bind(input.default_value.flatten())
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -919,7 +909,7 @@ pub(super) async fn insert_quantity(
     .bind(input.per_point)
     .bind(input.has_uncertainty)
     .bind(input.optional)
-    .bind(input.default_value)
+    .bind(input.default_value.flatten())
     .bind(input.slot_count)
     .execute(&mut *conn)
     .await?;

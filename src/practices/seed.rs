@@ -54,7 +54,7 @@ fn no_u(mut q: QuantityInput) -> QuantityInput {
 /// Valor inicial del campo en el formulario (Hidrostática: ranuras vacías de la balanza de Mohr
 /// con masa 0, para que el alumno solo cargue las que usó).
 fn with_default(mut q: QuantityInput, value: f64) -> QuantityInput {
-    q.default_value = Some(value);
+    q.default_value = Some(Some(value));
     q
 }
 
@@ -1383,6 +1383,9 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
 /// Nombre con el que [`reset_legacy_hidrostatica`] queda registrada en `applied_migrations`.
 const HIDRO_RESET: &str = "2026-11-hidrostatica-ranuras";
 
+/// Nombre con que la reubicación de `f_res_exp` de CA (RLC) queda en `applied_migrations`.
+const CA_RLC_F_RES_ORDER: &str = "2026-11-ca-rlc-f-res-exp-orden";
+
 /// Bases sembradas antes de que la parte 2 usara las ranuras de la balanza (densidad en g/cm³,
 /// `d`/`dw_k` medidos con regla): `seed_hidrostatica` es idempotente y no re-siembra, así que se
 /// borra Hidrostática entera (definición y entregas) para que la siembre de cero con la forma
@@ -1487,21 +1490,31 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
     }
 
     // Reordena f_res_exp arriba de f_trabajo si quedo mal ubicada: una version anterior de esta
-    // migracion la insertaba al final en vez de antes de f_trabajo.
-    // ponytail: a diferencia de las otras ramas de esta funcion, esta no tiene un flag de "ya
-    // migrado" que la desactive sola (comparar posiciones es la unica forma de saber si sigue
-    // mal ordenada) — el SELECT corre en cada boot, pero es un self-join de 2 filas en una
-    // tabla de ~15 filas por practica: costo despreciable. Toda `fix_ca_rlc_labels` es temporal
-    // (ver doc de la funcion) y se borra junto con el resto en una limpieza futura.
-    let stray_position: Option<(i64, i64)> = sqlx::query_as(
-        "SELECT fre.position, ft.position \
-         FROM practice_quantities fre, practice_quantities ft \
-         WHERE fre.practice_id = 'ca-rlc' AND fre.symbol = 'f_res_exp' \
-           AND ft.practice_id = 'ca-rlc' AND ft.symbol = 'f_trabajo' \
-           AND fre.position > ft.position",
-    )
-    .fetch_optional(pool)
-    .await?;
+    // migracion la insertaba al final en vez de antes de f_trabajo. Corre **una sola vez** por
+    // base (`applied_migrations`): desde que el docente puede reordenar magnitudes, repetirla en
+    // cada arranque desharía un orden elegido a propósito.
+    let already: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+        .bind(CA_RLC_F_RES_ORDER)
+        .fetch_one(pool)
+        .await?;
+    let stray_position: Option<(i64, i64)> = if already.0 > 0 {
+        None
+    } else {
+        sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+            .bind(CA_RLC_F_RES_ORDER)
+            .bind(chrono::Utc::now())
+            .execute(pool)
+            .await?;
+        sqlx::query_as(
+            "SELECT fre.position, ft.position \
+             FROM practice_quantities fre, practice_quantities ft \
+             WHERE fre.practice_id = 'ca-rlc' AND fre.symbol = 'f_res_exp' \
+               AND ft.practice_id = 'ca-rlc' AND ft.symbol = 'f_trabajo' \
+               AND fre.position > ft.position",
+        )
+        .fetch_optional(pool)
+        .await?
+    };
     if let Some((f_res_exp_pos, f_trabajo_pos)) = stray_position {
         sqlx::query(
             "UPDATE practice_quantities SET position = position + 1 \

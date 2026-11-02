@@ -57,13 +57,15 @@ fn strip_ids(value: &mut Value) {
     }
 }
 
-/// Compara dos JSON: números con tolerancia relativa 1e-9 (absoluta 1e-12 cerca de cero), el
-/// resto exacto. Devuelve la primera diferencia con su ruta.
+/// Compara dos JSON: números con tolerancia relativa 1e-9, el resto exacto. Sin piso absoluto
+/// apreciable: en SI hay valores legítimos de 1e-10 (capacidades, incertidumbres de un capacitor)
+/// que un piso de 1e-12 dejaría sin verificar; el 1e-300 solo cubre el cero exacto. Devuelve la
+/// primera diferencia con su ruta.
 fn diff(path: &str, actual: &Value, expected: &Value) -> Option<String> {
     match (actual, expected) {
         (Value::Number(a), Value::Number(e)) => {
             let (a, e) = (a.as_f64().unwrap(), e.as_f64().unwrap());
-            let tol = 1e-12_f64.max(1e-9 * e.abs());
+            let tol = 1e-300_f64.max(1e-9 * e.abs().max(a.abs()));
             ((a - e).abs() > tol).then(|| format!("{path}: {a} != {e} (esperado)"))
         }
         (Value::Array(a), Value::Array(e)) => {
