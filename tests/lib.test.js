@@ -129,6 +129,10 @@ test("symbolHtml no anida subíndices y inlineMathHtml usa la misma regla", () =
   // Dígitos y después guion bajo (masas de Hidrostática): un solo subíndice.
   assert.equal(symbolHtml("m1_2"), "m<sub>1,2</sub>");
   assert.equal(symbolHtml("R1_load"), "R<sub>1,load</sub>");
+  // Letras con tilde dentro del subíndice: no lo cortan.
+  assert.equal(symbolHtml("v_máx"), "v<sub>máx</sub>");
+  assert.equal(inlineMathHtml("T_ñu"), "T<sub>ÑU</sub>");
+  assert.equal(inlineMathHtml("ver tabla_índice"), "ver tabla_índice");
   // En nombres libres solo `_` + 1-2 caracteres: una palabra con guion bajo queda tal cual.
   assert.equal(inlineMathHtml("ver tabla_resumen"), "ver tabla_resumen");
   assert.equal(inlineMathHtml("Tiempo T_oc"), "Tiempo T<sub>OC</sub>");

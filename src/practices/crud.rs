@@ -598,6 +598,24 @@ pub async fn update_quantity(
     Ok(Some(fetch_quantity(pool, quantity_id).await?))
 }
 
+/// Cuántas entregas tienen alguna lectura de la magnitud que no es una ranura de 1 a `n` (no
+/// entera o fuera de rango). Para no poner `slot_count` sobre datos que el motor después rechaza.
+pub async fn submissions_off_slots(
+    pool: &SqlitePool,
+    quantity_id: &str,
+    n: i64,
+) -> anyhow::Result<i64> {
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(DISTINCT submission_id) FROM submission_measurements \
+         WHERE quantity_id = ?1 AND (value <> CAST(value AS INTEGER) OR value < 1 OR value > ?2)",
+    )
+    .bind(quantity_id)
+    .bind(n)
+    .fetch_one(pool)
+    .await?;
+    Ok(count)
+}
+
 /// Elimina una magnitud por id. Devuelve `true` si existía.
 pub async fn delete_quantity(pool: &SqlitePool, quantity_id: &str) -> anyhow::Result<bool> {
     let result = sqlx::query("DELETE FROM practice_quantities WHERE id = ?1")

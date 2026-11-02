@@ -2530,8 +2530,9 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     let torque = 1.0 * 3.0 + 2.0 * 7.0; // g*cm
     let empuje = (torque / 10.0) * g_ac / 1000.0; // N
     let rho_goma = rho_f * m_goma * 10.0 * 1000.0 / torque; // kg/m3
-                                                            // Wilhelmy: pesa de 0.5 g a 4 cm de la cruz, marco de 5 cm colgado a 8 cm.
-    let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 8.0 * 1000.0); // N/m
+
+    // Wilhelmy: pesa de 0.5 g en la ranura 4, marco de 5 cm colgado del brazo fijo de 10 cm.
+    let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 10.0 * 1000.0); // N/m
 
     let mut measurements = Vec::new();
     let mut push = |symbol: &str, value: f64| {
@@ -2570,7 +2571,7 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
         }
     }
     push("l", 5.0);
-    push("d", 8.0);
+    push("d", 10.0);
     for k in 1..=3 {
         push(&format!("mw{k}"), 0.5);
         push(&format!("dw{k}"), 4.0);

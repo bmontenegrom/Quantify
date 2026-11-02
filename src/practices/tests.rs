@@ -1744,9 +1744,32 @@ async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     assert_eq!(count.0, 15);
 }
 
+/// En una base nueva (Hidrostatica todavia sin sembrar) el reset no borra nada: solo queda
+/// registrado, y la siembra normal la deja con la forma actual.
+#[tokio::test]
+async fn reset_legacy_hidrostatica_is_a_noop_on_a_new_database() {
+    let (pool, _dir) = setup().await;
+    reset_legacy_hidrostatica(&pool).await.unwrap();
+    seed_hidrostatica(&pool).await.unwrap();
+    let applied: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(applied.0, 1);
+    // Corre de nuevo (proximo arranque): ya registrada, no borra lo recien sembrado.
+    reset_legacy_hidrostatica(&pool).await.unwrap();
+    let qty: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'hidrostatica'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(qty.0 > 0);
+}
+
 /// `reset_legacy_hidrostatica` borra Hidrostatica (definicion y entregas de prueba) en una base
-/// sembrada con la forma vieja para que `seed_hidrostatica` la siembre de cero, y en una base ya
-/// actual no toca nada.
+/// donde ya estaba sembrada (la forma vieja) para que `seed_hidrostatica` la siembre de cero, y
+/// una vez registrada no vuelve a borrar nada.
 #[tokio::test]
 async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
     let (pool, _dir) = setup().await;
@@ -1764,9 +1787,10 @@ async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
     let fresh = snapshot(pool.clone()).await;
     assert!(!fresh.is_empty());
 
-    // Forma vieja: dw1 sin slot_count, densidad en g/cm3, y una entrega de prueba con su lectura.
+    // Forma vieja, con `dw1` ademas renombrado por el docente (no hay marca que buscar: alcanza
+    // con que este sembrada), densidad en g/cm3 y una entrega de prueba con su lectura.
     sqlx::query(
-        "UPDATE practice_quantities SET slot_count = NULL, name = 'distancia con regla' \
+        "UPDATE practice_quantities SET slot_count = NULL, symbol = 'dw_regla' \
          WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
     )
     .execute(&pool)
@@ -1790,7 +1814,7 @@ async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
     sqlx::query(
         "INSERT INTO submission_measurements (id, submission_id, quantity_id, value) \
          SELECT 'm1', 's1', id, 4.3 FROM practice_quantities \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
+         WHERE practice_id = 'hidrostatica' AND symbol = 'dw_regla'",
     )
     .execute(&pool)
     .await
@@ -1814,8 +1838,8 @@ async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
             .unwrap();
     assert_eq!(left.0, 0);
 
-    // Ya corrio: aunque el docente recree `dw1` desde el admin (sin slot_count, la marca de la
-    // forma vieja), una entrega nueva sobrevive al proximo arranque.
+    // Ya corrio: aunque el docente recree `dw1` desde el admin (sin slot_count), una entrega
+    // nueva sobrevive al proximo arranque.
     sqlx::query(
         "UPDATE practice_quantities SET slot_count = NULL \
          WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
@@ -1837,4 +1861,42 @@ async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
         .await
         .unwrap();
     assert_eq!(kept.0, 1);
+}
+
+/// `submissions_off_slots` cuenta las entregas con alguna lectura que no es una ranura de 1 a n
+/// (no entera o fuera de rango), para no poner `slot_count` sobre datos que el motor rechaza.
+#[tokio::test]
+async fn submissions_off_slots_counts_non_slot_readings() {
+    let (pool, _dir) = setup().await;
+    seed_hidrostatica(&pool).await.unwrap();
+    let (qid,): (String,) = sqlx::query_as(
+        "SELECT id FROM practice_quantities WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for (sid, value) in [("ok", 4.0), ("dec", 4.3), ("alto", 12.0)] {
+        sqlx::query(
+            "INSERT INTO submissions (id, student_name, group_name, course, practice_id, \
+             file_name, csv_path, analysis_json, submitted_at) \
+             VALUES (?1, 'a', 'g', 'c', 'hidrostatica', '', '', '{}', '2026-11-01T00:00:00Z')",
+        )
+        .bind(sid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO submission_measurements (id, submission_id, quantity_id, value) \
+             VALUES (?1, ?1, ?2, ?3)",
+        )
+        .bind(sid)
+        .bind(&qid)
+        .bind(value)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // 4.3 (no entera) y 12 (fuera de 1..=9); con 12 ranuras solo queda 4.3.
+    assert_eq!(submissions_off_slots(&pool, &qid, 9).await.unwrap(), 2);
+    assert_eq!(submissions_off_slots(&pool, &qid, 12).await.unwrap(), 1);
 }

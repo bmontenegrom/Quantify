@@ -802,6 +802,11 @@ function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
   const repeated = "repeated" in raw;
   const replicas = Number(raw.replicas_per_point);
+  // Un no-entero (2.5) no llega a `validate_quantity`: el JSON ya falla con un error genérico.
+  const slots = raw.slot_count ? Number(raw.slot_count) : null;
+  if (slots != null && !Number.isInteger(slots)) {
+    throw new Error("Las ranuras tienen que ser un entero de 1 en adelante (vacío = sin restricción).");
+  }
   return {
     symbol: raw.symbol,
     name: raw.name,
@@ -815,7 +820,7 @@ function quantityPayloadFromForm(form) {
     is_given: "is_given" in raw,
     has_uncertainty: "has_uncertainty" in raw,
     optional: "optional" in raw,
-    slot_count: raw.slot_count ? Number(raw.slot_count) : null,
+    slot_count: slots,
   };
 }
 

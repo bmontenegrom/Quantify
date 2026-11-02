@@ -28,10 +28,11 @@ const GREEK_PREFIX = new RegExp(`^(${Object.keys(GREEK_NAMES).join("|")})(?=_|\\
 // Subíndices de un símbolo: todo lo que sigue al primer guion bajo, con los guiones siguientes
 // como coma (`f_res_exp` → `f<sub>res,exp</sub>`), o los dígitos pegados a una letra con lo que
 // les siga tras un guion bajo (`R1`, `m1_2` → `m<sub>1,2</sub>`).
+// Las letras son `\p{L}` (con `u`), no ASCII: así `v_máx` no corta el subíndice en la tilde.
 const SYMBOL_SUBSCRIPT =
-  /([A-Za-zα-ω])(?:_([A-Za-z0-9/]+(?:_[A-Za-z0-9/]+)*)\b|(\d+(?:\/\d+)?(?:_[A-Za-z0-9/]+)*))/g;
+  /([A-Za-zα-ω])(?:_([\p{L}\p{N}/]+(?:_[\p{L}\p{N}/]+)*)|(\d+(?:\/\d+)?(?:_[\p{L}\p{N}/]+)*))/gu;
 // En texto libre (nombres) solo `_` + 1-2 caracteres (`T_oc`): `tabla_resumen` es una palabra.
-const NAME_SUBSCRIPT = /([A-Za-zα-ω])(?:_([A-Za-z0-9/]{1,2})\b|(\d+(?:\/\d+)?))/g;
+const NAME_SUBSCRIPT = /([A-Za-zα-ω])(?:_([\p{L}\p{N}/]{1,2})(?![\p{L}\p{N}])|(\d+(?:\/\d+)?))/gu;
 
 /**
  * Aplica `pattern` (uno de los de arriba) sobre texto ya escapado, en una sola pasada para que

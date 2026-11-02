@@ -5,7 +5,7 @@ use super::crud::{
 use super::{
     AggregateInput, CurveInput, IntermediateInput, PointResultInput, QuantityInput, ResultInput,
 };
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 /// Construye un `QuantityInput` (magnitud de entrada) para el seed de definiciones.
 fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> QuantityInput {
@@ -167,6 +167,38 @@ async fn seed_practice(
         insert_result(&mut conn, practice_id, pos as i64 + 1, r).await?;
     }
     Ok(true)
+}
+
+/// Borra la definición entera de una práctica (magnitudes y todo lo que cuelga de ellas, más las
+/// lecturas que las referencian) para que su `seed_*` la vuelva a sembrar de cero. Para las
+/// limpiezas de forma vieja; va dentro de la transacción del llamador, así no queda a medias
+/// (p. ej. `practice_quantities` vacía con `practice_results` viejos, que chocarían con
+/// `UNIQUE(practice_id, symbol)` al resembrar). No toca entregas ni la asignación a cursos.
+async fn wipe_practice_definition(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "DELETE FROM submission_measurements WHERE quantity_id IN \
+         (SELECT id FROM practice_quantities WHERE practice_id = ?1)",
+    )
+    .bind(practice_id)
+    .execute(&mut *conn)
+    .await?;
+    for table in [
+        "practice_point_results",
+        "practice_aggregates",
+        "practice_curves",
+        "practice_intermediates",
+        "practice_results",
+        "practice_quantities",
+    ] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE practice_id = ?1"))
+            .bind(practice_id)
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
 }
 
 /// `true` si la práctica no tiene una magnitud con ese símbolo. Para migraciones puntuales que
@@ -476,28 +508,8 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
     if !quantity_missing(pool, "p2-cc", "R").await?
         && quantity_missing(pool, "p2-cc", "Vg_s").await?
     {
-        // Una sola transacción: si el proceso muere a mitad de camino, no queda un estado
-        // parcial (p. ej. `practice_quantities` ya vacía pero `practice_results` todavía con
-        // las filas viejas, que chocarían con `UNIQUE(practice_id, symbol)` al resembrar).
         let mut tx = pool.begin().await?;
-        sqlx::query(
-            "DELETE FROM submission_measurements WHERE quantity_id IN \
-             (SELECT id FROM practice_quantities WHERE practice_id = 'p2-cc')",
-        )
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query("DELETE FROM practice_quantities WHERE practice_id = 'p2-cc'")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM practice_results WHERE practice_id = 'p2-cc'")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM practice_curves WHERE practice_id = 'p2-cc'")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM practice_intermediates WHERE practice_id = 'p2-cc'")
-            .execute(&mut *tx)
-            .await?;
+        wipe_practice_definition(&mut tx, "p2-cc").await?;
         tx.commit().await?;
     }
     let fresh_p2cc = seed_practice(
@@ -939,24 +951,7 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
         let missing_exp = quantity_missing(pool, "filtros", "fpasaje_exp").await?;
         if given_r.0 > 0 || missing_exp {
             let mut tx = pool.begin().await?;
-            sqlx::query(
-                "DELETE FROM submission_measurements WHERE quantity_id IN \
-                 (SELECT id FROM practice_quantities WHERE practice_id = 'filtros')",
-            )
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query("DELETE FROM practice_quantities WHERE practice_id = 'filtros'")
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query("DELETE FROM practice_results WHERE practice_id = 'filtros'")
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query("DELETE FROM practice_curves WHERE practice_id = 'filtros'")
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query("DELETE FROM practice_intermediates WHERE practice_id = 'filtros'")
-                .execute(&mut *tx)
-                .await?;
+            wipe_practice_definition(&mut tx, "filtros").await?;
             tx.commit().await?;
         }
     }
@@ -1393,10 +1388,11 @@ const HIDRO_RESET: &str = "2026-11-hidrostatica-ranuras";
 /// borra Hidrostática entera (definición y entregas) para que la siembre de cero con la forma
 /// actual. Las entregas de esa forma eran de prueba (decisión de la cátedra): no se conservan.
 ///
-/// Corre **una sola vez** por base (queda en `applied_migrations`): la marca de forma vieja (`dw1`
-/// sin `slot_count`) solo se mira esa vez, así que un docente que después recrea `dw1` desde el
-/// admin no dispara otro borrado. Todo en una transacción, como la limpieza de p2-cc. No toca la
-/// asignación de la práctica a cursos ni a mesas, solo su definición y sus entregas.
+/// Corre **una sola vez** por base (queda en `applied_migrations`) y sin mirar marcas de forma:
+/// si Hidrostática ya está sembrada cuando corre, es de antes de este cambio (en una base nueva
+/// corre antes de `seed_hidrostatica`, con la práctica vacía, y no borra nada). Así no importa si
+/// el docente renombró o recreó magnitudes, ni puede dispararlo de nuevo después. Todo en una
+/// transacción. No toca la asignación de la práctica a cursos ni a mesas.
 pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     let done: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
         .bind(HIDRO_RESET)
@@ -1405,14 +1401,14 @@ pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Resu
     if done.0 > 0 {
         return Ok(());
     }
-    let legacy: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM practice_quantities \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'dw1' AND slot_count IS NULL",
+    let seeded: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'hidrostatica'",
     )
     .fetch_one(pool)
     .await?;
+    let seeded = seeded.0 > 0;
     let mut tx = pool.begin().await?;
-    if legacy.0 > 0 {
+    if seeded {
         for sql in [
             "DELETE FROM submission_measurements WHERE submission_id IN \
              (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
@@ -1427,20 +1423,7 @@ pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Resu
             .execute(&mut *tx)
             .await?
             .rows_affected();
-        for table in [
-            "practice_point_results",
-            "practice_aggregates",
-            "practice_curves",
-            "practice_intermediates",
-            "practice_results",
-            "practice_quantities",
-        ] {
-            sqlx::query(&format!(
-                "DELETE FROM {table} WHERE practice_id = 'hidrostatica'"
-            ))
-            .execute(&mut *tx)
-            .await?;
-        }
+        wipe_practice_definition(&mut tx, "hidrostatica").await?;
         tracing::warn!(
             submissions,
             "Hidrostática tenía la forma vieja: se borró (definición y entregas) para resembrarla"
