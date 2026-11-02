@@ -13,7 +13,7 @@
 // Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
 // E2E_SKIP_BUILD, E2E_HEADED.
 
-import { ARTIFACTS, STUDENT, TEACHER, assert, step, symbolText, withE2E } from "./lib.mjs";
+import { ARTIFACTS, STUDENT, TEACHER, assert, openAddForm, step, symbolText, withE2E } from "./lib.mjs";
 import { join } from "node:path";
 
 const PORT = process.env.E2E_PORT ?? "8137";
@@ -122,7 +122,7 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   step("docente: abre Fluidos II en el admin de prácticas");
   await tPage.click('.tab.teacher-only[data-view="practices"]');
   await tPage.click('[data-practice-open][data-practice-id="fluidos-2"]');
-  await tPage.waitForSelector("#new-quantity-form");
+  await openAddForm(tPage, "#new-quantity-form");
 
   step("docente: agrega una magnitud sin unidad (adimensional)");
   const qForm = tPage.locator("#new-quantity-form");

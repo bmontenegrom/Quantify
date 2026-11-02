@@ -31,6 +31,15 @@ export function assert(condition, message) {
   if (!condition) throw new Error(`Falló la verificación: ${message}`);
 }
 
+/** Abre (como un usuario, clickeando el `summary`) el `<details>` plegado que contiene un form de
+ *  alta del admin de prácticas, si no está ya abierto. */
+export async function openAddForm(page, formSelector) {
+  await page.waitForSelector(formSelector, { state: "attached" });
+  const details = page.locator(`details:has(${formSelector})`);
+  if (!(await details.evaluate((d) => d.open))) await details.locator("summary").first().click();
+  await page.waitForSelector(formSelector);
+}
+
 /** Texto plano con el que un símbolo queda en `textContent` (sin las etiquetas de subíndice). */
 export function symbolText(symbol) {
   return symbolHtml(symbol).replace(/<[^>]+>/g, "");

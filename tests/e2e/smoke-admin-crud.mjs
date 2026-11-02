@@ -5,7 +5,7 @@
 // Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
 // E2E_SKIP_BUILD, E2E_HEADED.
 
-import { TEACHER, assert, step, symbolText, withE2E } from "./lib.mjs";
+import { TEACHER, assert, openAddForm, step, symbolText, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8157";
 const PRACTICE_ID = "fluidos-2";
@@ -25,7 +25,7 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
   step(`docente: abre ${PRACTICE_ID} en el admin de prácticas`);
   await page.click('.tab.teacher-only[data-view="practices"]');
   await page.click(`[data-practice-open][data-practice-id="${PRACTICE_ID}"]`);
-  await page.waitForSelector("#new-quantity-form");
+  await openAddForm(page, "#new-quantity-form");
 
   step("docente: crea una magnitud nueva");
   await fillAndSubmit(page, "#new-quantity-form", {
@@ -40,7 +40,7 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
   );
 
   step("docente: crea un mensurando nuevo (usa la magnitud recién creada en la fórmula)");
-  await page.waitForSelector("#new-result-form");
+  await openAddForm(page, "#new-result-form");
   await fillAndSubmit(page, "#new-result-form", {
     symbol: "crud_test_res",
     name: "Mensurando de prueba CRUD",
@@ -54,7 +54,7 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
   );
 
   step("docente: crea un agregado nuevo (referencia el mensurando recién creado)");
-  await page.waitForSelector("#new-aggregate-form");
+  await openAddForm(page, "#new-aggregate-form");
   await fillAndSubmit(page, "#new-aggregate-form", {
     symbol: "crud_test_agg",
     name: "Agregado de prueba CRUD",
