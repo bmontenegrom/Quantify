@@ -13,7 +13,7 @@
 // Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
 // E2E_SKIP_BUILD, E2E_HEADED.
 
-import { ARTIFACTS, STUDENT, TEACHER, assert, openAddForm, step, symbolText, withE2E } from "./lib.mjs";
+import { ARTIFACTS, STUDENT, TEACHER, assert, openAddForm, step, symbolText, waitForDraft, withE2E } from "./lib.mjs";
 import { join } from "node:path";
 
 const PORT = process.env.E2E_PORT ?? "8137";
@@ -92,18 +92,26 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
 
   step("estudiante: recarga y el borrador restaura la serie");
   // Restaurar una serie usa helpers de forms-series.js que forms.js no importaba (ReferenceError).
-  await sPage.waitForTimeout(600); // el borrador se guarda con debounce de 350 ms
+  await waitForDraft(sPage, String(points.at(-1).t));
   await sPage.reload();
   await sPage.waitForSelector("#app-shell:not(.hidden)");
   await sPage.click('#practice-nav-children .nav-child:has-text("Fluidos II")');
   await sPage.waitForSelector(".series-table");
-  const restored = await sPage.$$eval(`.series-value[data-quantity-id="${idBySym["h"]}"]`, (inputs) =>
-    inputs.map((input) => input.value),
-  );
-  assert(
-    JSON.stringify(restored) === JSON.stringify(points.map((p) => String(p.h))),
-    `el borrador debía restaurar h = ${points.map((p) => p.h)} (vi: ${restored})`,
-  );
+  for (const sym of ["h", "t"]) {
+    const restored = await sPage.$$eval(`.series-value[data-quantity-id="${idBySym[sym]}"]`, (inputs) =>
+      inputs.map((input) => input.value),
+    );
+    const expected = points.map((p) => String(p[sym]));
+    assert(
+      JSON.stringify(restored) === JSON.stringify(expected),
+      `el borrador debía restaurar ${sym} = ${expected} (vi: ${restored})`,
+    );
+  }
+  const restoredRho = await sPage
+    .locator(`.shared-quantities .measurement-row[data-quantity-id="${idBySym["rho"]}"] .measure-value`)
+    .first()
+    .inputValue();
+  assert(restoredRho === String(shared.rho), `el borrador debía restaurar rho (vi: ${restoredRho})`);
   await sPage.selectOption("#table-select", "1");
 
   step("estudiante: entrega el formulario");

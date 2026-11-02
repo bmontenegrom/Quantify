@@ -40,6 +40,18 @@ export async function openAddForm(page, formSelector) {
   await page.waitForSelector(formSelector);
 }
 
+/** Espera a que el borrador local (guardado con debounce) contenga `text`, antes de recargar. */
+export async function waitForDraft(page, text) {
+  await page.waitForFunction(
+    (needle) =>
+      Object.keys(localStorage).some(
+        (key) => key.startsWith("quantify-draft:") && localStorage.getItem(key).includes(needle),
+      ),
+    text,
+    { timeout: 10_000 },
+  );
+}
+
 /** Texto plano con el que un símbolo queda en `textContent` (sin las etiquetas de subíndice). */
 export function symbolText(symbol) {
   return symbolHtml(symbol).replace(/<[^>]+>/g, "");

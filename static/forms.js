@@ -932,7 +932,6 @@ function applyDraftPrefill() {
  *  instrument_id, scale_id}) ya armado, sin importar si viene de una entrega guardada
  *  (`editPrefillByQuantity`) o de un borrador local (`draftMeasurementsByQuantity`). */
 function applyMeasurementPrefill(byQ, finalResults, comment) {
-  applyFinalResultsPrefillFrom(finalResults);
   if (studentComment) studentComment.value = comment ?? "";
 
   const seriesTable = measurementFields.querySelector(".series-table");
@@ -973,6 +972,8 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
     measurementFields
       .querySelectorAll(".shared-quantities .measurement-row")
       .forEach((row) => prefillStandaloneRow(row, byQ));
+    // Después de reconstruir las filas: los Re#k viven en ellas y se indexan por fila completa.
+    applyFinalResultsPrefillFrom(finalResults);
     return;
   }
 
@@ -993,6 +994,7 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
   for (const row of standalone) {
     prefillStandaloneRow(row, byQ);
   }
+  applyFinalResultsPrefillFrom(finalResults);
 }
 
 /// Rellena una fila suelta (dato dado o medida única/réplicas) desde el prefill de edición.
