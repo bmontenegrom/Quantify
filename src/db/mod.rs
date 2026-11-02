@@ -606,6 +606,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "ca-rlc",
         "hidrostatica",
     ] {
+        // DO NOTHING: si el docente la deshabilitó, la fila sigue (con enabled = FALSE) y no se toca.
         sqlx::query(
             r#"
             INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -941,6 +942,28 @@ mod tests {
                 .await
                 .unwrap()
         );
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
+
+        // Deshabilitada por el docente, la siembra no la vuelve a habilitar al rearrancar.
+        assert!(disable_course_practice(&pool, COURSE, "p1-estadistica")
+            .await
+            .unwrap());
+        seed_academic(&pool).await.unwrap();
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 9);
+        assert!(
+            !user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
+                .await
+                .unwrap()
+        );
+        enable_course_practice(
+            &pool,
+            COURSE,
+            SetCoursePractice {
+                practice_id: "p1-estadistica".into(),
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
     }
 

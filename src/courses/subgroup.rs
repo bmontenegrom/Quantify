@@ -109,7 +109,7 @@ pub async fn set_practice_table_assignment(
         r#"
         SELECT 1
         FROM group_members gm
-        JOIN course_practices cp ON cp.course_id = ?3 AND cp.practice_id = ?4
+        JOIN course_practices cp ON cp.course_id = ?3 AND cp.practice_id = ?4 AND cp.enabled = TRUE
         WHERE gm.group_id = ?1 AND gm.user_id = ?2
         "#,
     )

@@ -176,7 +176,7 @@ pub async fn add_course_member(
     Ok(Some(()))
 }
 
-/// Habilita una práctica en un curso. Idempotente (`ON CONFLICT DO NOTHING`).
+/// Habilita una práctica en un curso (o la re-habilita si estaba deshabilitada). Idempotente.
 pub async fn enable_course_practice(
     pool: &SqlitePool,
     course_id: &str,
@@ -186,7 +186,7 @@ pub async fn enable_course_practice(
         r#"
         INSERT INTO course_practices (course_id, practice_id, created_at)
         VALUES (?1, ?2, ?3)
-        ON CONFLICT(course_id, practice_id) DO NOTHING
+        ON CONFLICT(course_id, practice_id) DO UPDATE SET enabled = TRUE
         "#,
     )
     .bind(course_id)
@@ -195,6 +195,26 @@ pub async fn enable_course_practice(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Deshabilita una práctica en un curso: los estudiantes ya no pueden entregarla. Las entregas
+/// existentes, los subgrupos y las mesas se conservan para cuando se re-habilite. La fila queda
+/// con `enabled = FALSE` (no se borra) para que la siembra no la vuelva a habilitar al arrancar.
+/// Devuelve `true` si estaba habilitada.
+pub async fn disable_course_practice(
+    pool: &SqlitePool,
+    course_id: &str,
+    practice_id: &str,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE course_practices SET enabled = FALSE \
+         WHERE course_id = ?1 AND practice_id = ?2 AND enabled = TRUE",
+    )
+    .bind(course_id)
+    .bind(practice_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Indica si un usuario puede entregar en (curso, grupo, práctica). Docentes/admin siempre
@@ -222,6 +242,7 @@ pub async fn user_can_submit(
           AND g.course_id = ?3
           AND gm.user_id = ?1
           AND cp.practice_id = ?4
+          AND cp.enabled = TRUE
         "#,
     )
     .bind(&user.id)
@@ -322,7 +343,7 @@ pub async fn practices_for_course(
         SELECT p.id, p.name, p.description, p.analysis_kind
         FROM course_practices cp
         JOIN practices p ON p.id = cp.practice_id
-        WHERE cp.course_id = ?1
+        WHERE cp.course_id = ?1 AND cp.enabled = TRUE
         ORDER BY p.name
         "#,
     )
