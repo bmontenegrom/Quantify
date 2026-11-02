@@ -12,8 +12,7 @@ pub(crate) const CONSTANTS: [(&str, f64); 2] =
 pub(crate) fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
     let tree = build_operator_tree(formula)
         .map_err(|err| anyhow::anyhow!("la formula \"{formula}\" no es valida: {err}"))?;
-    // Todos los desconocidos, no solo el primero: el admin compara errores antes y después de un
-    // cambio, y un segundo símbolo roto en la misma fórmula tiene que cambiar el mensaje.
+    // Todos los desconocidos, no solo el primero: el docente ve de una vez todo lo que falta.
     let mut unknown: Vec<&str> = Vec::new();
     for var in tree.iter_variable_identifiers() {
         let is_constant = CONSTANTS.iter().any(|(name, _)| *name == var);

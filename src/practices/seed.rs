@@ -1480,16 +1480,18 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         quantity_missing(pool, "ca-rlc", "f_res_exp").await?,
         f_trabajo,
     ) {
+        // Corrimiento e inserción juntos: si se cortara entre los dos, el próximo arranque
+        // volvería a correr las posiciones.
+        let mut tx = pool.begin().await?;
         sqlx::query(
             "UPDATE practice_quantities SET position = position + 1 \
              WHERE practice_id = 'ca-rlc' AND position >= ?1",
         )
         .bind(f_trabajo_pos.0)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-        let mut conn = pool.acquire().await?;
         insert_quantity(
-            &mut conn,
+            &mut tx,
             "ca-rlc",
             f_trabajo_pos.0,
             &qty_shared(
@@ -1500,6 +1502,7 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
             ),
         )
         .await?;
+        tx.commit().await?;
     }
 
     // Reordena f_res_exp arriba de f_trabajo si quedo mal ubicada: una version anterior de esta

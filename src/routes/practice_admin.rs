@@ -727,13 +727,13 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
 }
 
 /// Todos los problemas de fórmulas de la definición (mensurandos, ejes, curvas, intermedias,
-/// derivadas por punto y agregados), revisados con los mismos validadores que el alta. Cada uno
-/// nombra el elemento afectado.
-fn formula_problems(def: &practices::PracticeDefinition) -> Vec<String> {
+/// derivadas por punto y agregados), revisados con los mismos validadores que el alta, como
+/// `(elemento, mensaje)`; el elemento es, p. ej., `el mensurando M_medio`.
+fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
     let mut problems = Vec::new();
     let mut note = |what: &str, symbol: &str, result: Result<(), AppError>| {
         if let Err(e) = result {
-            problems.push(format!("{what} {symbol}: {}", e.message()));
+            problems.push((format!("{what} {symbol}"), e.message().to_string()));
         }
     };
     for r in &def.results {
@@ -811,21 +811,24 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<String> {
     problems
 }
 
-/// Rechaza un cambio si deja alguna fórmula sin compilar que **antes** compilaba: se compara con
-/// los problemas que ya había, así una fórmula rota de antes (guardada cuando no se validaba) no
-/// bloquea cambios que no tienen que ver con ella. `what` describe el cambio en el mensaje.
+/// Rechaza un cambio si deja sin compilar alguna fórmula que **antes** compilaba. Se compara por
+/// elemento: uno que ya estaba roto (guardado cuando no se validaba) no bloquea nada, ni siquiera
+/// un cambio que lo arregla a medias. `what` describe el cambio en el mensaje.
 fn guard_change(
     before: &practices::PracticeDefinition,
     after: &practices::PracticeDefinition,
     what: &str,
 ) -> Result<(), AppError> {
-    let old = formula_problems(before);
+    let already_broken: Vec<String> = formula_problems(before)
+        .into_iter()
+        .map(|(element, _)| element)
+        .collect();
     match formula_problems(after)
         .into_iter()
-        .find(|p| !old.contains(p))
+        .find(|(element, _)| !already_broken.contains(element))
     {
-        Some(problem) => Err(AppError::bad_request(format!(
-            "No se puede {what}: {problem}"
+        Some((element, message)) => Err(AppError::bad_request(format!(
+            "No se puede {what}: {element}: {message}"
         ))),
         None => Ok(()),
     }
@@ -1496,16 +1499,11 @@ mod tests {
         let mut also_unit = broken.clone();
         also_unit.quantities[0].unit = "cm".into();
         assert!(guard_change(&broken, &also_unit, "x").is_ok());
-        // ...pero romperla un poco más (renombrar otro símbolo que usa) se detecta igual.
-        broken.results[0].formula = "slope * no_existe * R_cap".into();
-        let mut worse = broken.clone();
-        worse
-            .quantities
-            .iter_mut()
-            .find(|q| q.symbol == "R_cap")
-            .unwrap()
-            .symbol = "Rc".into();
-        assert!(guard_change(&broken, &worse, "x").is_err());
+        // ...ni uno que la arregla a medias: se compara por elemento, no por el texto del error.
+        broken.results[0].formula = "slope * no_existe * Rc".into();
+        let mut half_fixed = broken.clone();
+        half_fixed.results[0].formula = "slope * no_existe * R_cap".into();
+        assert!(guard_change(&broken, &half_fixed, "x").is_ok());
     }
 
     /// Cada tipo de análisis rechaza los símbolos que su motor no liga a un mensurando.

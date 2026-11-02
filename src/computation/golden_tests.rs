@@ -117,7 +117,15 @@ async fn golden_practices_match() {
         .filter(|p| p.to_string_lossy().ends_with(".input.json"))
         .collect();
     inputs.sort();
-    assert!(!inputs.is_empty(), "no hay entradas en tests/golden");
+    // Toda práctica sembrada tiene su golden: una nueva sin entrada no quedaría cubierta.
+    for practice in crate::db::practices(&pool).await.unwrap() {
+        let input = golden_dir().join(format!("{}.input.json", practice.id));
+        assert!(
+            inputs.contains(&input),
+            "falta tests/golden/{}.input.json (cada práctica sembrada necesita su golden)",
+            practice.id
+        );
+    }
 
     let mut failures = Vec::new();
     for input_path in &inputs {
