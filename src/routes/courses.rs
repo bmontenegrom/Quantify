@@ -294,6 +294,21 @@ pub(super) async fn enable_course_practice(
     Ok(Json(Health { status: "ok" }))
 }
 
+/// `POST /api/academic/courses/{id}/practices/remove`: deshabilita una práctica del curso (solo
+/// docente/admin). Las entregas ya hechas se conservan.
+pub(super) async fn disable_course_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(course_id): Path<String>,
+    Json(input): Json<db::SetCoursePractice>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !db::disable_course_practice(&state.pool, &course_id, &input.practice_id).await? {
+        return Err(AppError::not_found("practica no habilitada en el curso"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

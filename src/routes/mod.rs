@@ -141,6 +141,10 @@ pub fn api_router(state: SharedState) -> Router {
             "/academic/courses/{id}/practices",
             post(enable_course_practice),
         )
+        .route(
+            "/academic/courses/{id}/practices/remove",
+            post(disable_course_practice),
+        )
         .route("/academic/courses/{id}/members", post(add_course_member))
         .route("/academic/groups/{id}/members", post(add_group_member))
         .route(

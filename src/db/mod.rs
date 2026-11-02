@@ -606,6 +606,21 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "ca-rlc",
         "hidrostatica",
     ] {
+        // Cada práctica se habilita una sola vez por base (queda marcada en `applied_migrations`):
+        // si el docente la deshabilita después, el próximo arranque no la vuelve a habilitar.
+        let first_time = sqlx::query(
+            "INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2) \
+             ON CONFLICT(name) DO NOTHING",
+        )
+        .bind(format!("seed-course-practice:{course_id}:{practice}"))
+        .bind(Utc::now())
+        .execute(pool)
+        .await?
+        .rows_affected()
+            > 0;
+        if !first_time {
+            continue;
+        }
         sqlx::query(
             r#"
             INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -942,6 +957,13 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
+
+        // Deshabilitada por el docente, la siembra no la vuelve a habilitar al rearrancar.
+        assert!(disable_course_practice(&pool, COURSE, "p1-estadistica")
+            .await
+            .unwrap());
+        seed_academic(&pool).await.unwrap();
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 9);
     }
 
     #[test]

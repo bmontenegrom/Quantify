@@ -197,6 +197,22 @@ pub async fn enable_course_practice(
     Ok(())
 }
 
+/// Deshabilita una práctica en un curso: los estudiantes ya no pueden entregarla. Las entregas
+/// existentes se conservan. Devuelve `true` si estaba habilitada.
+pub async fn disable_course_practice(
+    pool: &SqlitePool,
+    course_id: &str,
+    practice_id: &str,
+) -> anyhow::Result<bool> {
+    let result =
+        sqlx::query("DELETE FROM course_practices WHERE course_id = ?1 AND practice_id = ?2")
+            .bind(course_id)
+            .bind(practice_id)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Indica si un usuario puede entregar en (curso, grupo, práctica). Docentes/admin siempre
 /// pueden; un estudiante puede solo si está inscripto, pertenece al grupo y la práctica está habilitada.
 pub async fn user_can_submit(

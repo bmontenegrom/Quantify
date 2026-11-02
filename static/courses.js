@@ -79,6 +79,9 @@ export function renderCoursesPage() {
   courseWorkspace.querySelector("#course-group-form")?.addEventListener("submit", saveCourseGroup);
   courseWorkspace.querySelector("#course-subgroup-form")?.addEventListener("submit", saveCourseSubgroup);
   courseWorkspace.querySelector("#course-practice-form")?.addEventListener("submit", saveCoursePractice);
+  courseWorkspace.querySelectorAll("[data-disable-practice]").forEach((button) => {
+    button.addEventListener("click", () => disableCoursePractice(course, button.dataset.practiceId));
+  });
   courseWorkspace.querySelectorAll("[data-group-open]").forEach((button) => {
     button.addEventListener("click", () => openGroupWorkspace(button.dataset.groupId));
   });
@@ -182,10 +185,22 @@ function renderCourseGroupForm(course) {
 function renderCoursePracticesPanel(course) {
   const enabled = new Set(course.practices.map((practice) => practice.id));
   const available = state.practices.filter((practice) => !enabled.has(practice.id));
+  const rows = course.practices.map(
+    (practice) => `
+      <tr>
+        <td class="directory-primary"><strong>${escapeHtml(practice.name)}</strong></td>
+        <td class="directory-actions">
+          <button type="button" class="btn-danger" data-disable-practice data-practice-id="${escapeHtml(practice.id)}">Deshabilitar</button>
+        </td>
+      </tr>
+    `,
+  );
   return `
-    <div class="chips">
-      ${course.practices.map((practice) => `<span class="chip">${escapeHtml(practice.name)}</span>`).join("") || `<span class="chip">Sin practicas</span>`}
-    </div>
+    ${
+      rows.length
+        ? `<div class="data-table-wrap"><table class="data-table"><tbody>${rows.join("")}</tbody></table></div>`
+        : `<p class="submission-meta">No hay practicas habilitadas.</p>`
+    }
     <form id="course-practice-form" class="detail-form compact">
       <input name="course_id" type="hidden" value="${escapeHtml(course.id)}" />
       <label>
@@ -388,6 +403,20 @@ async function saveCoursePractice(event) {
     await postJson(`/api/academic/courses/${payload.course_id}/practices`, { practice_id: payload.practice_id });
     state.courseActionStatus = "Practica habilitada";
     await refreshAcademic("Practica habilitada");
+  } catch (error) {
+    state.courseActionStatus = error.message;
+    renderCoursesPage();
+  }
+}
+
+async function disableCoursePractice(course, practiceId) {
+  const practice = course.practices.find((item) => item.id === practiceId);
+  if (!window.confirm(`¿Deshabilitar "${practice?.name ?? practiceId}" en este curso? Los estudiantes ya no podran entregarla; las entregas hechas se conservan.`)) return;
+  try {
+    state.courseActionStatus = "";
+    await postJson(`/api/academic/courses/${course.id}/practices/remove`, { practice_id: practiceId });
+    state.courseActionStatus = "Practica deshabilitada";
+    await refreshAcademic("Practica deshabilitada");
   } catch (error) {
     state.courseActionStatus = error.message;
     renderCoursesPage();
