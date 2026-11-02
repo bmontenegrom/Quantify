@@ -192,7 +192,7 @@ function renderGroupMembersPanel(group) {
         <td>${renderStudentPoints(totals)}</td>
         <td class="directory-actions">
           <button type="button" data-student-open="overview" data-student-id="${escapeHtml(student.id)}">Editar</button>
-          <button type="button" data-remove-group-member data-group-id="${escapeHtml(group.id)}" data-student-id="${escapeHtml(student.id)}">Quitar</button>
+          <button type="button" class="btn-danger" data-remove-group-member data-group-id="${escapeHtml(group.id)}" data-student-id="${escapeHtml(student.id)}">Quitar</button>
         </td>
       </tr>
     `;
