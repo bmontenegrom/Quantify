@@ -146,7 +146,7 @@ export function renderStudentEnrollmentPanel(student) {
                     (group) => `
                       <div class="inline-row">
                         <span class="chip">${escapeHtml(group.courseName)} - ${escapeHtml(group.name)}</span>
-                        <button type="button" data-remove-group-member data-group-id="${escapeHtml(group.id)}" data-student-id="${escapeHtml(student.id)}">Quitar</button>
+                        <button type="button" class="btn-danger" data-remove-group-member data-group-id="${escapeHtml(group.id)}" data-student-id="${escapeHtml(student.id)}">Quitar</button>
                       </div>
                     `,
                   )

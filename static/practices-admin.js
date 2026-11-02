@@ -119,7 +119,7 @@ function renderSymbolFormulaList(kind, def, practiceId) {
         ${finalCell}
         <td class="directory-actions">
           <button type="button" data-edit-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">${editing ? "Cerrar" : "Editar"}</button>
-          <button type="button" data-delete-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">Eliminar</button>
+          <button type="button" class="btn-danger" data-delete-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">Eliminar</button>
         </td>
       </tr>`;
     const editRow = editing
@@ -235,18 +235,13 @@ export function renderPracticesPage() {
     return;
   }
 
-  // Las curvas pueden tener mensurandos escalares (p. ej. fpasaje, RP_max); el editor los muestra.
-  const resultsBlock = `
-    <div class="workspace-grid">
-      <section class="panel workspace-panel">
-        <h3>Nuevo mensurando</h3>
-        ${renderResultForm(null, practice.id)}
-      </section>
-      <section class="panel workspace-panel">
-        <h3>Mensurandos derivados</h3>
-        ${renderResultsList(def, practice.id)}
-      </section>
-    </div>`;
+  const kind = def?.analysis_kind;
+  const pointBased = kind === "regresion_lineal" || kind === "curva";
+  // Los `<details>` de alta abiertos sobreviven al re-render (cada acción redibuja todo): si no,
+  // agregar tres magnitudes seguidas obligaba a reabrir el form cada vez.
+  const openPanels = new Set(
+    [...practiceWorkspace.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel),
+  );
   practiceWorkspace.innerHTML = `
     <div class="workspace-head">
       <div>
@@ -270,33 +265,39 @@ export function renderPracticesPage() {
       </div>
     </div>
 
-    <div class="workspace-grid">
-      <section class="panel workspace-panel">
-        <h3>Tipo de análisis</h3>
-        ${renderAnalysisKindForm(practice, def)}
-        ${def?.analysis_kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
-        ${def?.analysis_kind === "curva" ? renderCurvesSection(practice, def) : ""}
-        ${def?.analysis_kind === "regresion_lineal" || def?.analysis_kind === "curva" ? renderIntermediatesSection(practice, def) : ""}
-        ${def?.analysis_kind === "regresion_lineal" ? renderPointResultsSection(practice, def) : ""}
-        ${def?.analysis_kind === "regresion_lineal" ? renderAggregatesSection(practice, def) : ""}
-        ${def?.analysis_kind == null || def?.analysis_kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
-      </section>
-      <section class="panel workspace-panel">
-        <h3>Nueva magnitud</h3>
-        ${renderQuantityForm(null, practice.id)}
-      </section>
-    </div>
+    ${state.practiceActionStatus ? `<p class="inline-status practice-status" role="status">${escapeHtml(state.practiceActionStatus)}</p>` : ""}
 
     <section class="panel workspace-panel">
-      <div class="list-head">
-        <h3>Magnitudes de entrada</h3>
-        <span class="submission-meta">${escapeHtml(state.practiceActionStatus)}</span>
-      </div>
-      ${renderQuantitiesList(def, practice.id)}
+      <h3 class="admin-section-title">Configuración del análisis</h3>
+      ${renderAnalysisKindForm(practice, def)}
+      ${kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
+      ${kind == null || kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
     </section>
 
-    ${resultsBlock}
+    ${adminSection({
+      id: "quantity",
+      title: "Magnitudes de entrada",
+      count: def?.quantities?.length ?? 0,
+      list: renderQuantitiesList(def, practice.id),
+      addLabel: "Nueva magnitud",
+      form: renderQuantityForm(null, practice.id),
+    })}
+    ${pointBased ? renderIntermediatesSection(practice, def) : ""}
+    ${kind === "curva" ? renderCurvesSection(practice, def) : ""}
+    ${adminSection({
+      id: "result",
+      title: "Mensurandos derivados",
+      count: def?.results?.length ?? 0,
+      list: renderResultsList(def, practice.id),
+      addLabel: "Nuevo mensurando",
+      form: renderResultForm(null, practice.id),
+    })}
+    ${kind === "regresion_lineal" ? renderPointResultsSection(practice, def) : ""}
+    ${kind === "regresion_lineal" ? renderAggregatesSection(practice, def) : ""}
   `;
+  for (const details of practiceWorkspace.querySelectorAll("details[data-add-panel]")) {
+    if (openPanels.has(details.dataset.addPanel)) details.open = true;
+  }
 
   practiceWorkspace.classList.remove("hidden");
   practiceCatalog?.closest(".panel")?.classList.add("hidden");
@@ -476,56 +477,79 @@ function renderOperatorCountForm(practice, def) {
   `;
 }
 
-/// Gestión de magnitudes derivadas por punto (Motor E): lista editable + alta. Se evalúan tras el
-/// ajuste, una por corrida, usando magnitudes/intermedias del punto + slope/intercept + mensurandos.
+/// Bloque de la ficha de práctica, todos con la misma forma: título con contador, ayuda corta, la
+/// lista a ancho completo y el alta plegada en un `<details>` nativo (casi siempre el docente
+/// revisa o edita; agregar es lo menos frecuente y no tiene por qué ocupar media pantalla).
+/// `id` identifica el `<details>` para reabrirlo tras un re-render (ver `renderPracticesPage`).
+function adminSection({ id, title, count, help = "", list, addLabel, form }) {
+  return `
+    <section class="panel workspace-panel admin-section">
+      <h3 class="admin-section-title">${title} <span class="count-badge">${count}</span></h3>
+      ${help ? `<p class="submission-meta">${help}</p>` : ""}
+      ${list}
+      <details class="add-panel" data-add-panel="${id}">
+        <summary>${addLabel}</summary>
+        ${form}
+      </details>
+    </section>`;
+}
+
+/// Bloque de una de las listas símbolo/fórmula (`SYMBOL_FORMULA_KINDS`).
+function symbolFormulaSection(kindKey, practice, def, { title, help, addLabel }) {
+  const kind = SYMBOL_FORMULA_KINDS[kindKey];
+  return adminSection({
+    id: kindKey,
+    title,
+    count: kind.listOf(def).length,
+    help,
+    list: renderSymbolFormulaList(kind, def, practice.id),
+    addLabel,
+    form: renderSymbolFormulaForm(kind, null, practice.id),
+  });
+}
+
+/// Magnitudes derivadas por punto (Motor E): se evalúan tras el ajuste, una por corrida, usando
+/// magnitudes/intermedias del punto + slope/intercept + mensurandos.
 function renderPointResultsSection(practice, def) {
-  const kind = SYMBOL_FORMULA_KINDS.pointResult;
-  return `
-    <h4>Magnitudes derivadas por punto</h4>
-    <p class="submission-meta">Se calculan tras el ajuste, una por corrida (p. ej. Reynolds). La fórmula puede usar las magnitudes y las intermedias del punto, <code>slope</code>/<code>intercept</code> y los mensurandos. Sin incertidumbre.</p>
-    ${renderSymbolFormulaList(kind, def, practice.id)}
-    <h4>Nueva derivada por punto</h4>
-    ${renderSymbolFormulaForm(kind, null, practice.id)}
-  `;
+  return symbolFormulaSection("pointResult", practice, def, {
+    title: "Magnitudes derivadas por punto",
+    help: "Se calculan tras el ajuste, una por corrida (p. ej. Reynolds). La fórmula puede usar las magnitudes y las intermedias del punto, <code>slope</code>/<code>intercept</code> y los mensurandos. Sin incertidumbre.",
+    addLabel: "Nueva derivada por punto",
+  });
 }
 
-/// Gestión de mensurandos agregados (Motor F): lista editable + alta. Se evalúan una vez tras el
-/// ajuste (un valor escalar) y pueden usar escalares compartidos, slope/intercept, los mensurandos,
-/// los agregados anteriores y los extremos de cada magnitud por punto.
+/// Mensurandos agregados (Motor F): se evalúan una vez tras el ajuste (un valor escalar) y pueden
+/// usar escalares compartidos, slope/intercept, los mensurandos, los agregados anteriores y los
+/// extremos de cada magnitud por punto.
 function renderAggregatesSection(practice, def) {
-  const kind = SYMBOL_FORMULA_KINDS.aggregate;
-  return `
-    <h4>Mensurandos agregados</h4>
-    <p class="submission-meta">Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Sin incertidumbre.</p>
-    ${renderSymbolFormulaList(kind, def, practice.id)}
-    <h4>Nuevo agregado</h4>
-    ${renderSymbolFormulaForm(kind, null, practice.id)}
-  `;
+  return symbolFormulaSection("aggregate", practice, def, {
+    title: "Mensurandos agregados",
+    help: "Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Sin incertidumbre.",
+    addLabel: "Nuevo agregado",
+  });
 }
 
-/// Gestión de magnitudes intermedias por punto (Motor C): lista editable + alta. Cada una define
-/// un símbolo y una fórmula que se promedia por punto y queda disponible en las fórmulas de eje.
+/// Magnitudes intermedias por punto (Motor C): un símbolo y una fórmula que se promedia por punto
+/// y queda disponible en las fórmulas de eje.
 function renderIntermediatesSection(practice, def) {
-  const kind = SYMBOL_FORMULA_KINDS.intermediate;
-  return `
-    <h4>Magnitudes intermedias por punto</h4>
-    <p class="submission-meta">Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio). El símbolo queda disponible en las fórmulas de eje.</p>
-    ${renderSymbolFormulaList(kind, def, practice.id)}
-    <h4>Nueva intermedia</h4>
-    ${renderSymbolFormulaForm(kind, null, practice.id)}
-  `;
+  return symbolFormulaSection("intermediate", practice, def, {
+    title: "Magnitudes intermedias por punto",
+    help: "Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio). El símbolo queda disponible en las fórmulas de eje.",
+    addLabel: "Nueva intermedia",
+  });
 }
 
-/// Gestión de curvas de una práctica `curva`: lista editable + alta. Una práctica de curva grafica
-/// las curvas de esta lista; sin curvas no hay nada para graficar.
+/// Curvas de una práctica `curva`: sin curvas no hay nada para graficar.
 function renderCurvesSection(practice, def) {
-  return `
-    <h4>Curvas</h4>
-    <p class="submission-meta">Una práctica de curva grafica una o varias series sobre el mismo barrido (p. ej. dos curvas en Filtros). Se grafican los puntos sin ajuste ni mensurandos derivados.</p>
-    ${renderCurvesList(def, practice.id)}
-    <h4>Nueva curva</h4>
-    ${renderCurveForm(null, practice.id)}
-  `;
+  return adminSection({
+    id: "curve",
+    title: "Curvas",
+    count: def?.curves?.length ?? 0,
+    help: "Una práctica de curva grafica una o varias series sobre el mismo barrido (p. ej. dos curvas en Filtros). Se grafican los puntos sin ajuste ni mensurandos derivados.",
+    list: renderCurvesList(def, practice.id),
+    addLabel: "Nueva curva",
+    form: renderCurveForm(null, practice.id),
+  });
 }
 
 function renderCurveForm(curve, practiceId) {
@@ -566,7 +590,7 @@ function renderCurvesList(def, practiceId) {
           <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="up" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
           <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="down" title="Bajar" ${i === curves.length - 1 ? "disabled" : ""}>▼</button>
           <button type="button" data-edit-curve data-cid="${escapeHtml(c.id)}">${editing ? "Cerrar" : "Editar"}</button>
-          <button type="button" data-delete-curve data-cid="${escapeHtml(c.id)}">Eliminar</button>
+          <button type="button" class="btn-danger" data-delete-curve data-cid="${escapeHtml(c.id)}">Eliminar</button>
         </td>
       </tr>`;
     const editRow = editing
@@ -635,7 +659,7 @@ function renderQuantityForm(qty, practiceId) {
 
 function renderQuantitiesList(def, practiceId) {
   const quantities = def?.quantities ?? [];
-  if (quantities.length === 0) return `<p class="submission-meta">Sin magnitudes. Agrega una desde el panel lateral.</p>`;
+  if (quantities.length === 0) return `<p class="submission-meta">Sin magnitudes. Agregá una con «Nueva magnitud».</p>`;
 
   const rows = quantities.flatMap((q) => {
     const editing = isEditing("quantity", q.id);
@@ -648,7 +672,7 @@ function renderQuantitiesList(def, practiceId) {
         <td>${q.repeated ? "Sí" : "No"}</td>
         <td class="directory-actions">
           <button type="button" data-edit-quantity data-qid="${escapeHtml(q.id)}">${editing ? "Cerrar" : "Editar"}</button>
-          <button type="button" data-delete-quantity data-qid="${escapeHtml(q.id)}">Eliminar</button>
+          <button type="button" class="btn-danger" data-delete-quantity data-qid="${escapeHtml(q.id)}">Eliminar</button>
         </td>
       </tr>`;
     const editRow = editing
@@ -704,7 +728,7 @@ function renderResultForm(res, practiceId) {
 
 function renderResultsList(def, practiceId) {
   const results = def?.results ?? [];
-  if (results.length === 0) return `<p class="submission-meta">Sin mensurandos. Agrega uno desde el panel lateral.</p>`;
+  if (results.length === 0) return `<p class="submission-meta">Sin mensurandos. Agregá uno con «Nuevo mensurando».</p>`;
 
   const rows = results.flatMap((r) => {
     const tolLabel = r.tolerance != null ? `${escapeHtml(String(r.tolerance))} %` : `<span class="submission-meta">—</span>`;
@@ -720,7 +744,7 @@ function renderResultsList(def, practiceId) {
         <td>${finalLabel}</td>
         <td class="directory-actions">
           <button type="button" data-edit-result data-rid="${escapeHtml(r.id)}">${editing ? "Cerrar" : "Editar"}</button>
-          <button type="button" data-delete-result data-rid="${escapeHtml(r.id)}">Eliminar</button>
+          <button type="button" class="btn-danger" data-delete-result data-rid="${escapeHtml(r.id)}">Eliminar</button>
         </td>
       </tr>`;
     const editRow = editing

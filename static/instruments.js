@@ -122,7 +122,7 @@ function renderInstrumentDirectory() {
       <td><strong>${item.scales.length}</strong></td>
       <td class="directory-actions">
         <button type="button" data-instrument-open data-instrument-id="${escapeHtml(item.id)}">Editar</button>
-        <button type="button" data-instrument-delete data-instrument-id="${escapeHtml(item.id)}">Eliminar</button>
+        <button type="button" class="btn-danger" data-instrument-delete data-instrument-id="${escapeHtml(item.id)}">Eliminar</button>
       </td>
     </tr>
   `);
@@ -274,7 +274,7 @@ function renderScalesList(item) {
         <td>${escapeHtml(scale.unit)}</td>
         <td class="directory-actions">
           <button type="button" data-edit-scale data-scale-id="${escapeHtml(scale.id)}">${state.editingScaleId === scale.id ? "Cerrar" : "Editar"}</button>
-          <button type="button" data-delete-scale data-scale-id="${escapeHtml(scale.id)}">Eliminar</button>
+          <button type="button" class="btn-danger" data-delete-scale data-scale-id="${escapeHtml(scale.id)}">Eliminar</button>
         </td>
       </tr>
     `;
