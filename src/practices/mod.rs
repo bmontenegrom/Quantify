@@ -53,6 +53,10 @@ pub struct QuantityInput {
     /// Valor inicial que muestra el formulario. `None` = campo vacío (comportamiento previo).
     #[serde(default)]
     pub default_value: Option<f64>,
+    /// Si es `Some(n)`, el valor tiene que ser una de las `n` ranuras de un instrumento: un entero
+    /// de 1 a `n` (Hidrostática: la pesa de Wilhelmy en una de las 9 ranuras de la balanza).
+    #[serde(default)]
+    pub slot_count: Option<i64>,
 }
 
 /// Default `true` para campos booleanos opcionales (p. ej. `per_point`).

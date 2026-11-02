@@ -879,14 +879,32 @@ pub async fn analyze(
 
     // Toda medición debe corresponder a una magnitud de esta práctica (evita insertar filas
     // colgadas y da un error claro en vez de una violación de clave foránea).
-    let valid_ids: std::collections::HashSet<&str> = definition
+    let by_id: HashMap<&str, &PracticeQuantity> = definition
         .quantities
         .iter()
-        .map(|q| q.id.as_str())
+        .map(|q| (q.id.as_str(), q))
         .collect();
     for measurement in measurements {
-        if !valid_ids.contains(measurement.quantity_id.as_str()) {
+        let Some(quantity) = by_id.get(measurement.quantity_id.as_str()) else {
             anyhow::bail!("una de las mediciones no corresponde a una magnitud de esta practica");
+        };
+        // Una ranura de un instrumento solo puede ser una de las que existen: 4.5 o 10 en una
+        // balanza de 9 ranuras calcularía en silencio con una posición imposible.
+        if let Some(n) = quantity.slot_count {
+            let nested = [&measurement.point_replicas, &measurement.operator_replicas];
+            let all = measurement
+                .values
+                .iter()
+                .chain(nested.into_iter().flatten().flatten().flatten());
+            for &v in all {
+                if v.fract() != 0.0 || !(1.0..=n as f64).contains(&v) {
+                    anyhow::bail!(
+                        "\"{}\" ({}) tiene que ser una de las ranuras, un entero de 1 a {n} (se cargó {v})",
+                        quantity.name,
+                        quantity.symbol
+                    );
+                }
+            }
         }
     }
 

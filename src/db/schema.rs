@@ -497,6 +497,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     // Valor inicial que el formulario muestra en la magnitud (Hidrostática: ranuras vacías de la
     // balanza de Mohr con masa 0). NULL = input vacío, comportamiento previo.
     add_column_if_missing(pool, "practice_quantities", "default_value", "REAL").await?;
+    // Cantidad de ranuras si el valor es una ranura de un instrumento (entero 1..=n). NULL = libre.
+    add_column_if_missing(pool, "practice_quantities", "slot_count", "INTEGER").await?;
 
     // Número de mesa del informe compartido (NULL en entregas legacy/CSV).
     add_column_if_missing(pool, "submissions", "table_number", "INTEGER").await?;

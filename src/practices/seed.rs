@@ -21,6 +21,7 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
         has_uncertainty: true,
         optional: false,
         default_value: None,
+        slot_count: None,
     }
 }
 
@@ -38,6 +39,7 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
         has_uncertainty: true,
         optional: false,
         default_value: None,
+        slot_count: None,
     }
 }
 
@@ -53,6 +55,12 @@ fn no_u(mut q: QuantityInput) -> QuantityInput {
 /// con masa 0, para que el alumno solo cargue las que usó).
 fn with_default(mut q: QuantityInput, value: f64) -> QuantityInput {
     q.default_value = Some(value);
+    q
+}
+
+/// Restringe el valor a una de las `n` ranuras de un instrumento (entero 1..=n).
+fn slots(mut q: QuantityInput, n: i64) -> QuantityInput {
+    q.slot_count = Some(n);
     q
 }
 
@@ -82,6 +90,7 @@ fn qty_replicas(
         has_uncertainty: true,
         optional: false,
         default_value: None,
+        slot_count: None,
     }
 }
 
@@ -100,6 +109,7 @@ fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityI
         has_uncertainty: true,
         optional: false,
         default_value: None,
+        slot_count: None,
     }
 }
 
@@ -1316,12 +1326,15 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
             "g",
             "masa",
         ));
-        quantities.push(no_u(qty_given(
-            &format!("dw{k}"),
-            &format!("Medida {k} - ranura de la pesa (1 a 9 cm)"),
-            "cm",
-            "longitud",
-        )));
+        quantities.push(slots(
+            no_u(qty_given(
+                &format!("dw{k}"),
+                &format!("Medida {k} - ranura de la pesa (1 a 9 cm)"),
+                "cm",
+                "longitud",
+            )),
+            MOHR_RANURAS as i64,
+        ));
     }
 
     let torque = mohr_torque;
@@ -1460,12 +1473,14 @@ pub(super) async fn fix_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     for k in 1..=HIDRO_MEDIDAS {
         sqlx::query(
             "UPDATE practice_quantities \
-             SET is_given = 1, repeated = 0, per_point = 0, has_uncertainty = 0, name = ?2 \
+             SET is_given = 1, repeated = 0, per_point = 0, has_uncertainty = 0, name = ?2, \
+                 slot_count = ?4 \
              WHERE practice_id = 'hidrostatica' AND symbol = ?1 AND name = ?3",
         )
         .bind(format!("dw{k}"))
         .bind(format!("Medida {k} - ranura de la pesa (1 a 9 cm)"))
         .bind(format!("Medida {k} - distancia de la pesa a la cruz"))
+        .bind(MOHR_RANURAS as i64)
         .execute(&mut *tx)
         .await?;
     }

@@ -36,6 +36,7 @@ fn sample_quantity() -> QuantityInput {
         has_uncertainty: true,
         optional: false,
         default_value: None,
+        slot_count: None,
     }
 }
 
@@ -93,6 +94,7 @@ async fn update_and_delete_quantity() {
             has_uncertainty: true,
             optional: false,
             default_value: None,
+            slot_count: None,
         },
     )
     .await
@@ -1770,7 +1772,7 @@ async fn fix_hidrostatica_migrates_once() {
     // ...d y dw_k como `qty_shared` (medidos con regla, con U) y sus nombres viejos...
     sqlx::query(
         "UPDATE practice_quantities SET is_given = 0, repeated = 0, per_point = 0, \
-         has_uncertainty = 1, default_value = NULL, \
+         has_uncertainty = 1, default_value = NULL, slot_count = NULL, \
          name = CASE symbol WHEN 'd' THEN 'Distancia del marco a la cruz' \
                 ELSE 'Medida ' || substr(symbol, 3) || ' - distancia de la pesa a la cruz' END \
          WHERE practice_id = 'hidrostatica' AND symbol IN ('d', 'dw1', 'dw2', 'dw3')",
@@ -1801,8 +1803,11 @@ async fn fix_hidrostatica_migrates_once() {
 
     fix_hidrostatica(&pool).await.unwrap();
 
-    let ranuras: Vec<(String, String, i64, i64, Option<f64>)> = sqlx::query_as(
-        "SELECT symbol, name, is_given, has_uncertainty, default_value FROM practice_quantities \
+    // (symbol, name, is_given, has_uncertainty, default_value, slot_count)
+    type Ranura = (String, String, i64, i64, Option<f64>, Option<i64>);
+    let ranuras: Vec<Ranura> = sqlx::query_as(
+        "SELECT symbol, name, is_given, has_uncertainty, default_value, slot_count \
+         FROM practice_quantities \
          WHERE practice_id = 'hidrostatica' AND symbol IN ('d', 'dw1', 'dw2', 'dw3') \
          ORDER BY symbol",
     )
@@ -1815,6 +1820,7 @@ async fn fix_hidrostatica_migrates_once() {
         1,
         0,
         Some(10.0),
+        None,
     )];
     for k in 1..=3 {
         expected.push((
@@ -1823,6 +1829,7 @@ async fn fix_hidrostatica_migrates_once() {
             1,
             0,
             None,
+            Some(9),
         ));
     }
     assert_eq!(ranuras, expected);

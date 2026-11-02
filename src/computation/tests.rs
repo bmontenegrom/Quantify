@@ -192,6 +192,7 @@ fn quantity(symbol: &str) -> PracticeQuantity {
         has_uncertainty: true,
         optional: false,
         default_value: None,
+        slot_count: None,
     }
 }
 
@@ -2601,4 +2602,39 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     assert!(close(get("gamma_medio"), gamma, 1e-12));
     // La goma es mas densa que el agua en este caso (control de sanidad del orden de magnitud).
     assert!(rho_goma > rho_f * 1000.0);
+}
+
+/// La ranura de la pesa de Wilhelmy (`dw_k`, `slot_count = 9`) solo acepta un entero de 1 a 9: una
+/// posicion que no existe en la balanza se rechaza en vez de calcular gamma en silencio.
+#[tokio::test]
+async fn analyze_rejects_a_slot_outside_the_balance() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
+        .await
+        .unwrap()
+        .unwrap();
+    let dw1 = def.quantities.iter().find(|q| q.symbol == "dw1").unwrap();
+    assert_eq!(dw1.slot_count, Some(9));
+    let with_value = |value: f64| {
+        vec![MeasurementInput {
+            quantity_id: dw1.id.clone(),
+            instrument_id: None,
+            scale_id: None,
+            values: vec![value],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        }]
+    };
+    for bad in [0.0, 4.5, 10.0] {
+        let err = analyze(&pool, "hidrostatica", &with_value(bad))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("entero de 1 a 9"), "{bad}: {err}");
+    }
+    // Una ranura valida pasa la validacion (el resto de las magnitudes faltan: solo avisos).
+    assert!(analyze(&pool, "hidrostatica", &with_value(4.0))
+        .await
+        .is_ok());
 }

@@ -192,6 +192,10 @@ pub struct PracticeQuantity {
     /// balanza de Mohr arrancan en masa 0). `None` = input vacío.
     #[sqlx(default)]
     pub default_value: Option<f64>,
+    /// `Some(n)`: el valor es una de las `n` ranuras de un instrumento, un entero de 1 a `n`. El
+    /// formulario lo restringe y el motor rechaza cualquier otro valor. `None` = sin restricción.
+    #[sqlx(default)]
+    pub slot_count: Option<i64>,
 }
 
 /// Mensurando derivado de una práctica (determinación indirecta).
