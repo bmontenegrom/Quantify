@@ -27,7 +27,7 @@ import {
 } from "./forms-chrono.js";
 import {
   renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
-  SERIES_INITIAL_ROWS,
+  refreshSeries, SERIES_INITIAL_ROWS,
 } from "./forms-series.js";
 import { loadDraft, clearDraft, scheduleDraftSave } from "./forms-draft.js";
 
@@ -972,9 +972,8 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
       .forEach((row) => prefillStandaloneRow(row, byQ));
     // Después de reconstruir las filas: los Re#k viven en ellas y se indexan por fila completa.
     applyFinalResultsPrefillFrom(finalResults);
-    // Con todo cargado (incluidos los compartidos, que usan columnas en vivo como v = dx/t̄): el
-    // mismo `change` que al tipear recalcula medias, columnas en vivo y la vista previa del ajuste.
-    seriesTable.dispatchEvent(new Event("change"));
+    // Con todo cargado: los compartidos también entran en columnas en vivo (v = dx/t̄).
+    refreshSeries();
     return;
   }
 

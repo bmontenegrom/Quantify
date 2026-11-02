@@ -134,6 +134,14 @@ export function renderSeriesTable(definition) {
   wireChronoHelpers();
 }
 
+/** Recalcula todo lo que depende de la serie ya cargada: medias, columnas en vivo y la vista
+ *  previa del ajuste. Para cuando los valores se cargan por código (restaurar un borrador). */
+export function refreshSeries() {
+  updateSeriesMeans();
+  updateSeriesLive();
+  updateRegressionPreview();
+}
+
 async function updateRegressionPreview() {
   const container = measurementFields.querySelector(".series-preview");
   if (!container) return;
