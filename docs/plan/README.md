@@ -12,6 +12,7 @@ las próximas iteraciones.
 3. [`03-modelo-datos-y-motor.md`](03-modelo-datos-y-motor.md) — diseño del esquema de base de datos, API y motor de incertidumbres.
 4. [`04-roadmap-fases.md`](04-roadmap-fases.md) — fases con tareas concretas, archivos a tocar y criterios de aceptación.
 5. [`05-refactor-modularizacion.md`](05-refactor-modularizacion.md) — plan de refactor modularizar+dedup (frontend primero, luego motor Rust, luego data/routes).
+6. [`06-practicas-configurables.md`](06-practicas-configurables.md) — roadmap para que el docente cree y edite prácticas desde la UI (partes con su propio análisis, datos compartidos, versionado, plantillas).
 
 ## Decisiones tomadas (29-05-2026)
 
