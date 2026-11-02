@@ -192,6 +192,7 @@ fn quantity(symbol: &str) -> PracticeQuantity {
         has_uncertainty: true,
         optional: false,
         default_value: None,
+        slot_count: None,
     }
 }
 
@@ -2528,9 +2529,10 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     let rho_f = 0.998; // g/cm3
     let torque = 1.0 * 3.0 + 2.0 * 7.0; // g*cm
     let empuje = (torque / 10.0) * g_ac / 1000.0; // N
-    let rho_goma = rho_f * m_goma * 10.0 / torque; // g/cm3
-                                                   // Wilhelmy: pesa de 0.5 g a 4 cm de la cruz, marco de 5 cm colgado a 8 cm.
-    let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 8.0 * 1000.0); // N/m
+    let rho_goma = rho_f * m_goma * 10.0 * 1000.0 / torque; // kg/m3
+
+    // Wilhelmy: pesa de 0.5 g en la ranura 4, marco de 5 cm colgado del brazo fijo de 10 cm.
+    let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 10.0 * 1000.0); // N/m
 
     let mut measurements = Vec::new();
     let mut push = |symbol: &str, value: f64| {
@@ -2569,7 +2571,7 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
         }
     }
     push("l", 5.0);
-    push("d", 8.0);
+    push("d", 10.0);
     for k in 1..=3 {
         push(&format!("mw{k}"), 0.5);
         push(&format!("dw{k}"), 4.0);
@@ -2600,5 +2602,40 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     assert!(close(get("rho_medio"), rho_goma, 1e-12));
     assert!(close(get("gamma_medio"), gamma, 1e-12));
     // La goma es mas densa que el agua en este caso (control de sanidad del orden de magnitud).
-    assert!(rho_goma > rho_f);
+    assert!(rho_goma > rho_f * 1000.0);
+}
+
+/// La ranura de la pesa de Wilhelmy (`dw_k`, `slot_count = 9`) solo acepta un entero de 1 a 9: una
+/// posicion que no existe en la balanza se rechaza en vez de calcular gamma en silencio.
+#[tokio::test]
+async fn analyze_rejects_a_slot_outside_the_balance() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
+        .await
+        .unwrap()
+        .unwrap();
+    let dw1 = def.quantities.iter().find(|q| q.symbol == "dw1").unwrap();
+    assert_eq!(dw1.slot_count, Some(9));
+    let with_value = |value: f64| {
+        vec![MeasurementInput {
+            quantity_id: dw1.id.clone(),
+            instrument_id: None,
+            scale_id: None,
+            values: vec![value],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: None,
+        }]
+    };
+    for bad in [0.0, 4.5, 10.0] {
+        let err = analyze(&pool, "hidrostatica", &with_value(bad))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("entero de 1 a 9"), "{bad}: {err}");
+    }
+    // Una ranura valida pasa la validacion (el resto de las magnitudes faltan: solo avisos).
+    assert!(analyze(&pool, "hidrostatica", &with_value(4.0))
+        .await
+        .is_ok());
 }

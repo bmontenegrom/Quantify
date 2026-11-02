@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { symbolHtml } from "../../static/lib.js";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const ARTIFACTS = join(ROOT, "tests", "e2e", "artifacts");
@@ -28,6 +29,11 @@ export function step(name) {
 
 export function assert(condition, message) {
   if (!condition) throw new Error(`Falló la verificación: ${message}`);
+}
+
+/** Texto plano con el que un símbolo queda en `textContent` (sin las etiquetas de subíndice). */
+export function symbolText(symbol) {
+  return symbolHtml(symbol).replace(/<[^>]+>/g, "");
 }
 
 function buildServer() {

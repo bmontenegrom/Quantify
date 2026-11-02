@@ -164,6 +164,17 @@ pub(super) async fn update_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
+    // Poner ranuras a una magnitud con lecturas fuera de 1..=n dejaría esas entregas sin poder
+    // editarse (el motor las rechaza al recalcular): se avisa acá, al hacer el cambio.
+    if let Some(n) = input.slot_count {
+        let bad = practices::submissions_off_slots(&state.pool, &qid, n).await?;
+        if bad > 0 {
+            return Err(AppError::bad_request(format!(
+                "Hay {bad} entrega(s) con valores de esta magnitud que no son una ranura de 1 a {n}: \
+                 no se pueden poner las ranuras sin dejarlas imposibles de editar."
+            )));
+        }
+    }
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -810,6 +821,19 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
             "La magnitud necesita un simbolo y un nombre. La unidad puede quedar vacia (adimensional).",
         ));
     }
+    // 0 o negativo dejaría el rango 1..=n vacío y rechazaría toda entrega de la práctica.
+    if input.slot_count.is_some_and(|n| n < 1) {
+        return Err(AppError::bad_request(
+            "La cantidad de ranuras tiene que ser un entero de 1 en adelante (vacio = sin restriccion).",
+        ));
+    }
+    // Solo el input de un dato dado respeta las ranuras (sin prefijo, entero 1..=n); en una
+    // magnitud medida el alumno vería un campo libre y el motor le rechazaría la entrega.
+    if input.slot_count.is_some() && !input.is_given {
+        return Err(AppError::bad_request(
+            "Las ranuras solo aplican a un dato dado (marca \"Dato dado\" o deja las ranuras vacias).",
+        ));
+    }
     Ok(())
 }
 
@@ -855,6 +879,7 @@ mod tests {
             has_uncertainty: true,
             optional: false,
             default_value: None,
+            slot_count: None,
         };
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),
@@ -913,6 +938,7 @@ mod tests {
             has_uncertainty: true,
             optional: false,
             default_value: None,
+            slot_count: None,
         };
         let mut c = h.clone();
         c.id = "q-c".into();
@@ -1020,6 +1046,7 @@ mod tests {
             has_uncertainty: true,
             optional: false,
             default_value: None,
+            slot_count: None,
         };
         // Unidad vacía (o solo espacios) → magnitud adimensional, válida.
         assert!(validate_quantity(&q("")).is_ok());
@@ -1034,6 +1061,21 @@ mod tests {
         assert!(validate_quantity(&QuantityInput {
             name: "  ".into(),
             ..q("")
+        })
+        .is_err());
+        // Ranuras: 0 o negativo vaciarian el rango 1..=n; 1 en adelante es valido.
+        for (n, ok) in [(0, false), (-3, false), (1, true), (9, true)] {
+            let input = QuantityInput {
+                slot_count: Some(n),
+                is_given: true,
+                ..q("cm")
+            };
+            assert_eq!(validate_quantity(&input).is_ok(), ok, "slot_count = {n}");
+        }
+        // ...y solo en datos dados.
+        assert!(validate_quantity(&QuantityInput {
+            slot_count: Some(9),
+            ..q("cm")
         })
         .is_err());
     }

@@ -13,7 +13,7 @@
 // Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
 // E2E_SKIP_BUILD, E2E_HEADED.
 
-import { ARTIFACTS, STUDENT, TEACHER, assert, step, withE2E } from "./lib.mjs";
+import { ARTIFACTS, STUDENT, TEACHER, assert, step, symbolText, withE2E } from "./lib.mjs";
 import { join } from "node:path";
 
 const PORT = process.env.E2E_PORT ?? "8137";
@@ -114,7 +114,7 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   const detail = (await tPage.locator("#submission-detail-body").textContent()) ?? "";
   assert(/Mensurandos agregados/.test(detail), "el docente debía ver la tabla de mensurandos agregados");
   for (const sym of ["M_medio", "Re_max", "Re_min", "Re_medio", "M_teorico"]) {
-    assert(detail.includes(sym), `el análisis debía mostrar ${sym}`);
+    assert(detail.includes(symbolText(sym)), `el análisis debía mostrar ${sym}`);
   }
   await tPage.screenshot({ path: join(ARTIFACTS, "fluidos2-analisis.png"), fullPage: true });
 
@@ -138,7 +138,7 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
     { timeout: 10_000 },
   );
   const adminText = (await tPage.locator("#practice-workspace").textContent()) ?? "";
-  assert(adminText.includes("factor_test"), "la magnitud adimensional debía aparecer en la lista");
+  assert(adminText.includes(symbolText("factor_test")), "la magnitud adimensional debía aparecer en la lista");
   assert(adminText.includes("adimensional"), 'la unidad vacía debía mostrarse como "adimensional"');
   assert(
     !adminText.includes("datos de magnitud invalidos"),

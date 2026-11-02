@@ -497,6 +497,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     // Valor inicial que el formulario muestra en la magnitud (Hidrostática: ranuras vacías de la
     // balanza de Mohr con masa 0). NULL = input vacío, comportamiento previo.
     add_column_if_missing(pool, "practice_quantities", "default_value", "REAL").await?;
+    // Cantidad de ranuras si el valor es una ranura de un instrumento (entero 1..=n). NULL = libre.
+    add_column_if_missing(pool, "practice_quantities", "slot_count", "INTEGER").await?;
 
     // Número de mesa del informe compartido (NULL en entregas legacy/CSV).
     add_column_if_missing(pool, "submissions", "table_number", "INTEGER").await?;
@@ -529,6 +531,19 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_report_members_user ON report_members(user_id, status)",
+    )
+    .execute(pool)
+    .await?;
+
+    // Migraciones de datos de una sola vez (resiembras de definiciones, limpiezas): cada una se
+    // registra al correr y no vuelve a correr, aunque más tarde la base vuelva a parecer vieja.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS applied_migrations (
+            name       TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        "#,
     )
     .execute(pool)
     .await?;

@@ -19,29 +19,54 @@ export function escapeHtml(value) {
 const CC_PART_SUFFIX = /_[spc](?:_t)?$/;
 const CC_BASE_SYMBOLS = new Set(["Vg", "RA", "VR1", "VR2", "VR3", "I"]);
 
+// Letras griegas escritas con su nombre en el símbolo guardado (rho_f, gamma1, mu_agua): se
+// muestran con la letra. Solo al principio del símbolo, que es donde son la magnitud, y solo si
+// el nombre termina ahí (seguido de "_", un dígito o nada): `mult` o `taux` no se tocan.
+const GREEK_NAMES = { rho: "ρ", gamma: "γ", mu: "μ", phi: "φ", tau: "τ", omega: "ω" };
+const GREEK_PREFIX = new RegExp(`^(${Object.keys(GREEK_NAMES).join("|")})(?=_|\\d|$)`);
+
+// Subíndices de un símbolo: todo lo que sigue al primer guion bajo, con los guiones siguientes
+// como coma (`f_res_exp` → `f<sub>res,exp</sub>`), o los dígitos pegados a una letra con lo que
+// les siga tras un guion bajo (`R1`, `m1_2` → `m<sub>1,2</sub>`).
+// Las letras son `\p{L}` (con `u`), no ASCII: así `v_máx` no corta el subíndice en la tilde.
+const SYMBOL_SUBSCRIPT =
+  /([A-Za-zα-ω])(?:_([\p{L}\p{N}/]+(?:_[\p{L}\p{N}/]+)*)|(\d+(?:\/\d+)?(?:_[\p{L}\p{N}/]+)*))/gu;
+// En texto libre (nombres) solo `_` + 1-2 caracteres (`T_oc`): `tabla_resumen` es una palabra.
+const NAME_SUBSCRIPT = /([A-Za-zα-ω])(?:_([\p{L}\p{N}/]{1,2})(?![\p{L}\p{N}])|(\d+(?:\/\d+)?))/gu;
+
 /**
- * Escapa un símbolo y muestra como subíndice los dígitos pegados a letras:
- * `R1` → `R<sub>1</sub>`, `C12` → `C<sub>12</sub>`. No altera guiones bajos ni nombres largos.
+ * Aplica `pattern` (uno de los de arriba) sobre texto ya escapado, en una sola pasada para que
+ * `R_load2` no anide `<sub>`. Cada tramo de 1-2 caracteres va en mayúscula (`rho_f` →
+ * `ρ<sub>F</sub>`); las palabras se dejan como están (`E_medio` → `E<sub>medio</sub>`).
+ */
+function subscriptHtml(escaped, pattern) {
+  return escaped.replace(pattern, (_, base, sub, digits) => {
+    const parts = (sub ?? digits).split("_");
+    const text = parts.map((s) => (s.length <= 2 ? s.toUpperCase() : s)).join(",");
+    return `${base}<sub>${text}</sub>`;
+  });
+}
+
+/**
+ * Escapa un símbolo y lo muestra con notación física: dígitos pegados a letras y lo que sigue a
+ * un guion bajo como subíndice (`R1` → `R<sub>1</sub>`, `E_medio` → `E<sub>medio</sub>`), y los
+ * nombres de letras griegas como la letra (`rho_medio` → `ρ<sub>medio</sub>`). Los subíndices de
+ * 1-2 caracteres van en mayúscula (`rho_f` → `ρ<sub>F</sub>`); las palabras se dejan como están.
  */
 export function symbolHtml(value) {
   const specials = {
     tmedio: "t<sub>1/2</sub>",
     T_oc: "T<sub>OC</sub>",
     T_OC: "T<sub>OC</sub>",
-    gamma: "γ",
-    mu: "μ",
     // Vg/RA no llevan guion bajo en el símbolo guardado, pero se muestran con subíndice como
     // el resto de las magnitudes (R1, rho_e, VR1...) para que la tipografía sea coherente.
     Vg: "V<sub>G</sub>",
     RA: "R<sub>A</sub>",
-    // CA (RLC): voltajes pico a pico (sin guion bajo) y teo/exp/res (subíndice de 3 letras,
-    // fuera del regex genérico de 1-2 caracteres); phi se muestra con el símbolo φ, no la palabra.
-    f_res: "f<sub>res</sub>",
-    f_res_exp: "f<sub>res,exp</sub>",
+    // CA (RLC): voltajes pico a pico (sin guion bajo) y subíndices que arrancan antes del guion
+    // bajo ("R,teo"), que el regex genérico no arma; phi se muestra con el símbolo φ.
     VRpp: "V<sub>R,PP</sub>",
     VCpp: "V<sub>C,PP</sub>",
     VLpp: "V<sub>L,PP</sub>",
-    I_teo: "I<sub>teo</sub>",
     VR_teo: "V<sub>R,teo</sub>",
     VR_exp: "V<sub>R,exp</sub>",
     VC_teo: "V<sub>C,teo</sub>",
@@ -59,9 +84,10 @@ export function symbolHtml(value) {
   if (specials[raw]) return specials[raw];
   const base = raw.replace(CC_PART_SUFFIX, "");
   if (base !== raw && CC_BASE_SYMBOLS.has(base)) return symbolHtml(base);
-  return escapeHtml(raw)
-    .replace(/([A-Za-z])_([A-Za-z0-9/]{1,2})\b/g, (_, base, sub) => `${base}<sub>${sub.toUpperCase()}</sub>`)
-    .replace(/([A-Za-z])(\d+(?:\/\d+)?)/g, "$1<sub>$2</sub>");
+  return subscriptHtml(
+    escapeHtml(raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
+    SYMBOL_SUBSCRIPT,
+  );
 }
 
 /**
@@ -69,10 +95,7 @@ export function symbolHtml(value) {
  * subíndices (`R1`, `t1/2`, `T_oc`) y potencias escritas con `^`.
  */
 export function inlineMathHtml(value) {
-  return escapeHtml(value)
-    .replace(/([A-Za-z])_([A-Za-z0-9/]{1,2})\b/g, (_, base, sub) => `${base}<sub>${sub.toUpperCase()}</sub>`)
-    .replace(/([A-Za-z])(\d+(?:\/\d+)?)/g, "$1<sub>$2</sub>")
-    .replace(/\^(-?\d+)/g, "<sup>$1</sup>");
+  return subscriptHtml(escapeHtml(value), NAME_SUBSCRIPT).replace(/\^(-?\d+)/g, "<sup>$1</sup>");
 }
 
 /** Escapa y formatea unidades simples: `m3`, `m/s2`, `kg/m3`, `R^2`. */

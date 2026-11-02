@@ -574,7 +574,8 @@ pub async fn update_quantity(
     let result = sqlx::query(
         "UPDATE practice_quantities \
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
-             replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11 \
+             replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11, \
+             slot_count = ?12 \
          WHERE id = ?1",
     )
     .bind(quantity_id)
@@ -588,12 +589,31 @@ pub async fn update_quantity(
     .bind(input.per_point)
     .bind(input.has_uncertainty)
     .bind(input.optional)
+    .bind(input.slot_count)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
         return Ok(None);
     }
     Ok(Some(fetch_quantity(pool, quantity_id).await?))
+}
+
+/// Cuántas entregas tienen alguna lectura de la magnitud que no es una ranura de 1 a `n` (no
+/// entera o fuera de rango). Para no poner `slot_count` sobre datos que el motor después rechaza.
+pub async fn submissions_off_slots(
+    pool: &SqlitePool,
+    quantity_id: &str,
+    n: i64,
+) -> anyhow::Result<i64> {
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(DISTINCT submission_id) FROM submission_measurements \
+         WHERE quantity_id = ?1 AND (value <> CAST(value AS INTEGER) OR value < 1 OR value > ?2)",
+    )
+    .bind(quantity_id)
+    .bind(n)
+    .fetch_one(pool)
+    .await?;
+    Ok(count)
 }
 
 /// Elimina una magnitud por id. Devuelve `true` si existía.
@@ -801,7 +821,7 @@ async fn quantities_for(
 ) -> anyhow::Result<Vec<PracticeQuantity>> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point, per_point, has_uncertainty, optional, default_value \
+         replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count \
          FROM practice_quantities WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -824,7 +844,7 @@ async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec
 async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQuantity> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point, per_point, has_uncertainty, optional, default_value \
+         replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -854,8 +874,8 @@ pub(super) async fn insert_quantity(
     sqlx::query(
         "INSERT INTO practice_quantities \
          (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-          replicas_per_point, per_point, has_uncertainty, optional, default_value) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -871,6 +891,7 @@ pub(super) async fn insert_quantity(
     .bind(input.has_uncertainty)
     .bind(input.optional)
     .bind(input.default_value)
+    .bind(input.slot_count)
     .execute(&mut *conn)
     .await?;
     Ok(id)

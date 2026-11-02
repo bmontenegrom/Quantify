@@ -103,8 +103,39 @@ test("symbolHtml escapa HTML y convierte dígitos pegados a letras en subíndice
   assert.equal(symbolHtml("C12"), "C<sub>12</sub>");
   assert.equal(symbolHtml("tmedio"), "t<sub>1/2</sub>");
   assert.equal(symbolHtml("T_oc"), "T<sub>OC</sub>");
-  assert.equal(symbolHtml("R_cap"), "R_cap");
+  assert.equal(symbolHtml("R_cap"), "R<sub>cap</sub>");
+  // Subíndices de 1-2 caracteres en mayúscula, palabras tal cual.
+  assert.equal(symbolHtml("E_medio"), "E<sub>medio</sub>");
   assert.equal(symbolHtml("<R1>"), "&lt;R<sub>1</sub>&gt;");
+});
+
+test("symbolHtml muestra los nombres de letras griegas como la letra", () => {
+  assert.equal(symbolHtml("rho_medio"), "ρ<sub>medio</sub>");
+  assert.equal(symbolHtml("rho_f"), "ρ<sub>F</sub>");
+  assert.equal(symbolHtml("gamma1"), "γ<sub>1</sub>");
+  assert.equal(symbolHtml("mu_agua"), "μ<sub>agua</sub>");
+  assert.equal(symbolHtml("tau_exp"), "τ<sub>exp</sub>");
+  // Solo si el nombre griego termina ahí: `mult`/`taux` son símbolos propios, no μ/τ.
+  assert.equal(symbolHtml("mult"), "mult");
+  assert.equal(symbolHtml("taux"), "taux");
+  assert.equal(symbolHtml("rhoA_b"), "rhoA<sub>B</sub>");
+});
+
+test("symbolHtml no anida subíndices y inlineMathHtml usa la misma regla", () => {
+  assert.equal(symbolHtml("R_load2"), "R<sub>load2</sub>");
+  // Varios guiones bajos: todo va al subíndice, separado por coma.
+  assert.equal(symbolHtml("crud_test_qty"), "crud<sub>test,qty</sub>");
+  assert.equal(symbolHtml("f_res_exp"), "f<sub>res,exp</sub>");
+  // Dígitos y después guion bajo (masas de Hidrostática): un solo subíndice.
+  assert.equal(symbolHtml("m1_2"), "m<sub>1,2</sub>");
+  assert.equal(symbolHtml("R1_load"), "R<sub>1,load</sub>");
+  // Letras con tilde dentro del subíndice: no lo cortan.
+  assert.equal(symbolHtml("v_máx"), "v<sub>máx</sub>");
+  assert.equal(inlineMathHtml("T_ñu"), "T<sub>ÑU</sub>");
+  assert.equal(inlineMathHtml("ver tabla_índice"), "ver tabla_índice");
+  // En nombres libres solo `_` + 1-2 caracteres: una palabra con guion bajo queda tal cual.
+  assert.equal(inlineMathHtml("ver tabla_resumen"), "ver tabla_resumen");
+  assert.equal(inlineMathHtml("Tiempo T_oc"), "Tiempo T<sub>OC</sub>");
 });
 
 test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)", () => {
@@ -121,8 +152,9 @@ test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)"
   assert.equal(symbolHtml("VR3_p_t"), "VR<sub>3</sub>");
   assert.equal(symbolHtml("I_s"), "I");
   assert.equal(symbolHtml("I_p"), "I");
-  // Sin whitelist de la base, no se toca: evita falsos positivos en otras prácticas.
-  assert.equal(symbolHtml("h_max"), "h_max");
+  // Sin whitelist de la base, no se toca el sufijo: evita falsos positivos en otras prácticas
+  // (h_max no es "h" de la parte serie, es una magnitud propia de Fluidos II).
+  assert.equal(symbolHtml("h_max"), "h<sub>max</sub>");
 });
 
 test("symbolHtml renderiza los símbolos de CA (RLC): voltajes pp, teo/exp y phi", () => {

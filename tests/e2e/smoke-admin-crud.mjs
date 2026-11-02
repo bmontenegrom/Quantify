@@ -5,7 +5,7 @@
 // Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
 // E2E_SKIP_BUILD, E2E_HEADED.
 
-import { TEACHER, assert, step, withE2E } from "./lib.mjs";
+import { TEACHER, assert, step, symbolText, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8157";
 const PRACTICE_ID = "fluidos-2";
@@ -34,7 +34,8 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
     unit: "m",
   });
   await page.waitForFunction(
-    () => document.querySelector("#practice-workspace")?.textContent?.includes("crud_test_qty"),
+    (text) => document.querySelector("#practice-workspace")?.textContent?.includes(text),
+    symbolText("crud_test_qty"),
     { timeout: 10_000 },
   );
 
@@ -47,7 +48,8 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
     formula: "crud_test_qty",
   });
   await page.waitForFunction(
-    () => document.querySelector("#practice-workspace")?.textContent?.includes("crud_test_res"),
+    (text) => document.querySelector("#practice-workspace")?.textContent?.includes(text),
+    symbolText("crud_test_res"),
     { timeout: 10_000 },
   );
 
@@ -60,14 +62,15 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
     formula: "crud_test_res",
   });
   await page.waitForFunction(
-    () => document.querySelector("#practice-workspace")?.textContent?.includes("crud_test_agg"),
+    (text) => document.querySelector("#practice-workspace")?.textContent?.includes(text),
+    symbolText("crud_test_agg"),
     { timeout: 10_000 },
   );
 
   step("verifica que las tres entidades quedaron listadas");
   const workspaceText = (await page.locator("#practice-workspace").textContent()) ?? "";
   for (const symbol of ["crud_test_qty", "crud_test_res", "crud_test_agg"]) {
-    assert(workspaceText.includes(symbol), `"${symbol}" debía aparecer en el workspace de la práctica`);
+    assert(workspaceText.includes(symbolText(symbol)), `"${symbol}" debía aparecer en el workspace de la práctica`);
   }
 
   console.log("alta de magnitud, mensurando y agregado desde el admin, sin errores JS.");
