@@ -1818,7 +1818,7 @@ async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     // Corre una sola vez: si despues el docente la baja a proposito, el proximo arranque no la
     // vuelve a subir.
     sqlx::query(
-        "UPDATE practice_quantities SET position = ?1          WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+        "UPDATE practice_quantities SET position = ?1 WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
     )
     .bind(max_pos.0 + 1)
     .execute(&pool)

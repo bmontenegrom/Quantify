@@ -1383,8 +1383,8 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
 /// Nombre con el que [`reset_legacy_hidrostatica`] queda registrada en `applied_migrations`.
 const HIDRO_RESET: &str = "2026-11-hidrostatica-ranuras";
 
-/// Nombre con que la reubicación de `f_res_exp` de CA (RLC) queda en `applied_migrations`.
-const CA_RLC_F_RES_ORDER: &str = "2026-11-ca-rlc-f-res-exp-orden";
+/// Nombre con que [`fix_ca_rlc_labels`] queda registrada en `applied_migrations`.
+const CA_RLC_FIX: &str = "2026-11-ca-rlc-correcciones";
 
 /// Bases sembradas antes de que la parte 2 usara las ranuras de la balanza (densidad en g/cm³,
 /// `d`/`dw_k` medidos con regla): `seed_hidrostatica` es idempotente y no re-siembra, así que se
@@ -1448,9 +1448,19 @@ pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Resu
 /// del docente sobre estos mismos campos. También borra `I_exp`: la corriente no se mide en el
 /// circuito, solo se deriva (`I_teo`); no tiene FK entrante (no aparece en mediciones ni en
 /// `submission_student_results`, que referencian por símbolo texto, no por id).
+///
+/// Corre **una sola vez** por base (`applied_migrations`): desde que el docente puede renombrar,
+/// borrar y reordenar magnitudes y mensurandos, repetirla en cada arranque desharía sus cambios
+/// (y fallaba si `f_trabajo` ya no existía). Si falla a mitad de camino no queda marcada y vuelve
+/// a correr: cada paso es idempotente.
 pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
-    // Gateado por result_missing (patrón del resto del archivo): una vez borrada, esta rama
-    // deja de ejecutarse en cada boot.
+    let already: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+        .bind(CA_RLC_FIX)
+        .fetch_one(pool)
+        .await?;
+    if already.0 > 0 {
+        return Ok(());
+    }
     if !result_missing(pool, "ca-rlc", "I_exp").await? {
         sqlx::query(
             "DELETE FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'I_exp'",
@@ -1461,12 +1471,15 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
 
     // f_res_exp: magnitud nueva (se mide con el osciloscopio), no existia en la siembra original.
     // Va arriba de f_trabajo: se corre +1 la posicion de f_trabajo en adelante y se inserta ahi.
-    if quantity_missing(pool, "ca-rlc", "f_res_exp").await? {
-        let f_trabajo_pos: (i64,) = sqlx::query_as(
-            "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
-        )
-        .fetch_one(pool)
-        .await?;
+    let f_trabajo: Option<(i64,)> = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if let (true, Some(f_trabajo_pos)) = (
+        quantity_missing(pool, "ca-rlc", "f_res_exp").await?,
+        f_trabajo,
+    ) {
         sqlx::query(
             "UPDATE practice_quantities SET position = position + 1 \
              WHERE practice_id = 'ca-rlc' AND position >= ?1",
@@ -1490,16 +1503,9 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
     }
 
     // Reordena f_res_exp arriba de f_trabajo si quedo mal ubicada: una version anterior de esta
-    // migracion la insertaba al final en vez de antes de f_trabajo. Corre **una sola vez** por
-    // base (`applied_migrations`): desde que el docente puede reordenar magnitudes, repetirla en
-    // cada arranque desharía un orden elegido a propósito.
-    // Todo en una transacción: si falla a mitad de camino no queda marcada como hecha.
+    // migracion la insertaba al final en vez de antes de f_trabajo.
     let mut tx = pool.begin().await?;
-    let already: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
-        .bind(CA_RLC_F_RES_ORDER)
-        .fetch_one(&mut *tx)
-        .await?;
-    if already.0 == 0 {
+    {
         let stray_position: Option<(i64, i64)> = sqlx::query_as(concat!(
             "SELECT fre.position, ft.position ",
             "FROM practice_quantities fre, practice_quantities ft ",
@@ -1525,11 +1531,6 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
             .execute(&mut *tx)
             .await?;
         }
-        sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
-            .bind(CA_RLC_F_RES_ORDER)
-            .bind(chrono::Utc::now())
-            .execute(&mut *tx)
-            .await?;
     }
     tx.commit().await?;
 
@@ -1610,6 +1611,11 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
     }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(CA_RLC_FIX)
+        .bind(chrono::Utc::now())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

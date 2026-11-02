@@ -97,7 +97,16 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   await sPage.reload();
   await sPage.waitForSelector("#app-shell:not(.hidden)");
   await sPage.click('#practice-nav-children .nav-child:has-text("Fluidos II")');
-  await sPage.waitForSelector(".series-table");
+  // Tras recargar puede verse primero el formulario de otra práctica: se espera el de Fluidos II
+  // (sus ids de magnitud) ya restaurado, con la última altura cargada.
+  await sPage
+    .waitForFunction(
+      ({ id, value }) =>
+        [...document.querySelectorAll(`.series-value[data-quantity-id="${id}"]`)].some((i) => i.value === value),
+      { id: idBySym["h"], value: String(points.at(-1).h) },
+      { timeout: 10_000 },
+    )
+    .catch(() => {});
   for (const sym of ["h", "t"]) {
     const restored = await sPage.$$eval(`.series-value[data-quantity-id="${idBySym[sym]}"]`, (inputs) =>
       inputs.map((input) => input.value),

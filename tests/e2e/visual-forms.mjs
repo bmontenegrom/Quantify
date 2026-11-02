@@ -97,13 +97,21 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await page.reload();
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "fluidos-1");
+  // openPractice vuelve con el primer formulario que aparezca (tras recargar puede ser el de la
+  // práctica anterior): se espera a que el de Fluidos I esté pintado y restaurado.
+  const restored = await page
+    .waitForFunction(
+      () => document.querySelector("#measurement-fields .series-row .series-point-result")?.value === "1234",
+      null,
+      { timeout: 10_000 },
+    )
+    .then(() => true, () => false);
   const restoredRe = await page
-    .locator("#measurement-fields .series-row")
+    .locator("#measurement-fields .series-row .series-point-result")
     .first()
-    .locator(".series-point-result")
-    .first()
-    .inputValue();
-  assert(restoredRe === "1234", `el borrador debía restaurar el Re de la corrida (vi: "${restoredRe}")`);
+    .inputValue({ timeout: 1_000 })
+    .catch(() => "(sin campo Re)");
+  assert(restored, `el borrador debía restaurar el Re de la corrida (vi: "${restoredRe}")`);
 
   await openPractice(page, "fluidos-2");
   await assertInputContrast(page);

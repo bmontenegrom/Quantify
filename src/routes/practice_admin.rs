@@ -386,15 +386,6 @@ pub(super) async fn update_intermediate(
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &id).await?;
     validate_intermediate(&def, &input, Some(&iid))?;
-    let mut after = def.clone();
-    let item = after
-        .intermediates
-        .iter_mut()
-        .find(|x| x.id == iid)
-        .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
-    item.symbol = input.symbol.trim().to_string();
-    item.formula = input.formula.trim().to_string();
-    guard_change(&def, &after, "guardar la magnitud intermedia")?;
     guard_symbol(
         &state.pool,
         &id,
@@ -406,6 +397,15 @@ pub(super) async fn update_intermediate(
         None,
     )
     .await?;
+    let mut after = def.clone();
+    let item = after
+        .intermediates
+        .iter_mut()
+        .find(|x| x.id == iid)
+        .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
+    item.symbol = input.symbol.trim().to_string();
+    item.formula = input.formula.trim().to_string();
+    guard_change(&def, &after, "guardar la magnitud intermedia")?;
     let updated = practices::update_intermediate(&state.pool, &id, &iid, input)
         .await?
         .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
@@ -606,15 +606,6 @@ pub(super) async fn update_aggregate(
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &id).await?;
     validate_aggregate(&def, &input, Some(&aid))?;
-    let mut after = def.clone();
-    let item = after
-        .aggregates
-        .iter_mut()
-        .find(|x| x.id == aid)
-        .ok_or_else(|| AppError::not_found("mensurando agregado no encontrado"))?;
-    item.symbol = input.symbol.trim().to_string();
-    item.formula = input.formula.trim().to_string();
-    guard_change(&def, &after, "guardar el agregado")?;
     guard_symbol(
         &state.pool,
         &id,
@@ -626,6 +617,15 @@ pub(super) async fn update_aggregate(
         Some(&aid),
     )
     .await?;
+    let mut after = def.clone();
+    let item = after
+        .aggregates
+        .iter_mut()
+        .find(|x| x.id == aid)
+        .ok_or_else(|| AppError::not_found("mensurando agregado no encontrado"))?;
+    item.symbol = input.symbol.trim().to_string();
+    item.formula = input.formula.trim().to_string();
+    guard_change(&def, &after, "guardar el agregado")?;
     let updated = practices::update_aggregate(&state.pool, &id, &aid, input)
         .await?
         .ok_or_else(|| AppError::not_found("mensurando agregado no encontrado"))?;
@@ -943,15 +943,6 @@ pub(super) async fn update_result(
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &practice_id).await?;
     validate_result(&def, &input)?;
-    let mut after = def.clone();
-    let item = after
-        .results
-        .iter_mut()
-        .find(|x| x.id == rid)
-        .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
-    item.symbol = input.symbol.trim().to_string();
-    item.formula = input.formula.trim().to_string();
-    guard_change(&def, &after, "guardar el mensurando")?;
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -963,6 +954,15 @@ pub(super) async fn update_result(
         None,
     )
     .await?;
+    let mut after = def.clone();
+    let item = after
+        .results
+        .iter_mut()
+        .find(|x| x.id == rid)
+        .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
+    item.symbol = input.symbol.trim().to_string();
+    item.formula = input.formula.trim().to_string();
+    guard_change(&def, &after, "guardar el mensurando")?;
     let updated = practices::update_result(&state.pool, &rid, input)
         .await?
         .ok_or_else(|| AppError::not_found("mensurando no encontrado"))?;
@@ -1496,6 +1496,16 @@ mod tests {
         let mut also_unit = broken.clone();
         also_unit.quantities[0].unit = "cm".into();
         assert!(guard_change(&broken, &also_unit, "x").is_ok());
+        // ...pero romperla un poco más (renombrar otro símbolo que usa) se detecta igual.
+        broken.results[0].formula = "slope * no_existe * R_cap".into();
+        let mut worse = broken.clone();
+        worse
+            .quantities
+            .iter_mut()
+            .find(|q| q.symbol == "R_cap")
+            .unwrap()
+            .symbol = "Rc".into();
+        assert!(guard_change(&broken, &worse, "x").is_err());
     }
 
     /// Cada tipo de análisis rechaza los símbolos que su motor no liga a un mensurando.
