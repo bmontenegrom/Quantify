@@ -33,6 +33,163 @@ async fn load_definition(
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
+/// Tipos de análisis que el motor sabe correr.
+const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
+
+/// Nombre no vacío (el id y la descripción se derivan o pueden quedar vacíos).
+fn validate_practice_name(name: &str) -> Result<(), AppError> {
+    if name.trim().is_empty() {
+        return Err(AppError::bad_request("La practica necesita un nombre."));
+    }
+    Ok(())
+}
+
+/// `POST /api/practices`: crea una práctica vacía en borrador (docente/admin).
+pub(super) async fn create_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(input): Json<practices::NewPracticeInput>,
+) -> Result<Json<db::Practice>, AppError> {
+    let user = require_teacher(&state, &headers).await?;
+    validate_practice_name(&input.name)?;
+    if !ANALYSIS_KINDS.contains(&input.analysis_kind.trim()) {
+        return Err(AppError::bad_request(
+            "analysis_kind debe ser estadistico, regresion_lineal o curva",
+        ));
+    }
+    Ok(Json(
+        practices::create_practice(&state.pool, &input, &user.id).await?,
+    ))
+}
+
+/// `POST /api/practices/{id}`: cambia nombre y descripción (docente/admin).
+pub(super) async fn update_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<practices::PracticeInfoInput>,
+) -> Result<Json<db::Practice>, AppError> {
+    require_teacher(&state, &headers).await?;
+    validate_practice_name(&input.name)?;
+    practices::update_practice(&state.pool, &id, &input)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))
+}
+
+/// Cuerpo para duplicar: nombre de la copia (por defecto, "Copia de …").
+#[derive(Debug, Deserialize)]
+pub(super) struct DuplicateBody {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// `POST /api/practices/{id}/duplicate`: copia la práctica como borrador (docente/admin).
+pub(super) async fn duplicate_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<DuplicateBody>,
+) -> Result<Json<db::Practice>, AppError> {
+    let user = require_teacher(&state, &headers).await?;
+    let source = practices::practice(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    let name = body
+        .name
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| format!("Copia de {}", source.name));
+    practices::duplicate_practice(&state.pool, &id, &name, &user.id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))
+}
+
+/// Cuerpo para cambiar el estado de una práctica.
+#[derive(Debug, Deserialize)]
+pub(super) struct StatusBody {
+    status: String,
+}
+
+/// Qué le falta a una práctica para poder publicarse: algo que el alumno cargue, algo que se
+/// calcule y todas sus fórmulas compilando. Vacío = se puede publicar.
+fn publish_problems(def: &practices::PracticeDefinition) -> Vec<String> {
+    let mut problems = Vec::new();
+    if def.quantities.is_empty() {
+        problems.push("no tiene magnitudes de entrada".to_string());
+    }
+    match def.analysis_kind.as_deref() {
+        Some("curva") if def.curves.is_empty() => {
+            problems.push("es de tipo curva y no tiene curvas".to_string());
+        }
+        Some("regresion_lineal") if def.x_formula.is_none() || def.y_formula.is_none() => {
+            problems.push("es de regresion y le faltan las formulas de los ejes".to_string());
+        }
+        Some("curva") => {}
+        _ if def.results.is_empty() => {
+            problems.push("no tiene mensurandos".to_string());
+        }
+        _ => {}
+    }
+    problems.extend(
+        formula_problems(def)
+            .into_iter()
+            .map(|(element, message)| format!("{element}: {message}")),
+    );
+    problems
+}
+
+/// `POST /api/practices/{id}/status`: publica, archiva o restaura una práctica (docente/admin).
+/// Publicar un borrador exige que esté completa ([`publish_problems`]).
+pub(super) async fn set_practice_status(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<StatusBody>,
+) -> Result<Json<db::Practice>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let status = body.status.trim();
+    if status == "publicada" {
+        let def = load_definition(&state, &id).await?;
+        let problems = publish_problems(&def);
+        if !problems.is_empty() {
+            return Err(AppError::bad_request(format!(
+                "Todavia no se puede publicar: {}.",
+                problems.join("; ")
+            )));
+        }
+    }
+    match practices::set_practice_status(&state.pool, &id, status).await? {
+        practices::StatusChange::Done => practices::practice(&state.pool, &id)
+            .await?
+            .map(Json)
+            .ok_or_else(|| AppError::not_found("practica no encontrada")),
+        practices::StatusChange::NotFound => Err(AppError::not_found("practica no encontrada")),
+        practices::StatusChange::NotAllowed(current) => Err(AppError::bad_request(format!(
+            "Una practica {current} no puede pasar a {status}."
+        ))),
+    }
+}
+
+/// `DELETE /api/practices/{id}`: borra un borrador sin entregas (docente/admin).
+pub(super) async fn delete_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    match practices::delete_practice(&state.pool, &id).await? {
+        practices::DeletePractice::Deleted => Ok(Json(Health { status: "ok" })),
+        practices::DeletePractice::NotFound => Err(AppError::not_found("practica no encontrada")),
+        practices::DeletePractice::NotDraft => Err(AppError::bad_request(
+            "Solo se puede eliminar un borrador; una practica publicada se archiva.",
+        )),
+        practices::DeletePractice::HasSubmissions => Err(AppError::bad_request(
+            "La practica tiene entregas: no se puede eliminar.",
+        )),
+    }
+}
+
 /// `GET /api/practices/{id}/definition`: magnitudes + mensurandos de una práctica (requiere sesión).
 pub(super) async fn practice_definition(
     State(state): State<SharedState>,
@@ -74,7 +231,7 @@ pub(super) async fn set_practice_analysis_kind(
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
     let kind = body.analysis_kind.trim();
-    if !matches!(kind, "estadistico" | "regresion_lineal" | "curva") {
+    if !ANALYSIS_KINDS.contains(&kind) {
         return Err(AppError::bad_request(
             "analysis_kind debe ser estadistico, regresion_lineal o curva",
         ));
@@ -1504,6 +1661,41 @@ mod tests {
         let mut half_fixed = broken.clone();
         half_fixed.results[0].formula = "slope * no_existe * R_cap".into();
         assert!(guard_change(&broken, &half_fixed, "x").is_ok());
+    }
+
+    /// Publicar exige algo que cargar, algo que calcular y fórmulas que compilen; las 10
+    /// prácticas sembradas lo cumplen.
+    #[tokio::test]
+    async fn publish_requires_a_complete_definition() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let draft = practices::create_practice(
+            &pool,
+            &practices::NewPracticeInput {
+                name: "Vacia".into(),
+                description: String::new(),
+                analysis_kind: "regresion_lineal".into(),
+            },
+            "u1",
+        )
+        .await
+        .unwrap();
+        let def = practices::definition(&pool, &draft.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let problems = publish_problems(&def).join(" | ");
+        assert!(problems.contains("magnitudes"), "{problems}");
+        assert!(problems.contains("ejes"), "{problems}");
+        for practice in db::practices(&pool).await.unwrap() {
+            if practice.id == draft.id {
+                continue;
+            }
+            let def = practices::definition(&pool, &practice.id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(publish_problems(&def).is_empty(), "{}", practice.id);
+        }
     }
 
     /// Cada tipo de análisis rechaza los símbolos que su motor no liga a un mensurando.

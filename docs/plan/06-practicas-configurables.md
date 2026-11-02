@@ -418,7 +418,17 @@ restaurar y el recálculo de columnas en vivo). Los puntos 1, 4 y 5 en la PR de 
 `static/forms.js`, `static/practices-admin.js`, tests nuevos.
 **Aceptación**: golden de las 10 prácticas en verde; los dos bugs con test.
 
-### F1 — Práctica como entidad editable
+### F1 — Práctica como entidad editable ✅ HECHA
+
+**Estado (2026-11-02)**: hecho como se describe abajo, con dos cambios:
+- **El id no se edita**: se genera del nombre (slug sin tildes, `-2` si se repite) y queda fijo,
+  porque es la clave primaria y las tablas de la definición la referencian sin `ON UPDATE`.
+- **Un solo endpoint de estado** `POST /practices/{id}/status` (`publicada` / `archivada`) en vez
+  de `/archive`: publicar exige magnitudes, mensurandos (o curvas) y fórmulas que compilen.
+- Una archivada sale de "Prácticas habilitadas" y del menú del alumno aunque siga habilitada;
+  sus entregas se conservan. El estudiante no ve borradores ni archivadas en el catálogo.
+- Limitación hasta F2/F6: duplicar una práctica no copia lo que está escrito a mano para su id
+  en `static/constants.js` (pestañas de P1/P2-CC/Hidrostática, columnas en vivo).
 
 1. Schema: `practices.status`, `created_by`, `created_at`, `updated_at`. Las 10 existentes quedan
    `publicada`.

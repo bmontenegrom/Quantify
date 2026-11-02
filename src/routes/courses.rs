@@ -290,7 +290,11 @@ pub(super) async fn enable_course_practice(
     Json(input): Json<db::SetCoursePractice>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    db::enable_course_practice(&state.pool, &course_id, input).await?;
+    if !db::enable_course_practice(&state.pool, &course_id, input).await? {
+        return Err(AppError::bad_request(
+            "Solo se puede habilitar una practica publicada (no un borrador ni una archivada).",
+        ));
+    }
     Ok(Json(Health { status: "ok" }))
 }
 

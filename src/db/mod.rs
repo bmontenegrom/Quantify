@@ -156,7 +156,13 @@ pub struct Practice {
     /// Tipo de análisis: `estadistico` o `regresion_lineal`. (El kind `relajacion_exponencial`
     /// se eliminó: τ se obtiene por medida directa y por desfasaje, ambas cubiertas.)
     pub analysis_kind: Option<String>,
+    /// `borrador`, `publicada` o `archivada` (ver `practices::set_practice_status`).
+    pub status: String,
 }
+
+/// Columnas de [`Practice`] en los `SELECT` (sin `#[sqlx(default)]`: si una consulta se olvida
+/// una columna, falla en vez de leerla vacía).
+pub(crate) const PRACTICE_COLS: &str = "id, name, description, analysis_kind, status";
 
 /// Magnitud medida directamente dentro de una práctica (variable de entrada).
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -468,14 +474,13 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
-        // Actualiza nombre y descripción en conflicto para corregir errores de texto entre
-        // versiones, pero preserva los campos editables por el docente (analysis_kind,
-        // x_formula, y_formula) para no pisar cambios hechos desde la UI.
+        // Solo inserta las que faltan: nombre, descripción, tipo y ejes son del docente (se
+        // editan desde la UI) y un arranque no los pisa.
         sqlx::query(
             r#"
             INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description
+            ON CONFLICT(id) DO NOTHING
             "#,
         )
         .bind(id)
@@ -737,12 +742,22 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
 
 /// Lista el catálogo completo de prácticas ordenado por nombre.
 pub async fn practices(pool: &SqlitePool) -> anyhow::Result<Vec<Practice>> {
-    let rows = sqlx::query_as::<_, Practice>(
-        "SELECT id, name, description, analysis_kind FROM practices ORDER BY name",
-    )
+    let rows = sqlx::query_as::<_, Practice>(&format!(
+        "SELECT {PRACTICE_COLS} FROM practices ORDER BY name"
+    ))
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+/// Catálogo que ve un usuario: docente y admin, todas (incluidos borradores y archivadas); un
+/// estudiante, solo las publicadas.
+pub async fn practices_for_role(pool: &SqlitePool, role: &str) -> anyhow::Result<Vec<Practice>> {
+    let mut all = practices(pool).await?;
+    if !matches!(role, "docente" | "admin") {
+        all.retain(|p| p.status == "publicada");
+    }
+    Ok(all)
 }
 
 /// Colapsa a `0.0` los valores con magnitud despreciable (< 1e-9) para evitar mostrar
@@ -911,12 +926,13 @@ mod tests {
         seed_practices(&pool).await.unwrap();
         // El docente edita el tipo de análisis de una práctica.
         sqlx::query(
-            "UPDATE practices SET analysis_kind = 'regresion_lineal' WHERE id = 'p1-estadistica'",
+            "UPDATE practices SET analysis_kind = 'regresion_lineal', name = 'Pendulo (editado)' \
+             WHERE id = 'p1-estadistica'",
         )
         .execute(&pool)
         .await
         .unwrap();
-        // Un reinicio re-corre el seed: NO debe pisar la edición.
+        // Un reinicio re-corre el seed: NO debe pisar la edición (tampoco el nombre).
         seed_practices(&pool).await.unwrap();
         let p = practices(&pool)
             .await
@@ -925,6 +941,8 @@ mod tests {
             .find(|p| p.id == "p1-estadistica")
             .unwrap();
         assert_eq!(p.analysis_kind.as_deref(), Some("regresion_lineal"));
+        assert_eq!(p.name, "Pendulo (editado)");
+        assert_eq!(p.status, "publicada");
     }
 
     #[tokio::test]

@@ -1998,3 +1998,170 @@ async fn submissions_off_slots_counts_non_slot_readings() {
     assert_eq!(submissions_off_slots(&pool, &qid, 9).await.unwrap(), 2);
     assert_eq!(submissions_off_slots(&pool, &qid, 12).await.unwrap(), 1);
 }
+
+#[test]
+fn slugify_folds_accents_and_symbols() {
+    assert_eq!(
+        slugify("Péndulo de prueba (2026)"),
+        "pendulo-de-prueba-2026"
+    );
+    assert_eq!(slugify("  Tensión superficial  "), "tension-superficial");
+    assert_eq!(slugify("¿?¡!"), "practica");
+}
+
+#[tokio::test]
+async fn practice_lifecycle_create_duplicate_status_and_delete() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let new = |name: &str| NewPracticeInput {
+        name: name.into(),
+        description: "desc".into(),
+        analysis_kind: "estadistico".into(),
+    };
+
+    // Alta en borrador con id del nombre; un nombre repetido recibe sufijo.
+    let a = create_practice(&pool, &new("Péndulo de prueba"), "u1")
+        .await
+        .unwrap();
+    assert_eq!(
+        (a.id.as_str(), a.status.as_str()),
+        ("pendulo-de-prueba", "borrador")
+    );
+    let b = create_practice(&pool, &new("Péndulo de prueba"), "u1")
+        .await
+        .unwrap();
+    assert_eq!(b.id, "pendulo-de-prueba-2");
+
+    // Duplicar copia la definición entera con ids nuevos, en borrador, sin tocar el original.
+    let original = definition(&pool, "fluidos-2").await.unwrap().unwrap();
+    let copy = duplicate_practice(&pool, "fluidos-2", "Copia de Fluidos II", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(copy.status, "borrador");
+    let copied = definition(&pool, &copy.id).await.unwrap().unwrap();
+    let symbols = |d: &PracticeDefinition| -> Vec<String> {
+        d.quantities.iter().map(|q| q.symbol.clone()).collect()
+    };
+    assert_eq!(symbols(&copied), symbols(&original));
+    assert_eq!(copied.results.len(), original.results.len());
+    assert_eq!(copied.aggregates.len(), original.aggregates.len());
+    assert_eq!(copied.x_formula, original.x_formula);
+    assert!(copied
+        .quantities
+        .iter()
+        .all(|q| original.quantities.iter().all(|o| o.id != q.id)));
+    assert_eq!(
+        definition(&pool, "fluidos-2")
+            .await
+            .unwrap()
+            .unwrap()
+            .quantities
+            .len(),
+        original.quantities.len()
+    );
+    assert!(duplicate_practice(&pool, "no-existe", "x", "u1")
+        .await
+        .unwrap()
+        .is_none());
+
+    // Transiciones: borrador -> publicada -> archivada -> publicada; nunca de vuelta a borrador.
+    assert_eq!(
+        set_practice_status(&pool, &a.id, "archivada")
+            .await
+            .unwrap(),
+        StatusChange::NotAllowed("borrador".into())
+    );
+    assert_eq!(
+        set_practice_status(&pool, &a.id, "publicada")
+            .await
+            .unwrap(),
+        StatusChange::Done
+    );
+    assert_eq!(
+        set_practice_status(&pool, &a.id, "archivada")
+            .await
+            .unwrap(),
+        StatusChange::Done
+    );
+    assert_eq!(
+        set_practice_status(&pool, &a.id, "publicada")
+            .await
+            .unwrap(),
+        StatusChange::Done
+    );
+    assert_eq!(
+        set_practice_status(&pool, &a.id, "borrador").await.unwrap(),
+        StatusChange::NotAllowed("publicada".into())
+    );
+
+    // Solo se borra un borrador; la copia se va con su definición.
+    assert_eq!(
+        delete_practice(&pool, &a.id).await.unwrap(),
+        DeletePractice::NotDraft
+    );
+    assert_eq!(
+        delete_practice(&pool, &copy.id).await.unwrap(),
+        DeletePractice::Deleted
+    );
+    let (left,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1")
+            .bind(&copy.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(
+        delete_practice(&pool, &copy.id).await.unwrap(),
+        DeletePractice::NotFound
+    );
+}
+
+#[tokio::test]
+async fn only_published_practices_reach_courses_and_students() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    db::seed_academic(&pool).await.unwrap();
+    let course = "fisica-experimental-i-2026";
+    let draft = create_practice(
+        &pool,
+        &NewPracticeInput {
+            name: "Borrador".into(),
+            description: String::new(),
+            analysis_kind: "estadistico".into(),
+        },
+        "u1",
+    )
+    .await
+    .unwrap();
+    let enable = |id: &str| db::SetCoursePractice {
+        practice_id: id.into(),
+    };
+    // Un borrador no se habilita; publicado sí.
+    assert!(
+        !db::enable_course_practice(&pool, course, enable(&draft.id))
+            .await
+            .unwrap()
+    );
+    set_practice_status(&pool, &draft.id, "publicada")
+        .await
+        .unwrap();
+    assert!(db::enable_course_practice(&pool, course, enable(&draft.id))
+        .await
+        .unwrap());
+    let listed = |pool: SqlitePool| async move {
+        db::practices_for_course(&pool, course)
+            .await
+            .unwrap()
+            .into_iter()
+            .any(|p| p.id == "borrador")
+    };
+    assert!(listed(pool.clone()).await);
+    // Archivada: sale del curso aunque siga habilitada, y el estudiante deja de verla.
+    set_practice_status(&pool, &draft.id, "archivada")
+        .await
+        .unwrap();
+    assert!(!listed(pool.clone()).await);
+    let student_catalog = db::practices_for_role(&pool, "estudiante").await.unwrap();
+    assert!(student_catalog.iter().all(|p| p.id != "borrador"));
+    let teacher_catalog = db::practices_for_role(&pool, "docente").await.unwrap();
+    assert!(teacher_catalog.iter().any(|p| p.id == "borrador"));
+}

@@ -248,6 +248,7 @@ export function renderPracticesPage() {
         <button type="button" class="back-link" id="practice-workspace-back">Volver al listado</button>
         <h3>${escapeHtml(practice.name)}</h3>
         <p class="submission-meta">${escapeHtml(practice.description)}</p>
+        ${practiceLifecycleActions(practice)}
       </div>
       <div class="metrics compact-metrics">
         <div class="metric">
@@ -266,6 +267,11 @@ export function renderPracticesPage() {
     </div>
 
     ${state.practiceActionStatus ? `<p class="inline-status practice-status" role="status">${escapeHtml(state.practiceActionStatus)}</p>` : ""}
+
+    <details class="panel workspace-panel add-panel" data-add-panel="practice-info">
+      <summary>Datos de la práctica</summary>
+      ${renderPracticeInfoForm(practice)}
+    </details>
 
     <section class="panel workspace-panel">
       <h3 class="admin-section-title">Configuración del análisis</h3>
@@ -303,6 +309,13 @@ export function renderPracticesPage() {
   practiceCatalog?.closest(".panel")?.classList.add("hidden");
 
   practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", closePracticeWorkspace);
+  practiceWorkspace.querySelector("#practice-info-form")?.addEventListener("submit", savePracticeInfo);
+  practiceWorkspace.querySelectorAll("[data-practice-status]").forEach((btn) => {
+    btn.addEventListener("click", () => setPracticeStatus(btn.dataset.practiceId, btn.dataset.practiceStatus));
+  });
+  practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
+    deletePractice(e.currentTarget.dataset.practiceId);
+  });
   practiceWorkspace.querySelector("#practice-kind-form")?.addEventListener("submit", savePracticeKind);
   practiceWorkspace.querySelector("#practice-regression-form")?.addEventListener("submit", savePracticeRegressionFormulas);
   practiceWorkspace.querySelector("#practice-operators-form")?.addEventListener("submit", savePracticeOperatorCount);
@@ -386,27 +399,59 @@ export function renderPracticesPage() {
   });
 }
 
+const STATUS_LABELS = { borrador: "Borrador", publicada: "Publicada", archivada: "Archivada" };
+
+/** Etiqueta del estado de una práctica (borrador / publicada / archivada). */
+function practiceStatusChip(status) {
+  return `<span class="practice-state practice-state--${escapeHtml(status)}">${escapeHtml(STATUS_LABELS[status] ?? status)}</span>`;
+}
+
+function renderNewPracticeForm() {
+  const kinds = ["estadistico", "regresion_lineal", "curva"];
+  return `
+    <form id="new-practice-form" class="detail-form detail-form-grid">
+      <label>Nombre <input name="name" required placeholder="Péndulo simple" /></label>
+      <label>Tipo de análisis
+        <select name="analysis_kind">
+          ${kinds.map((k) => `<option value="${k}">${escapeHtml(analysisKindLabel(k))}</option>`).join("")}
+        </select>
+      </label>
+      <label>Descripción <input name="description" placeholder="Qué se mide y qué se determina" /></label>
+      <div class="detail-actions"><button type="submit">Crear borrador</button></div>
+    </form>`;
+}
+
 function renderPracticeDirectory() {
   if (!practiceCatalog) return;
 
   const rows = state.practices.map((p) => `
     <tr>
       <td class="directory-primary"><strong>${escapeHtml(p.name)}</strong></td>
+      <td>${practiceStatusChip(p.status)}</td>
       <td><span class="status-chip">${escapeHtml(analysisKindLabel(p.analysis_kind))}</span></td>
       <td>${escapeHtml(p.description)}</td>
       <td class="directory-actions">
         <button type="button" data-practice-open data-practice-id="${escapeHtml(p.id)}">Editar</button>
+        <button type="button" data-practice-duplicate data-practice-id="${escapeHtml(p.id)}">Duplicar</button>
       </td>
     </tr>
   `);
 
-  practiceCatalog.innerHTML = rows.length
-    ? `
+  practiceCatalog.innerHTML = `
+    <details class="add-panel" data-add-panel="practice">
+      <summary>Nueva práctica</summary>
+      <p class="submission-meta">Se crea como borrador: cargale magnitudes y mensurandos, y publicala para poder habilitarla en un curso.</p>
+      ${renderNewPracticeForm()}
+    </details>
+    ${
+      rows.length
+        ? `
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
             <tr>
               <th>Práctica</th>
+              <th>Estado</th>
               <th>Tipo de análisis</th>
               <th>Descripción</th>
               <th>Acciones</th>
@@ -414,13 +459,102 @@ function renderPracticeDirectory() {
           </thead>
           <tbody>${rows.join("")}</tbody>
         </table>
-      </div>
-    `
-    : `<p class="submission-meta">No hay prácticas definidas.</p>`;
+      </div>`
+        : `<p class="submission-meta">No hay prácticas definidas.</p>`
+    }
+  `;
 
+  practiceCatalog.querySelector("#new-practice-form")?.addEventListener("submit", createPractice);
   practiceCatalog.querySelectorAll("[data-practice-open]").forEach((btn) => {
     btn.addEventListener("click", () => openPracticeWorkspace(btn.dataset.practiceId));
   });
+  practiceCatalog.querySelectorAll("[data-practice-duplicate]").forEach((btn) => {
+    btn.addEventListener("click", () => duplicatePractice(btn.dataset.practiceId));
+  });
+}
+
+/** Recarga el catálogo (nombre, estado) después de una acción sobre la práctica. */
+async function refreshPractices() {
+  state.practices = await fetchJson("/api/practices");
+}
+
+async function createPractice(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  try {
+    const created = await postJson("/api/practices", payload);
+    await refreshPractices();
+    await openPracticeWorkspace(created.id);
+    state.practiceActionStatus = "Práctica creada en borrador";
+    renderPracticesPage();
+  } catch (error) {
+    withPracticeStatus(error.message);
+  }
+}
+
+async function duplicatePractice(practiceId) {
+  try {
+    const copy = await postJson(`/api/practices/${practiceId}/duplicate`, {});
+    await refreshPractices();
+    await openPracticeWorkspace(copy.id);
+    state.practiceActionStatus = "Copia creada en borrador";
+    renderPracticesPage();
+  } catch (error) {
+    withPracticeStatus(error.message);
+  }
+}
+
+/** Botones de estado de la ficha según el estado actual. */
+function practiceLifecycleActions(practice) {
+  const id = escapeHtml(practice.id);
+  const buttons = {
+    borrador: `<button type="button" data-practice-status="publicada" data-practice-id="${id}">Publicar</button>
+      <button type="button" class="btn-danger" data-practice-delete data-practice-id="${id}">Eliminar</button>`,
+    publicada: `<button type="button" data-practice-status="archivada" data-practice-id="${id}">Archivar</button>`,
+    archivada: `<button type="button" data-practice-status="publicada" data-practice-id="${id}">Restaurar</button>`,
+  };
+  return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""}</div>`;
+}
+
+function renderPracticeInfoForm(practice) {
+  return `
+    <form id="practice-info-form" class="detail-form detail-form-grid">
+      <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
+      <label>Nombre <input name="name" value="${escapeHtml(practice.name)}" required /></label>
+      <label>Descripción <input name="description" value="${escapeHtml(practice.description)}" /></label>
+      <div class="detail-actions"><button type="submit">Guardar</button></div>
+    </form>`;
+}
+
+const STATUS_DONE = { publicada: "Práctica publicada", archivada: "Práctica archivada" };
+
+async function setPracticeStatus(practiceId, status) {
+  await runPracticeAction(async () => {
+    await postJson(`/api/practices/${practiceId}/status`, { status });
+    await refreshPractices();
+  }, STATUS_DONE[status] ?? "Estado actualizado");
+}
+
+async function savePracticeInfo(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  await runPracticeAction(async () => {
+    await postJson(`/api/practices/${payload.practice_id}`, { name: payload.name, description: payload.description });
+    await refreshPractices();
+  }, "Datos de la práctica guardados");
+}
+
+async function deletePractice(practiceId) {
+  if (!window.confirm("¿Eliminar este borrador con toda su definición? Esta accion no se puede deshacer.")) return;
+  try {
+    await deleteJson(`/api/practices/${practiceId}`);
+    await refreshPractices();
+    closePracticeWorkspace();
+    withPracticeStatus("Borrador eliminado");
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+    renderPracticesPage();
+  }
 }
 
 function renderAnalysisKindForm(practice, def) {

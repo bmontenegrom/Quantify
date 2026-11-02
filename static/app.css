@@ -1274,6 +1274,37 @@ button.back-link {
   white-space: nowrap;
 }
 
+/* Estado de una práctica: contorno del color del estado, sin fondo, para no competir con el
+   tipo de análisis (status-chip) en la misma fila. */
+.practice-state {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+
+.practice-state--borrador {
+  color: var(--warn);
+}
+
+.practice-state--publicada {
+  color: var(--success);
+}
+
+.practice-state--archivada {
+  color: var(--muted);
+}
+
+.practice-lifecycle {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .course-catalog {
   display: grid;
   gap: 12px;

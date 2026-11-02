@@ -79,7 +79,7 @@ pub async fn academic_context(
 
     Ok(AcademicContext {
         courses,
-        practices: crate::db::practices(pool).await?,
+        practices: crate::db::practices_for_role(pool, &user.role).await?,
         students: if matches!(user.role.as_str(), "docente" | "admin") {
             crate::users::students(pool).await?
         } else {
@@ -176,12 +176,22 @@ pub async fn add_course_member(
     Ok(Some(()))
 }
 
-/// Habilita una práctica en un curso (o la re-habilita si estaba deshabilitada). Idempotente.
+/// Habilita una práctica **publicada** en un curso (o la re-habilita si estaba deshabilitada).
+/// Idempotente. Devuelve `false` si la práctica no existe o no está publicada (un borrador o una
+/// archivada no se ofrecen a los estudiantes).
 pub async fn enable_course_practice(
     pool: &SqlitePool,
     course_id: &str,
     input: SetCoursePractice,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
+    let published: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM practices WHERE id = ?1 AND status = 'publicada'")
+            .bind(&input.practice_id)
+            .fetch_optional(pool)
+            .await?;
+    if published.is_none() {
+        return Ok(false);
+    }
     sqlx::query(
         r#"
         INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -194,7 +204,7 @@ pub async fn enable_course_practice(
     .bind(Utc::now())
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(true)
 }
 
 /// Deshabilita una práctica en un curso: los estudiantes ya no pueden entregarla. Las entregas
@@ -236,6 +246,7 @@ pub async fn user_can_submit(
         FROM course_members cm
         JOIN lab_groups g ON g.course_id = cm.course_id
         JOIN course_practices cp ON cp.course_id = g.course_id
+        JOIN practices p ON p.id = cp.practice_id AND p.status = 'publicada'
         JOIN group_members gm ON gm.group_id = g.id
         WHERE cm.user_id = ?1
           AND g.id = ?2
@@ -333,17 +344,18 @@ async fn course_members_for_course(
     .await?)
 }
 
-/// Lista las prácticas habilitadas en un curso, ordenadas por nombre.
+/// Lista las prácticas habilitadas y publicadas de un curso, ordenadas por nombre. Una archivada
+/// deja de listarse (y de admitir entregas) aunque siga habilitada; sus entregas se conservan.
 pub async fn practices_for_course(
     pool: &SqlitePool,
     course_id: &str,
 ) -> anyhow::Result<Vec<Practice>> {
     Ok(sqlx::query_as::<_, Practice>(
         r#"
-        SELECT p.id, p.name, p.description, p.analysis_kind
+        SELECT p.id, p.name, p.description, p.analysis_kind, p.status
         FROM course_practices cp
         JOIN practices p ON p.id = cp.practice_id
-        WHERE cp.course_id = ?1 AND cp.enabled = TRUE
+        WHERE cp.course_id = ?1 AND cp.enabled = TRUE AND p.status = 'publicada'
         ORDER BY p.name
         "#,
     )

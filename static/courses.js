@@ -184,7 +184,8 @@ function renderCourseGroupForm(course) {
 
 function renderCoursePracticesPanel(course) {
   const enabled = new Set(course.practices.map((practice) => practice.id));
-  const available = state.practices.filter((practice) => !enabled.has(practice.id));
+  // Solo las publicadas: un borrador o una archivada no se ofrecen a los estudiantes.
+  const available = state.practices.filter((practice) => practice.status === "publicada" && !enabled.has(practice.id));
   const rows = course.practices.map(
     (practice) => `
       <tr>

@@ -211,10 +211,29 @@ pub struct AggregateInput {
     pub is_final: bool,
 }
 
+/// Alta de una práctica desde la UI (queda en borrador).
+#[derive(Debug, Deserialize)]
+pub struct NewPracticeInput {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub analysis_kind: String,
+}
+
+/// Nombre y descripción de una práctica (lo editable fuera de la definición).
+#[derive(Debug, Deserialize)]
+pub struct PracticeInfoInput {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 mod crud;
+mod lifecycle;
 mod seed;
 #[cfg(test)]
 mod tests;
 
 pub use crud::*;
+pub use lifecycle::*;
 pub use seed::seed_definitions;

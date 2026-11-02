@@ -253,6 +253,18 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     // Motor D (Fase 15): cantidad de operadores de una práctica estadística (cada uno carga su
     // propia serie de las magnitudes repetidas). NULL o ≤1 = sin operadores (comportamiento actual).
     add_column_if_missing(pool, "practices", "operator_count", "INTEGER").await?;
+    // Ciclo de vida de una práctica creada desde la UI: `borrador` (solo la ve el docente),
+    // `publicada` (se habilita en cursos) o `archivada` (sin entregas nuevas). Las sembradas
+    // quedan publicadas por el default. Autor y fecha de alta: NULL en las sembradas.
+    add_column_if_missing(
+        pool,
+        "practices",
+        "status",
+        "TEXT NOT NULL DEFAULT 'publicada'",
+    )
+    .await?;
+    add_column_if_missing(pool, "practices", "created_by", "TEXT").await?;
+    add_column_if_missing(pool, "practices", "created_at", "TEXT").await?;
 
     // Motor B (Fase 15): una práctica `curva` define una o varias curvas sobre el mismo barrido,
     // cada una con su par de fórmulas de eje y su flag de eje x logarítmico (p. ej. dos en Filtros).
