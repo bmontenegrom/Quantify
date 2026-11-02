@@ -1759,6 +1759,14 @@ async fn fix_hidrostatica_migrates_once() {
     .execute(&pool)
     .await
     .unwrap();
+    // ...salvo rho2, que el docente reescribio (sigue en g/cm3, pero no es la formula sembrada)...
+    sqlx::query(
+        "UPDATE practice_results SET formula = 'rho_f*m_goma/m2_1' \
+         WHERE practice_id = 'hidrostatica' AND symbol = 'rho2'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     // ...d y dw_k como `qty_shared` (medidos con regla, con U) y sus nombres viejos...
     sqlx::query(
         "UPDATE practice_quantities SET is_given = 0, repeated = 0, per_point = 0, \
@@ -1784,7 +1792,8 @@ async fn fix_hidrostatica_migrates_once() {
     sqlx::query(
         "INSERT INTO submission_student_results \
          (id, submission_id, symbol, value, u_expanded, created_at) \
-         VALUES ('r1', 's1', 'rho_medio', 1.2, 0.02, '2026-10-01T00:00:00Z')",
+         VALUES ('r1', 's1', 'rho_medio', 1.2, 0.02, '2026-10-01T00:00:00Z'), \
+                ('r2', 's1', 'rho2', 1.3, NULL, '2026-10-01T00:00:00Z')",
     )
     .execute(&pool)
     .await
@@ -1827,6 +1836,25 @@ async fn fix_hidrostatica_migrates_once() {
     .unwrap();
     assert_eq!(rho.0, "kg/m3");
     assert!(rho.1.starts_with("(rho_f*m_goma*b_E/(") && rho.1.ends_with("))*1000"));
+    let custom: (String, String) = sqlx::query_as(
+        "SELECT unit, formula FROM practice_results \
+         WHERE practice_id = 'hidrostatica' AND symbol = 'rho2'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        custom,
+        ("g/cm3".to_string(), "rho_f*m_goma/m2_1".to_string())
+    );
+    let medio: (String,) = sqlx::query_as(
+        "SELECT unit FROM practice_results \
+         WHERE practice_id = 'hidrostatica' AND symbol = 'rho_medio'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(medio.0, "kg/m3");
 
     let student: (f64, f64) =
         sqlx::query_as("SELECT value, u_expanded FROM submission_student_results WHERE id = 'r1'")
@@ -1834,6 +1862,13 @@ async fn fix_hidrostatica_migrates_once() {
             .await
             .unwrap();
     assert_eq!(student, (1200.0, 20.0));
+    // rho2 no se migro (formula del docente), asi que el calculo del alumno queda en g/cm3.
+    let custom_student: (f64,) =
+        sqlx::query_as("SELECT value FROM submission_student_results WHERE id = 'r2'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(custom_student.0, 1.3);
     let (json,): (String,) =
         sqlx::query_as("SELECT analysis_json FROM submissions WHERE id = 's1'")
             .fetch_one(&pool)
