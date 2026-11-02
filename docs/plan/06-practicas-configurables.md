@@ -42,6 +42,12 @@ Escrito el 2026-11-02, con `main` en `16f48c6` (después de #70).
 | **Partes** | Una práctica es **una sola entrega con pestañas**. **Cada parte elige su tipo de análisis** (`estadistico`, `regresion_lineal`, `curva`, y los que vengan). Los datos compartidos se declaran a nivel práctica y todas las partes los ven. P3 (hoy dos prácticas agrupadas en el menú) pasa a ser **una práctica de dos partes**. |
 | **Ediciones con entregas** | **Versionado.** Cada entrega queda atada a la versión de la práctica con la que se hizo; un cambio estructural crea una versión nueva y las entregas viejas se siguen viendo y recalculando como eran. |
 | **Usos futuros a contemplar** | Otros cursos de física; otras materias (química, biología: unidades, constantes y funciones distintas); compartir prácticas (exportar/importar, plantillas); nuevos tipos de análisis (ajustes no lineales, ponderados). |
+| **Datos existentes** | **No hay datos de producción que conservar.** Las migraciones pueden borrar entregas y definiciones cuando simplifica el cambio (en particular, las entregas de P3). Igual se mantienen los golden de cálculo (F0): lo que importa preservar es la física de cada práctica, no las filas. |
+| **Quién crea y publica** | **Docente y admin** (los dos roles que hoy pasan `require_teacher`). |
+| **Alcance de una práctica** | **Catálogo global**: toda práctica la ven todos los cursos, para poder reutilizarla. Cada curso decide cuáles habilita. |
+| **P1 (operadores)** | **Se mantiene una pestaña por operador.** |
+| **Versiones y entregas** | Las entregas **se quedan en su versión**; no hay migración de entregas entre versiones (queda para más adelante si aparece la necesidad). |
+| **Otra materia probable** | **Química.** El modelo tiene que soportar concentraciones y unidades compuestas (mol/L, g/mol, ppm, % m/m…), logaritmos decimales (pH) y curvas de calibración. Ver [F10](#f10--futuro). |
 
 **Restricción transversal.** Las 10 prácticas existentes tienen que seguir calculando
 **exactamente lo mismo** en todas las fases. Para eso la Fase 0 congela su comportamiento con
@@ -228,8 +234,8 @@ El `id` lo genera el servidor a partir del nombre (slug único), editable solo e
   versión vigente sin crear otra; los estructurales (símbolos, fórmulas, roles, partes, tipo de
   análisis) siempre crean versión. La UI lo explica antes de publicar ("esto crea la versión 4; las
   12 entregas existentes siguen con la versión 3").
-- Opción explícita del docente: **migrar entregas** de la versión N a la N+1 cuando el cambio es
-  compatible (p. ej. corrigió una fórmula), con recálculo y aviso. No es automático.
+- Las entregas **se quedan en su versión** (decisión 2026-11-02). Migrar entregas de la versión N
+  a la N+1 queda fuera de alcance; si aparece la necesidad, va a F10.
 
 ### 3.4 Partes
 
@@ -346,8 +352,8 @@ guardar cada elemento y, completo, al publicar. Devuelve una lista de problemas 
   sin cálculo), para preguntas de la hoja de resultados.
 - **Compartir.** Formato de intercambio JSON versionado (`schema_version`), autocontenido (sin ids
   internos), igual que el exportar/importar de instrumentos.
-- **Alcance.** Las prácticas siguen en un catálogo global; se suma autoría y, si hace falta,
-  visibilidad por curso o por docente (ver preguntas abiertas).
+- **Alcance.** Las prácticas siguen en un **catálogo global** (decidido): se registra el autor,
+  pero no hay visibilidad por curso ni por docente.
 
 ---
 
@@ -357,14 +363,14 @@ Cómo queda cada práctica en el modelo nuevo. Ninguna cambia sus números.
 
 | Práctica | Partes | Compartido | Notas de migración |
 |----------|--------|------------|--------------------|
-| `p1-estadistica` | 1 estadística con 3 determinaciones (F9) — o, hasta F9, 3 partes estadísticas Op1/Op2/Op3 | L, `t_med` | Las 3 pestañas por operador dejan de ser JS. Con F9, T se declara "repetida por operador" y g se deriva por operador. |
-| P3 (nueva, une `p3-relajacion` + `p3-relajacion-desfasaje`) | Parte 1 estadística (τ directo) + parte 2 regresión (desfasaje) | `Rint` y lo que usen ambas | Desaparece `PRACTICE_GROUPS`. Las entregas viejas quedan en las dos prácticas legacy archivadas (pregunta abierta 1). |
+| `p1-estadistica` | 1 estadística con 3 determinaciones (F9) mostradas **como pestañas** — hasta F9, 3 partes estadísticas Op1/Op2/Op3 | L, `t_med` | **Se mantiene una pestaña por operador** (decidido). Las pestañas dejan de ser JS. Con F9, T se declara "repetida por operador" y g se deriva por operador. |
+| P3 (nueva, une `p3-relajacion` + `p3-relajacion-desfasaje`) | Parte 1 estadística (τ directo) + parte 2 regresión (desfasaje) | `Rint` y lo que usen ambas | Desaparece `PRACTICE_GROUPS`. Las dos prácticas viejas **se borran con sus entregas** (decidido: no hay datos que conservar). |
 | `p2-cc` | Serie (estadística), Paralelo (estadística), Potencia (curva) | R1, R2, R3 | Los sufijos `_s/_p/_c` se reemplazan por `display_symbol`; los símbolos internos pueden quedar iguales (no hace falta renombrar). |
 | `fluidos-1` | 1 regresión | – | `Q` en vivo por `show_live` en la intermedia (J2). |
 | `viscosidad` | 1 regresión | – | `v` en vivo: nueva intermedia `v = dx/t` con `show_live` (hoy calculada en JS). |
 | `fluidos-2` | 1 regresión | – | Sin cambios. |
 | `filtros` | 1 curva (2 curvas) | – | Sin cambios. |
-| `ca-rlc` | 1 estadística (o 3 partes por canal, a decidir con el docente) | R, C, L, Vg, f | Fórmulas expandidas se simplifican con encadenamiento (F4); teórico vs experimental vía `compare_with`. |
+| `ca-rlc` | 1 estadística (o una pestaña por componente R/C/L, pendiente en la sección 7) | R, C, L, Vg, f | Fórmulas expandidas se simplifican con encadenamiento (F4); teórico vs experimental vía `compare_with`. |
 | `hidrostatica` | Arquímedes (estadística) + Tensión superficial (estadística) | `g_ac` (hoy mal ubicado en la parte 1) | Con F9 las 3 determinaciones dejan de ser símbolos separados (`m{k}_{i}` → magnitudes repetidas por determinación). |
 
 ---
@@ -402,7 +408,8 @@ Antes de tocar el modelo, congelar el comportamiento y sacar los bugs.
 
 1. Schema: `practices.status`, `created_by`, `created_at`, `updated_at`. Las 10 existentes quedan
    `publicada`.
-2. API: `POST /practices` (nombre, descripción, tipo de análisis → crea borrador con id slug),
+2. API (docente y admin, `require_teacher`; catálogo global): `POST /practices` (nombre,
+   descripción, tipo de análisis → crea borrador con id slug),
    `POST /practices/{id}` (nombre, descripción, id mientras sea borrador),
    `POST /practices/{id}/duplicate`, `POST /practices/{id}/archive`, `DELETE /practices/{id}`
    (solo borrador sin entregas).
@@ -446,13 +453,14 @@ antes (capturas de `visual-forms.mjs`); una práctica nueva puede tener pestaña
 3. P2-CC: Serie y Paralelo pasan a partes estadísticas y Potencia a curva (hoy todo es una curva
    con escalares). Golden idénticos.
 4. **P3 unificada**: práctica nueva de dos partes (estadística + regresión) con lo compartido; las
-   dos prácticas legacy pasan a `archivada` con sus entregas (decisión a confirmar). Se borra
+   dos prácticas viejas se borran con sus entregas (migración de una sola vez). Se borra
    `PRACTICE_GROUPS` y su lógica en `forms.js`/`navigation.js`.
 5. Vista del docente (`static/analysis.js`) y comparación alumno-vs-automático agrupadas por parte.
 6. UI admin: el tipo de análisis, ejes y operadores se configuran por parte.
 
-**Aceptación**: golden idénticos (P3 legacy recalcula igual; la P3 nueva da lo mismo que las dos
-viejas sobre los mismos datos); E2E de una práctica nueva de dos partes con distinto análisis.
+**Aceptación**: golden idénticos (los golden de P3 se reescriben para la práctica nueva y deben
+dar lo mismo que las dos viejas sobre los mismos datos); E2E de una práctica nueva de dos partes
+con distinto análisis.
 
 ### F4 — Encadenamiento y resultados compartidos
 
@@ -477,8 +485,8 @@ que la fórmula expandida).
 3. `analyze` y todas las lecturas de una entrega usan la definición de su versión. El borrador
    solo lo ven el editor y `analyze-preview`.
 4. Flujo en la UI: "Cambios sin publicar" → "Publicar versión N+1" con resumen de diferencias y
-   cantidad de entregas afectadas; cambios cosméticos sin versión nueva (3.3).
-5. Migración opcional de entregas de una versión a otra, iniciada por el docente.
+   cantidad de entregas que siguen en la versión anterior; cambios cosméticos sin versión nueva
+   (3.3). Las entregas no se migran entre versiones.
 
 **Aceptación**: editar estructuralmente una práctica con entregas no altera el análisis de las
 entregas existentes (test); una entrega nueva usa la versión nueva; golden idénticos.
@@ -535,26 +543,48 @@ nueva arranca con las 10 desde plantillas; `seed.rs` ya no contiene definiciones
 Generaliza el motor D (operadores) y el patrón de Hidrostática (3 determinaciones independientes,
 derivado por determinación y promedio con propagación):
 
-1. Una parte estadística declara `determinations: { count, label, average: bool }` en `config_json`.
+1. Una parte estadística declara `determinations: { count, label, average: bool, display }` en
+   `config_json`, con `display` = `pestanas` (una pestaña por determinación, como P1 hoy) o
+   `bloques` (todas en la misma pestaña, como Hidrostática).
 2. Cada magnitud se marca "repetida por determinación" o "común"; los resultados se derivan por
    determinación y, si `average`, se agrega el promedio con incertidumbre propagada desde las
    determinaciones (lo que pide la técnica de Hidrostática).
-3. Migrar P1 (3 operadores, sin promedio) e Hidrostática (3 determinaciones con promedio) a este
-   modelo; el formulario genera un bloque por determinación.
+3. Migrar P1 (3 operadores, sin promedio, **en pestañas**) e Hidrostática (3 determinaciones con
+   promedio, en bloques) a este modelo.
 
 **Aceptación**: golden idénticos para P1 e Hidrostática con el modelo nuevo; Hidrostática pasa de
 48 magnitudes a ~16.
 
 ### F10 — Futuro
 
-Sin orden fijo; cada ítem se planifica cuando haya un caso real:
+Sin orden fijo; cada ítem se planifica cuando haya un caso real. **Química es la candidata más
+probable**, así que lo que la habilita va primero:
+
+**Química (prioritario dentro de F10)**
+
+- **Unidades compuestas y de concentración.** Hoy `unit` es texto libre y el formulario solo
+  convierte prefijos SI. Pasar a unidades estructuradas (base + prefijo + exponentes) con un
+  catálogo que incluya `mol`, `L`/`mL`, `mol/L` (M, mM), `g/mol`, `g/L`, `ppm`/`ppb`, `% m/m`,
+  `% m/v`, `% v/v`, `°C`/`K`. Conversión automática al ingresar y al mostrar (p. ej. el alumno
+  carga mL y la fórmula recibe L).
+- **Chequeo dimensional opcional** de fórmulas al guardar (avisa si `c = n/V` no da mol/L), para
+  detectar errores de unidades en el editor.
+- **Funciones y constantes.** `math::log10` y `math::exp` documentadas en el editor (pH =
+  `-math::log10(c_H)`), y un catálogo de constantes con incertidumbre (R, N_A, F, masas molares
+  de uso común) que se pueden agregar a una práctica como dato de cátedra con un clic.
+- **Curvas de calibración.** Ya cubiertas por `regresion_lineal` (p. ej. absorbancia vs
+  concentración, Beer-Lambert); falta la **interpolación inversa** como resultado (concentración
+  de una muestra a partir de su absorbancia, con incertidumbre de la recta), que es un agregado
+  con `slope`/`intercept` y se puede expresar con el modelo actual.
+- **Material volumétrico** (bureta, pipeta, matraz) como instrumentos: ya entra en el catálogo con
+  `apreciacion` o tolerancia de clase; validar con el primer caso real.
+
+**General**
 
 - Interfaz común de motores (`PartEngine`, 3.10) y primer motor nuevo (ajuste exponencial no
   lineal o regresión ponderada).
-- Catálogo de constantes y funciones, documentado en el editor.
-- Unidades estructuradas y chequeo dimensional opcional.
+- Migración opcional de entregas entre versiones (hoy descartada: se quedan en su versión).
 - Tipos de entrada sin cálculo (texto, opción, imagen) para preguntas de la hoja.
-- Permisos y autoría: quién crea, quién publica, visibilidad por curso.
 - Biblioteca compartida de prácticas entre instalaciones.
 
 ---
@@ -580,25 +610,30 @@ F0 → F1 → F2 → F3 → F4
 | Riesgo | Mitigación |
 |--------|------------|
 | Cambiar números de prácticas en uso | Golden (F0) en cada PR; migraciones de una sola vez que solo tocan filas en estado sembrado. |
-| Migraciones de SQLite con tablas reconstruidas (FK) | En transacción, con backup previo (`scripts/backup-db.*`) documentado en la PR; probadas sobre una copia de la base de producción. |
-| Entregas en curso durante una migración | Desplegar fuera de horario de laboratorio; las migraciones corren al arrancar. |
+| Migraciones de SQLite con tablas reconstruidas (FK) | No hay datos de producción que conservar: cuando simplifica, la migración borra y vuelve a sembrar. Igual corren en transacción. |
 | Correlaciones al encadenar resultados (F4) | Propagación compuesta contra entradas, con test de equivalencia contra la fórmula expandida. |
 | El editor se vuelve inmanejable | Asistente por pasos, panel de validación y vista previa como alumno (F7); duplicar práctica como forma principal de crear. |
 | Autorreparaciones de siembras pisando ediciones del docente | Se eliminan en F8; hasta entonces, no editar los símbolos que tocan (listados en R4). |
 
 ---
 
-## 7. Preguntas abiertas para el docente
+## 7. Preguntas para el docente
 
-1. **Entregas viejas de P3**: ¿quedan en las dos prácticas legacy archivadas (solo lectura) o se
-   migran a la P3 nueva (cada entrega vieja ocuparía una sola de las dos partes)?
-2. **Quién crea y quién publica**: ¿cualquier docente, o solo admin publica?
-3. **Alcance**: ¿una práctica nueva es del catálogo global (visible para todos los cursos) o de un
-   curso/docente en particular?
-4. **P1**: ¿se mantienen las pestañas por operador o pasa a un bloque por operador dentro de una
-   sola pestaña (F9)?
-5. **CA (RLC)**: ¿conviene separar los canales R, C y L en tres partes?
-6. **Versionado**: ¿el docente quiere poder "migrar" entregas a una versión nueva, o las entregas
-   siempre se quedan en su versión?
-7. **Otras materias**: ¿hay ya un caso concreto (curso, práctica) para priorizar unidades o un
-   motor nuevo en F10?
+Respondidas el 2026-11-02 (incorporadas en la [sección 1](#1-objetivo-y-decisiones) y en las fases):
+
+1. **Entregas viejas de P3** → no hay datos de producción; se borran.
+2. **Quién crea y publica** → docente y admin.
+3. **Alcance** → catálogo global, para reutilizar prácticas entre cursos.
+4. **P1** → se mantienen las pestañas por operador.
+5. **Versionado** → las entregas se quedan en su versión.
+6. **Otras materias** → todavía no hay un caso concreto; la candidata es química (concentraciones,
+   unidades compuestas, pH).
+
+Pendiente:
+
+- **CA (RLC) en pestañas.** En la práctica, el osciloscopio mide la elipse de Lissajous (`a`, `b`)
+  sobre la resistencia, el condensador y la bobina por separado (`a_R/b_R`, `a_C/b_C`,
+  `a_L/b_L`), y de cada una sale su desfasaje (`phiR`, `phiC`, `phiL`), además de los módulos de
+  tensión de cada componente. Hoy todo eso está en un solo formulario largo. ¿Conviene una
+  pestaña por componente (R, C, L) con los datos del circuito (R, C, L, Vg, f) compartidos, o se
+  deja en una sola pestaña? Por defecto queda en **una sola pestaña** (como hoy).
