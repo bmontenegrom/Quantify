@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # Las PRs cubren development y staging: sus reglas exigen la rama al día con la base, así que
+  # lo que queda mergeado es lo que ya probó la PR. En main el push sí suma: la PR de release de
+  # release-please la abre el token de Actions y no dispara la CI.
   push:
-    branches: [development, staging, main]
+    branches: [main]
   pull_request:
 
 env:
