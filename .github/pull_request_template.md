@@ -30,7 +30,7 @@
 # Checklist
 
 - [ ] El título de la PR sigue [Conventional Commits](https://www.conventionalcommits.org/es/v1.0.0/)
-- [ ] Basada en `main`
+- [ ] Basada en `development` (o es una promoción: `development` → `staging` → `main`)
 - [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test` pasan
 - [ ] `npm test` y `npm run test:e2e` pasan
 - [ ] Agregué o actualicé tests para lo que cambia

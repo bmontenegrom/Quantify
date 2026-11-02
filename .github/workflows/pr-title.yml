@@ -1,0 +1,19 @@
+name: PR Title
+
+# El título de la PR es el commit que queda en el historial (squash a development) y lo que lee
+# release-please: tiene que seguir Conventional Commits.
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  lint:
+    name: Conventional commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
