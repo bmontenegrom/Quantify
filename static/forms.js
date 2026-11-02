@@ -27,7 +27,7 @@ import {
 } from "./forms-chrono.js";
 import {
   renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
-  updateSeriesMeans, updateSeriesLive,
+  SERIES_INITIAL_ROWS,
 } from "./forms-series.js";
 import { loadDraft, clearDraft, scheduleDraftSave } from "./forms-draft.js";
 
@@ -941,7 +941,7 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
     // Solo las columnas por punto (las compartidas se rellenan aparte, abajo).
     const cols = state.practiceForm.definition.quantities.filter((q) => q.per_point && !q.is_given);
     const tbody = seriesTable.querySelector("tbody");
-    tbody.innerHTML = Array.from({ length: Math.max(nPoints, 1) }, () => seriesRowHtml(cols)).join("");
+    tbody.innerHTML = Array.from({ length: Math.max(nPoints, SERIES_INITIAL_ROWS) }, () => seriesRowHtml(cols)).join("");
     wireSeriesRemove();
     [...tbody.querySelectorAll(".series-row")].forEach((row, i) => {
       // Columnas de un valor por punto.
@@ -966,14 +966,15 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
         });
       });
     });
-    updateSeriesMeans();
-    updateSeriesLive();
     // Escalares compartidos (Motor E): se rellenan como filas sueltas fuera de la serie.
     measurementFields
       .querySelectorAll(".shared-quantities .measurement-row")
       .forEach((row) => prefillStandaloneRow(row, byQ));
     // Después de reconstruir las filas: los Re#k viven en ellas y se indexan por fila completa.
     applyFinalResultsPrefillFrom(finalResults);
+    // Con todo cargado (incluidos los compartidos, que usan columnas en vivo como v = dx/t̄): el
+    // mismo `change` que al tipear recalcula medias, columnas en vivo y la vista previa del ajuste.
+    seriesTable.dispatchEvent(new Event("change"));
     return;
   }
 

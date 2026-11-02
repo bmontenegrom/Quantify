@@ -113,6 +113,11 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
     .first()
     .inputValue();
   assert(restoredRho === String(shared.rho), `el borrador debía restaurar rho (vi: ${restoredRho})`);
+  // Con la serie restaurada la vista previa del ajuste se recalcula sola, sin tipear nada.
+  await sPage.waitForFunction(
+    () => (document.querySelector(".series-preview")?.textContent ?? "").trim().length > 0,
+    { timeout: 10_000 },
+  );
   await sPage.selectOption("#table-select", "1");
 
   step("estudiante: entrega el formulario");

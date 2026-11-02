@@ -7,6 +7,9 @@ import { givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaIn
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireRemoveReplica, collectMeasurements } from "./forms.js";
 
+/** Filas con las que arranca la tabla de la serie (también el mínimo al restaurar un borrador). */
+export const SERIES_INITIAL_ROWS = 3;
+
 export function renderSeriesTable(definition) {
   // Motor E: separa las magnitudes que se miden por punto (van en la serie) de los escalares
   // compartidos (datos de cátedra / medida única), que se cargan una sola vez.
@@ -20,8 +23,7 @@ export function renderSeriesTable(definition) {
     .join("") + seriesPointResultCols()
     .map((p) => `<th>${symbolHtml(p.symbol)}${p.unit ? ` <span class="submission-meta">(${unitHtml(p.unit)})</span>` : ""}</th>`)
     .join("");
-  const INITIAL_ROWS = 3;
-  const body = Array.from({ length: INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
+  const body = Array.from({ length: SERIES_INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
   // Secciones temáticas (PRACTICE_SECTIONS): agrupa los escalares por sección, con `data-section`
   // para que las tabs de partes las muestren/oculten. Sin secciones, un solo bloque como siempre.
   const sections = PRACTICE_SECTIONS[practiceSelect.value];
