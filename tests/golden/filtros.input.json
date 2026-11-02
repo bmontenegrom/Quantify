@@ -1,0 +1,103 @@
+{
+  "practice_id": "filtros",
+  "note": "Barrido de 6 frecuencias de un filtro con L = 10 mH, C1 = 100 nF, C2 = 47 nF.",
+  "measurements": [
+    {
+      "symbol": "f",
+      "values": [
+        500.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        7000.0,
+        10000.0
+      ]
+    },
+    {
+      "symbol": "VRpp",
+      "values": [
+        0.8,
+        1.8,
+        3.2,
+        3.8,
+        1.2,
+        2.4
+      ]
+    },
+    {
+      "symbol": "Vgpp",
+      "values": [
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0
+      ]
+    },
+    {
+      "symbol": "a",
+      "values": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ]
+    },
+    {
+      "symbol": "b",
+      "values": [
+        1.86,
+        1.57,
+        0.591,
+        -0.2,
+        -1.68,
+        -0.959
+      ]
+    },
+    {
+      "symbol": "R",
+      "values": [
+        99.8
+      ],
+      "scale": "Tester EXTECH MN35 (resistencia) / 200 ohm"
+    },
+    {
+      "symbol": "C1",
+      "values": [
+        1.01e-07
+      ],
+      "scale": "Tester UA78A (capacidad) / 200 nF"
+    },
+    {
+      "symbol": "C2",
+      "values": [
+        4.68e-08
+      ],
+      "scale": "Tester UA78A (capacidad) / 200 nF"
+    },
+    {
+      "symbol": "fpasaje_exp",
+      "values": [
+        4234.0
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (frecuencia) / frecuencia (1% de la medida)"
+    },
+    {
+      "symbol": "fbloqueo_exp",
+      "values": [
+        7194.0
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (frecuencia) / frecuencia (1% de la medida)"
+    },
+    {
+      "symbol": "L",
+      "values": [
+        0.01
+      ],
+      "given_u": 0.0005
+    }
+  ]
+}

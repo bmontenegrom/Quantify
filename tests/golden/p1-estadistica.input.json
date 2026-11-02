@@ -1,0 +1,50 @@
+{
+  "practice_id": "p1-estadistica",
+  "note": "Pendulo de 1 m: T1 con 10 replicas, T2 con 5, T3 (opcional) vacio.",
+  "measurements": [
+    {
+      "symbol": "L",
+      "values": [
+        1.0
+      ],
+      "given_u": 0.002
+    },
+    {
+      "symbol": "t_med",
+      "values": [
+        95.3
+      ]
+    },
+    {
+      "symbol": "T1",
+      "values": [
+        2.006,
+        2.01,
+        2.003,
+        2.008,
+        2.011,
+        2.005,
+        2.007,
+        2.009,
+        2.004,
+        2.006
+      ],
+      "scale": "Cronometro digital / milesimas"
+    },
+    {
+      "symbol": "T2",
+      "values": [
+        2.012,
+        2.001,
+        2.009,
+        2.004,
+        2.007
+      ],
+      "scale": "Cronometro digital / milesimas"
+    },
+    {
+      "symbol": "T3",
+      "values": []
+    }
+  ]
+}

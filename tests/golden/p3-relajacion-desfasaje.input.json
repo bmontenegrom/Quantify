@@ -1,0 +1,33 @@
+{
+  "practice_id": "p3-relajacion-desfasaje",
+  "note": "Desfasaje RC con tau = 1 ms: b de la elipse para 4 frecuencias, con ruido.",
+  "measurements": [
+    {
+      "symbol": "f",
+      "values": [
+        50.0,
+        100.0,
+        200.0,
+        400.0
+      ]
+    },
+    {
+      "symbol": "a",
+      "values": [
+        4.0,
+        4.0,
+        4.0,
+        4.0
+      ]
+    },
+    {
+      "symbol": "b",
+      "values": [
+        1.21,
+        2.113,
+        3.136,
+        3.714
+      ]
+    }
+  ]
+}

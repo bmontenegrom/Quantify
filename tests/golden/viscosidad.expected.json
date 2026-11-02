@@ -1,0 +1,54 @@
+{
+  "aggregates": [],
+  "derived": [
+    {
+      "formula": "(rho_e - rho_f)*2*g/(9*slope)",
+      "has_uncertainty": true,
+      "name": "Viscosidad de la glicerina",
+      "symbol": "mu",
+      "u": 0.039477219911751626,
+      "u_expanded": 0.07895443982350325,
+      "unit": "Pa.s",
+      "value": 1.3597963995874245
+    }
+  ],
+  "operators": [],
+  "point_results": [
+    {
+      "name": "Numero de Reynolds",
+      "symbol": "Re",
+      "unit": "",
+      "values": [
+        0.018852681737138395,
+        0.06235734139709407,
+        0.1538451448414996
+      ]
+    }
+  ],
+  "quantities": [],
+  "regression": {
+    "intercept": -0.0006082558237970048,
+    "points": [
+      [
+        1e-6,
+        0.010172939979654119
+      ],
+      [
+        2.25e-6,
+        0.02243208685704031
+      ],
+      [
+        4e-6,
+        0.041507554374896234
+      ]
+    ],
+    "r_squared": 0.9991587127617887,
+    "slope": 10474.117059721611,
+    "u_intercept": 0.0008242122554817006,
+    "u_slope": 303.929134893681,
+    "x_label": "R^2",
+    "y_label": "dx/t"
+  },
+  "scatters": [],
+  "warnings": []
+}

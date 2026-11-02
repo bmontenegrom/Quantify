@@ -1,0 +1,315 @@
+{
+  "practice_id": "hidrostatica",
+  "note": "Balanza de Mohr con pesas en las ranuras 3 y 7 (3 determinaciones) y Wilhelmy.",
+  "measurements": [
+    {
+      "symbol": "m_goma",
+      "values": [
+        12.5
+      ],
+      "scale": "Balanza digital / 0.1 g (calibracion 3 %)"
+    },
+    {
+      "symbol": "rho_f",
+      "values": [
+        0.998
+      ],
+      "scale": "Densimetro / 0.001 g/cm3"
+    },
+    {
+      "symbol": "g_ac",
+      "values": [
+        9.8
+      ]
+    },
+    {
+      "symbol": "b_E",
+      "values": [
+        10.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "b1",
+      "values": [
+        1.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "b2",
+      "values": [
+        2.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "b3",
+      "values": [
+        3.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "b4",
+      "values": [
+        4.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "b5",
+      "values": [
+        5.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "b6",
+      "values": [
+        6.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "b7",
+      "values": [
+        7.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "b8",
+      "values": [
+        8.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "b9",
+      "values": [
+        9.0
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "m1_1",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m1_2",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m1_3",
+      "values": [
+        1.0
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "m1_4",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m1_5",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m1_6",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m1_7",
+      "values": [
+        2.0
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "m1_8",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m1_9",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m2_1",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m2_2",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m2_3",
+      "values": [
+        1.02
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "m2_4",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m2_5",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m2_6",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m2_7",
+      "values": [
+        1.98
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "m2_8",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m2_9",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m3_1",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m3_2",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m3_3",
+      "values": [
+        0.99
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "m3_4",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m3_5",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m3_6",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m3_7",
+      "values": [
+        2.01
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "m3_8",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "m3_9",
+      "values": [
+        0.0
+      ]
+    },
+    {
+      "symbol": "l",
+      "values": [
+        5.0
+      ]
+    },
+    {
+      "symbol": "d",
+      "values": [
+        10.0
+      ]
+    },
+    {
+      "symbol": "mw1",
+      "values": [
+        0.5
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "dw1",
+      "values": [
+        4.0
+      ]
+    },
+    {
+      "symbol": "mw2",
+      "values": [
+        0.52
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "dw2",
+      "values": [
+        4.0
+      ]
+    },
+    {
+      "symbol": "mw3",
+      "values": [
+        0.49
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "dw3",
+      "values": [
+        4.0
+      ]
+    }
+  ]
+}
