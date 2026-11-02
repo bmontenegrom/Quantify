@@ -93,7 +93,7 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   const row = page.locator("#measurement-fields .series-row").first();
   for (const input of await row.locator(".series-value, .series-replica").all()) await input.fill("2");
   await row.locator(".series-point-result").first().fill("1234");
-  await waitForDraft(page, "1234");
+  await waitForDraft(page, { result: "Re#0", value: 1234 });
   await page.reload();
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "fluidos-1");

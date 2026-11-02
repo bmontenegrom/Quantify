@@ -85,8 +85,7 @@ pub struct CatalogExport {
 const INSTRUMENT_COLS: &str = "id, course_id, name, kind, quantity, unit";
 
 /// Columnas de una escala usadas en los `SELECT` (sin `created_at`).
-pub(crate) const SCALE_COLS: &str =
-    "id, instrument_id, label, full_scale, step, appreciation, internal_res, \
+const SCALE_COLS: &str = "id, instrument_id, label, full_scale, step, appreciation, internal_res, \
     internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, u_cal_pct, \
     u_cal_fixed, unit, position";
 
@@ -133,14 +132,25 @@ async fn fetch_instrument(pool: &SqlitePool, id: &str) -> anyhow::Result<Instrum
     .await?)
 }
 
-/// Recupera una escala por id.
-async fn fetch_scale(pool: &SqlitePool, id: &str) -> anyhow::Result<InstrumentScale> {
+/// Busca una escala por id (`None` si no existe). Única consulta de escala por id: el cálculo
+/// también la usa, para que una columna nueva (como la calibración) no quede afuera.
+pub(crate) async fn find_scale(
+    pool: &SqlitePool,
+    id: &str,
+) -> anyhow::Result<Option<InstrumentScale>> {
     Ok(sqlx::query_as::<_, InstrumentScale>(&format!(
         "SELECT {SCALE_COLS} FROM instrument_scales WHERE id = ?1"
     ))
     .bind(id)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?)
+}
+
+/// Recupera una escala por id que tiene que existir.
+async fn fetch_scale(pool: &SqlitePool, id: &str) -> anyhow::Result<InstrumentScale> {
+    find_scale(pool, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("escala {id} no encontrada"))
 }
 
 /// Inserta un instrumento con el ejecutor dado y devuelve el id generado. Permite reutilizar

@@ -92,7 +92,8 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
 
   step("estudiante: recarga y el borrador restaura la serie");
   // Restaurar una serie usa helpers de forms-series.js que forms.js no importaba (ReferenceError).
-  await waitForDraft(sPage, String(points.at(-1).t));
+  // Las dos columnas de la serie, con todos sus puntos (t es la última que se tipea).
+  await waitForDraft(sPage, { quantityId: idBySym["t"], count: points.length });
   await sPage.reload();
   await sPage.waitForSelector("#app-shell:not(.hidden)");
   await sPage.click('#practice-nav-children .nav-child:has-text("Fluidos II")');

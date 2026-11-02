@@ -1028,14 +1028,10 @@ mod tests {
         assert_eq!(inst.quantity, "longitud");
         assert_eq!(inst.course_id, COURSE);
 
-        let scale = sqlx::query_as::<_, InstrumentScale>(&format!(
-            "SELECT {} FROM instrument_scales WHERE id = ?1",
-            crate::instruments::SCALE_COLS
-        ))
-        .bind("scale-1")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let scale = crate::instruments::find_scale(&pool, "scale-1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(scale.b_model, "apreciacion");
         assert_eq!(scale.step, 0.05);
         assert_eq!(scale.appreciation, Some(0.05));
