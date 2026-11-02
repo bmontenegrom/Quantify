@@ -1082,15 +1082,9 @@ async fn load_scales(
         if scales.contains_key(scale_id) {
             continue;
         }
-        let scale = sqlx::query_as::<_, InstrumentScale>(
-            "SELECT id, instrument_id, label, full_scale, step, appreciation, internal_res, \
-             internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, unit, position \
-             FROM instrument_scales WHERE id = ?1",
-        )
-        .bind(scale_id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("la escala seleccionada no existe"))?;
+        let scale = crate::instruments::find_scale(pool, scale_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("la escala seleccionada no existe"))?;
         scales.insert(scale_id.to_string(), scale);
     }
     Ok(scales)

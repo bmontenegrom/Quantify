@@ -13,7 +13,7 @@
 // Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
 // E2E_SKIP_BUILD, E2E_HEADED.
 
-import { ARTIFACTS, STUDENT, TEACHER, assert, openAddForm, step, symbolText, withE2E } from "./lib.mjs";
+import { ARTIFACTS, STUDENT, TEACHER, assert, openAddForm, step, symbolText, waitForDraft, withE2E } from "./lib.mjs";
 import { join } from "node:path";
 
 const PORT = process.env.E2E_PORT ?? "8137";
@@ -89,6 +89,34 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
     { timeout: 10_000 },
   );
   await sPage.screenshot({ path: join(ARTIFACTS, "fluidos2-preview.png"), fullPage: true });
+
+  step("estudiante: recarga y el borrador restaura la serie");
+  // Restaurar una serie usa helpers de forms-series.js que forms.js no importaba (ReferenceError).
+  // Las dos columnas de la serie, con todos sus puntos (t es la última que se tipea).
+  await waitForDraft(sPage, { quantityId: idBySym["t"], count: points.length });
+  await sPage.reload();
+  await sPage.waitForSelector("#app-shell:not(.hidden)");
+  await sPage.click('#practice-nav-children .nav-child:has-text("Fluidos II")');
+  await sPage.waitForSelector(".series-table");
+  for (const sym of ["h", "t"]) {
+    const restored = await sPage.$$eval(`.series-value[data-quantity-id="${idBySym[sym]}"]`, (inputs) =>
+      inputs.map((input) => input.value),
+    );
+    const expected = points.map((p) => String(p[sym]));
+    assert(
+      JSON.stringify(restored) === JSON.stringify(expected),
+      `el borrador debía restaurar ${sym} = ${expected} (vi: ${restored})`,
+    );
+  }
+  const restoredRho = await sPage
+    .locator(`.shared-quantities .measurement-row[data-quantity-id="${idBySym["rho"]}"] .measure-value`)
+    .first()
+    .inputValue();
+  assert(restoredRho === String(shared.rho), `el borrador debía restaurar rho (vi: ${restoredRho})`);
+  // Con la serie restaurada el ajuste se recalcula solo, sin tipear nada (no basta cualquier texto:
+  // "Cargá al menos 2 puntos" o el error también llenan el contenedor).
+  await sPage.waitForSelector('.series-preview h4:has-text("Vista previa del ajuste")', { timeout: 10_000 });
+  await sPage.selectOption("#table-select", "1");
 
   step("estudiante: entrega el formulario");
   await sPage.click("#submit-button");

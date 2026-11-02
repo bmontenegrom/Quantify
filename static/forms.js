@@ -25,7 +25,10 @@ import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
   wireChronometerWidget, chronoWidgetInnerHtml,
 } from "./forms-chrono.js";
-import { renderSeriesTable, collectSeriesPointResults } from "./forms-series.js";
+import {
+  renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
+  refreshSeries, SERIES_INITIAL_ROWS,
+} from "./forms-series.js";
 import { loadDraft, clearDraft, scheduleDraftSave } from "./forms-draft.js";
 
 export function quantityNameHtml(q) {
@@ -929,7 +932,6 @@ function applyDraftPrefill() {
  *  instrument_id, scale_id}) ya armado, sin importar si viene de una entrega guardada
  *  (`editPrefillByQuantity`) o de un borrador local (`draftMeasurementsByQuantity`). */
 function applyMeasurementPrefill(byQ, finalResults, comment) {
-  applyFinalResultsPrefillFrom(finalResults);
   if (studentComment) studentComment.value = comment ?? "";
 
   const seriesTable = measurementFields.querySelector(".series-table");
@@ -939,7 +941,7 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
     // Solo las columnas por punto (las compartidas se rellenan aparte, abajo).
     const cols = state.practiceForm.definition.quantities.filter((q) => q.per_point && !q.is_given);
     const tbody = seriesTable.querySelector("tbody");
-    tbody.innerHTML = Array.from({ length: Math.max(nPoints, 1) }, () => seriesRowHtml(cols)).join("");
+    tbody.innerHTML = Array.from({ length: Math.max(nPoints, SERIES_INITIAL_ROWS) }, () => seriesRowHtml(cols)).join("");
     wireSeriesRemove();
     [...tbody.querySelectorAll(".series-row")].forEach((row, i) => {
       // Columnas de un valor por punto.
@@ -964,12 +966,14 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
         });
       });
     });
-    updateSeriesMeans();
-    updateSeriesLive();
     // Escalares compartidos (Motor E): se rellenan como filas sueltas fuera de la serie.
     measurementFields
       .querySelectorAll(".shared-quantities .measurement-row")
       .forEach((row) => prefillStandaloneRow(row, byQ));
+    // Después de reconstruir las filas: los Re#k viven en ellas y se indexan por fila completa.
+    applyFinalResultsPrefillFrom(finalResults);
+    // Con todo cargado: los compartidos también entran en columnas en vivo (v = dx/t̄).
+    refreshSeries();
     return;
   }
 
@@ -990,6 +994,7 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
   for (const row of standalone) {
     prefillStandaloneRow(row, byQ);
   }
+  applyFinalResultsPrefillFrom(finalResults);
 }
 
 /// Rellena una fila suelta (dato dado o medida única/réplicas) desde el prefill de edición.

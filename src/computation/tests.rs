@@ -2577,7 +2577,43 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
         push(&format!("dw{k}"), 4.0);
     }
 
+    // La goma se pesa con la escala de 0.1 g que suma 3 % de calibracion en cuadratura.
+    db::seed_academic(&pool).await.unwrap();
+    crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
+        .await
+        .unwrap();
+    let (instrument_id, scale_id): (String, String) = sqlx::query_as(
+        "SELECT instrument_id, id FROM instrument_scales WHERE label = '0.1 g (calibracion 3 %)'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let goma_id = &def
+        .quantities
+        .iter()
+        .find(|q| q.symbol == "m_goma")
+        .unwrap()
+        .id;
+    let goma = measurements
+        .iter_mut()
+        .find(|m| &m.quantity_id == goma_id)
+        .unwrap();
+    goma.instrument_id = Some(instrument_id);
+    goma.scale_id = Some(scale_id);
+
     let analysis = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    let u_b_goma = analysis
+        .quantities
+        .iter()
+        .find(|q| q.symbol == "m_goma")
+        .unwrap()
+        .result
+        .u_b;
+    let esperado = ((0.1 / (2.0 * 3f64.sqrt())).powi(2) + (0.03 * m_goma).powi(2)).sqrt();
+    assert!(
+        close(u_b_goma, esperado, 1e-12),
+        "u_B de la balanza sin la calibracion: {u_b_goma} != {esperado}"
+    );
     assert!(
         analysis.warnings.is_empty(),
         "no deberia haber advertencias: {:?}",

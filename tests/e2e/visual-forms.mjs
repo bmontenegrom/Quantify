@@ -2,7 +2,7 @@
 // Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs).
 
 import { join } from "node:path";
-import { ARTIFACTS, STUDENT, assert, withE2E } from "./lib.mjs";
+import { ARTIFACTS, STUDENT, assert, waitForDraft, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8141";
 
@@ -87,6 +87,23 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await openPractice(page, "fluidos-1");
   await assertInputContrast(page);
   await page.screenshot({ path: join(ARTIFACTS, "visual-fluidos1-dark.png"), fullPage: true });
+
+  // El Re por corrida (Re#k) vive en la fila de la serie: el borrador lo restaura después de
+  // reconstruir las filas (antes se rellenaba primero y la reconstrucción lo borraba).
+  const row = page.locator("#measurement-fields .series-row").first();
+  for (const input of await row.locator(".series-value, .series-replica").all()) await input.fill("2");
+  await row.locator(".series-point-result").first().fill("1234");
+  await waitForDraft(page, { result: "Re#0", value: 1234 });
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "fluidos-1");
+  const restoredRe = await page
+    .locator("#measurement-fields .series-row")
+    .first()
+    .locator(".series-point-result")
+    .first()
+    .inputValue();
+  assert(restoredRe === "1234", `el borrador debía restaurar el Re de la corrida (vi: "${restoredRe}")`);
 
   await openPractice(page, "fluidos-2");
   await assertInputContrast(page);

@@ -40,6 +40,24 @@ export async function openAddForm(page, formSelector) {
   await page.waitForSelector(formSelector);
 }
 
+/** Espera a que el borrador local (guardado con debounce) tenga lo último que se tipeó, antes de
+ *  recargar: `{ quantityId, count }` = esa magnitud con `count` valores (puntos de una serie), o
+ *  `{ result, value }` = ese resultado final (p. ej. `Re#0`) con ese valor. */
+export async function waitForDraft(page, expected) {
+  await page.waitForFunction(
+    ({ quantityId, count, result, value }) =>
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith("quantify-draft:"))
+        .some((key) => {
+          const draft = JSON.parse(localStorage.getItem(key));
+          if (result) return draft.finalResults?.some((r) => r.symbol === result && r.value === value);
+          return draft.measurements?.some((m) => m.quantity_id === quantityId && m.values?.length === count);
+        }),
+    expected,
+    { timeout: 10_000 },
+  );
+}
+
 /** Texto plano con el que un símbolo queda en `textContent` (sin las etiquetas de subíndice). */
 export function symbolText(symbol) {
   return symbolHtml(symbol).replace(/<[^>]+>/g, "");

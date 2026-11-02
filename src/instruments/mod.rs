@@ -132,14 +132,25 @@ async fn fetch_instrument(pool: &SqlitePool, id: &str) -> anyhow::Result<Instrum
     .await?)
 }
 
-/// Recupera una escala por id.
-async fn fetch_scale(pool: &SqlitePool, id: &str) -> anyhow::Result<InstrumentScale> {
+/// Busca una escala por id (`None` si no existe). Única consulta de escala por id: el cálculo
+/// también la usa, para que una columna nueva (como la calibración) no quede afuera.
+pub(crate) async fn find_scale(
+    pool: &SqlitePool,
+    id: &str,
+) -> anyhow::Result<Option<InstrumentScale>> {
     Ok(sqlx::query_as::<_, InstrumentScale>(&format!(
         "SELECT {SCALE_COLS} FROM instrument_scales WHERE id = ?1"
     ))
     .bind(id)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?)
+}
+
+/// Recupera una escala por id que tiene que existir.
+async fn fetch_scale(pool: &SqlitePool, id: &str) -> anyhow::Result<InstrumentScale> {
+    find_scale(pool, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("escala {id} no encontrada"))
 }
 
 /// Inserta un instrumento con el ejecutor dado y devuelve el id generado. Permite reutilizar

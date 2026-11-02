@@ -264,11 +264,10 @@ pub struct InstrumentScale {
     pub spec_fixed: Option<f64>,
     /// Calibración: porcentaje del valor leído sumado **en cuadratura** sobre el modelo base
     /// (3.0 = 3 %, balanza digital de Hidrostática). Es una `u`, no se divide por k.
-    #[sqlx(default)]
+    /// Sin `#[sqlx(default)]`: un `SELECT` que la omita falla en vez de calcular sin calibración.
     pub u_cal_pct: f64,
     /// Calibración: término fijo en unidad base sumado **en cuadratura** sobre el modelo base
     /// (0.001 g/cm3 del densímetro, 0.5 mm de los brazos de la balanza de Mohr).
-    #[sqlx(default)]
     pub u_cal_fixed: f64,
     pub unit: String,
     pub position: i64,
@@ -1029,15 +1028,10 @@ mod tests {
         assert_eq!(inst.quantity, "longitud");
         assert_eq!(inst.course_id, COURSE);
 
-        let scale = sqlx::query_as::<_, InstrumentScale>(
-            "SELECT id, instrument_id, label, full_scale, step, appreciation, internal_res, \
-             internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, unit, \
-             position FROM instrument_scales WHERE id = ?1",
-        )
-        .bind("scale-1")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let scale = crate::instruments::find_scale(&pool, "scale-1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(scale.b_model, "apreciacion");
         assert_eq!(scale.step, 0.05);
         assert_eq!(scale.appreciation, Some(0.05));
