@@ -1,0 +1,92 @@
+{
+  "practice_id": "fluidos-1",
+  "note": "Capilar de R = 0.5 mm y L = 10 cm, 4 alturas con 2 replicas de V y t.",
+  "measurements": [
+    {
+      "symbol": "h",
+      "values": [
+        0.3,
+        0.25,
+        0.2,
+        0.15
+      ]
+    },
+    {
+      "symbol": "V",
+      "values": [],
+      "point_replicas": [
+        [
+          2e-05,
+          2e-05
+        ],
+        [
+          2e-05,
+          2e-05
+        ],
+        [
+          2e-05,
+          2e-05
+        ],
+        [
+          2e-05,
+          2e-05
+        ]
+      ]
+    },
+    {
+      "symbol": "t",
+      "values": [],
+      "point_replicas": [
+        [
+          27.44,
+          27.99
+        ],
+        [
+          32.6,
+          33.26
+        ],
+        [
+          41.58,
+          42.42
+        ],
+        [
+          54.61,
+          55.71
+        ]
+      ]
+    },
+    {
+      "symbol": "R",
+      "values": [
+        0.0005
+      ],
+      "given_u": 1e-05
+    },
+    {
+      "symbol": "L",
+      "values": [
+        0.1
+      ],
+      "given_u": 0.001
+    },
+    {
+      "symbol": "g",
+      "values": [
+        9.8
+      ],
+      "given_u": 0.01
+    },
+    {
+      "symbol": "rho",
+      "values": [
+        998.0
+      ]
+    },
+    {
+      "symbol": "Temp",
+      "values": [
+        20.0
+      ]
+    }
+  ]
+}

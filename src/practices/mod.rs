@@ -50,9 +50,10 @@ pub struct QuantityInput {
     /// `true` si puede quedar sin lecturas sin bloquear el envío del formulario.
     #[serde(default)]
     pub optional: bool,
-    /// Valor inicial que muestra el formulario. `None` = campo vacío (comportamiento previo).
-    #[serde(default)]
-    pub default_value: Option<f64>,
+    /// Valor inicial que muestra el formulario. Ausente en el JSON = no cambiarlo al editar;
+    /// `null` = campo vacío; número = ese valor.
+    #[serde(default, deserialize_with = "double_option")]
+    pub default_value: Option<Option<f64>>,
     /// Si es `Some(n)`, el valor tiene que ser una de las `n` ranuras de un instrumento: un entero
     /// de 1 a `n` (Hidrostática: la pesa de Wilhelmy en una de las 9 ranuras de la balanza).
     #[serde(default)]
@@ -89,7 +90,7 @@ pub struct ResultInput {
 }
 
 /// Definición completa de una práctica: tipo de análisis, magnitudes y mensurandos.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PracticeDefinition {
     pub practice_id: String,
     pub analysis_kind: Option<String>,
@@ -116,7 +117,7 @@ pub struct PracticeDefinition {
 
 /// Una curva de una práctica `curva`: un par de fórmulas de eje sobre el barrido común, con eje x
 /// logarítmico opcional. `position` ordena las curvas en el gráfico.
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct PracticeCurve {
     pub id: String,
     pub practice_id: String,
@@ -137,7 +138,7 @@ pub struct CurveInput {
 
 /// Magnitud intermedia por punto (Motor C) de una práctica de regresión/curva: su `formula` se
 /// evalúa por réplica de cada punto y se promedia, quedando disponible como símbolo en los ejes.
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct PracticeIntermediate {
     pub id: String,
     pub practice_id: String,
@@ -160,7 +161,7 @@ pub struct IntermediateInput {
 /// Magnitud derivada **por punto, post-ajuste** (Motor E) de una práctica `regresion_lineal`: su
 /// `formula` se evalúa en cada punto con las magnitudes/intermedias del punto + `slope`/`intercept`
 /// + los mensurandos derivados, produciendo una columna por corrida (p. ej. Reynolds).
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct PracticePointResult {
     pub id: String,
     pub practice_id: String,
@@ -184,7 +185,7 @@ pub struct PointResultInput {
 /// evalúa una vez tras el ajuste y puede usar escalares compartidos, `slope`/`intercept`, los
 /// mensurandos, los agregados anteriores, y los extremos de cada magnitud por punto (`X_first`,
 /// `X_first2`, `X_last`, `X_last2`). Un valor, sin incertidumbre.
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct PracticeAggregate {
     pub id: String,
     pub practice_id: String,

@@ -1,0 +1,47 @@
+{
+  "aggregates": [],
+  "derived": [
+    {
+      "formula": "slope",
+      "has_uncertainty": true,
+      "name": "Constante de tiempo RC",
+      "symbol": "tau",
+      "u": 4.973421053429599e-6,
+      "u_expanded": 9.946842106859197e-6,
+      "unit": "s",
+      "value": 0.0009943636333428563
+    }
+  ],
+  "operators": [],
+  "point_results": [],
+  "quantities": [],
+  "regression": {
+    "intercept": 0.004274896560570118,
+    "points": [
+      [
+        314.1592653589793,
+        0.31736892955237733
+      ],
+      [
+        628.3185307179587,
+        0.6221374561377724
+      ],
+      [
+        1256.6370614359173,
+        1.26296629927753
+      ],
+      [
+        2513.2741228718346,
+        2.5004551295347595
+      ]
+    ],
+    "r_squared": 0.9999499702584531,
+    "slope": 0.0009943636333428563,
+    "u_intercept": 0.007202521583268458,
+    "u_slope": 4.9734210535596445e-6,
+    "x_label": "2*pi*f",
+    "y_label": "b / math::sqrt(a*a - b*b)"
+  },
+  "scatters": [],
+  "warnings": []
+}

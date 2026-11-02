@@ -1,0 +1,74 @@
+{
+  "practice_id": "viscosidad",
+  "note": "Esferas de acero en glicerina: 3 radios, 5 tiempos por esfera.",
+  "measurements": [
+    {
+      "symbol": "R",
+      "values": [
+        0.001,
+        0.0015,
+        0.002
+      ]
+    },
+    {
+      "symbol": "t",
+      "values": [],
+      "point_replicas": [
+        [
+          19.46,
+          19.66,
+          19.86,
+          19.56,
+          19.76
+        ],
+        [
+          8.827,
+          8.916,
+          9.005,
+          8.871,
+          8.96
+        ],
+        [
+          4.77,
+          4.818,
+          4.867,
+          4.794,
+          4.843
+        ]
+      ]
+    },
+    {
+      "symbol": "dx",
+      "values": [
+        0.2
+      ],
+      "given_u": 0.001
+    },
+    {
+      "symbol": "rho_e",
+      "values": [
+        7800.0
+      ],
+      "given_u": 10.0
+    },
+    {
+      "symbol": "rho_f",
+      "values": [
+        1260.0
+      ]
+    },
+    {
+      "symbol": "g",
+      "values": [
+        9.8
+      ],
+      "given_u": 0.01
+    },
+    {
+      "symbol": "Temp",
+      "values": [
+        21.0
+      ]
+    }
+  ]
+}

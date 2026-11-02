@@ -1,0 +1,111 @@
+{
+  "practice_id": "ca-rlc",
+  "note": "RLC serie con R = 100 ohm, L = 0.1 H, C = 1 uF, Vg = 5 V a 1 kHz.",
+  "measurements": [
+    {
+      "symbol": "R",
+      "values": [
+        100.2
+      ],
+      "scale": "Tester EXTECH MN35 (resistencia) / 200 ohm"
+    },
+    {
+      "symbol": "C",
+      "values": [
+        1.01e-06
+      ],
+      "scale": "Tester UA78A (capacidad) / 100 uF"
+    },
+    {
+      "symbol": "L",
+      "values": [
+        0.1
+      ],
+      "given_u": 0.005
+    },
+    {
+      "symbol": "Vg",
+      "values": [
+        5.0
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 20 V"
+    },
+    {
+      "symbol": "f_res_exp",
+      "values": [
+        508.3
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (frecuencia) / frecuencia (1% de la medida)"
+    },
+    {
+      "symbol": "f_trabajo",
+      "values": [
+        1000.0
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (frecuencia) / frecuencia (1% de la medida)"
+    },
+    {
+      "symbol": "VRpp",
+      "values": [
+        2.085
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (voltaje) / 1 V/div"
+    },
+    {
+      "symbol": "VCpp",
+      "values": [
+        3.318
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (voltaje) / 2 V/div"
+    },
+    {
+      "symbol": "VLpp",
+      "values": [
+        13.1
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (voltaje) / 2 V/div"
+    },
+    {
+      "symbol": "a_R",
+      "values": [
+        2.0
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (voltaje) / 1 V/div"
+    },
+    {
+      "symbol": "b_R",
+      "values": [
+        -1.956
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (voltaje) / 1 V/div"
+    },
+    {
+      "symbol": "a_C",
+      "values": [
+        2.0
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (voltaje) / 1 V/div"
+    },
+    {
+      "symbol": "b_C",
+      "values": [
+        -0.4169
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (voltaje) / 1 V/div"
+    },
+    {
+      "symbol": "a_L",
+      "values": [
+        2.0
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (voltaje) / 1 V/div"
+    },
+    {
+      "symbol": "b_L",
+      "values": [
+        0.4169
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (voltaje) / 1 V/div"
+    }
+  ]
+}

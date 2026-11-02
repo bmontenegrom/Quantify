@@ -1,0 +1,41 @@
+{
+  "practice_id": "p3-relajacion",
+  "note": "Descarga RC con R = 10 kohm, C = 47 uF.",
+  "measurements": [
+    {
+      "symbol": "R",
+      "values": [
+        9980.0
+      ],
+      "scale": "Tester EXTECH MN35 (resistencia) / 20 kohm"
+    },
+    {
+      "symbol": "Rint",
+      "values": [
+        50.0
+      ],
+      "given_u": 1.0
+    },
+    {
+      "symbol": "C",
+      "values": [
+        4.71e-05
+      ],
+      "scale": "Tester UA78A (capacidad) / 100 uF"
+    },
+    {
+      "symbol": "T_oc",
+      "values": [
+        0.5
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (tiempo) / tiempo (1% de la medida)"
+    },
+    {
+      "symbol": "tmedio",
+      "values": [
+        0.33
+      ],
+      "scale": "Osciloscopio GW Instek GDS-1052-U (tiempo) / tiempo (1% de la medida)"
+    }
+  ]
+}

@@ -1,0 +1,197 @@
+{
+  "aggregates": [],
+  "derived": [
+    {
+      "formula": "1/(2*pi*math::sqrt(L*(C1+C2)))",
+      "has_uncertainty": true,
+      "name": "Frecuencia de pasaje teorica",
+      "symbol": "fpasaje",
+      "u": 60.90117035771163,
+      "u_expanded": 121.80234071542326,
+      "unit": "Hz",
+      "value": 4139.833881616247
+    },
+    {
+      "formula": "1/(2*pi*math::sqrt(L*C2))",
+      "has_uncertainty": true,
+      "name": "Frecuencia de bloqueo teorica",
+      "symbol": "fbloqueo",
+      "u": 120.26270495730273,
+      "u_expanded": 240.52540991460546,
+      "unit": "Hz",
+      "value": 7356.939846940793
+    }
+  ],
+  "operators": [],
+  "point_results": [],
+  "quantities": [
+    {
+      "name": "Resistencia",
+      "result": {
+        "mean": 99.8,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.5992,
+        "u_c": 0.5992,
+        "u_expanded": 1.1984
+      },
+      "symbol": "R",
+      "unit": "ohm",
+      "values": [
+        99.8
+      ]
+    },
+    {
+      "name": "Capacitor C_1",
+      "result": {
+        "mean": 1.01e-7,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 2.07e-9,
+        "u_c": 2.07e-9,
+        "u_expanded": 4.14e-9
+      },
+      "symbol": "C1",
+      "unit": "F",
+      "values": [
+        1.01e-7
+      ]
+    },
+    {
+      "name": "Capacitor C_2",
+      "result": {
+        "mean": 4.68e-8,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 9.860000000000001e-10,
+        "u_c": 9.860000000000001e-10,
+        "u_expanded": 1.9720000000000002e-9
+      },
+      "symbol": "C2",
+      "unit": "F",
+      "values": [
+        4.68e-8
+      ]
+    },
+    {
+      "name": "Frecuencia de pasaje experimental",
+      "result": {
+        "mean": 4234.0,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 21.17,
+        "u_c": 21.17,
+        "u_expanded": 42.34
+      },
+      "symbol": "fpasaje_exp",
+      "unit": "Hz",
+      "values": [
+        4234.0
+      ]
+    },
+    {
+      "name": "Frecuencia de bloqueo experimental",
+      "result": {
+        "mean": 7194.0,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 35.97,
+        "u_c": 35.97,
+        "u_expanded": 71.94
+      },
+      "symbol": "fbloqueo_exp",
+      "unit": "Hz",
+      "values": [
+        7194.0
+      ]
+    },
+    {
+      "name": "Inductor",
+      "result": {
+        "mean": 0.01,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.00025,
+        "u_c": 0.00025,
+        "u_expanded": 0.0005
+      },
+      "symbol": "L",
+      "unit": "H",
+      "values": [
+        0.01
+      ]
+    }
+  ],
+  "regression": null,
+  "scatters": [
+    {
+      "points": [
+        [
+          3141.592653589793,
+          0.2
+        ],
+        [
+          6283.185307179586,
+          0.45
+        ],
+        [
+          12566.370614359172,
+          0.8
+        ],
+        [
+          25132.741228718343,
+          0.95
+        ],
+        [
+          43982.2971502571,
+          0.3
+        ],
+        [
+          62831.853071795864,
+          0.6
+        ]
+      ],
+      "x_label": "omega",
+      "x_log": true,
+      "y_label": "razon"
+    },
+    {
+      "points": [
+        [
+          3141.592653589793,
+          1.1944128444771684
+        ],
+        [
+          6283.185307179586,
+          0.9026961270378197
+        ],
+        [
+          12566.370614359172,
+          0.29997884871407443
+        ],
+        [
+          25132.741228718343,
+          -0.1001674211615598
+        ],
+        [
+          43982.2971502571,
+          -0.9972832223717998
+        ],
+        [
+          62831.853071795864,
+          -0.5000848502750038
+        ]
+      ],
+      "x_label": "omega",
+      "x_log": true,
+      "y_label": "phi"
+    }
+  ],
+  "warnings": []
+}

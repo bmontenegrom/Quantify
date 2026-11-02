@@ -54,7 +54,7 @@ fn no_u(mut q: QuantityInput) -> QuantityInput {
 /// Valor inicial del campo en el formulario (Hidrostática: ranuras vacías de la balanza de Mohr
 /// con masa 0, para que el alumno solo cargue las que usó).
 fn with_default(mut q: QuantityInput, value: f64) -> QuantityInput {
-    q.default_value = Some(value);
+    q.default_value = Some(Some(value));
     q
 }
 
@@ -494,8 +494,8 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
     // con multimetro y se comparan con las teoricas VRi_s_t / VRi_p_t (resultados finales que
     // el alumno calcula a mano con propagacion). Por punto: R (carga variable) e I; intermedia
     // P = I^2*R y curva P vs R. Los finales experimentales de potencia (P_max_e / RP_max_e)
-    // usan los alias de extremos del camino curva (`P_max`, `R_at_P_max`) con U = 0; por eso
-    // sus formulas no son editables desde la UI admin (check_formula no conoce los alias).
+    // usan los alias de extremos del camino curva (`P_max`, `R_at_P_max`) con U = 0; el admin
+    // los acepta al validar la formula (`result_scope` en routes/practice_admin.rs).
     // Migración de forma: mientras se desarrollaba la unificación (#43) algunas bases quedaron
     // sembradas con una forma intermedia de p2-cc (símbolos con sufijo _serie/_paralelo/_potencia,
     // p. ej. `Vg_serie`/`RA_serie`, en vez de los `_s`/`_p`/`_c` actuales). `seed_practice` es
@@ -1383,6 +1383,9 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
 /// Nombre con el que [`reset_legacy_hidrostatica`] queda registrada en `applied_migrations`.
 const HIDRO_RESET: &str = "2026-11-hidrostatica-ranuras";
 
+/// Nombre con que [`fix_ca_rlc_labels`] queda registrada en `applied_migrations`.
+const CA_RLC_FIX: &str = "2026-11-ca-rlc-correcciones";
+
 /// Bases sembradas antes de que la parte 2 usara las ranuras de la balanza (densidad en g/cm³,
 /// `d`/`dw_k` medidos con regla): `seed_hidrostatica` es idempotente y no re-siembra, así que se
 /// borra Hidrostática entera (definición y entregas) para que la siembre de cero con la forma
@@ -1445,9 +1448,19 @@ pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Resu
 /// del docente sobre estos mismos campos. También borra `I_exp`: la corriente no se mide en el
 /// circuito, solo se deriva (`I_teo`); no tiene FK entrante (no aparece en mediciones ni en
 /// `submission_student_results`, que referencian por símbolo texto, no por id).
+///
+/// Corre **una sola vez** por base (`applied_migrations`): desde que el docente puede renombrar,
+/// borrar y reordenar magnitudes y mensurandos, repetirla en cada arranque desharía sus cambios
+/// (y fallaba si `f_trabajo` ya no existía). Si falla a mitad de camino no queda marcada y vuelve
+/// a correr: cada paso es idempotente.
 pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
-    // Gateado por result_missing (patrón del resto del archivo): una vez borrada, esta rama
-    // deja de ejecutarse en cada boot.
+    let already: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+        .bind(CA_RLC_FIX)
+        .fetch_one(pool)
+        .await?;
+    if already.0 > 0 {
+        return Ok(());
+    }
     if !result_missing(pool, "ca-rlc", "I_exp").await? {
         sqlx::query(
             "DELETE FROM practice_results WHERE practice_id = 'ca-rlc' AND symbol = 'I_exp'",
@@ -1458,22 +1471,27 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
 
     // f_res_exp: magnitud nueva (se mide con el osciloscopio), no existia en la siembra original.
     // Va arriba de f_trabajo: se corre +1 la posicion de f_trabajo en adelante y se inserta ahi.
-    if quantity_missing(pool, "ca-rlc", "f_res_exp").await? {
-        let f_trabajo_pos: (i64,) = sqlx::query_as(
-            "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
-        )
-        .fetch_one(pool)
-        .await?;
+    let f_trabajo: Option<(i64,)> = sqlx::query_as(
+        "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if let (true, Some(f_trabajo_pos)) = (
+        quantity_missing(pool, "ca-rlc", "f_res_exp").await?,
+        f_trabajo,
+    ) {
+        // Corrimiento e inserción juntos: si se cortara entre los dos, el próximo arranque
+        // volvería a correr las posiciones.
+        let mut tx = pool.begin().await?;
         sqlx::query(
             "UPDATE practice_quantities SET position = position + 1 \
              WHERE practice_id = 'ca-rlc' AND position >= ?1",
         )
         .bind(f_trabajo_pos.0)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-        let mut conn = pool.acquire().await?;
         insert_quantity(
-            &mut conn,
+            &mut tx,
             "ca-rlc",
             f_trabajo_pos.0,
             &qty_shared(
@@ -1484,41 +1502,40 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
             ),
         )
         .await?;
+        tx.commit().await?;
     }
 
     // Reordena f_res_exp arriba de f_trabajo si quedo mal ubicada: una version anterior de esta
     // migracion la insertaba al final en vez de antes de f_trabajo.
-    // ponytail: a diferencia de las otras ramas de esta funcion, esta no tiene un flag de "ya
-    // migrado" que la desactive sola (comparar posiciones es la unica forma de saber si sigue
-    // mal ordenada) — el SELECT corre en cada boot, pero es un self-join de 2 filas en una
-    // tabla de ~15 filas por practica: costo despreciable. Toda `fix_ca_rlc_labels` es temporal
-    // (ver doc de la funcion) y se borra junto con el resto en una limpieza futura.
-    let stray_position: Option<(i64, i64)> = sqlx::query_as(
-        "SELECT fre.position, ft.position \
-         FROM practice_quantities fre, practice_quantities ft \
-         WHERE fre.practice_id = 'ca-rlc' AND fre.symbol = 'f_res_exp' \
-           AND ft.practice_id = 'ca-rlc' AND ft.symbol = 'f_trabajo' \
-           AND fre.position > ft.position",
-    )
-    .fetch_optional(pool)
-    .await?;
-    if let Some((f_res_exp_pos, f_trabajo_pos)) = stray_position {
-        sqlx::query(
-            "UPDATE practice_quantities SET position = position + 1 \
-             WHERE practice_id = 'ca-rlc' AND position >= ?1 AND position < ?2",
-        )
-        .bind(f_trabajo_pos)
-        .bind(f_res_exp_pos)
-        .execute(pool)
+    let mut tx = pool.begin().await?;
+    {
+        let stray_position: Option<(i64, i64)> = sqlx::query_as(concat!(
+            "SELECT fre.position, ft.position ",
+            "FROM practice_quantities fre, practice_quantities ft ",
+            "WHERE fre.practice_id = 'ca-rlc' AND fre.symbol = 'f_res_exp' ",
+            "AND ft.practice_id = 'ca-rlc' AND ft.symbol = 'f_trabajo' ",
+            "AND fre.position > ft.position",
+        ))
+        .fetch_optional(&mut *tx)
         .await?;
-        sqlx::query(
-            "UPDATE practice_quantities SET position = ?1 \
-             WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
-        )
-        .bind(f_trabajo_pos)
-        .execute(pool)
-        .await?;
+        if let Some((f_res_exp_pos, f_trabajo_pos)) = stray_position {
+            sqlx::query(concat!(
+                "UPDATE practice_quantities SET position = position + 1 ",
+                "WHERE practice_id = 'ca-rlc' AND position >= ?1 AND position < ?2",
+            ))
+            .bind(f_trabajo_pos)
+            .bind(f_res_exp_pos)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE practice_quantities SET position = ?1 WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+            )
+            .bind(f_trabajo_pos)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
+    tx.commit().await?;
 
     // Quita el "(a)"/"(b)" que una version anterior de esta migracion agrego al nombre: quedo
     // redundante en cuanto el símbolo se empezó a mostrar antes del nombre en el formulario.
@@ -1597,6 +1614,11 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
     }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(CA_RLC_FIX)
+        .bind(chrono::Utc::now())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

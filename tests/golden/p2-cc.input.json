@@ -1,0 +1,133 @@
+{
+  "practice_id": "p2-cc",
+  "note": "Serie y paralelo con R1 = 1 k, R2 = 2.2 k, R3 = 3.3 k a 10 V; curva de potencia a 5 V.",
+  "measurements": [
+    {
+      "symbol": "R1",
+      "values": [
+        998.0
+      ],
+      "scale": "Tester EXTECH MN35 (resistencia) / 2 kohm"
+    },
+    {
+      "symbol": "R2",
+      "values": [
+        2190.0
+      ],
+      "scale": "Tester EXTECH MN35 (resistencia) / 20 kohm"
+    },
+    {
+      "symbol": "R3",
+      "values": [
+        3310.0
+      ],
+      "scale": "Tester EXTECH MN35 (resistencia) / 20 kohm"
+    },
+    {
+      "symbol": "Vg_s",
+      "values": [
+        10.0
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 20 V"
+    },
+    {
+      "symbol": "RA_s",
+      "values": [
+        10.0
+      ],
+      "given_u": 1.0
+    },
+    {
+      "symbol": "VR1_s",
+      "values": [
+        1.536
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 2 V"
+    },
+    {
+      "symbol": "VR2_s",
+      "values": [
+        3.379
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 20 V"
+    },
+    {
+      "symbol": "VR3_s",
+      "values": [
+        5.069
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 20 V"
+    },
+    {
+      "symbol": "Vg_p",
+      "values": [
+        10.0
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 20 V"
+    },
+    {
+      "symbol": "RA_p",
+      "values": [
+        10.0
+      ],
+      "given_u": 1.0
+    },
+    {
+      "symbol": "VR1_p",
+      "values": [
+        4.292
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 20 V"
+    },
+    {
+      "symbol": "VR2_p",
+      "values": [
+        5.665
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 20 V"
+    },
+    {
+      "symbol": "VR3_p",
+      "values": [
+        5.665
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 20 V"
+    },
+    {
+      "symbol": "Vg_c",
+      "values": [
+        5.0
+      ],
+      "scale": "Tester EXTECH MN35 (voltaje) / 20 V"
+    },
+    {
+      "symbol": "RA_c",
+      "values": [
+        10.0
+      ],
+      "given_u": 1.0
+    },
+    {
+      "symbol": "R",
+      "values": [
+        200.0,
+        500.0,
+        1000.0,
+        1500.0,
+        2000.0,
+        3000.0
+      ]
+    },
+    {
+      "symbol": "I",
+      "values": [
+        0.003268,
+        0.002732,
+        0.002146,
+        0.001767,
+        0.001502,
+        0.001155
+      ]
+    }
+  ]
+}

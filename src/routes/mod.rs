@@ -190,6 +190,8 @@ pub fn api_router(state: SharedState) -> Router {
             post(update_curve).delete(delete_curve),
         )
         .route("/practices/{id}/curves/{cid}/move", post(move_curve))
+        .route("/practices/{id}/quantities/{qid}/move", post(move_quantity))
+        .route("/practices/{id}/results/{rid}/move", post(move_result))
         .route("/practices/{id}/intermediates", post(create_intermediate))
         .route(
             "/practices/{id}/intermediates/{iid}",

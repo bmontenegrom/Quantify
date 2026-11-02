@@ -1,0 +1,81 @@
+{
+  "practice_id": "fluidos-2",
+  "note": "Descarga por capilar: 5 alturas y sus tiempos.",
+  "measurements": [
+    {
+      "symbol": "h",
+      "values": [
+        0.36,
+        0.3,
+        0.25,
+        0.2,
+        0.16
+      ]
+    },
+    {
+      "symbol": "t",
+      "values": [
+        0.0,
+        9.1,
+        17.6,
+        27.0,
+        35.4
+      ]
+    },
+    {
+      "symbol": "h_max",
+      "values": [
+        0.36
+      ]
+    },
+    {
+      "symbol": "R_cap",
+      "values": [
+        0.001
+      ]
+    },
+    {
+      "symbol": "L_cap",
+      "values": [
+        0.1
+      ]
+    },
+    {
+      "symbol": "R_recip",
+      "values": [
+        0.05
+      ]
+    },
+    {
+      "symbol": "g",
+      "values": [
+        9.8
+      ],
+      "given_u": 0.1
+    },
+    {
+      "symbol": "rho",
+      "values": [
+        1000.0
+      ]
+    },
+    {
+      "symbol": "mu_agua",
+      "values": [
+        0.001
+      ]
+    },
+    {
+      "symbol": "kp",
+      "values": [
+        0.78
+      ]
+    },
+    {
+      "symbol": "Temp",
+      "values": [
+        20.0
+      ]
+    }
+  ]
+}

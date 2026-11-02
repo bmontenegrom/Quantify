@@ -12,15 +12,24 @@ pub(crate) const CONSTANTS: [(&str, f64); 2] =
 pub(crate) fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
     let tree = build_operator_tree(formula)
         .map_err(|err| anyhow::anyhow!("la formula \"{formula}\" no es valida: {err}"))?;
+    // Todos los desconocidos, no solo el primero: el docente ve de una vez todo lo que falta.
+    let mut unknown: Vec<&str> = Vec::new();
     for var in tree.iter_variable_identifiers() {
         let is_constant = CONSTANTS.iter().any(|(name, _)| *name == var);
-        if !is_constant && !allowed.iter().any(|s| s == var) {
-            anyhow::bail!(
-                "la formula \"{formula}\" usa el simbolo \"{var}\", que no es una magnitud de la practica"
-            );
+        if !is_constant && !allowed.iter().any(|s| s == var) && !unknown.contains(&var) {
+            unknown.push(var);
         }
     }
-    Ok(tree)
+    match unknown.as_slice() {
+        [] => Ok(tree),
+        [var] => anyhow::bail!(
+            "la formula \"{formula}\" usa el simbolo \"{var}\", que no es una magnitud de la practica"
+        ),
+        vars => anyhow::bail!(
+            "la formula \"{formula}\" usa los simbolos \"{}\", que no son magnitudes de la practica",
+            vars.join("\", \"")
+        ),
+    }
 }
 
 /// Valida que `formula` sea sintácticamente correcta y solo use símbolos de `allowed` (o las

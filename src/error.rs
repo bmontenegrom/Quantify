@@ -19,6 +19,11 @@ struct ErrorBody<'a> {
 }
 
 impl AppError {
+    /// Mensaje que ve el usuario (para anteponerle contexto al reutilizar un error).
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     /// Crea un error 400 Bad Request con el mensaje dado.
     ///
     /// # Ejemplos

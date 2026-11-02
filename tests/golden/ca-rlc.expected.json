@@ -1,0 +1,437 @@
+{
+  "aggregates": [],
+  "derived": [
+    {
+      "formula": "((2*pi*f_trabajo)*L)",
+      "has_uncertainty": true,
+      "name": "Reactancia inductiva",
+      "symbol": "XL",
+      "u": 16.019042245018568,
+      "u_expanded": 32.038084490037136,
+      "unit": "ohm",
+      "value": 628.3185307179587
+    },
+    {
+      "formula": "(1/((2*pi*f_trabajo)*C))",
+      "has_uncertainty": true,
+      "name": "Reactancia capacitiva",
+      "symbol": "XC",
+      "u": 11.766834885378099,
+      "u_expanded": 23.533669770756198,
+      "unit": "ohm",
+      "value": 157.579151576134
+    },
+    {
+      "formula": "math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C)))))",
+      "has_uncertainty": true,
+      "name": "Impedancia",
+      "symbol": "Z",
+      "u": 19.562612449994393,
+      "u_expanded": 39.12522489998879,
+      "unit": "ohm",
+      "value": 481.2853655315426
+    },
+    {
+      "formula": "1/(2*pi*math::sqrt(L*C))",
+      "has_uncertainty": true,
+      "name": "Frecuencia de resonancia teorica",
+      "symbol": "f_res",
+      "u": 19.678077123294468,
+      "u_expanded": 39.356154246588936,
+      "unit": "Hz",
+      "value": 500.7943779793135
+    },
+    {
+      "formula": "(Vg/(math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C)))))))",
+      "has_uncertainty": true,
+      "name": "Corriente teorica",
+      "symbol": "I_teo",
+      "u": 0.0004248512415801231,
+      "u_expanded": 0.0008497024831602462,
+      "unit": "A",
+      "value": 0.010388846946297412
+    },
+    {
+      "formula": "((Vg/(math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))))))*R",
+      "has_uncertainty": true,
+      "name": "Voltaje teorico en la resistencia",
+      "symbol": "VR_teo",
+      "u": 0.04298596939563623,
+      "u_expanded": 0.08597193879127246,
+      "unit": "V",
+      "value": 1.0409624640190007
+    },
+    {
+      "formula": "VRpp/2",
+      "has_uncertainty": true,
+      "name": "Voltaje experimental en la resistencia",
+      "symbol": "VR_exp",
+      "u": 0.040887500004060516,
+      "u_expanded": 0.08177500000812103,
+      "unit": "V",
+      "value": 1.0425
+    },
+    {
+      "formula": "((Vg/(math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))))))*((1/((2*pi*f_trabajo)*C)))",
+      "has_uncertainty": true,
+      "name": "Voltaje teorico en el capacitor",
+      "symbol": "VC_teo",
+      "u": 0.17078545013422114,
+      "u_expanded": 0.3415709002684423,
+      "unit": "V",
+      "value": 1.6370656876518568
+    },
+    {
+      "formula": "VCpp/2",
+      "has_uncertainty": true,
+      "name": "Voltaje experimental en el capacitor",
+      "symbol": "VC_exp",
+      "u": 0.07513500000193431,
+      "u_expanded": 0.15027000000386861,
+      "unit": "V",
+      "value": 1.659
+    },
+    {
+      "formula": "((Vg/(math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))))))*(((2*pi*f_trabajo)*L))",
+      "has_uncertainty": true,
+      "name": "Voltaje teorico en el inductor",
+      "symbol": "VL_teo",
+      "u": 0.16596055675337631,
+      "u_expanded": 0.33192111350675263,
+      "unit": "V",
+      "value": 6.527505049151341
+    },
+    {
+      "formula": "VLpp/2",
+      "has_uncertainty": true,
+      "name": "Voltaje experimental en el inductor",
+      "symbol": "VL_exp",
+      "u": 0.14850000000364097,
+      "u_expanded": 0.29700000000728194,
+      "unit": "V",
+      "value": 6.55
+    },
+    {
+      "formula": "(-(math::atan(((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))/R)))*180/pi",
+      "has_uncertainty": true,
+      "name": "Desfasaje teorico en R",
+      "symbol": "phiR_teo",
+      "u": 0.5006190525885602,
+      "u_expanded": 1.0012381051771204,
+      "unit": "°",
+      "value": -77.98355129656905
+    },
+    {
+      "formula": "math::asin(b_R/a_R)*180/pi",
+      "has_uncertainty": true,
+      "name": "Desfasaje experimental en R",
+      "symbol": "phiR_exp",
+      "u": 15.398630636668498,
+      "u_expanded": 30.797261273336996,
+      "unit": "°",
+      "value": -77.95939225883437
+    },
+    {
+      "formula": "(-(math::atan(((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))/R))-pi/2)*180/pi",
+      "has_uncertainty": true,
+      "name": "Desfasaje teorico en C",
+      "symbol": "phiC_teo",
+      "u": 0.5006190525885602,
+      "u_expanded": 1.0012381051771204,
+      "unit": "°",
+      "value": -167.98355129656903
+    },
+    {
+      "formula": "math::asin(b_C/a_C)*180/pi",
+      "has_uncertainty": true,
+      "name": "Desfasaje experimental en C",
+      "symbol": "phiC_exp",
+      "u": 1.7335261735474836,
+      "u_expanded": 3.4670523470949672,
+      "unit": "°",
+      "value": -12.03153373776962
+    },
+    {
+      "formula": "(-(math::atan(((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))/R))+pi/2)*180/pi",
+      "has_uncertainty": true,
+      "name": "Desfasaje teorico en L",
+      "symbol": "phiL_teo",
+      "u": 0.5006190526998667,
+      "u_expanded": 1.0012381053997335,
+      "unit": "°",
+      "value": 12.016448703430955
+    },
+    {
+      "formula": "math::asin(b_L/a_L)*180/pi",
+      "has_uncertainty": true,
+      "name": "Desfasaje experimental en L",
+      "symbol": "phiL_exp",
+      "u": 1.7335261735474836,
+      "u_expanded": 3.4670523470949672,
+      "unit": "°",
+      "value": 12.03153373776962
+    }
+  ],
+  "operators": [],
+  "point_results": [],
+  "quantities": [
+    {
+      "name": "Resistencia",
+      "result": {
+        "mean": 100.2,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.6008,
+        "u_c": 0.6008,
+        "u_expanded": 1.2016
+      },
+      "symbol": "R",
+      "unit": "ohm",
+      "values": [
+        100.2
+      ]
+    },
+    {
+      "name": "Capacitor",
+      "result": {
+        "mean": 1.01e-6,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 7.525e-8,
+        "u_c": 7.525e-8,
+        "u_expanded": 1.505e-7
+      },
+      "symbol": "C",
+      "unit": "F",
+      "values": [
+        1.01e-6
+      ]
+    },
+    {
+      "name": "Inductor",
+      "result": {
+        "mean": 0.1,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.0025,
+        "u_c": 0.0025,
+        "u_expanded": 0.005
+      },
+      "symbol": "L",
+      "unit": "H",
+      "values": [
+        0.1
+      ]
+    },
+    {
+      "name": "Voltaje en el generador",
+      "result": {
+        "mean": 5.0,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.0225,
+        "u_c": 0.0225,
+        "u_expanded": 0.045
+      },
+      "symbol": "Vg",
+      "unit": "V",
+      "values": [
+        5.0
+      ]
+    },
+    {
+      "name": "Frecuencia de resonancia experimental",
+      "result": {
+        "mean": 508.3,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 2.5415,
+        "u_c": 2.5415,
+        "u_expanded": 5.083
+      },
+      "symbol": "f_res_exp",
+      "unit": "Hz",
+      "values": [
+        508.3
+      ]
+    },
+    {
+      "name": "Frecuencia de trabajo",
+      "result": {
+        "mean": 1000.0,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 5.0,
+        "u_c": 5.0,
+        "u_expanded": 10.0
+      },
+      "symbol": "f_trabajo",
+      "unit": "Hz",
+      "values": [
+        1000.0
+      ]
+    },
+    {
+      "name": "Voltaje en la resistencia",
+      "result": {
+        "mean": 2.085,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.081775,
+        "u_c": 0.081775,
+        "u_expanded": 0.16355
+      },
+      "symbol": "VRpp",
+      "unit": "V",
+      "values": [
+        2.085
+      ]
+    },
+    {
+      "name": "Voltaje en el capacitor",
+      "result": {
+        "mean": 3.318,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.15027000000000001,
+        "u_c": 0.15027000000000001,
+        "u_expanded": 0.30054000000000003
+      },
+      "symbol": "VCpp",
+      "unit": "V",
+      "values": [
+        3.318
+      ]
+    },
+    {
+      "name": "Voltaje en el inductor",
+      "result": {
+        "mean": 13.1,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.297,
+        "u_c": 0.297,
+        "u_expanded": 0.594
+      },
+      "symbol": "VLpp",
+      "unit": "V",
+      "values": [
+        13.1
+      ]
+    },
+    {
+      "name": "Semieje mayor de Lissajous - R",
+      "result": {
+        "mean": 2.0,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.0805,
+        "u_c": 0.0805,
+        "u_expanded": 0.161
+      },
+      "symbol": "a_R",
+      "unit": "V",
+      "values": [
+        2.0
+      ]
+    },
+    {
+      "name": "Semieje menor de Lissajous - R",
+      "result": {
+        "mean": -1.956,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.07984,
+        "u_c": 0.07984,
+        "u_expanded": 0.15968
+      },
+      "symbol": "b_R",
+      "unit": "V",
+      "values": [
+        -1.956
+      ]
+    },
+    {
+      "name": "Semieje mayor de Lissajous - C",
+      "result": {
+        "mean": 2.0,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.0805,
+        "u_c": 0.0805,
+        "u_expanded": 0.161
+      },
+      "symbol": "a_C",
+      "unit": "V",
+      "values": [
+        2.0
+      ]
+    },
+    {
+      "name": "Semieje menor de Lissajous - C",
+      "result": {
+        "mean": -0.4169,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.056753500000000005,
+        "u_c": 0.056753500000000005,
+        "u_expanded": 0.11350700000000001
+      },
+      "symbol": "b_C",
+      "unit": "V",
+      "values": [
+        -0.4169
+      ]
+    },
+    {
+      "name": "Semieje mayor de Lissajous - L",
+      "result": {
+        "mean": 2.0,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.0805,
+        "u_c": 0.0805,
+        "u_expanded": 0.161
+      },
+      "symbol": "a_L",
+      "unit": "V",
+      "values": [
+        2.0
+      ]
+    },
+    {
+      "name": "Semieje menor de Lissajous - L",
+      "result": {
+        "mean": 0.4169,
+        "n": 1,
+        "s": 0.0,
+        "u_a": 0.0,
+        "u_b": 0.056753500000000005,
+        "u_c": 0.056753500000000005,
+        "u_expanded": 0.11350700000000001
+      },
+      "symbol": "b_L",
+      "unit": "V",
+      "values": [
+        0.4169
+      ]
+    }
+  ],
+  "regression": null,
+  "scatters": [],
+  "warnings": []
+}
