@@ -606,21 +606,7 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "ca-rlc",
         "hidrostatica",
     ] {
-        // Cada práctica se habilita una sola vez por base (queda marcada en `applied_migrations`):
-        // si el docente la deshabilita después, el próximo arranque no la vuelve a habilitar.
-        let first_time = sqlx::query(
-            "INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2) \
-             ON CONFLICT(name) DO NOTHING",
-        )
-        .bind(format!("seed-course-practice:{course_id}:{practice}"))
-        .bind(Utc::now())
-        .execute(pool)
-        .await?
-        .rows_affected()
-            > 0;
-        if !first_time {
-            continue;
-        }
+        // DO NOTHING: si el docente la deshabilitó, la fila sigue (con enabled = 0) y no se toca.
         sqlx::query(
             r#"
             INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -964,6 +950,21 @@ mod tests {
             .unwrap());
         seed_academic(&pool).await.unwrap();
         assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 9);
+        assert!(
+            !user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
+                .await
+                .unwrap()
+        );
+        enable_course_practice(
+            &pool,
+            COURSE,
+            SetCoursePractice {
+                practice_id: "p1-estadistica".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
     }
 
     #[test]

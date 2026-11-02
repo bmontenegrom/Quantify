@@ -499,6 +499,15 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "practice_quantities", "default_value", "REAL").await?;
     // Cantidad de ranuras si el valor es una ranura de un instrumento (entero 1..=n). NULL = libre.
     add_column_if_missing(pool, "practice_quantities", "slot_count", "INTEGER").await?;
+    // Práctica deshabilitada por el docente en el curso: la fila queda (con enabled = 0) para que
+    // la siembra del curso de ejemplo, que inserta con ON CONFLICT DO NOTHING, no la re-habilite.
+    add_column_if_missing(
+        pool,
+        "course_practices",
+        "enabled",
+        "INTEGER NOT NULL DEFAULT 1",
+    )
+    .await?;
 
     // Número de mesa del informe compartido (NULL en entregas legacy/CSV).
     add_column_if_missing(pool, "submissions", "table_number", "INTEGER").await?;
