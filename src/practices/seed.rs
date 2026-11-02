@@ -1493,45 +1493,45 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
     // migracion la insertaba al final en vez de antes de f_trabajo. Corre **una sola vez** por
     // base (`applied_migrations`): desde que el docente puede reordenar magnitudes, repetirla en
     // cada arranque desharía un orden elegido a propósito.
+    // Todo en una transacción: si falla a mitad de camino no queda marcada como hecha.
+    let mut tx = pool.begin().await?;
     let already: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
         .bind(CA_RLC_F_RES_ORDER)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
-    let stray_position: Option<(i64, i64)> = if already.0 > 0 {
-        None
-    } else {
+    if already.0 == 0 {
+        let stray_position: Option<(i64, i64)> = sqlx::query_as(concat!(
+            "SELECT fre.position, ft.position ",
+            "FROM practice_quantities fre, practice_quantities ft ",
+            "WHERE fre.practice_id = 'ca-rlc' AND fre.symbol = 'f_res_exp' ",
+            "AND ft.practice_id = 'ca-rlc' AND ft.symbol = 'f_trabajo' ",
+            "AND fre.position > ft.position",
+        ))
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((f_res_exp_pos, f_trabajo_pos)) = stray_position {
+            sqlx::query(concat!(
+                "UPDATE practice_quantities SET position = position + 1 ",
+                "WHERE practice_id = 'ca-rlc' AND position >= ?1 AND position < ?2",
+            ))
+            .bind(f_trabajo_pos)
+            .bind(f_res_exp_pos)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE practice_quantities SET position = ?1 WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
+            )
+            .bind(f_trabajo_pos)
+            .execute(&mut *tx)
+            .await?;
+        }
         sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
             .bind(CA_RLC_F_RES_ORDER)
             .bind(chrono::Utc::now())
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
-        sqlx::query_as(
-            "SELECT fre.position, ft.position \
-             FROM practice_quantities fre, practice_quantities ft \
-             WHERE fre.practice_id = 'ca-rlc' AND fre.symbol = 'f_res_exp' \
-               AND ft.practice_id = 'ca-rlc' AND ft.symbol = 'f_trabajo' \
-               AND fre.position > ft.position",
-        )
-        .fetch_optional(pool)
-        .await?
-    };
-    if let Some((f_res_exp_pos, f_trabajo_pos)) = stray_position {
-        sqlx::query(
-            "UPDATE practice_quantities SET position = position + 1 \
-             WHERE practice_id = 'ca-rlc' AND position >= ?1 AND position < ?2",
-        )
-        .bind(f_trabajo_pos)
-        .bind(f_res_exp_pos)
-        .execute(pool)
-        .await?;
-        sqlx::query(
-            "UPDATE practice_quantities SET position = ?1 \
-             WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
-        )
-        .bind(f_trabajo_pos)
-        .execute(pool)
-        .await?;
     }
+    tx.commit().await?;
 
     // Quita el "(a)"/"(b)" que una version anterior de esta migracion agrego al nombre: quedo
     // redundante en cuanto el símbolo se empezó a mostrar antes del nombre en el formulario.

@@ -80,11 +80,10 @@ pub(super) async fn set_practice_analysis_kind(
         ));
     }
     // Cada tipo liga otros símbolos a los mensurandos: no se cambia si alguno deja de compilar.
-    let mut def = load_definition(&state, &id).await?;
-    def.analysis_kind = Some(kind.to_string());
-    check_all_formulas(&def).map_err(|e| {
-        AppError::bad_request(format!("No se puede cambiar el tipo de analisis: {e}"))
-    })?;
+    let before = load_definition(&state, &id).await?;
+    let mut after = before.clone();
+    after.analysis_kind = Some(kind.to_string());
+    guard_change(&before, &after, "cambiar el tipo de analisis")?;
     if !practices::set_analysis_kind(&state.pool, &id, kind).await? {
         return Err(AppError::not_found("practica no encontrada"));
     }
@@ -201,14 +200,17 @@ pub(super) async fn update_quantity(
     )
     .await?;
     // Renombrarla o cambiarle el rol (por punto, dato dado) puede dejar fórmulas sin compilar.
-    let mut def = load_definition(&state, &practice_id).await?;
-    if let Some(q) = def.quantities.iter_mut().find(|q| q.id == qid) {
-        q.symbol = input.symbol.trim().to_string();
-        q.per_point = input.per_point;
-        q.is_given = input.is_given;
-    }
-    check_all_formulas(&def)
-        .map_err(|e| AppError::bad_request(format!("No se puede guardar la magnitud: {e}")))?;
+    let before = load_definition(&state, &practice_id).await?;
+    let mut after = before.clone();
+    let q = after
+        .quantities
+        .iter_mut()
+        .find(|q| q.id == qid)
+        .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
+    q.symbol = input.symbol.trim().to_string();
+    q.per_point = input.per_point;
+    q.is_given = input.is_given;
+    guard_change(&before, &after, "guardar la magnitud")?;
     let updated = practices::update_quantity(&state.pool, &qid, input)
         .await?
         .ok_or_else(|| AppError::not_found("magnitud no encontrada"))?;
@@ -222,10 +224,13 @@ pub(super) async fn delete_quantity(
     Path((id, qid)): Path<(String, String)>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    let mut def = load_definition(&state, &id).await?;
-    def.quantities.retain(|q| q.id != qid);
-    check_all_formulas(&def)
-        .map_err(|e| AppError::bad_request(format!("No se puede eliminar la magnitud: {e}")))?;
+    let before = load_definition(&state, &id).await?;
+    let mut after = before.clone();
+    after.quantities.retain(|q| q.id != qid);
+    if after.quantities.len() == before.quantities.len() {
+        return Err(AppError::not_found("magnitud no encontrada en la practica"));
+    }
+    guard_change(&before, &after, "eliminar la magnitud")?;
     if !practices::delete_quantity(&state.pool, &qid).await? {
         return Err(AppError::not_found("magnitud no encontrada"));
     }
@@ -381,6 +386,15 @@ pub(super) async fn update_intermediate(
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &id).await?;
     validate_intermediate(&def, &input, Some(&iid))?;
+    let mut after = def.clone();
+    let item = after
+        .intermediates
+        .iter_mut()
+        .find(|x| x.id == iid)
+        .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
+    item.symbol = input.symbol.trim().to_string();
+    item.formula = input.formula.trim().to_string();
+    guard_change(&def, &after, "guardar la magnitud intermedia")?;
     guard_symbol(
         &state.pool,
         &id,
@@ -405,6 +419,13 @@ pub(super) async fn delete_intermediate(
     Path((id, iid)): Path<(String, String)>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    let before = load_definition(&state, &id).await?;
+    let mut after = before.clone();
+    after.intermediates.retain(|x| x.id != iid);
+    if after.intermediates.len() == before.intermediates.len() {
+        return Err(AppError::not_found("magnitud intermedia no encontrada"));
+    }
+    guard_change(&before, &after, "eliminar la magnitud intermedia")?;
     if !practices::delete_intermediate(&state.pool, &id, &iid).await? {
         return Err(AppError::not_found("magnitud intermedia no encontrada"));
     }
@@ -585,6 +606,15 @@ pub(super) async fn update_aggregate(
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &id).await?;
     validate_aggregate(&def, &input, Some(&aid))?;
+    let mut after = def.clone();
+    let item = after
+        .aggregates
+        .iter_mut()
+        .find(|x| x.id == aid)
+        .ok_or_else(|| AppError::not_found("mensurando agregado no encontrado"))?;
+    item.symbol = input.symbol.trim().to_string();
+    item.formula = input.formula.trim().to_string();
+    guard_change(&def, &after, "guardar el agregado")?;
     guard_symbol(
         &state.pool,
         &id,
@@ -609,6 +639,13 @@ pub(super) async fn delete_aggregate(
     Path((id, aid)): Path<(String, String)>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    let before = load_definition(&state, &id).await?;
+    let mut after = before.clone();
+    after.aggregates.retain(|x| x.id != aid);
+    if after.aggregates.len() == before.aggregates.len() {
+        return Err(AppError::not_found("mensurando agregado no encontrado"));
+    }
+    guard_change(&before, &after, "eliminar el agregado")?;
     if !practices::delete_aggregate(&state.pool, &id, &aid).await? {
         return Err(AppError::not_found("mensurando agregado no encontrado"));
     }
@@ -689,13 +726,16 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
     check_axes(def, &input.x_formula, &input.y_formula)
 }
 
-/// Revalida **todas** las fórmulas de la definición (mensurandos, ejes, curvas, intermedias,
-/// derivadas por punto y agregados) con los mismos validadores que el alta. Se usa antes de un
-/// cambio que puede romper fórmulas ya guardadas: renombrar o cambiar el rol de una magnitud,
-/// borrarla, o cambiar el tipo de análisis. Devuelve el primer problema, con el elemento.
-fn check_all_formulas(def: &practices::PracticeDefinition) -> Result<(), String> {
-    let message =
-        |what: &str, symbol: &str, e: AppError| format!("{what} {symbol}: {}", e.message());
+/// Todos los problemas de fórmulas de la definición (mensurandos, ejes, curvas, intermedias,
+/// derivadas por punto y agregados), revisados con los mismos validadores que el alta. Cada uno
+/// nombra el elemento afectado.
+fn formula_problems(def: &practices::PracticeDefinition) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut note = |what: &str, symbol: &str, result: Result<(), AppError>| {
+        if let Err(e) = result {
+            problems.push(format!("{what} {symbol}: {}", e.message()));
+        }
+    };
     for r in &def.results {
         let input = ResultInput {
             symbol: r.symbol.clone(),
@@ -706,43 +746,52 @@ fn check_all_formulas(def: &practices::PracticeDefinition) -> Result<(), String>
             is_final: r.is_final,
             has_uncertainty: r.has_uncertainty,
         };
-        validate_result(def, &input).map_err(|e| message("el mensurando", &r.symbol, e))?;
+        note("el mensurando", &r.symbol, validate_result(def, &input));
     }
     // Ejes, curvas, intermedias, por punto y agregados solo los usa el motor de su tipo.
-    match def.analysis_kind.as_deref() {
-        Some("regresion_lineal") => {
-            if let (Some(x), Some(y)) = (&def.x_formula, &def.y_formula) {
-                check_axes(def, x, y).map_err(|e| message("el ajuste", "lineal", e))?;
-            }
+    let kind = def.analysis_kind.as_deref();
+    if kind == Some("regresion_lineal") {
+        if let (Some(x), Some(y)) = (&def.x_formula, &def.y_formula) {
+            note("el ajuste", "lineal", check_axes(def, x, y));
         }
-        Some("curva") => {
-            for c in &def.curves {
-                check_axes(def, &c.x_formula, &c.y_formula)
-                    .map_err(|e| message("la curva", &c.y_formula, e))?;
-            }
+    }
+    if kind == Some("curva") {
+        for c in &def.curves {
+            note(
+                "la curva",
+                &c.y_formula,
+                check_axes(def, &c.x_formula, &c.y_formula),
+            );
         }
-        _ => return Ok(()),
     }
-    for it in &def.intermediates {
-        let input = IntermediateInput {
-            symbol: it.symbol.clone(),
-            name: it.name.clone(),
-            unit: it.unit.clone(),
-            formula: it.formula.clone(),
-        };
-        validate_intermediate(def, &input, Some(&it.id))
-            .map_err(|e| message("la intermedia", &it.symbol, e))?;
-    }
-    if def.analysis_kind.as_deref() == Some("regresion_lineal") {
-        for p in &def.point_results {
-            let input = PointResultInput {
-                symbol: p.symbol.clone(),
-                name: p.name.clone(),
-                unit: p.unit.clone(),
-                formula: p.formula.clone(),
+    if matches!(kind, Some("regresion_lineal" | "curva")) {
+        for it in &def.intermediates {
+            let input = IntermediateInput {
+                symbol: it.symbol.clone(),
+                name: it.name.clone(),
+                unit: it.unit.clone(),
+                formula: it.formula.clone(),
             };
-            validate_point_result(def, &input)
-                .map_err(|e| message("la derivada por punto", &p.symbol, e))?;
+            note(
+                "la intermedia",
+                &it.symbol,
+                validate_intermediate(def, &input, Some(&it.id)),
+            );
+        }
+    }
+    if kind == Some("regresion_lineal") {
+        for pr in &def.point_results {
+            let input = PointResultInput {
+                symbol: pr.symbol.clone(),
+                name: pr.name.clone(),
+                unit: pr.unit.clone(),
+                formula: pr.formula.clone(),
+            };
+            note(
+                "la derivada por punto",
+                &pr.symbol,
+                validate_point_result(def, &input),
+            );
         }
         for a in &def.aggregates {
             let input = AggregateInput {
@@ -752,11 +801,34 @@ fn check_all_formulas(def: &practices::PracticeDefinition) -> Result<(), String>
                 formula: a.formula.clone(),
                 is_final: a.is_final,
             };
-            validate_aggregate(def, &input, Some(&a.id))
-                .map_err(|e| message("el agregado", &a.symbol, e))?;
+            note(
+                "el agregado",
+                &a.symbol,
+                validate_aggregate(def, &input, Some(&a.id)),
+            );
         }
     }
-    Ok(())
+    problems
+}
+
+/// Rechaza un cambio si deja alguna fórmula sin compilar que **antes** compilaba: se compara con
+/// los problemas que ya había, así una fórmula rota de antes (guardada cuando no se validaba) no
+/// bloquea cambios que no tienen que ver con ella. `what` describe el cambio en el mensaje.
+fn guard_change(
+    before: &practices::PracticeDefinition,
+    after: &practices::PracticeDefinition,
+    what: &str,
+) -> Result<(), AppError> {
+    let old = formula_problems(before);
+    match formula_problems(after)
+        .into_iter()
+        .find(|p| !old.contains(p))
+    {
+        Some(problem) => Err(AppError::bad_request(format!(
+            "No se puede {what}: {problem}"
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// Símbolos que puede usar una fórmula de eje (regresión o curva), igual que `build_points`:
@@ -871,6 +943,15 @@ pub(super) async fn update_result(
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &practice_id).await?;
     validate_result(&def, &input)?;
+    let mut after = def.clone();
+    let item = after
+        .results
+        .iter_mut()
+        .find(|x| x.id == rid)
+        .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
+    item.symbol = input.symbol.trim().to_string();
+    item.formula = input.formula.trim().to_string();
+    guard_change(&def, &after, "guardar el mensurando")?;
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -892,9 +973,18 @@ pub(super) async fn update_result(
 pub(super) async fn delete_result(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Path((_id, rid)): Path<(String, String)>,
+    Path((id, rid)): Path<(String, String)>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    let before = load_definition(&state, &id).await?;
+    let mut after = before.clone();
+    after.results.retain(|x| x.id != rid);
+    if after.results.len() == before.results.len() {
+        return Err(AppError::not_found(
+            "mensurando no encontrado en la practica",
+        ));
+    }
+    guard_change(&before, &after, "eliminar el mensurando")?;
     if !practices::delete_result(&state.pool, &rid).await? {
         return Err(AppError::not_found("mensurando no encontrado"));
     }
@@ -1346,14 +1436,13 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            if let Err(e) = check_all_formulas(&def) {
-                panic!("{}: {e}", def.practice_id);
-            }
+            let problems = formula_problems(&def);
+            assert!(problems.is_empty(), "{}: {problems:?}", def.practice_id);
         }
     }
 
-    /// Un cambio que dejaría fórmulas guardadas sin compilar se detecta antes de hacerlo: cambiar
-    /// el tipo de análisis, renombrar una magnitud o volverla por punto.
+    /// Un cambio que dejaría fórmulas guardadas sin compilar se rechaza antes de hacerlo, pero una
+    /// fórmula que ya estaba rota (guardada cuando no se validaba) no bloquea otros cambios.
     #[tokio::test]
     async fn changes_that_break_saved_formulas_are_detected() {
         let (pool, _dir) = crate::computation::tests::setup().await;
@@ -1361,38 +1450,52 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(check_all_formulas(&def).is_ok());
+        let rejected = |after: &practices::PracticeDefinition| {
+            guard_change(&def, after, "x")
+                .map(|_| String::new())
+                .unwrap_or_else(|e| e.message().to_string())
+        };
         // A estadístico: los mensurandos que usan slope dejan de compilar.
-        let mut kind = practices::definition(&pool, "fluidos-2")
-            .await
-            .unwrap()
-            .unwrap();
+        let mut kind = def.clone();
         kind.analysis_kind = Some("estadistico".into());
-        assert!(check_all_formulas(&kind).unwrap_err().contains("slope"));
-        // Renombrar una magnitud que usa una fórmula.
-        let mut renamed = practices::definition(&pool, "fluidos-2")
-            .await
-            .unwrap()
-            .unwrap();
+        assert!(rejected(&kind).contains("slope"));
+        // Renombrar una magnitud que usan otras fórmulas.
+        let mut renamed = def.clone();
         renamed
             .quantities
             .iter_mut()
             .find(|q| q.symbol == "R_cap")
             .unwrap()
             .symbol = "Rc".into();
-        assert!(check_all_formulas(&renamed).unwrap_err().contains("R_cap"));
+        assert!(rejected(&renamed).contains("R_cap"));
         // Volver por punto un escalar compartido: un mensurando de regresión ya no lo ve.
-        let mut per_point = practices::definition(&pool, "fluidos-2")
-            .await
-            .unwrap()
-            .unwrap();
+        let mut per_point = def.clone();
         per_point
             .quantities
             .iter_mut()
             .find(|q| q.symbol == "R_cap")
             .unwrap()
             .per_point = true;
-        assert!(check_all_formulas(&per_point).is_err());
+        assert!(!rejected(&per_point).is_empty());
+        // Renombrar un mensurando que usan los agregados (M_teorico no, pero Re_medio sí usa Re_max).
+        let mut agg = def.clone();
+        agg.aggregates
+            .iter_mut()
+            .find(|a| a.symbol == "Re_max")
+            .unwrap()
+            .symbol = "Remax".into();
+        assert!(rejected(&agg).contains("Re_max"));
+        // Un cambio inocuo pasa.
+        let mut unit = def.clone();
+        unit.quantities[0].unit = "cm".into();
+        assert!(rejected(&unit).is_empty());
+
+        // Con una fórmula rota de antes, un cambio que no la empeora pasa igual.
+        let mut broken = def.clone();
+        broken.results[0].formula = "slope * no_existe".into();
+        let mut also_unit = broken.clone();
+        also_unit.quantities[0].unit = "cm".into();
+        assert!(guard_change(&broken, &also_unit, "x").is_ok());
     }
 
     /// Cada tipo de análisis rechaza los símbolos que su motor no liga a un mensurando.
