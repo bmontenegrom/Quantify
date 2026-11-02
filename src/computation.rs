@@ -192,7 +192,7 @@ pub struct CurveSpec<'a> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 mod golden_tests;

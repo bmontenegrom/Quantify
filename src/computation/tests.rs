@@ -13,7 +13,7 @@ fn close(a: f64, b: f64, tol: f64) -> bool {
     (a - b).abs() < tol
 }
 
-pub(super) async fn setup() -> (SqlitePool, TempDir) {
+pub(crate) async fn setup() -> (SqlitePool, TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let url = format!("sqlite:{}", dir.path().join("t.db").to_string_lossy());
     let opts = SqliteConnectOptions::from_str(&url)

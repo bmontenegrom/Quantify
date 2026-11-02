@@ -122,6 +122,10 @@ pub(super) async fn set_practice_regression_formulas(
     Json(body): Json<RegressionFormulasBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    check_axes(&def, &body.x_formula, &body.y_formula)?;
     if !practices::set_regression_formulas(&state.pool, &id, &body.x_formula, &body.y_formula)
         .await?
     {
@@ -213,7 +217,10 @@ pub(super) async fn create_curve(
     Json(input): Json<CurveInput>,
 ) -> Result<Json<practices::PracticeCurve>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_curve(&input)?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_curve(&def, &input)?;
     Ok(Json(
         practices::create_curve(&state.pool, &id, input).await?,
     ))
@@ -227,7 +234,10 @@ pub(super) async fn update_curve(
     Json(input): Json<CurveInput>,
 ) -> Result<Json<practices::PracticeCurve>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_curve(&input)?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_curve(&def, &input)?;
     let updated = practices::update_curve(&state.pool, &id, &cid, input)
         .await?
         .ok_or_else(|| AppError::not_found("curva no encontrada"))?;
@@ -602,14 +612,78 @@ fn validate_aggregate(
     Ok(())
 }
 
-/// Una curva necesita ambas fórmulas de eje (sin ellas no se puede graficar). Error 400 amigable.
-fn validate_curve(input: &CurveInput) -> Result<(), AppError> {
+/// Una curva necesita ambas fórmulas de eje (sin ellas no se puede graficar), y las dos tienen que
+/// compilar con los símbolos de un eje ([`axis_scope`]). Error 400 amigable.
+fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Result<(), AppError> {
     if input.x_formula.trim().is_empty() || input.y_formula.trim().is_empty() {
         return Err(AppError::bad_request(
             "La curva necesita las formulas de ambos ejes (x e y).",
         ));
     }
+    check_axes(def, &input.x_formula, &input.y_formula)
+}
+
+/// Símbolos que puede usar una fórmula de eje (regresión o curva), igual que `build_points`:
+/// todas las magnitudes y todas las intermedias.
+fn axis_scope(def: &practices::PracticeDefinition) -> Vec<String> {
+    def.quantities
+        .iter()
+        .map(|q| q.symbol.clone())
+        .chain(def.intermediates.iter().map(|it| it.symbol.clone()))
+        .collect()
+}
+
+/// Compila las fórmulas de eje no vacías (vacía = sin definir, se permite para borrarlas).
+fn check_axes(def: &practices::PracticeDefinition, x: &str, y: &str) -> Result<(), AppError> {
+    let allowed = axis_scope(def);
+    for (axis, formula) in [("x", x.trim()), ("y", y.trim())] {
+        if formula.is_empty() {
+            continue;
+        }
+        computation::check_formula(formula, &allowed)
+            .map_err(|e| AppError::bad_request(format!("Eje {axis}: {e}")))?;
+    }
     Ok(())
+}
+
+/// Símbolos que puede usar la fórmula de un mensurando derivado, según el tipo de análisis y tal
+/// como los liga el motor (`computation::analyze`):
+/// - estadístico: todas las magnitudes (los mensurandos no se encadenan entre sí);
+/// - regresión: los escalares compartidos (`!per_point || is_given`) más `slope`/`intercept`;
+/// - curva: los escalares compartidos más los alias de extremo `{S}_max` y `{T}_at_{S}_max` de
+///   cada símbolo por punto (magnitudes medidas por punto e intermedias).
+fn result_scope(def: &practices::PracticeDefinition) -> Vec<String> {
+    let shared = def
+        .quantities
+        .iter()
+        .filter(|q| !q.per_point || q.is_given)
+        .map(|q| q.symbol.clone());
+    match def.analysis_kind.as_deref() {
+        Some("regresion_lineal") => shared
+            .chain(["slope".to_string(), "intercept".to_string()])
+            .collect(),
+        Some("curva") => {
+            let per_point: Vec<&str> = def
+                .quantities
+                .iter()
+                .filter(|q| q.per_point && !q.is_given)
+                .map(|q| q.symbol.as_str())
+                .chain(def.intermediates.iter().map(|it| it.symbol.as_str()))
+                .collect();
+            let mut allowed: Vec<String> = shared.collect();
+            for s in &per_point {
+                allowed.push(format!("{s}_max"));
+                allowed.extend(
+                    per_point
+                        .iter()
+                        .filter(|t| *t != s)
+                        .map(|t| format!("{t}_at_{s}_max")),
+                );
+            }
+            allowed
+        }
+        _ => def.quantities.iter().map(|q| q.symbol.clone()).collect(),
+    }
 }
 
 /// `DELETE /api/practices/{id}/curves/{cid}`: elimina una curva (docente/admin).
@@ -633,7 +707,10 @@ pub(super) async fn create_result(
     Json(input): Json<ResultInput>,
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_result(&input)?;
+    let def = practices::definition(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_result(&def, &input)?;
     guard_symbol(
         &state.pool,
         &id,
@@ -658,7 +735,10 @@ pub(super) async fn update_result(
     Json(input): Json<ResultInput>,
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_result(&input)?;
+    let def = practices::definition(&state.pool, &practice_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_result(&def, &input)?;
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -837,10 +917,14 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Valida los campos de un mensurando derivado: símbolo, nombre y fórmula no vacíos, y tolerancia
-/// no negativa si se proporciona. La unidad **puede** ir vacía: mensurando adimensional (p. ej. un
-/// coeficiente como `M_medio` en Fluidos II).
-fn validate_result(input: &ResultInput) -> Result<(), AppError> {
+/// Valida los campos de un mensurando derivado: símbolo, nombre y fórmula no vacíos, fórmula que
+/// compila con los símbolos que el motor le da ([`result_scope`]) y tolerancia no negativa si se
+/// proporciona. La unidad **puede** ir vacía: mensurando adimensional (p. ej. un coeficiente como
+/// `M_medio` en Fluidos II).
+fn validate_result(
+    def: &practices::PracticeDefinition,
+    input: &ResultInput,
+) -> Result<(), AppError> {
     if input.symbol.trim().is_empty()
         || input.name.trim().is_empty()
         || input.formula.trim().is_empty()
@@ -854,7 +938,8 @@ fn validate_result(input: &ResultInput) -> Result<(), AppError> {
             return Err(AppError::bad_request("tolerancia no puede ser negativa"));
         }
     }
-    Ok(())
+    computation::check_formula(input.formula.trim(), &result_scope(def))
+        .map_err(|e| AppError::bad_request(e.to_string()))
 }
 
 #[cfg(test)]
@@ -1082,6 +1167,19 @@ mod tests {
 
     #[test]
     fn validate_result_allows_dimensionless_unit() {
+        let def = practices::PracticeDefinition {
+            practice_id: "p".into(),
+            analysis_kind: Some("regresion_lineal".into()),
+            x_formula: None,
+            y_formula: None,
+            quantities: vec![],
+            results: vec![],
+            curves: vec![],
+            operator_count: None,
+            intermediates: vec![],
+            point_results: vec![],
+            aggregates: vec![],
+        };
         let r = |unit: &str| ResultInput {
             symbol: "M_medio".into(),
             name: "Coeficiente medio".into(),
@@ -1092,15 +1190,81 @@ mod tests {
             has_uncertainty: true,
         };
         // Unidad vacía → mensurando adimensional, válido.
-        assert!(validate_result(&r("")).is_ok());
-        assert!(validate_result(&r("   ")).is_ok());
-        assert!(validate_result(&r("Pa.s")).is_ok());
+        assert!(validate_result(&def, &r("")).is_ok());
+        assert!(validate_result(&def, &r("   ")).is_ok());
+        assert!(validate_result(&def, &r("Pa.s")).is_ok());
         // Fórmula vacía sigue siendo inválida.
-        assert!(validate_result(&ResultInput {
-            formula: "".into(),
-            ..r("")
-        })
+        assert!(validate_result(
+            &def,
+            &ResultInput {
+                formula: "".into(),
+                ..r("")
+            }
+        )
         .is_err());
+    }
+
+    /// Las fórmulas de mensurandos, ejes y curvas de las 10 prácticas sembradas pasan la
+    /// validación: el alcance de símbolos del validador coincide con el que usa el motor.
+    #[tokio::test]
+    async fn seeded_formulas_pass_validation() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        for practice in db::practices(&pool).await.unwrap() {
+            let def = practices::definition(&pool, &practice.id)
+                .await
+                .unwrap()
+                .unwrap();
+            for r in &def.results {
+                assert!(
+                    computation::check_formula(&r.formula, &result_scope(&def)).is_ok(),
+                    "{}: el mensurando {} = {} no valida",
+                    def.practice_id,
+                    r.symbol,
+                    r.formula
+                );
+            }
+            if let (Some(x), Some(y)) = (&def.x_formula, &def.y_formula) {
+                assert!(check_axes(&def, x, y).is_ok(), "{}: ejes", def.practice_id);
+            }
+            for c in &def.curves {
+                assert!(
+                    check_axes(&def, &c.x_formula, &c.y_formula).is_ok(),
+                    "{}: curva {} vs {}",
+                    def.practice_id,
+                    c.y_formula,
+                    c.x_formula
+                );
+            }
+        }
+    }
+
+    /// Cada tipo de análisis rechaza los símbolos que su motor no liga a un mensurando.
+    #[tokio::test]
+    async fn result_formulas_respect_the_engine_scope() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let def = |id: &'static str| {
+            let pool = pool.clone();
+            async move { practices::definition(&pool, id).await.unwrap().unwrap() }
+        };
+        let check = |def: &practices::PracticeDefinition, formula: &str| {
+            computation::check_formula(formula, &result_scope(def)).is_ok()
+        };
+        // Estadístico: magnitudes sí; slope o un símbolo inexistente, no.
+        let p1 = def("p1-estadistica").await;
+        assert!(check(&p1, "4*pi^2*L/T1^2"));
+        assert!(!check(&p1, "slope"));
+        assert!(!check(&p1, "L*zzz"));
+        // Regresión: escalares compartidos y slope sí; una magnitud por punto, no (no es escalar).
+        let f2 = def("fluidos-2").await;
+        assert!(check(&f2, "slope*R_cap"));
+        assert!(!check(&f2, "h*2"));
+        // Curva: alias de extremo de lo que va por punto sí; el valor por punto suelto, no.
+        let cc = def("p2-cc").await;
+        assert!(check(&cc, "P_max + R_at_P_max + I_at_P_max"));
+        assert!(!check(&cc, "P*2"));
+        // Ejes: una magnitud inexistente se rechaza con el eje en el mensaje.
+        let err = check_axes(&f2, "h", "t*zzz").unwrap_err();
+        assert!(format!("{err:?}").contains("Eje y"), "{err:?}");
     }
 
     #[test]

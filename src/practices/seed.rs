@@ -494,8 +494,8 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
     // con multimetro y se comparan con las teoricas VRi_s_t / VRi_p_t (resultados finales que
     // el alumno calcula a mano con propagacion). Por punto: R (carga variable) e I; intermedia
     // P = I^2*R y curva P vs R. Los finales experimentales de potencia (P_max_e / RP_max_e)
-    // usan los alias de extremos del camino curva (`P_max`, `R_at_P_max`) con U = 0; por eso
-    // sus formulas no son editables desde la UI admin (check_formula no conoce los alias).
+    // usan los alias de extremos del camino curva (`P_max`, `R_at_P_max`) con U = 0; el admin
+    // los acepta al validar la formula (`result_scope` en routes/practice_admin.rs).
     // Migración de forma: mientras se desarrollaba la unificación (#43) algunas bases quedaron
     // sembradas con una forma intermedia de p2-cc (símbolos con sufijo _serie/_paralelo/_potencia,
     // p. ej. `Vg_serie`/`RA_serie`, en vez de los `_s`/`_p`/`_c` actuales). `seed_practice` es
