@@ -1082,11 +1082,11 @@ async fn load_scales(
         if scales.contains_key(scale_id) {
             continue;
         }
-        let scale = sqlx::query_as::<_, InstrumentScale>(
-            "SELECT id, instrument_id, label, full_scale, step, appreciation, internal_res, \
-             internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, unit, position \
-             FROM instrument_scales WHERE id = ?1",
-        )
+        // Mismas columnas que el catálogo: una lista aparte ya dejó afuera la calibración.
+        let scale = sqlx::query_as::<_, InstrumentScale>(&format!(
+            "SELECT {} FROM instrument_scales WHERE id = ?1",
+            crate::instruments::SCALE_COLS
+        ))
         .bind(scale_id)
         .fetch_optional(pool)
         .await?

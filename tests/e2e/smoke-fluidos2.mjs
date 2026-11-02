@@ -90,6 +90,22 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   );
   await sPage.screenshot({ path: join(ARTIFACTS, "fluidos2-preview.png"), fullPage: true });
 
+  step("estudiante: recarga y el borrador restaura la serie");
+  // Restaurar una serie usa helpers de forms-series.js que forms.js no importaba (ReferenceError).
+  await sPage.waitForTimeout(600); // el borrador se guarda con debounce de 350 ms
+  await sPage.reload();
+  await sPage.waitForSelector("#app-shell:not(.hidden)");
+  await sPage.click('#practice-nav-children .nav-child:has-text("Fluidos II")');
+  await sPage.waitForSelector(".series-table");
+  const restored = await sPage.$$eval(`.series-value[data-quantity-id="${idBySym["h"]}"]`, (inputs) =>
+    inputs.map((input) => input.value),
+  );
+  assert(
+    JSON.stringify(restored) === JSON.stringify(points.map((p) => String(p.h))),
+    `el borrador debía restaurar h = ${points.map((p) => p.h)} (vi: ${restored})`,
+  );
+  await sPage.selectOption("#table-select", "1");
+
   step("estudiante: entrega el formulario");
   await sPage.click("#submit-button");
   await sPage.waitForSelector('#submit-status:has-text("Entrega guardada")', { timeout: 15_000 });

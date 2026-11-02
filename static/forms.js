@@ -25,7 +25,10 @@ import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
   wireChronometerWidget, chronoWidgetInnerHtml,
 } from "./forms-chrono.js";
-import { renderSeriesTable, collectSeriesPointResults } from "./forms-series.js";
+import {
+  renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
+  updateSeriesMeans, updateSeriesLive,
+} from "./forms-series.js";
 import { loadDraft, clearDraft, scheduleDraftSave } from "./forms-draft.js";
 
 export function quantityNameHtml(q) {

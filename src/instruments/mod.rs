@@ -85,7 +85,8 @@ pub struct CatalogExport {
 const INSTRUMENT_COLS: &str = "id, course_id, name, kind, quantity, unit";
 
 /// Columnas de una escala usadas en los `SELECT` (sin `created_at`).
-const SCALE_COLS: &str = "id, instrument_id, label, full_scale, step, appreciation, internal_res, \
+pub(crate) const SCALE_COLS: &str =
+    "id, instrument_id, label, full_scale, step, appreciation, internal_res, \
     internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, u_cal_pct, \
     u_cal_fixed, unit, position";
 
