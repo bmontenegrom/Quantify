@@ -1,6 +1,6 @@
 use super::*;
 use crate::db;
-use seed::{fix_ca_rlc_labels, fix_hidrostatica, seed_ca_rlc, seed_hidrostatica};
+use seed::{fix_ca_rlc_labels, reset_legacy_hidrostatica, seed_ca_rlc, seed_hidrostatica};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use tempfile::TempDir;
@@ -1744,150 +1744,34 @@ async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     assert_eq!(count.0, 15);
 }
 
-/// `fix_hidrostatica` pasa la densidad de la goma de g/cm3 a kg/m3 (formula, calculo del alumno y
-/// foto del analisis) y las distancias de Wilhelmy a ranuras en una base sembrada con la forma
-/// original, y en el proximo arranque no toca nada aunque el docente haya vuelto a g/cm3 o a
-/// medir `d` con regla.
+/// `reset_legacy_hidrostatica` borra Hidrostatica (definicion y entregas de prueba) en una base
+/// sembrada con la forma vieja para que `seed_hidrostatica` la siembre de cero, y en una base ya
+/// actual no toca nada.
 #[tokio::test]
-async fn fix_hidrostatica_migrates_once() {
+async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
     let (pool, _dir) = setup().await;
+    let snapshot = |pool: SqlitePool| async move {
+        let rows: Vec<(String, String, Option<i64>)> = sqlx::query_as(
+            "SELECT symbol, name, slot_count FROM practice_quantities \
+             WHERE practice_id = 'hidrostatica' ORDER BY position",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        rows
+    };
     seed_hidrostatica(&pool).await.unwrap();
+    let fresh = snapshot(pool.clone()).await;
+    assert!(!fresh.is_empty());
 
-    // Simula la siembra original: densidad en g/cm3 sin el *1000...
+    // Forma vieja: dw1 sin slot_count, densidad en g/cm3, y una entrega de prueba con su lectura.
     sqlx::query(
-        "UPDATE practice_results SET unit = 'g/cm3', formula = replace(formula, '*1000/', '/') \
-         WHERE practice_id = 'hidrostatica' AND symbol IN ('rho1', 'rho2', 'rho3', 'rho_medio')",
+        "UPDATE practice_quantities SET slot_count = NULL, name = 'distancia con regla' \
+         WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
     )
     .execute(&pool)
     .await
     .unwrap();
-    // ...salvo rho2, que el docente reescribio (sigue en g/cm3, pero no es la formula sembrada)...
-    sqlx::query(
-        "UPDATE practice_results SET formula = 'rho_f*m_goma/m2_1' \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'rho2'",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    // ...d y dw_k como `qty_shared` (medidos con regla, con U) y sus nombres viejos...
-    sqlx::query(
-        "UPDATE practice_quantities SET is_given = 0, repeated = 0, per_point = 0, \
-         has_uncertainty = 1, default_value = NULL, slot_count = NULL, \
-         name = CASE symbol WHEN 'd' THEN 'Distancia del marco a la cruz' \
-                ELSE 'Medida ' || substr(symbol, 3) || ' - distancia de la pesa a la cruz' END \
-         WHERE practice_id = 'hidrostatica' AND symbol IN ('d', 'dw1', 'dw2', 'dw3')",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    // ...y una entrega con el calculo del alumno y el analisis en g/cm3.
-    let analysis = r#"{"results":[{"symbol":"rho_medio","unit":"g/cm3","value":1.2,"u":0.01,"u_expanded":0.02},{"symbol":"gamma1","unit":"N/m","value":0.07,"u":0.0,"u_expanded":0.0}]}"#;
-    sqlx::query(
-        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
-         csv_path, analysis_json, submitted_at) \
-         VALUES ('s1', 'a', 'g', 'c', 'hidrostatica', '', '', ?1, '2026-10-01T00:00:00Z')",
-    )
-    .bind(analysis)
-    .execute(&pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO submission_student_results \
-         (id, submission_id, symbol, value, u_expanded, created_at) \
-         VALUES ('r1', 's1', 'rho_medio', 1.2, 0.02, '2026-10-01T00:00:00Z'), \
-                ('r2', 's1', 'rho2', 1.3, NULL, '2026-10-01T00:00:00Z')",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    fix_hidrostatica(&pool).await.unwrap();
-
-    // (symbol, name, is_given, has_uncertainty, default_value, slot_count)
-    type Ranura = (String, String, i64, i64, Option<f64>, Option<i64>);
-    let ranuras: Vec<Ranura> = sqlx::query_as(
-        "SELECT symbol, name, is_given, has_uncertainty, default_value, slot_count \
-         FROM practice_quantities \
-         WHERE practice_id = 'hidrostatica' AND symbol IN ('d', 'dw1', 'dw2', 'dw3') \
-         ORDER BY symbol",
-    )
-    .fetch_all(&pool)
-    .await
-    .unwrap();
-    let mut expected = vec![(
-        "d".to_string(),
-        "Brazo fijo del marco".to_string(),
-        1,
-        0,
-        Some(10.0),
-        None,
-    )];
-    for k in 1..=3 {
-        expected.push((
-            format!("dw{k}"),
-            format!("Medida {k} - ranura de la pesa (1 a 9 cm)"),
-            1,
-            0,
-            None,
-            Some(9),
-        ));
-    }
-    assert_eq!(ranuras, expected);
-
-    let rho: (String, String) = sqlx::query_as(
-        "SELECT unit, formula FROM practice_results \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'rho1'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(rho.0, "kg/m3");
-    assert!(rho.1.starts_with("(rho_f*m_goma*b_E/(") && rho.1.ends_with("))*1000"));
-    let custom: (String, String) = sqlx::query_as(
-        "SELECT unit, formula FROM practice_results \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'rho2'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(
-        custom,
-        ("g/cm3".to_string(), "rho_f*m_goma/m2_1".to_string())
-    );
-    let medio: (String,) = sqlx::query_as(
-        "SELECT unit FROM practice_results \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'rho_medio'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(medio.0, "kg/m3");
-
-    let student: (f64, f64) =
-        sqlx::query_as("SELECT value, u_expanded FROM submission_student_results WHERE id = 'r1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(student, (1200.0, 20.0));
-    // rho2 no se migro (formula del docente), asi que el calculo del alumno queda en g/cm3.
-    let custom_student: (f64,) =
-        sqlx::query_as("SELECT value FROM submission_student_results WHERE id = 'r2'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(custom_student.0, 1.3);
-    let (json,): (String,) =
-        sqlx::query_as("SELECT analysis_json FROM submissions WHERE id = 's1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    let json: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(json["results"][0]["unit"], "kg/m3");
-    assert_eq!(json["results"][0]["value"], 1200.0);
-    assert_eq!(json["results"][0]["u_expanded"], 20.0);
-    assert_eq!(json["results"][1]["value"], 0.07);
-
-    // El docente vuelve a g/cm3 y a medir `d` con regla; el proximo arranque no toca nada.
     sqlx::query(
         "UPDATE practice_results SET unit = 'g/cm3' \
          WHERE practice_id = 'hidrostatica' AND symbol = 'rho1'",
@@ -1896,33 +1780,53 @@ async fn fix_hidrostatica_migrates_once() {
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE practice_quantities SET is_given = 0 \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'd'",
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at) \
+         VALUES ('s1', 'a', 'g', 'c', 'hidrostatica', '', '', '{}', '2026-10-01T00:00:00Z')",
     )
     .execute(&pool)
     .await
     .unwrap();
-    fix_hidrostatica(&pool).await.unwrap();
-    let again: (String, String) = sqlx::query_as(
-        "SELECT unit, formula FROM practice_results \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'rho1'",
+    sqlx::query(
+        "INSERT INTO submission_measurements (id, submission_id, quantity_id, value) \
+         SELECT 'm1', 's1', id, 4.3 FROM practice_quantities \
+         WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    reset_legacy_hidrostatica(&pool).await.unwrap();
+    seed_hidrostatica(&pool).await.unwrap();
+
+    assert_eq!(snapshot(pool.clone()).await, fresh);
+    let unit: (String,) = sqlx::query_as(
+        "SELECT unit FROM practice_results WHERE practice_id = 'hidrostatica' AND symbol = 'rho1'",
     )
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(again, ("g/cm3".to_string(), rho.1));
-    let d_given: (i64,) = sqlx::query_as(
-        "SELECT is_given FROM practice_quantities \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'd'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(d_given.0, 0);
-    let student_again: (f64,) =
-        sqlx::query_as("SELECT value FROM submission_student_results WHERE id = 'r1'")
+    assert_eq!(unit.0, "kg/m3");
+    let left: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM submissions WHERE practice_id = 'hidrostatica'")
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(student_again.0, 1200.0);
+    assert_eq!(left.0, 0);
+
+    // Base ya actual: una entrega nueva sobrevive al proximo arranque.
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at) \
+         VALUES ('s2', 'a', 'g', 'c', 'hidrostatica', '', '', '{}', '2026-11-01T00:00:00Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    reset_legacy_hidrostatica(&pool).await.unwrap();
+    let kept: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions WHERE id = 's2'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kept.0, 1);
 }

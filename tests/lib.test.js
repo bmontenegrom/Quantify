@@ -123,7 +123,12 @@ test("symbolHtml muestra los nombres de letras griegas como la letra", () => {
 
 test("symbolHtml no anida subíndices y inlineMathHtml usa la misma regla", () => {
   assert.equal(symbolHtml("R_load2"), "R<sub>load2</sub>");
-  assert.equal(inlineMathHtml("Energía E_medio"), "Energía E<sub>medio</sub>");
+  // Varios guiones bajos: todo va al subíndice, separado por coma.
+  assert.equal(symbolHtml("crud_test_qty"), "crud<sub>test,qty</sub>");
+  assert.equal(symbolHtml("f_res_exp"), "f<sub>res,exp</sub>");
+  // En nombres libres solo `_` + 1-2 caracteres: una palabra con guion bajo queda tal cual.
+  assert.equal(inlineMathHtml("ver tabla_resumen"), "ver tabla_resumen");
+  assert.equal(inlineMathHtml("Tiempo T_oc"), "Tiempo T<sub>OC</sub>");
 });
 
 test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)", () => {

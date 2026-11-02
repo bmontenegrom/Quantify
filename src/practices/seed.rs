@@ -1222,26 +1222,6 @@ const MOHR_RANURAS: usize = 9;
 /// Cantidad de determinaciones independientes de cada parte (la tecnica pide 3 y promediar).
 const HIDRO_MEDIDAS: usize = 3;
 
-/// sum(m_i * b_i) de la determinacion k de Hidrostatica, en g*cm.
-fn mohr_torque(k: usize) -> String {
-    (1..=MOHR_RANURAS)
-        .map(|i| format!("m{k}_{i}*b{i}"))
-        .collect::<Vec<_>>()
-        .join(" + ")
-}
-
-/// rho_goma = rho_f * m_goma * b_E / sum(m_i*b_i); las unidades se cancelan y queda en las de
-/// rho_f (g/cm3, como lo lee el densimetro). `escala` es "*1000" para darla en kg/m3 (siembra
-/// actual) o "" (siembra original, que [`fix_hidrostatica`] reconoce para migrarla).
-fn densidad_goma(k: usize, escala: &str) -> String {
-    format!("rho_f*m_goma*b_E{escala}/({})", mohr_torque(k))
-}
-
-/// Promedio expandido de las [`HIDRO_MEDIDAS`] determinaciones.
-fn promedio_medidas(partes: [String; HIDRO_MEDIDAS]) -> String {
-    format!("(({}) + ({}) + ({}))/3", partes[0], partes[1], partes[2])
-}
-
 /// Siembra Hidrostatica y Tension Superficial (ver [`seed_definitions`]).
 pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     // Hidrostatica y Tension Superficial — dos partes en una sola entrega, ambas estadisticas.
@@ -1337,13 +1317,23 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
         ));
     }
 
-    let torque = mohr_torque;
+    // sum(m_i * b_i) de la determinacion k, en g*cm.
+    let torque = |k: usize| {
+        (1..=MOHR_RANURAS)
+            .map(|i| format!("m{k}_{i}*b{i}"))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
     // E = sum(m_i*b_i)/b_E * g, con las masas en g -> /1000 para dar N.
     let empuje = |k: usize| format!("(({})/b_E)*g_ac/1000", torque(k));
-    let densidad = |k: usize| densidad_goma(k, "*1000");
+    // rho_goma = rho_f * m_goma * b_E / sum(m_i*b_i); las unidades se cancelan y queda en las de
+    // rho_f (g/cm3, como lo lee el densimetro), *1000 para darla en kg/m3.
+    let densidad = |k: usize| format!("rho_f*m_goma*b_E*1000/({})", torque(k));
     // gamma = mw*g*dw/(2*l*d), con mw en g (/1000) y l en cm (*100) -> N/m.
     let gamma = |k: usize| format!("mw{k}*g_ac*dw{k}*100/(2*l*d*1000)");
-    let promedio = promedio_medidas;
+    let promedio = |partes: [String; HIDRO_MEDIDAS]| {
+        format!("(({}) + ({}) + ({}))/3", partes[0], partes[1], partes[2])
+    };
 
     let mut results = Vec::new();
     for k in 1..=HIDRO_MEDIDAS {
@@ -1391,127 +1381,38 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Corrige en bases ya sembradas (`seed_hidrostatica` es idempotente y no re-siembra) dos cosas:
-/// la densidad de la goma pasa de g/cm³ a kg/m³, y las distancias de la parte 2 (Wilhelmy) pasan
-/// de medirse con regla a ser las ranuras de la balanza de Mohr. Cada bloque está gateado por la
-/// fórmula/nombre de la siembra original (no solo por la unidad o `is_given`, que el docente puede
-/// volver a poner), así que corre una sola vez y no pisa ediciones del docente.
-pub(super) async fn fix_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
-    // Solo las fórmulas que siguen siendo exactamente las de la siembra original: una fórmula
-    // editada por el docente (aunque siga en g/cm³) no se toca.
-    let legacy = [
-        ("rho1".to_string(), densidad_goma(1, "")),
-        ("rho2".to_string(), densidad_goma(2, "")),
-        ("rho3".to_string(), densidad_goma(3, "")),
-        (
-            "rho_medio".to_string(),
-            promedio_medidas([
-                densidad_goma(1, ""),
-                densidad_goma(2, ""),
-                densidad_goma(3, ""),
-            ]),
-        ),
-    ];
-    let mut migrated = Vec::new();
-    for (symbol, formula) in &legacy {
-        let changed = sqlx::query(
-            "UPDATE practice_results SET unit = 'kg/m3', formula = '(' || formula || ')*1000' \
-             WHERE practice_id = 'hidrostatica' AND symbol = ?1 AND formula = ?2 \
-             AND unit = 'g/cm3'",
-        )
-        .bind(symbol)
-        .bind(formula)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        if changed == 0 {
-            continue;
-        }
-        // Las entregas ya hechas guardan la densidad en g/cm³ (el cálculo del alumno y la foto
-        // del análisis): se pasan a kg/m³ en la misma transacción, solo para los símbolos que se
-        // migraron, para que la comparación siga cerrando.
-        sqlx::query(
-            "UPDATE submission_student_results \
-             SET value = value * 1000, u_expanded = u_expanded * 1000 \
-             WHERE symbol = ?1 AND submission_id IN \
-             (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
-        )
-        .bind(symbol)
-        .execute(&mut *tx)
-        .await?;
-        migrated.push(symbol.as_str());
-    }
-    if !migrated.is_empty() {
-        let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT id, analysis_json FROM submissions WHERE practice_id = 'hidrostatica'",
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-        for (id, json) in rows {
-            let mut analysis: serde_json::Value = serde_json::from_str(&json)?;
-            density_to_kg_m3(&mut analysis, &migrated);
-            sqlx::query("UPDATE submissions SET analysis_json = ?2 WHERE id = ?1")
-                .bind(id)
-                .bind(serde_json::to_string(&analysis)?)
-                .execute(&mut *tx)
-                .await?;
-        }
-    }
-
-    // Wilhelmy sobre la misma balanza de Mohr: `d` es el brazo fijo (10 cm) y `dw_k` la ranura
-    // elegida, ambos datos dados sin campo U (ver `seed_hidrostatica`).
-    sqlx::query(
-        "UPDATE practice_quantities \
-         SET is_given = 1, repeated = 0, per_point = 0, has_uncertainty = 0, \
-             name = 'Brazo fijo del marco', default_value = 10.0 \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'd' \
-         AND name = 'Distancia del marco a la cruz'",
+/// Bases sembradas antes de que la parte 2 usara las ranuras de la balanza (densidad en g/cm³,
+/// `d`/`dw_k` medidos con regla): `seed_hidrostatica` es idempotente y no re-siembra, así que se
+/// borra Hidrostática entera (definición y entregas) para que la siembre de cero con la forma
+/// actual. Las entregas de esa forma eran de prueba, no hay datos reales que conservar. La marca
+/// es `dw1` sin `slot_count`: el editor del admin no lo toca, así que un docente no puede
+/// disparar el borrado. Una sola transacción, como la limpieza de p2-cc.
+pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
+    let legacy: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_quantities \
+         WHERE practice_id = 'hidrostatica' AND symbol = 'dw1' AND slot_count IS NULL",
     )
-    .execute(&mut *tx)
+    .fetch_one(pool)
     .await?;
-    for k in 1..=HIDRO_MEDIDAS {
-        sqlx::query(
-            "UPDATE practice_quantities \
-             SET is_given = 1, repeated = 0, per_point = 0, has_uncertainty = 0, name = ?2, \
-                 slot_count = ?4 \
-             WHERE practice_id = 'hidrostatica' AND symbol = ?1 AND name = ?3",
-        )
-        .bind(format!("dw{k}"))
-        .bind(format!("Medida {k} - ranura de la pesa (1 a 9 cm)"))
-        .bind(format!("Medida {k} - distancia de la pesa a la cruz"))
-        .bind(MOHR_RANURAS as i64)
-        .execute(&mut *tx)
-        .await?;
+    if legacy.0 == 0 {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
+    for sql in [
+        "DELETE FROM submission_measurements WHERE submission_id IN \
+         (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
+        "DELETE FROM submission_student_results WHERE submission_id IN \
+         (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
+        "DELETE FROM report_members WHERE submission_id IN \
+         (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
+        "DELETE FROM submissions WHERE practice_id = 'hidrostatica'",
+        "DELETE FROM practice_quantities WHERE practice_id = 'hidrostatica'",
+        "DELETE FROM practice_results WHERE practice_id = 'hidrostatica'",
+    ] {
+        sqlx::query(sql).execute(&mut *tx).await?;
     }
     tx.commit().await?;
     Ok(())
-}
-
-/// Recorre un `analysis_json` y pasa a kg/m³ los mensurandos de `symbols` que sigan en g/cm³
-/// (valor, u y U), sin depender de en qué sección del análisis aparezcan.
-fn density_to_kg_m3(node: &mut serde_json::Value, symbols: &[&str]) {
-    match node {
-        serde_json::Value::Object(map) => {
-            let is_rho = map
-                .get("symbol")
-                .and_then(|s| s.as_str())
-                .is_some_and(|s| symbols.contains(&s));
-            if is_rho && map.get("unit").and_then(|u| u.as_str()) == Some("g/cm3") {
-                map.insert("unit".into(), "kg/m3".into());
-                for key in ["value", "u", "u_expanded"] {
-                    if let Some(x) = map.get(key).and_then(|x| x.as_f64()) {
-                        map.insert(key.into(), (x * 1000.0).into());
-                    }
-                }
-            }
-            map.values_mut().for_each(|v| density_to_kg_m3(v, symbols));
-        }
-        serde_json::Value::Array(items) => {
-            items.iter_mut().for_each(|v| density_to_kg_m3(v, symbols))
-        }
-        _ => {}
-    }
 }
 
 /// Corrige en bases ya sembradas (antes del 2026-08-07) los nombres/fórmulas de CA/RLC que
@@ -1691,7 +1592,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_filtros(pool).await?;
     seed_ca_rlc(pool).await?;
     fix_ca_rlc_labels(pool).await?;
+    reset_legacy_hidrostatica(pool).await?;
     seed_hidrostatica(pool).await?;
-    fix_hidrostatica(pool).await?;
     Ok(())
 }

@@ -343,7 +343,7 @@ export function renderMeasurementFields() {
           <div class="form-grid">
             <label>Valor
               <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
+                ${q.slot_count ? "" : prefixSelectHtml()}
                 <input class="measure-given-value" type="number" ${q.slot_count ? `min="1" max="${Number(q.slot_count)}" step="1"` : `step="any"`} placeholder="valor"${q.default_value != null ? ` value="${escapeHtml(String(q.default_value))}"` : ""} />
                 <span class="replica-unit">${unitHtml(q.unit)}</span>
               </div>
@@ -641,7 +641,9 @@ function collectStandaloneRow(row) {
   if (row.dataset.isGiven === "1") {
     const valInput = row.querySelector(".measure-given-value");
     const uInput = row.querySelector(".measure-given-u");
-    const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
+    // Cada prefijo se lee de su propio campo: una ranura (`slot_count`) no tiene selector.
+    const prefixOf = (input) => input?.closest(".replica-input-wrap")?.querySelector(".prefix-select")?.value;
+    const [valPrefix, uPrefix] = [prefixOf(valInput), prefixOf(uInput)];
     const rawVal = valInput.value.trim();
     // Sin campo U (magnitud `has_uncertainty: false`, p. ej. t_med): no hay nada que leer, va null.
     const rawU = uInput?.value.trim() ?? "";

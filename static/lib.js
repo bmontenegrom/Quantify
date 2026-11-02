@@ -25,17 +25,22 @@ const CC_BASE_SYMBOLS = new Set(["Vg", "RA", "VR1", "VR2", "VR3", "I"]);
 const GREEK_NAMES = { rho: "ρ", gamma: "γ", mu: "μ", phi: "φ", tau: "τ", omega: "ω" };
 const GREEK_PREFIX = new RegExp(`^(${Object.keys(GREEK_NAMES).join("|")})(?=_|\\d|$)`);
 
+// Subíndices de un símbolo: todo lo que sigue al primer guion bajo, con los guiones siguientes
+// como coma (`f_res_exp` → `f<sub>res,exp</sub>`), o los dígitos pegados a una letra (`R1`).
+const SYMBOL_SUBSCRIPT = /([A-Za-zα-ω])(?:_([A-Za-z0-9/]+(?:_[A-Za-z0-9/]+)*)\b|(\d+(?:\/\d+)?))/g;
+// En texto libre (nombres) solo `_` + 1-2 caracteres (`T_oc`): `tabla_resumen` es una palabra.
+const NAME_SUBSCRIPT = /([A-Za-zα-ω])(?:_([A-Za-z0-9/]{1,2})\b|(\d+(?:\/\d+)?))/g;
+
 /**
- * Subíndices sobre texto ya escapado: lo que sigue a un guion bajo (`E_medio` → `E<sub>medio</sub>`,
- * 1-2 caracteres en mayúscula: `rho_f` → `ρ<sub>F</sub>`) o los dígitos pegados a una letra
- * (`R1` → `R<sub>1</sub>`). Una sola pasada, así `R_load2` no anida `<sub>`.
+ * Aplica `pattern` (uno de los de arriba) sobre texto ya escapado, en una sola pasada para que
+ * `R_load2` no anide `<sub>`. Cada tramo de 1-2 caracteres va en mayúscula (`rho_f` →
+ * `ρ<sub>F</sub>`); las palabras se dejan como están (`E_medio` → `E<sub>medio</sub>`).
  */
-function subscriptHtml(escaped) {
-  return escaped.replace(
-    /([A-Za-zα-ω])(?:_([A-Za-z0-9/]+)\b|(\d+(?:\/\d+)?))/g,
-    (_, base, sub, digits) =>
-      `${base}<sub>${digits ?? (sub.length <= 2 ? sub.toUpperCase() : sub)}</sub>`,
-  );
+function subscriptHtml(escaped, pattern) {
+  return escaped.replace(pattern, (_, base, sub, digits) => {
+    const text = digits ?? sub.split("_").map((s) => (s.length <= 2 ? s.toUpperCase() : s)).join(",");
+    return `${base}<sub>${text}</sub>`;
+  });
 }
 
 /**
@@ -53,9 +58,8 @@ export function symbolHtml(value) {
     // el resto de las magnitudes (R1, rho_e, VR1...) para que la tipografía sea coherente.
     Vg: "V<sub>G</sub>",
     RA: "R<sub>A</sub>",
-    // CA (RLC): voltajes pico a pico (sin guion bajo) y subíndices compuestos ("R,teo"), que el
-    // regex genérico no arma; phi se muestra con el símbolo φ, no la palabra.
-    f_res_exp: "f<sub>res,exp</sub>",
+    // CA (RLC): voltajes pico a pico (sin guion bajo) y subíndices que arrancan antes del guion
+    // bajo ("R,teo"), que el regex genérico no arma; phi se muestra con el símbolo φ.
     VRpp: "V<sub>R,PP</sub>",
     VCpp: "V<sub>C,PP</sub>",
     VLpp: "V<sub>L,PP</sub>",
@@ -76,7 +80,10 @@ export function symbolHtml(value) {
   if (specials[raw]) return specials[raw];
   const base = raw.replace(CC_PART_SUFFIX, "");
   if (base !== raw && CC_BASE_SYMBOLS.has(base)) return symbolHtml(base);
-  return subscriptHtml(escapeHtml(raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]));
+  return subscriptHtml(
+    escapeHtml(raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
+    SYMBOL_SUBSCRIPT,
+  );
 }
 
 /**
@@ -84,7 +91,7 @@ export function symbolHtml(value) {
  * subíndices (`R1`, `t1/2`, `T_oc`) y potencias escritas con `^`.
  */
 export function inlineMathHtml(value) {
-  return subscriptHtml(escapeHtml(value)).replace(/\^(-?\d+)/g, "<sup>$1</sup>");
+  return subscriptHtml(escapeHtml(value), NAME_SUBSCRIPT).replace(/\^(-?\d+)/g, "<sup>$1</sup>");
 }
 
 /** Escapa y formatea unidades simples: `m3`, `m/s2`, `kg/m3`, `R^2`. */
