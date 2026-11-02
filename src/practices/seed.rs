@@ -1308,7 +1308,7 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
         quantities.push(slots(
             no_u(qty_given(
                 &format!("dw{k}"),
-                &format!("Medida {k} - ranura de la pesa (1 a 9 cm)"),
+                &format!("Medida {k} - ranura de la pesa (cm)"),
                 "cm",
                 "longitud",
             )),
