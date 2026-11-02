@@ -1282,11 +1282,11 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     }
     // Parte 2 (Wilhelmy): sobre la misma balanza de Mohr, asi que las distancias son las ranuras
     // calibradas, no medidas con regla. El marco cuelga del brazo fijo (10 cm, como la goma) y la
-    // pesa va en una de las 9 ranuras: el alumno anota en cual (1..9 cm), con la incertidumbre de
-    // calibracion de la balanza, no la de una regla.
+    // pesa va en una de las 9 ranuras: el alumno anota en cual (1..9 cm). Sin campo U: todos los
+    // mensurandos de la parte 2 son `res_no_u`, asi que una U de la ranura no se mostraria nunca.
     quantities.push(qty_shared("l", "Base del marco", "cm", "longitud"));
     quantities.push(with_default(
-        qty_given("d", "Brazo fijo del marco", "cm", "longitud"),
+        no_u(qty_given("d", "Brazo fijo del marco", "cm", "longitud")),
         10.0,
     ));
     for k in 1..=HIDRO_MEDIDAS {
@@ -1296,12 +1296,12 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
             "g",
             "masa",
         ));
-        quantities.push(qty_given(
+        quantities.push(no_u(qty_given(
             &format!("dw{k}"),
             &format!("Medida {k} - ranura de la pesa (1 a 9 cm)"),
             "cm",
             "longitud",
-        ));
+        )));
     }
 
     // sum(m_i * b_i) de la determinacion k, en g*cm.
@@ -1370,38 +1370,84 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
 
 /// Corrige en bases ya sembradas (`seed_hidrostatica` es idempotente y no re-siembra) dos cosas:
 /// la densidad de la goma pasa de g/cm³ a kg/m³, y las distancias de la parte 2 (Wilhelmy) pasan
-/// de medirse con regla a ser las ranuras de la balanza de Mohr. Cada bloque está gateado por el
-/// estado viejo, así que corre una sola vez y no pisa ediciones del docente.
+/// de medirse con regla a ser las ranuras de la balanza de Mohr. Cada bloque está gateado por la
+/// fórmula/nombre de la siembra original (no solo por la unidad o `is_given`, que el docente puede
+/// volver a poner), así que corre una sola vez y no pisa ediciones del docente.
 pub(super) async fn fix_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
-    sqlx::query(
-        "UPDATE practice_results SET unit = 'kg/m3', formula = '(' || formula || ')*1000' \
-         WHERE practice_id = 'hidrostatica' AND unit = 'g/cm3' \
-         AND symbol IN ('rho1', 'rho2', 'rho3', 'rho_medio')",
+    let mut tx = pool.begin().await?;
+    let migrated = sqlx::query(
+        "UPDATE practice_results SET unit = 'kg/m3', formula = '(' || formula || ')*1000'          WHERE practice_id = 'hidrostatica' AND unit = 'g/cm3' AND formula NOT LIKE '%*1000%'          AND symbol IN ('rho1', 'rho2', 'rho3', 'rho_medio')",
     )
-    .execute(pool)
-    .await?;
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    // Las entregas ya hechas guardan la densidad en g/cm³ (el cálculo del alumno y la foto del
+    // análisis): se pasan a kg/m³ en la misma transacción, para que la comparación siga cerrando.
+    if migrated > 0 {
+        sqlx::query(
+            "UPDATE submission_student_results              SET value = value * 1000, u_expanded = u_expanded * 1000              WHERE symbol IN ('rho1', 'rho2', 'rho3', 'rho_medio') AND submission_id IN              (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
+        )
+        .execute(&mut *tx)
+        .await?;
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT id, analysis_json FROM submissions WHERE practice_id = 'hidrostatica'",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        for (id, json) in rows {
+            let mut analysis: serde_json::Value = serde_json::from_str(&json)?;
+            density_to_kg_m3(&mut analysis);
+            sqlx::query("UPDATE submissions SET analysis_json = ?2 WHERE id = ?1")
+                .bind(id)
+                .bind(serde_json::to_string(&analysis)?)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
 
     // Wilhelmy sobre la misma balanza de Mohr: `d` es el brazo fijo (10 cm) y `dw_k` la ranura
-    // elegida, ambos datos dados con la incertidumbre de calibración de la balanza.
+    // elegida, ambos datos dados sin campo U (ver `seed_hidrostatica`).
     sqlx::query(
-        "UPDATE practice_quantities \
-         SET is_given = 1, repeated = 0, per_point = 0, name = 'Brazo fijo del marco', \
-             default_value = 10.0 \
-         WHERE practice_id = 'hidrostatica' AND symbol = 'd' AND is_given = 0",
+        "UPDATE practice_quantities          SET is_given = 1, repeated = 0, per_point = 0, has_uncertainty = 0,              name = 'Brazo fijo del marco', default_value = 10.0          WHERE practice_id = 'hidrostatica' AND symbol = 'd'          AND name = 'Distancia del marco a la cruz'",
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
     for k in 1..=HIDRO_MEDIDAS {
         sqlx::query(
-            "UPDATE practice_quantities SET is_given = 1, repeated = 0, per_point = 0, name = ?2 \
-             WHERE practice_id = 'hidrostatica' AND symbol = ?1 AND is_given = 0",
+            "UPDATE practice_quantities              SET is_given = 1, repeated = 0, per_point = 0, has_uncertainty = 0, name = ?2              WHERE practice_id = 'hidrostatica' AND symbol = ?1 AND name = ?3",
         )
         .bind(format!("dw{k}"))
         .bind(format!("Medida {k} - ranura de la pesa (1 a 9 cm)"))
-        .execute(pool)
+        .bind(format!("Medida {k} - distancia de la pesa a la cruz"))
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
     Ok(())
+}
+
+/// Recorre un `analysis_json` y pasa a kg/m³ todo mensurando de densidad de la goma que siga en
+/// g/cm³ (valor, u y U), sin depender de en qué sección del análisis aparezca.
+fn density_to_kg_m3(node: &mut serde_json::Value) {
+    match node {
+        serde_json::Value::Object(map) => {
+            let is_rho = matches!(
+                map.get("symbol").and_then(|s| s.as_str()),
+                Some("rho1" | "rho2" | "rho3" | "rho_medio")
+            );
+            if is_rho && map.get("unit").and_then(|u| u.as_str()) == Some("g/cm3") {
+                map.insert("unit".into(), "kg/m3".into());
+                for key in ["value", "u", "u_expanded"] {
+                    if let Some(x) = map.get(key).and_then(|x| x.as_f64()) {
+                        map.insert(key.into(), (x * 1000.0).into());
+                    }
+                }
+            }
+            map.values_mut().for_each(density_to_kg_m3);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(density_to_kg_m3),
+        _ => {}
+    }
 }
 
 /// Corrige en bases ya sembradas (antes del 2026-08-07) los nombres/fórmulas de CA/RLC que

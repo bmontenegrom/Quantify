@@ -115,6 +115,15 @@ test("symbolHtml muestra los nombres de letras griegas como la letra", () => {
   assert.equal(symbolHtml("gamma1"), "γ<sub>1</sub>");
   assert.equal(symbolHtml("mu_agua"), "μ<sub>agua</sub>");
   assert.equal(symbolHtml("tau_exp"), "τ<sub>exp</sub>");
+  // Solo si el nombre griego termina ahí: `mult`/`taux` son símbolos propios, no μ/τ.
+  assert.equal(symbolHtml("mult"), "mult");
+  assert.equal(symbolHtml("taux"), "taux");
+  assert.equal(symbolHtml("rhoA_b"), "rhoA<sub>B</sub>");
+});
+
+test("symbolHtml no anida subíndices y inlineMathHtml usa la misma regla", () => {
+  assert.equal(symbolHtml("R_load2"), "R<sub>load2</sub>");
+  assert.equal(inlineMathHtml("Energía E_medio"), "Energía E<sub>medio</sub>");
 });
 
 test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)", () => {

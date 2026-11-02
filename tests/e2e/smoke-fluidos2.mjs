@@ -13,7 +13,7 @@
 // Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
 // E2E_SKIP_BUILD, E2E_HEADED.
 
-import { ARTIFACTS, STUDENT, TEACHER, assert, step, withE2E } from "./lib.mjs";
+import { ARTIFACTS, STUDENT, TEACHER, assert, step, symbolText, withE2E } from "./lib.mjs";
 import { join } from "node:path";
 
 const PORT = process.env.E2E_PORT ?? "8137";
@@ -113,10 +113,8 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   step("docente: ve el ajuste, M_medio y la tabla de mensurandos agregados");
   const detail = (await tPage.locator("#submission-detail-body").textContent()) ?? "";
   assert(/Mensurandos agregados/.test(detail), "el docente debía ver la tabla de mensurandos agregados");
-  // Los símbolos se muestran con subíndice (M_medio -> M<sub>medio</sub>), así que en el texto
-  // plano llegan sin el guion bajo.
-  for (const sym of ["Mmedio", "Remax", "Remin", "Remedio", "Mteorico"]) {
-    assert(detail.includes(sym), `el análisis debía mostrar ${sym}`);
+  for (const sym of ["M_medio", "Re_max", "Re_min", "Re_medio", "M_teorico"]) {
+    assert(detail.includes(symbolText(sym)), `el análisis debía mostrar ${sym}`);
   }
   await tPage.screenshot({ path: join(ARTIFACTS, "fluidos2-analisis.png"), fullPage: true });
 
@@ -128,7 +126,7 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
 
   step("docente: agrega una magnitud sin unidad (adimensional)");
   const qForm = tPage.locator("#new-quantity-form");
-  await qForm.locator('input[name="symbol"]').fill("factorTest");
+  await qForm.locator('input[name="symbol"]').fill("factor_test");
   await qForm.locator('input[name="name"]').fill("Factor de prueba adimensional");
   // Unidad: la dejamos vacía a propósito.
   await qForm.locator('input[name="unit"]').fill("");
@@ -140,7 +138,7 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
     { timeout: 10_000 },
   );
   const adminText = (await tPage.locator("#practice-workspace").textContent()) ?? "";
-  assert(adminText.includes("factorTest"), "la magnitud adimensional debía aparecer en la lista");
+  assert(adminText.includes(symbolText("factor_test")), "la magnitud adimensional debía aparecer en la lista");
   assert(adminText.includes("adimensional"), 'la unidad vacía debía mostrarse como "adimensional"');
   assert(
     !adminText.includes("datos de magnitud invalidos"),
