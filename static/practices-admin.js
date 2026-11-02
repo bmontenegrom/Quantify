@@ -4,6 +4,12 @@ import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
 import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel } from "./lib.js";
 import { selectView } from "./navigation.js";
 
+/// Símbolo tal como se ve (ρ<sub>F</sub>) y, al lado, tal como se escribe en las fórmulas (`rho_f`):
+/// el docente necesita el crudo para no tipear `ρ_F` en una fórmula.
+function adminSymbolHtml(symbol) {
+  return `<strong>${symbolHtml(symbol)}</strong> <code title="Así se escribe en las fórmulas">${escapeHtml(symbol)}</code>`;
+}
+
 /// `point_results`, `aggregates` e `intermediates` son, en el admin, la misma forma —
 /// símbolo/nombre/unidad/fórmula con alta/edición/borrado — y solo cambian de endpoint, de clave
 /// de estado "en edición" y de textos. `curves` (otras columnas, sin nombre/unidad, con
@@ -108,7 +114,7 @@ function renderSymbolFormulaList(kind, def, practiceId) {
     const finalCell = kind.hasFinal ? `<td>${item.is_final ? "Sí" : "—"}</td>` : "";
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${symbolHtml(item.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(item.name)}${item.unit ? ` (${unitHtml(item.unit)})` : " (adimensional)"}</span></td>
+        <td class="directory-primary">${adminSymbolHtml(item.symbol)} <span class="submission-meta">${inlineMathHtml(item.name)}${item.unit ? ` (${unitHtml(item.unit)})` : " (adimensional)"}</span></td>
         <td><code>${escapeHtml(item.formula)}</code></td>
         ${finalCell}
         <td class="directory-actions">
@@ -616,6 +622,9 @@ function renderQuantityForm(qty, practiceId) {
         <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />
         Opcional (puede quedar sin lecturas sin bloquear la entrega)
       </label>
+      <label>Ranuras del instrumento (el valor es un entero de 1 a N, en la unidad de arriba)
+        <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" />
+      </label>
       <div class="detail-actions">
         <button type="submit">${qty ? "Guardar" : "Agregar"}</button>
         ${qty ? `<button type="button" data-cancel-quantity>Cancelar</button>` : ""}
@@ -632,7 +641,7 @@ function renderQuantitiesList(def, practiceId) {
     const editing = isEditing("quantity", q.id);
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${symbolHtml(q.symbol)}</strong></td>
+        <td class="directory-primary">${adminSymbolHtml(q.symbol)}</td>
         <td>${inlineMathHtml(q.name)}</td>
         <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
@@ -703,7 +712,7 @@ function renderResultsList(def, practiceId) {
     const editing = isEditing("result", r.id);
     const baseRow = `
       <tr>
-        <td class="directory-primary"><strong>${symbolHtml(r.symbol)}</strong></td>
+        <td class="directory-primary">${adminSymbolHtml(r.symbol)}</td>
         <td>${inlineMathHtml(r.name)}</td>
         <td>${r.unit ? unitHtml(r.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td><code>${escapeHtml(r.formula)}</code></td>
@@ -806,6 +815,7 @@ function quantityPayloadFromForm(form) {
     is_given: "is_given" in raw,
     has_uncertainty: "has_uncertainty" in raw,
     optional: "optional" in raw,
+    slot_count: raw.slot_count ? Number(raw.slot_count) : null,
   };
 }
 

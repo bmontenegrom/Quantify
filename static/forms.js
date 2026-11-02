@@ -18,7 +18,7 @@ import {
 } from "./constants.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
-  groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
+  givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
   replicaInputHtml, cellReplicaValues,
 } from "./forms-shared.js";
 import {
@@ -343,8 +343,7 @@ export function renderMeasurementFields() {
           <div class="form-grid">
             <label>Valor
               <div class="replica-input-wrap">
-                ${q.slot_count ? "" : prefixSelectHtml()}
-                <input class="measure-given-value" type="number" ${q.slot_count ? `min="1" max="${Number(q.slot_count)}" step="1"` : `step="any"`} placeholder="valor"${q.default_value != null ? ` value="${escapeHtml(String(q.default_value))}"` : ""} />
+                ${givenValueInputHtml(q)}
                 <span class="replica-unit">${unitHtml(q.unit)}</span>
               </div>
             </label>

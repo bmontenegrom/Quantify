@@ -3,7 +3,7 @@ import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
 import { escapeHtml, symbolHtml, unitHtml, format, prefixFactor, pointPower, flowRate, compatibleInstruments, canReview, hasUncertainty } from "./lib.js";
 import { PRACTICE_SECTIONS, PRACTICE_PARTS, SERIES_LIVE_COLUMNS } from "./constants.js";
-import { groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
+import { givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireRemoveReplica, collectMeasurements } from "./forms.js";
 
@@ -252,7 +252,7 @@ function sharedRowHtml(q) {
         <legend>${quantityNameHtml(q)}</legend>
         <div class="form-grid">
           <label>Valor
-            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-value" type="number" step="any" placeholder="valor" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
+            <div class="replica-input-wrap">${givenValueInputHtml(q)}<span class="replica-unit">${unitHtml(q.unit)}</span></div>
           </label>
           ${uField}
         </div>

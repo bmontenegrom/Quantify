@@ -1814,7 +1814,15 @@ async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
             .unwrap();
     assert_eq!(left.0, 0);
 
-    // Base ya actual: una entrega nueva sobrevive al proximo arranque.
+    // Ya corrio: aunque el docente recree `dw1` desde el admin (sin slot_count, la marca de la
+    // forma vieja), una entrega nueva sobrevive al proximo arranque.
+    sqlx::query(
+        "UPDATE practice_quantities SET slot_count = NULL \
+         WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
          csv_path, analysis_json, submitted_at) \

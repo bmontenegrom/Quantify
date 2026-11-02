@@ -26,8 +26,10 @@ const GREEK_NAMES = { rho: "ρ", gamma: "γ", mu: "μ", phi: "φ", tau: "τ", om
 const GREEK_PREFIX = new RegExp(`^(${Object.keys(GREEK_NAMES).join("|")})(?=_|\\d|$)`);
 
 // Subíndices de un símbolo: todo lo que sigue al primer guion bajo, con los guiones siguientes
-// como coma (`f_res_exp` → `f<sub>res,exp</sub>`), o los dígitos pegados a una letra (`R1`).
-const SYMBOL_SUBSCRIPT = /([A-Za-zα-ω])(?:_([A-Za-z0-9/]+(?:_[A-Za-z0-9/]+)*)\b|(\d+(?:\/\d+)?))/g;
+// como coma (`f_res_exp` → `f<sub>res,exp</sub>`), o los dígitos pegados a una letra con lo que
+// les siga tras un guion bajo (`R1`, `m1_2` → `m<sub>1,2</sub>`).
+const SYMBOL_SUBSCRIPT =
+  /([A-Za-zα-ω])(?:_([A-Za-z0-9/]+(?:_[A-Za-z0-9/]+)*)\b|(\d+(?:\/\d+)?(?:_[A-Za-z0-9/]+)*))/g;
 // En texto libre (nombres) solo `_` + 1-2 caracteres (`T_oc`): `tabla_resumen` es una palabra.
 const NAME_SUBSCRIPT = /([A-Za-zα-ω])(?:_([A-Za-z0-9/]{1,2})\b|(\d+(?:\/\d+)?))/g;
 
@@ -38,7 +40,8 @@ const NAME_SUBSCRIPT = /([A-Za-zα-ω])(?:_([A-Za-z0-9/]{1,2})\b|(\d+(?:\/\d+)?)
  */
 function subscriptHtml(escaped, pattern) {
   return escaped.replace(pattern, (_, base, sub, digits) => {
-    const text = digits ?? sub.split("_").map((s) => (s.length <= 2 ? s.toUpperCase() : s)).join(",");
+    const parts = (sub ?? digits).split("_");
+    const text = parts.map((s) => (s.length <= 2 ? s.toUpperCase() : s)).join(",");
     return `${base}<sub>${text}</sub>`;
   });
 }

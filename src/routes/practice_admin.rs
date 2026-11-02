@@ -810,6 +810,12 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
             "La magnitud necesita un simbolo y un nombre. La unidad puede quedar vacia (adimensional).",
         ));
     }
+    // 0 o negativo dejaría el rango 1..=n vacío y rechazaría toda entrega de la práctica.
+    if input.slot_count.is_some_and(|n| n < 1) {
+        return Err(AppError::bad_request(
+            "La cantidad de ranuras tiene que ser un entero de 1 en adelante (vacio = sin restriccion).",
+        ));
+    }
     Ok(())
 }
 
@@ -1039,6 +1045,14 @@ mod tests {
             ..q("")
         })
         .is_err());
+        // Ranuras: 0 o negativo vaciarian el rango 1..=n; 1 en adelante es valido.
+        for (n, ok) in [(0, false), (-3, false), (1, true), (9, true)] {
+            let input = QuantityInput {
+                slot_count: Some(n),
+                ..q("cm")
+            };
+            assert_eq!(validate_quantity(&input).is_ok(), ok, "slot_count = {n}");
+        }
     }
 
     #[test]

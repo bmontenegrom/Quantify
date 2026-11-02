@@ -563,7 +563,7 @@ pub async fn create_quantity(
 
 /// Actualiza los datos de una magnitud. Devuelve `None` si no existe.
 ///
-// ponytail: `default_value` y `slot_count` quedan fuera del UPDATE a propósito. Lo pone el seed y el editor del
+// ponytail: `default_value` queda fuera del UPDATE a propósito. Lo pone el seed y el editor del
 // admin no lo manda, así que incluirlo aquí lo borraría al editar cualquier otro campo. Se agrega
 // al editor (y al UPDATE) si el docente necesita cambiarlo.
 pub async fn update_quantity(
@@ -574,7 +574,8 @@ pub async fn update_quantity(
     let result = sqlx::query(
         "UPDATE practice_quantities \
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
-             replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11 \
+             replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11, \
+             slot_count = ?12 \
          WHERE id = ?1",
     )
     .bind(quantity_id)
@@ -588,6 +589,7 @@ pub async fn update_quantity(
     .bind(input.per_point)
     .bind(input.has_uncertainty)
     .bind(input.optional)
+    .bind(input.slot_count)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {

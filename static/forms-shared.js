@@ -25,6 +25,14 @@ export function prefixSelectHtml() {
   return `<select class="prefix-select" title="Prefijo SI">${opts}</select>`;
 }
 
+/** Prefijo + input del valor de un dato dado (estadístico y regresión). Una ranura (`slot_count`)
+ *  no lleva prefijo SI y solo acepta un entero de 1 a N; el motor lo vuelve a validar. */
+export function givenValueInputHtml(q) {
+  const attrs = q.slot_count ? `min="1" max="${Number(q.slot_count)}" step="1"` : `step="any"`;
+  const value = q.default_value != null ? ` value="${escapeHtml(String(q.default_value))}"` : "";
+  return `${q.slot_count ? "" : prefixSelectHtml()}<input class="measure-given-value" type="number" ${attrs} placeholder="valor"${value} />`;
+}
+
 /** `defaultValue` (opcional) precarga el campo: lo usan las magnitudes con `default_value` en la
  *  definición (Hidrostática: ranuras vacías de la balanza de Mohr en 0). Las réplicas agregadas a
  *  mano después no lo llevan. */

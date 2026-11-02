@@ -535,6 +535,19 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
+    // Migraciones de datos de una sola vez (resiembras de definiciones, limpiezas): cada una se
+    // registra al correr y no vuelve a correr, aunque más tarde la base vuelva a parecer vieja.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS applied_migrations (
+            name       TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     // Mesa por defecto del alumno por grupo (pre-rellena el formulario; puede variar por práctica).
     sqlx::query(
         r#"

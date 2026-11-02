@@ -1238,14 +1238,18 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     // Las 9 ranuras se cargan siempre: la que no se uso queda en masa 0 (`with_default`, el
     // formulario ya la trae en 0) y sin instrumento, asi que no aporta ni valor ni incertidumbre.
     //
-    // Parte 2 (tension superficial por el metodo de Wilhelmy): con el marco de base l colgado a
-    // distancia d de la cruz, el torque de la pelicula se sustituye por el de una pesa mw a
-    // distancia dw:  2*gamma*l*d = mw*g*dw  =>  gamma = mw*g*dw/(2*l*d). La tecnica indica
-    // explicitamente que esta parte **no informa incertidumbre**, de ahi los `res_no_u`.
+    // Parte 2 (tension superficial por el metodo de Wilhelmy), sobre la misma balanza de Mohr: el
+    // marco de base l cuelga del brazo fijo d (10 cm, dato dado como b_E) y el torque de la
+    // pelicula se sustituye por el de una pesa mw en una de las 9 ranuras, dw = 1..9 cm (dato
+    // dado, `slot_count` = 9, no una distancia medida con regla):
+    //     2*gamma*l*d = mw*g*dw  =>  gamma = mw*g*dw/(2*l*d)
+    // La tecnica indica explicitamente que esta parte **no informa incertidumbre**, de ahi los
+    // `res_no_u` y que d/dw_k no tengan campo U (`no_u`).
     //
     // Unidades: masas en g y brazos/distancias en cm (como se leen), asi que las formulas de E y
     // gamma llevan los factores de conversion a kg/m explicitos para dar N y N/m. En rho_goma las
-    // unidades se cancelan (es un cociente) y el resultado sale en las unidades de rho_f.
+    // unidades se cancelan (es un cociente) y quedaria en las de rho_f (g/cm3, como lo lee el
+    // densimetro); se multiplica por 1000 para informarla en kg/m3.
     //
     // El motor `estadistico` no encadena mensurandos entre si (cada formula se evalua solo contra
     // las magnitudes), asi que las sumas y los promedios van expandidos, como en `seed_ca_rlc`.
@@ -1381,36 +1385,72 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Nombre con el que [`reset_legacy_hidrostatica`] queda registrada en `applied_migrations`.
+const HIDRO_RESET: &str = "2026-11-hidrostatica-ranuras";
+
 /// Bases sembradas antes de que la parte 2 usara las ranuras de la balanza (densidad en g/cm³,
 /// `d`/`dw_k` medidos con regla): `seed_hidrostatica` es idempotente y no re-siembra, así que se
 /// borra Hidrostática entera (definición y entregas) para que la siembre de cero con la forma
-/// actual. Las entregas de esa forma eran de prueba, no hay datos reales que conservar. La marca
-/// es `dw1` sin `slot_count`: el editor del admin no lo toca, así que un docente no puede
-/// disparar el borrado. Una sola transacción, como la limpieza de p2-cc.
+/// actual. Las entregas de esa forma eran de prueba (decisión de la cátedra): no se conservan.
+///
+/// Corre **una sola vez** por base (queda en `applied_migrations`): la marca de forma vieja (`dw1`
+/// sin `slot_count`) solo se mira esa vez, así que un docente que después recrea `dw1` desde el
+/// admin no dispara otro borrado. Todo en una transacción, como la limpieza de p2-cc. No toca la
+/// asignación de la práctica a cursos ni a mesas, solo su definición y sus entregas.
 pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
+    let done: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+        .bind(HIDRO_RESET)
+        .fetch_one(pool)
+        .await?;
+    if done.0 > 0 {
+        return Ok(());
+    }
     let legacy: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM practice_quantities \
          WHERE practice_id = 'hidrostatica' AND symbol = 'dw1' AND slot_count IS NULL",
     )
     .fetch_one(pool)
     .await?;
-    if legacy.0 == 0 {
-        return Ok(());
-    }
     let mut tx = pool.begin().await?;
-    for sql in [
-        "DELETE FROM submission_measurements WHERE submission_id IN \
-         (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
-        "DELETE FROM submission_student_results WHERE submission_id IN \
-         (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
-        "DELETE FROM report_members WHERE submission_id IN \
-         (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
-        "DELETE FROM submissions WHERE practice_id = 'hidrostatica'",
-        "DELETE FROM practice_quantities WHERE practice_id = 'hidrostatica'",
-        "DELETE FROM practice_results WHERE practice_id = 'hidrostatica'",
-    ] {
-        sqlx::query(sql).execute(&mut *tx).await?;
+    if legacy.0 > 0 {
+        for sql in [
+            "DELETE FROM submission_measurements WHERE submission_id IN \
+             (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
+            "DELETE FROM submission_student_results WHERE submission_id IN \
+             (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
+            "DELETE FROM report_members WHERE submission_id IN \
+             (SELECT id FROM submissions WHERE practice_id = 'hidrostatica')",
+        ] {
+            sqlx::query(sql).execute(&mut *tx).await?;
+        }
+        let submissions = sqlx::query("DELETE FROM submissions WHERE practice_id = 'hidrostatica'")
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        for table in [
+            "practice_point_results",
+            "practice_aggregates",
+            "practice_curves",
+            "practice_intermediates",
+            "practice_results",
+            "practice_quantities",
+        ] {
+            sqlx::query(&format!(
+                "DELETE FROM {table} WHERE practice_id = 'hidrostatica'"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        tracing::warn!(
+            submissions,
+            "Hidrostática tenía la forma vieja: se borró (definición y entregas) para resembrarla"
+        );
     }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(HIDRO_RESET)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
