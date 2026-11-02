@@ -501,34 +501,65 @@ pub async fn move_curve(
     curve_id: &str,
     up: bool,
 ) -> anyhow::Result<bool> {
+    move_item(pool, Orderable::Curves, practice_id, curve_id, up).await
+}
+
+/// Listas de una práctica que el docente puede reordenar.
+#[derive(Debug, Clone, Copy)]
+pub enum Orderable {
+    Curves,
+    Quantities,
+    Results,
+}
+
+impl Orderable {
+    /// Tabla y orden con que la lista sale en la definición (el desempate de posiciones repetidas
+    /// tiene que ser el mismo, o "subir" movería otro elemento que el que ve el docente).
+    fn table_and_order(self) -> (&'static str, &'static str) {
+        match self {
+            Orderable::Curves => ("practice_curves", "position, id"),
+            Orderable::Quantities => ("practice_quantities", "position, symbol"),
+            Orderable::Results => ("practice_results", "position, symbol"),
+        }
+    }
+}
+
+/// Mueve un elemento de una lista de la práctica una posición arriba (`up`) o abajo. Devuelve
+/// `false` si no existe o ya está en el extremo. Renumera toda la lista (0, 1, 2…) con el
+/// intercambio aplicado, así funciona aunque haya posiciones repetidas (siembras viejas).
+pub async fn move_item(
+    pool: &SqlitePool,
+    list: Orderable,
+    practice_id: &str,
+    item_id: &str,
+    up: bool,
+) -> anyhow::Result<bool> {
+    let (table, order) = list.table_and_order();
     // Lee y reordena dentro de la misma transacción: así dos reordenamientos concurrentes no se
     // pisan (SQLite aborta el segundo con un error de snapshot en vez de corromper el orden).
     let mut tx = pool.begin().await?;
-    let curves = sqlx::query_as::<_, PracticeCurve>(
-        "SELECT id, practice_id, position, x_formula, y_formula, x_log \
-         FROM practice_curves WHERE practice_id = ?1 ORDER BY position, id",
-    )
+    let mut ids: Vec<String> = sqlx::query_scalar(&format!(
+        "SELECT id FROM {table} WHERE practice_id = ?1 ORDER BY {order}"
+    ))
     .bind(practice_id)
     .fetch_all(&mut *tx)
     .await?;
-    let Some(idx) = curves.iter().position(|c| c.id == curve_id) else {
+    let Some(idx) = ids.iter().position(|id| id == item_id) else {
         return Ok(false);
     };
     let neighbor = if up {
         idx.checked_sub(1)
     } else {
-        Some(idx + 1).filter(|&j| j < curves.len())
+        Some(idx + 1).filter(|&j| j < ids.len())
     };
     let Some(j) = neighbor else {
         return Ok(false);
     };
-    for (id, position) in [
-        (&curves[idx].id, curves[j].position),
-        (&curves[j].id, curves[idx].position),
-    ] {
-        sqlx::query("UPDATE practice_curves SET position = ?2 WHERE id = ?1")
+    ids.swap(idx, j);
+    for (position, id) in ids.iter().enumerate() {
+        sqlx::query(&format!("UPDATE {table} SET position = ?2 WHERE id = ?1"))
             .bind(id)
-            .bind(position)
+            .bind(position as i64)
             .execute(&mut *tx)
             .await?;
     }
@@ -561,11 +592,8 @@ pub async fn create_quantity(
     fetch_quantity(pool, &id).await
 }
 
-/// Actualiza los datos de una magnitud. Devuelve `None` si no existe.
-///
-// ponytail: `default_value` queda fuera del UPDATE a propósito. Lo pone el seed y el editor del
-// admin no lo manda, así que incluirlo aquí lo borraría al editar cualquier otro campo. Se agrega
-// al editor (y al UPDATE) si el docente necesita cambiarlo.
+/// Actualiza los datos de una magnitud, incluido `default_value` (el editor del admin lo manda
+/// siempre, precargado con el actual). Devuelve `None` si no existe.
 pub async fn update_quantity(
     pool: &SqlitePool,
     quantity_id: &str,
@@ -575,7 +603,7 @@ pub async fn update_quantity(
         "UPDATE practice_quantities \
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
              replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11, \
-             slot_count = ?12 \
+             slot_count = ?12, default_value = ?13 \
          WHERE id = ?1",
     )
     .bind(quantity_id)
@@ -590,6 +618,7 @@ pub async fn update_quantity(
     .bind(input.has_uncertainty)
     .bind(input.optional)
     .bind(input.slot_count)
+    .bind(input.default_value)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {

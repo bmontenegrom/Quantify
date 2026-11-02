@@ -342,8 +342,8 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("[data-delete-curve]").forEach((btn) => {
     btn.addEventListener("click", () => deletePracticeCurve(btn.dataset.cid, practice.id));
   });
-  practiceWorkspace.querySelectorAll("[data-move-curve]").forEach((btn) => {
-    btn.addEventListener("click", () => movePracticeCurve(btn.dataset.cid, practice.id, btn.dataset.dir));
+  practiceWorkspace.querySelectorAll("[data-move]").forEach((btn) => {
+    btn.addEventListener("click", () => movePracticeItem(btn.dataset.move, btn.dataset.id, practice.id, btn.dataset.dir));
   });
   practiceWorkspace.querySelectorAll("[data-cancel-curve]").forEach((btn) => {
     btn.addEventListener("click", () => { state.editing = { kind: null, id: null }; renderPracticesPage(); });
@@ -587,8 +587,7 @@ function renderCurvesList(def, practiceId) {
         <td><code>${escapeHtml(c.x_formula)}</code>${c.x_log ? ' <span class="submission-meta">(log)</span>' : ""}</td>
         <td><code>${escapeHtml(c.y_formula)}</code></td>
         <td class="directory-actions">
-          <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="up" title="Subir" ${i === 0 ? "disabled" : ""}>▲</button>
-          <button type="button" data-move-curve data-cid="${escapeHtml(c.id)}" data-dir="down" title="Bajar" ${i === curves.length - 1 ? "disabled" : ""}>▼</button>
+          ${moveButtonsHtml("curves", c.id, i, curves.length)}
           <button type="button" data-edit-curve data-cid="${escapeHtml(c.id)}">${editing ? "Cerrar" : "Editar"}</button>
           <button type="button" class="btn-danger" data-delete-curve data-cid="${escapeHtml(c.id)}">Eliminar</button>
         </td>
@@ -646,6 +645,9 @@ function renderQuantityForm(qty, practiceId) {
         <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />
         Opcional (puede quedar sin lecturas sin bloquear la entrega)
       </label>
+      <label>Valor inicial (precargado en el formulario del alumno)
+        <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" />
+      </label>
       <label>Ranuras del instrumento (el valor es un entero de 1 a N, en la unidad de arriba)
         <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" />
       </label>
@@ -661,7 +663,7 @@ function renderQuantitiesList(def, practiceId) {
   const quantities = def?.quantities ?? [];
   if (quantities.length === 0) return `<p class="submission-meta">Sin magnitudes. Agregá una con «Nueva magnitud».</p>`;
 
-  const rows = quantities.flatMap((q) => {
+  const rows = quantities.flatMap((q, i) => {
     const editing = isEditing("quantity", q.id);
     const baseRow = `
       <tr>
@@ -671,6 +673,7 @@ function renderQuantitiesList(def, practiceId) {
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
         <td>${q.repeated ? "Sí" : "No"}</td>
         <td class="directory-actions">
+          ${moveButtonsHtml("quantities", q.id, i, quantities.length)}
           <button type="button" data-edit-quantity data-qid="${escapeHtml(q.id)}">${editing ? "Cerrar" : "Editar"}</button>
           <button type="button" class="btn-danger" data-delete-quantity data-qid="${escapeHtml(q.id)}">Eliminar</button>
         </td>
@@ -730,7 +733,7 @@ function renderResultsList(def, practiceId) {
   const results = def?.results ?? [];
   if (results.length === 0) return `<p class="submission-meta">Sin mensurandos. Agregá uno con «Nuevo mensurando».</p>`;
 
-  const rows = results.flatMap((r) => {
+  const rows = results.flatMap((r, i) => {
     const tolLabel = r.tolerance != null ? `${escapeHtml(String(r.tolerance))} %` : `<span class="submission-meta">—</span>`;
     const finalLabel = r.is_final ? "Sí" : "";
     const editing = isEditing("result", r.id);
@@ -743,6 +746,7 @@ function renderResultsList(def, practiceId) {
         <td>${tolLabel}</td>
         <td>${finalLabel}</td>
         <td class="directory-actions">
+          ${moveButtonsHtml("results", r.id, i, results.length)}
           <button type="button" data-edit-result data-rid="${escapeHtml(r.id)}">${editing ? "Cerrar" : "Editar"}</button>
           <button type="button" class="btn-danger" data-delete-result data-rid="${escapeHtml(r.id)}">Eliminar</button>
         </td>
@@ -845,6 +849,7 @@ function quantityPayloadFromForm(form) {
     has_uncertainty: "has_uncertainty" in raw,
     optional: "optional" in raw,
     slot_count: slots,
+    default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
   };
 }
 
@@ -927,9 +932,17 @@ async function saveEditCurve(event) {
   );
 }
 
-async function movePracticeCurve(cid, practiceId, dir) {
+/** Botones ▲▼ para reordenar un elemento de una lista de la práctica (`list` = segmento de la API). */
+function moveButtonsHtml(list, id, index, total) {
+  const attrs = `data-move="${list}" data-id="${escapeHtml(id)}"`;
+  return `
+    <button type="button" ${attrs} data-dir="up" title="Subir" ${index === 0 ? "disabled" : ""}>▲</button>
+    <button type="button" ${attrs} data-dir="down" title="Bajar" ${index === total - 1 ? "disabled" : ""}>▼</button>`;
+}
+
+async function movePracticeItem(list, id, practiceId, dir) {
   await runPracticeAction(async () => {
-    await postJson(`/api/practices/${practiceId}/curves/${cid}/move`, { up: dir === "up" });
+    await postJson(`/api/practices/${practiceId}/${list}/${id}/move`, { up: dir === "up" });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
   }, state.practiceActionStatus);
 }

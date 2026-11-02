@@ -244,10 +244,10 @@ pub(super) async fn update_curve(
     Ok(Json(updated))
 }
 
-/// Cuerpo para reordenar una curva: dirección del movimiento.
+/// Cuerpo para reordenar una curva, magnitud o mensurando: dirección del movimiento.
 #[derive(Debug, Deserialize)]
 pub(super) struct MoveCurveBody {
-    /// `true` mueve la curva una posición hacia arriba; `false` (o ausente), hacia abajo.
+    /// `true` mueve el elemento una posición hacia arriba; `false` (o ausente), hacia abajo.
     #[serde(default)]
     up: bool,
 }
@@ -264,6 +264,44 @@ pub(super) async fn move_curve(
     if !practices::move_curve(&state.pool, &id, &cid, body.up).await? {
         return Err(AppError::not_found("curva no encontrada"));
     }
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// `POST /api/practices/{id}/quantities/{qid}/move`: reordena una magnitud (orden del formulario).
+pub(super) async fn move_quantity(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, qid)): Path<(String, String)>,
+    Json(body): Json<MoveCurveBody>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    practices::move_item(
+        &state.pool,
+        practices::Orderable::Quantities,
+        &id,
+        &qid,
+        body.up,
+    )
+    .await?;
+    Ok(Json(Health { status: "ok" }))
+}
+
+/// `POST /api/practices/{id}/results/{rid}/move`: reordena un mensurando derivado.
+pub(super) async fn move_result(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, rid)): Path<(String, String)>,
+    Json(body): Json<MoveCurveBody>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    practices::move_item(
+        &state.pool,
+        practices::Orderable::Results,
+        &id,
+        &rid,
+        body.up,
+    )
+    .await?;
     Ok(Json(Health { status: "ok" }))
 }
 

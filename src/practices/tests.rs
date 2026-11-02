@@ -503,6 +503,54 @@ async fn move_curve_swaps_position_with_neighbor() {
 }
 
 #[tokio::test]
+async fn move_item_reorders_quantities_and_results_even_with_tied_positions() {
+    // Con la definición sembrada de P1 (5 magnitudes, 5 mensurandos).
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let symbols = |def: &PracticeDefinition| -> Vec<String> {
+        def.quantities.iter().map(|q| q.symbol.clone()).collect()
+    };
+    // Posiciones repetidas (como en siembras viejas): el orden sale de (position, id).
+    sqlx::query("UPDATE practice_quantities SET position = 0 WHERE practice_id = 'p1-estadistica'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let before = symbols(&definition(&pool, "p1-estadistica").await.unwrap().unwrap());
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    let second = def.quantities[1].id.clone();
+    assert!(move_item(
+        &pool,
+        Orderable::Quantities,
+        "p1-estadistica",
+        &second,
+        true
+    )
+    .await
+    .unwrap());
+    let after = symbols(&definition(&pool, "p1-estadistica").await.unwrap().unwrap());
+    let mut expected = before.clone();
+    expected.swap(0, 1);
+    assert_eq!(after, expected);
+
+    // Mensurandos: bajar el primero lo intercambia con el segundo.
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    let (first, second) = (def.results[0].symbol.clone(), def.results[1].symbol.clone());
+    assert!(move_item(
+        &pool,
+        Orderable::Results,
+        "p1-estadistica",
+        &def.results[0].id,
+        false
+    )
+    .await
+    .unwrap());
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    assert_eq!(
+        (def.results[0].symbol.clone(), def.results[1].symbol.clone()),
+        (second, first)
+    );
+}
+
+#[tokio::test]
 async fn deleting_practice_cascades_to_curves() {
     let (pool, _dir) = setup().await;
     create_curve(

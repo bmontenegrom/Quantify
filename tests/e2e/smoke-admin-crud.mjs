@@ -27,7 +27,8 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
   await page.click(`[data-practice-open][data-practice-id="${PRACTICE_ID}"]`);
   await openAddForm(page, "#new-quantity-form");
 
-  step("docente: crea una magnitud nueva");
+  step("docente: crea una magnitud nueva (escalar compartido: un mensurando de regresión solo ve esos)");
+  await page.locator('#new-quantity-form [name="per_point"]').uncheck();
   await fillAndSubmit(page, "#new-quantity-form", {
     symbol: "crud_test_qty",
     name: "Magnitud de prueba CRUD",
@@ -72,6 +73,35 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
   for (const symbol of ["crud_test_qty", "crud_test_res", "crud_test_agg"]) {
     assert(workspaceText.includes(symbolText(symbol)), `"${symbol}" debía aparecer en el workspace de la práctica`);
   }
+
+  step("docente: un mensurando con un símbolo inexistente se rechaza al guardar");
+  await openAddForm(page, "#new-result-form");
+  await fillAndSubmit(page, "#new-result-form", {
+    symbol: "crud_bad_res",
+    name: "Mensurando con error",
+    unit: "m",
+    formula: "crud_test_qty * no_existe",
+  });
+  await page.waitForFunction(
+    () => /"no_existe"/.test(document.querySelector("#practice-workspace .practice-status")?.textContent ?? ""),
+    null,
+    { timeout: 10_000 },
+  );
+  const resultSymbols = await page.$$eval("[data-edit-result]", (buttons) => buttons.length);
+
+  step("docente: baja el primer mensurando con ▼ y el orden cambia");
+  const firstResult = () => page.locator('[data-move="results"][data-dir="down"]').first().getAttribute("data-id");
+  const before = await firstResult();
+  await page.locator('[data-move="results"][data-dir="down"]').first().click();
+  await page.waitForFunction(
+    (id) => document.querySelector('[data-move="results"][data-dir="down"]')?.dataset.id !== id,
+    before,
+    { timeout: 10_000 },
+  );
+  assert(
+    (await page.$$eval("[data-edit-result]", (buttons) => buttons.length)) === resultSymbols,
+    "reordenar no debía agregar ni quitar mensurandos",
+  );
 
   console.log("alta de magnitud, mensurando y agregado desde el admin, sin errores JS.");
 });

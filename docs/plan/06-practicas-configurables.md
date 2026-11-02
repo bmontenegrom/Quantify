@@ -380,9 +380,23 @@ Cómo queda cada práctica en el modelo nuevo. Ninguna cambia sus números.
 Cada fase es una o más PRs chicas sobre `main`, con título convencional, y deja todo verde
 (`cargo test`, `cargo clippy`, `npm test`, `npm run test:e2e`).
 
-### F0 — Base de seguridad
+### F0 — Base de seguridad ✅ HECHA
 
 Antes de tocar el modelo, congelar el comportamiento y sacar los bugs.
+
+**Estado (2026-11-02)**: los puntos 2 y 3 se resolvieron en #73 (más el `Re#k` que se perdía al
+restaurar y el recálculo de columnas en vivo). Los puntos 1, 4 y 5 en la PR de F0:
+- Golden: `tests/golden/<practica>.input.json` (mediciones por símbolo, con instrumento y escala
+  del catálogo por nombre) y `<practica>.expected.json` (el `FormAnalysis` completo sin ids),
+  comparados por `golden_practices_match` (`src/computation/golden_tests.rs`) con tolerancia
+  relativa 1e-9. Se regeneran con `QUANTIFY_UPDATE_GOLDEN=1 cargo test golden`. Un archivo por
+  práctica (no una carpeta): alcanza con un caso realista por práctica que cubra su camino
+  (réplicas por punto, opcionales vacíos, ranuras, escalas calibradas).
+- Validación: `result_scope` y `axis_scope` (`src/routes/practice_admin.rs`) replican los símbolos
+  que liga el motor; un test verifica que las fórmulas de las 10 prácticas validan.
+- Reordenar: `practices::move_item` (curvas, magnitudes y mensurandos) renumera la lista con el
+  mismo desempate que la definición; botones ▲▼ en el admin. `default_value` editable ("Valor
+  inicial").
 
 1. **Tests golden por práctica.** Para cada una de las 10 prácticas, una o más entregas de ejemplo
    (las de `seed_submissions` más casos con operadores, réplicas por punto, opcionales vacíos) y el
