@@ -16,7 +16,7 @@ Escrito el 2026-11-02, con `main` en `16f48c6` (después de #70).
 4. [Cobertura de las 10 prácticas existentes](#4-cobertura-de-las-10-prácticas-existentes)
 5. [Fases](#5-fases)
 6. [Orden, dependencias y riesgos](#6-orden-dependencias-y-riesgos)
-7. [Preguntas abiertas para el docente](#7-preguntas-abiertas-para-el-docente)
+7. [Decisiones del docente](#7-decisiones-del-docente)
 
 ---
 
@@ -370,7 +370,7 @@ Cómo queda cada práctica en el modelo nuevo. Ninguna cambia sus números.
 | `viscosidad` | 1 regresión | – | `v` en vivo: nueva intermedia `v = dx/t` con `show_live` (hoy calculada en JS). |
 | `fluidos-2` | 1 regresión | – | Sin cambios. |
 | `filtros` | 1 curva (2 curvas) | – | Sin cambios. |
-| `ca-rlc` | 1 estadística (o una pestaña por componente R/C/L, pendiente en la sección 7) | R, C, L, Vg, f | Fórmulas expandidas se simplifican con encadenamiento (F4); teórico vs experimental vía `compare_with`. |
+| `ca-rlc` | 1 estadística, una sola pestaña (decidido) | – | Fórmulas expandidas se simplifican con encadenamiento (F4); teórico vs experimental vía `compare_with`. |
 | `hidrostatica` | Arquímedes (estadística) + Tensión superficial (estadística) | `g_ac` (hoy mal ubicado en la parte 1) | Con F9 las 3 determinaciones dejan de ser símbolos separados (`m{k}_{i}` → magnitudes repetidas por determinación). |
 
 ---
@@ -617,7 +617,7 @@ F0 → F1 → F2 → F3 → F4
 
 ---
 
-## 7. Preguntas para el docente
+## 7. Decisiones del docente
 
 Respondidas el 2026-11-02 (incorporadas en la [sección 1](#1-objetivo-y-decisiones) y en las fases):
 
@@ -628,12 +628,7 @@ Respondidas el 2026-11-02 (incorporadas en la [sección 1](#1-objetivo-y-decisio
 5. **Versionado** → las entregas se quedan en su versión.
 6. **Otras materias** → todavía no hay un caso concreto; la candidata es química (concentraciones,
    unidades compuestas, pH).
-
-Pendiente:
-
-- **CA (RLC) en pestañas.** En la práctica, el osciloscopio mide la elipse de Lissajous (`a`, `b`)
-  sobre la resistencia, el condensador y la bobina por separado (`a_R/b_R`, `a_C/b_C`,
-  `a_L/b_L`), y de cada una sale su desfasaje (`phiR`, `phiC`, `phiL`), además de los módulos de
-  tensión de cada componente. Hoy todo eso está en un solo formulario largo. ¿Conviene una
-  pestaña por componente (R, C, L) con los datos del circuito (R, C, L, Vg, f) compartidos, o se
-  deja en una sola pestaña? Por defecto queda en **una sola pestaña** (como hoy).
+7. **CA (RLC) en pestañas** → se deja como está: **una sola pestaña**. (La pregunta era si separar
+   en una pestaña por componente las mediciones de Lissajous sobre la resistencia, el condensador
+   y la bobina — `a_R/b_R`, `a_C/b_C`, `a_L/b_L` → `phiR`, `phiC`, `phiL` —, con los datos del
+   circuito compartidos. Se puede revisar más adelante sin cambiar el modelo.)
