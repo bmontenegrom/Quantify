@@ -912,11 +912,45 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
     problems
 }
 
+fn series_parts(def: &practices::PracticeDefinition) -> Vec<String> {
+    if !matches!(
+        def.analysis_kind.as_deref(),
+        Some("regresion_lineal" | "curva")
+    ) {
+        return vec![];
+    }
+    let mut parts: Vec<String> = def
+        .quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .filter_map(|q| {
+            def.sections
+                .iter()
+                .find(|s| s.quantities.contains(&q.symbol))
+                .and_then(|s| s.part_id.clone())
+        })
+        .collect();
+    parts.sort();
+    parts.dedup();
+    parts
+}
+
+fn guard_series_part(def: &practices::PracticeDefinition, what: &str) -> Result<(), AppError> {
+    if series_parts(def).len() > 1 {
+        return Err(AppError::bad_request(format!(
+            "No se puede {what}: las magnitudes por punto forman una sola serie y tienen que \
+             estar en secciones de la misma parte."
+        )));
+    }
+    Ok(())
+}
+
 fn guard_change(
     before: &practices::PracticeDefinition,
     after: &practices::PracticeDefinition,
     what: &str,
 ) -> Result<(), AppError> {
+    guard_series_part(after, what)?;
     if after.status == "publicada" {
         let before_missing = structure_problems(before);
         if let Some(missing) = structure_problems(after)
@@ -1323,6 +1357,11 @@ pub(super) async fn update_section(
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
     require_title(&input.title)?;
+    let mut after = load_definition(&state, &id).await?;
+    if let Some(section) = after.sections.iter_mut().find(|s| s.id == sid) {
+        section.part_id = input.part_id.clone().filter(|p| !p.is_empty());
+    }
+    guard_series_part(&after, "cambiar la parte de la seccion")?;
     match practices::update_section(&state.pool, &id, &sid, &input).await? {
         None => Err(AppError::bad_request("La parte no es de esta practica.")),
         Some(false) => Err(AppError::not_found("seccion no encontrada")),
@@ -1375,6 +1414,23 @@ async fn set_section(
 ) -> Result<Json<Health>, AppError> {
     require_teacher(state, headers).await?;
     let section_id = body.section_id.as_deref().filter(|s| !s.is_empty());
+    if let practices::SectionMember::Quantity = member {
+        let mut after = load_definition(state, practice_id).await?;
+        if let Some(symbol) = after
+            .quantities
+            .iter()
+            .find(|q| q.id == member_id)
+            .map(|q| q.symbol.clone())
+        {
+            for section in &mut after.sections {
+                section.quantities.retain(|q| q != &symbol);
+                if Some(section.id.as_str()) == section_id {
+                    section.quantities.push(symbol.clone());
+                }
+            }
+        }
+        guard_series_part(&after, "asignar la seccion")?;
+    }
     if !practices::set_member_section(&state.pool, practice_id, member, member_id, section_id)
         .await?
     {
@@ -1680,6 +1736,30 @@ mod tests {
             let problems = formula_problems(&def);
             assert!(problems.is_empty(), "{}: {problems:?}", def.practice_id);
         }
+    }
+
+    #[tokio::test]
+    async fn the_series_stays_in_a_single_part() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(series_parts(&cc), vec!["p2-cc-potencia".to_string()]);
+        let mut split = cc.clone();
+        for section in &mut split.sections {
+            section.quantities.retain(|q| q != "R");
+            if section.part_id.as_deref() == Some("p2-cc-serie") {
+                section.quantities.push("R".into());
+            }
+        }
+        let err = guard_series_part(&split, "x").unwrap_err();
+        assert!(err.message().contains("misma parte"), "{}", err.message());
+        let mut shared = cc.clone();
+        for section in &mut shared.sections {
+            section.part_id = None;
+        }
+        assert!(guard_series_part(&shared, "x").is_ok());
     }
 
     #[tokio::test]
