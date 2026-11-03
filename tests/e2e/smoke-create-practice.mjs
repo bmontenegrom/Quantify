@@ -127,6 +127,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await sPage.selectOption("#table-select", "1");
   await sPage.waitForLoadState("networkidle");
   const tabs = sPage.locator("#practice-part-tabs .part-tab");
+  await tabs.nth(1).waitFor();
   assert((await tabs.count()) === 2, "la práctica debía mostrar las dos pestañas");
   const given = sPage.locator(".measurement-row--given").first();
   const measured = sPage.locator('#measurement-fields .measurement-row:not(.measurement-row--given):not([data-final-result])').first();
@@ -229,8 +230,8 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     const v = await post(`${base}/quantities`, { symbol: "V", name: "V", unit: "", repeated: false, quantity: null, per_point: false });
     const source = await post(`${base}/sections`, { title: "Fuente", part_id: partA.id });
     const vm = await post(`${base}/results`, { symbol: "Vm", name: "V fuente", unit: "", formula: "V", is_final: true });
-    await post(`${base}/quantities/${v.id}/section`, { section_id: source.id });
     await post(`${base}/results/${vm.id}/section`, { section_id: source.id });
+    await post(`${base}/quantities/${v.id}/section`, { section_id: source.id });
     const section = await post(`${base}/sections`, { title: "Barrido", part_id: partB.id });
     await post(`${base}/quantities/${r.id}/section`, { section_id: section.id });
     await post(`${base}/quantities/${i.id}/section`, { section_id: section.id });

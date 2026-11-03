@@ -881,9 +881,10 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
         .into_iter()
         .map(|(element, message)| {
             (
-                format!("en los datos compartidos, {element}"),
+                element,
                 format!(
-                    "{message} (lo compartido solo puede usar datos compartidos: pasalo a una                      seccion de la parte que corresponda)"
+                    "{message} (está en los datos compartidos, que solo pueden usar datos \
+                     compartidos: pasalo a una sección de la parte que corresponda)"
                 ),
             )
         })
@@ -892,8 +893,11 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
         problems.extend(formula_problems_in(&def.part_view(part)).into_iter().map(
             |(element, message)| {
                 (
-                    format!("en la parte \"{}\", {element}", part.title),
-                    message,
+                    element,
+                    format!(
+                        "{message} (está en la parte \"{}\", que solo ve lo compartido y lo suyo)",
+                        part.title
+                    ),
                 )
             },
         ));
@@ -1386,6 +1390,17 @@ pub(super) async fn delete_part(
     Path((id, pid)): Path<(String, String)>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    let before = load_definition(&state, &id).await?;
+    let mut after = before.clone();
+    after.parts.retain(|p| p.id != pid);
+    for section in after
+        .sections
+        .iter_mut()
+        .filter(|s| s.part_id.as_deref() == Some(pid.as_str()))
+    {
+        section.part_id = None;
+    }
+    guard_change(&before, &after, "eliminar la parte")?;
     if !practices::delete_part(&state.pool, &id, &pid).await? {
         return Err(AppError::not_found("parte no encontrada"));
     }
@@ -1443,7 +1458,7 @@ pub(super) async fn update_section(
     if let Some(section) = after.sections.iter_mut().find(|s| s.id == sid) {
         section.part_id = part_id;
     }
-    guard_series_part(&before, &after, "cambiar la parte de la seccion")?;
+    guard_change(&before, &after, "cambiar la parte de la sección")?;
     match practices::update_section(&state.pool, &id, &sid, &input).await? {
         None => Err(AppError::bad_request("La parte no es de esta practica.")),
         Some(false) => Err(AppError::not_found("seccion no encontrada")),
@@ -1457,6 +1472,10 @@ pub(super) async fn delete_section(
     Path((id, sid)): Path<(String, String)>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    let before = load_definition(&state, &id).await?;
+    let mut after = before.clone();
+    after.sections.retain(|s| s.id != sid);
+    guard_change(&before, &after, "eliminar la sección")?;
     if !practices::delete_section(&state.pool, &id, &sid).await? {
         return Err(AppError::not_found("seccion no encontrada"));
     }
@@ -1504,23 +1523,32 @@ async fn set_section(
     if !exists {
         return Err(AppError::not_found("elemento no encontrado en la practica"));
     }
-    if let practices::SectionMember::Quantity = member {
-        let mut after = before.clone();
-        if let Some(symbol) = after
+    let mut after = before.clone();
+    let symbol = match member {
+        practices::SectionMember::Quantity => before
             .quantities
             .iter()
             .find(|q| q.id == member_id)
-            .map(|q| q.symbol.clone())
-        {
-            for section in &mut after.sections {
-                section.quantities.retain(|q| q != &symbol);
-                if Some(section.id.as_str()) == section_id {
-                    section.quantities.push(symbol.clone());
-                }
+            .map(|q| &q.symbol),
+        practices::SectionMember::Result => before
+            .results
+            .iter()
+            .find(|r| r.id == member_id)
+            .map(|r| &r.symbol),
+    };
+    if let Some(symbol) = symbol {
+        for section in &mut after.sections {
+            let members = match member {
+                practices::SectionMember::Quantity => &mut section.quantities,
+                practices::SectionMember::Result => &mut section.results,
+            };
+            members.retain(|m| m != symbol);
+            if Some(section.id.as_str()) == section_id {
+                members.push(symbol.clone());
             }
         }
-        guard_series_part(&before, &after, "asignar la seccion")?;
     }
+    guard_change(&before, &after, "asignar la sección")?;
     if !practices::set_member_section(&state.pool, practice_id, member, member_id, section_id)
         .await?
     {
@@ -1993,7 +2021,7 @@ mod tests {
         assert!(
             problems
                 .iter()
-                .any(|(element, message)| element.contains("compartidos")
+                .any(|(element, message)| message.contains("compartidos")
                     && element.contains("Req")
                     && message.contains("RA_p")),
             "{problems:?}"
@@ -2018,6 +2046,42 @@ mod tests {
         after.analysis_kind = Some("regresion_lineal".into());
         let err = guard_change(&hidro, &after, "x").unwrap_err();
         assert!(format!("{err:?}").contains("ejes"), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn section_moves_cannot_take_a_quantity_out_of_reach_of_its_results() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut before = cc.clone();
+        let mut shared_result = cc.results[0].clone();
+        shared_result.id = "rsh".into();
+        shared_result.symbol = "Rsh".into();
+        shared_result.formula = "R1 * 2".into();
+        before.results.push(shared_result);
+        assert!(formula_problems(&before).is_empty());
+
+        let mut after = before.clone();
+        for section in &mut after.sections {
+            section.quantities.retain(|q| q != "R1");
+            if section.part_id.as_deref() == Some("p2-cc-serie")
+                && section.quantities.contains(&"Vg_s".to_string())
+            {
+                section.quantities.push("R1".into());
+            }
+        }
+        let err = guard_change(&before, &after, "asignar la sección").unwrap_err();
+        assert!(format!("{err:?}").contains("Rsh"), "{err:?}");
+
+        let mut broken = cc.clone();
+        for section in &mut broken.sections {
+            section.results.retain(|r| r != "Req");
+        }
+        assert!(!formula_problems(&broken).is_empty());
+        assert!(guard_change(&broken, &cc, "asignar la sección").is_ok());
+        assert!(guard_change(&cc, &broken, "eliminar la sección").is_err());
     }
 
     #[tokio::test]
