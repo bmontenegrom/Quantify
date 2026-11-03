@@ -100,4 +100,41 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await sPage.waitForSelector("#app-shell:not(.hidden)");
   const visible = await sPage.locator(`#practice-nav-children .nav-child:has-text("${NAME}")`).count();
   assert(visible === 0, "una práctica archivada no debía seguir en el menú del estudiante");
+
+  step("estudiante: no puede leer un borrador por id; de una archivada, solo la definición");
+  const draft = await page.evaluate(async (id) => {
+    const me = await (await fetch("/api/auth/me")).json();
+    const r = await fetch(`/api/practices/${id}/duplicate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-csrf-token": me.csrf_token },
+      body: "{}",
+    });
+    return (await r.json()).id;
+  }, ID);
+  const statuses = await sPage.evaluate(
+    async ({ archived, draft }) => {
+      const me = await (await fetch("/api/auth/me")).json();
+      const preview = (id) =>
+        fetch(`/api/practices/${id}/analyze-preview`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-csrf-token": me.csrf_token },
+          body: JSON.stringify({ measurements: [] }),
+        }).then((r) => r.status);
+      return {
+        draftDefinition: (await fetch(`/api/practices/${draft}/definition`)).status,
+        draftPreview: await preview(draft),
+        archivedDefinition: (await fetch(`/api/practices/${archived}/definition`)).status,
+        archivedPreview: await preview(archived),
+      };
+    },
+    { archived: ID, draft },
+  );
+  assert(
+    statuses.draftDefinition === 404 && statuses.draftPreview === 404,
+    `un borrador debía responder 404 al estudiante (${JSON.stringify(statuses)})`,
+  );
+  assert(
+    statuses.archivedDefinition === 200 && statuses.archivedPreview === 404,
+    `de una archivada el estudiante lee la definición pero no la vista previa (${JSON.stringify(statuses)})`,
+  );
 });

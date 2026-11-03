@@ -196,9 +196,28 @@ pub(super) async fn practice_definition(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<practices::PracticeDefinition>, AppError> {
-    current_user(&state, &headers).await?;
+    let user = current_user(&state, &headers).await?;
+    // Archivada sí: el alumno la necesita para ver sus entregas viejas.
+    ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
     let def = load_definition(&state, &id).await?;
     Ok(Json(def))
+}
+
+/// Un estudiante solo ve prácticas en los estados `allowed` (docente y admin, todas). Las demás
+/// responden 404, como si no existieran: un borrador no se adivina por su id.
+async fn ensure_student_can_see(
+    state: &SharedState,
+    user: &db::AuthUser,
+    practice_id: &str,
+    allowed: &[&str],
+) -> Result<(), AppError> {
+    if matches!(user.role.as_str(), "docente" | "admin") {
+        return Ok(());
+    }
+    match practices::practice(&state.pool, practice_id).await? {
+        Some(p) if allowed.contains(&p.status.as_str()) => Ok(()),
+        _ => Err(AppError::not_found("practica no encontrada")),
+    }
 }
 
 /// Cuerpo del preview de análisis: sólo las lecturas crudas (sin curso/grupo).
@@ -215,7 +234,9 @@ pub(super) async fn analyze_preview(
     Path(id): Path<String>,
     Json(body): Json<AnalyzePreviewBody>,
 ) -> Result<Json<computation::FormAnalysis>, AppError> {
-    current_user(&state, &headers).await?;
+    let user = current_user(&state, &headers).await?;
+    // Solo publicada: la vista previa es para cargar una entrega nueva.
+    ensure_student_can_see(&state, &user, &id, &["publicada"]).await?;
     let analysis = computation::analyze(&state.pool, &id, &body.measurements)
         .await
         .map_err(AppError::from_domain_or_db)?;
