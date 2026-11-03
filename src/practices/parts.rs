@@ -21,6 +21,10 @@ impl PracticeDefinition {
     }
 
     pub fn result_part(&self, symbol: &str) -> Option<&str> {
+        self.result_part_in(symbol, &mut Vec::new())
+    }
+
+    fn result_part_in<'a>(&'a self, symbol: &str, seen: &mut Vec<String>) -> Option<&'a str> {
         if self
             .sections
             .iter()
@@ -29,8 +33,13 @@ impl PracticeDefinition {
             return self.part_of(symbol, false);
         }
         let result = self.results.iter().find(|r| r.symbol == symbol)?;
-        self.inferred_part(&result.formula)
-            .or_else(|| self.used_by_series(symbol))
+        if seen.iter().any(|s| s == symbol) {
+            return None;
+        }
+        seen.push(symbol.to_string());
+        let part = self.inferred_part_in(&result.formula, seen);
+        seen.pop();
+        part.or_else(|| self.used_by_series(symbol))
     }
 
     fn used_by_series(&self, symbol: &str) -> Option<&str> {
@@ -47,9 +56,13 @@ impl PracticeDefinition {
     }
 
     pub fn inferred_part(&self, formula: &str) -> Option<&str> {
+        self.inferred_part_in(formula, &mut Vec::new())
+    }
+
+    fn inferred_part_in<'a>(&'a self, formula: &str, seen: &mut Vec<String>) -> Option<&'a str> {
         let mut parts: Vec<&str> = crate::computation::formula_symbols(formula)
             .iter()
-            .filter_map(|s| self.symbol_part(s))
+            .filter_map(|s| self.symbol_part_in(s, seen))
             .collect();
         parts.sort();
         parts.dedup();
@@ -202,7 +215,10 @@ impl PracticeDefinition {
             results: self
                 .results
                 .iter()
-                .filter(|r| self.result_part(&r.symbol) == Some(part.id.as_str()))
+                .filter(|r| match self.result_part(&r.symbol) {
+                    Some(p) => p == part.id,
+                    None => true,
+                })
                 .cloned()
                 .collect(),
             curves: self.curves.iter().filter(|_| is_series).cloned().collect(),
@@ -241,8 +257,15 @@ impl PracticeDefinition {
     }
 
     pub fn symbol_part(&self, symbol: &str) -> Option<&str> {
+        self.symbol_part_in(symbol, &mut Vec::new())
+    }
+
+    fn symbol_part_in<'a>(&'a self, symbol: &str, seen: &mut Vec<String>) -> Option<&'a str> {
         if let Some(part) = self.quantity_part(symbol) {
             return Some(part);
+        }
+        if self.results.iter().any(|r| r.symbol == symbol) {
+            return self.result_part_in(symbol, seen);
         }
         let series_part = self.series_part()?;
         let series: Vec<&str> = self
