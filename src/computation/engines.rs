@@ -898,6 +898,11 @@ pub async fn analyze(
         part_analysis
             .quantities
             .retain(|q| !shared_symbols.contains(&q.symbol.as_str()));
+        for operator in &mut part_analysis.operators {
+            operator
+                .quantities
+                .retain(|q| !shared_symbols.contains(&q.symbol.as_str()));
+        }
         part_analysis
             .warnings
             .retain(|w| !analysis.warnings.contains(w));

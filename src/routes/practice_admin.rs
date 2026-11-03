@@ -136,7 +136,11 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
                 .to_string(),
         );
     }
-    if def.results.is_empty() && def.curves.is_empty() {
+    if def.results.is_empty()
+        && def.curves.is_empty()
+        && def.point_results.is_empty()
+        && def.aggregates.is_empty()
+    {
         problems.push("no tiene mensurandos".to_string());
     }
     for part in def.parts.iter().filter(|p| def.part_has_content(p)) {
@@ -1211,11 +1215,6 @@ pub(super) async fn create_result(
             return Err(AppError::bad_request("La seccion no es de esta practica."));
         }
     }
-    guard_change(
-        &def,
-        &with_new_result(&def, &input, section_id.as_deref()),
-        "guardar el mensurando",
-    )?;
     guard_symbol(
         &state.pool,
         &id,
@@ -1227,6 +1226,11 @@ pub(super) async fn create_result(
         None,
     )
     .await?;
+    guard_change(
+        &def,
+        &with_new_result(&def, &input, section_id.as_deref()),
+        "guardar el mensurando",
+    )?;
     Ok(Json(
         practices::create_result_in_section(&state.pool, &id, input, section_id.as_deref()).await?,
     ))
@@ -1669,6 +1673,18 @@ pub(super) async fn set_result_section(
 mod tests {
     use super::*;
 
+    fn into_shared_section(def: &mut practices::PracticeDefinition, result: &str) {
+        for section in &mut def.sections {
+            section.results.retain(|r| r != result);
+        }
+        def.sections
+            .iter_mut()
+            .find(|s| s.part_id.is_none())
+            .expect("la practica tiene una seccion compartida")
+            .results
+            .push(result.to_string());
+    }
+
     #[test]
     fn validate_intermediate_checks_symbol_and_formula() {
         let qty = |symbol: &str| db::PracticeQuantity {
@@ -2087,10 +2103,15 @@ mod tests {
         assert!(formula_problems(&cc).is_empty());
         assert!(structure_problems(&cc).is_empty());
 
-        let mut shared_req = cc.clone();
-        for section in &mut shared_req.sections {
+        let mut inferred = cc.clone();
+        for section in &mut inferred.sections {
             section.results.retain(|r| r != "Req");
         }
+        assert_eq!(inferred.result_part("Req"), Some("p2-cc-paralelo"));
+        assert!(formula_problems(&inferred).is_empty());
+
+        let mut shared_req = cc.clone();
+        into_shared_section(&mut shared_req, "Req");
         let problems = formula_problems(&shared_req);
         assert!(
             problems
@@ -2135,6 +2156,7 @@ mod tests {
         shared_result.symbol = "Rsh".into();
         shared_result.formula = "R1 * 2".into();
         before.results.push(shared_result);
+        into_shared_section(&mut before, "Rsh");
         assert!(formula_problems(&before).is_empty());
 
         let mut after = before.clone();
@@ -2146,13 +2168,13 @@ mod tests {
                 section.quantities.push("R1".into());
             }
         }
-        let err = guard_change(&before, &after, "asignar la sección").unwrap_err();
-        assert!(format!("{err:?}").contains("Rsh"), "{err:?}");
+        assert!(guard_change(&before, &after, "asignar la sección").is_err());
+        assert!(formula_problems(&after)
+            .iter()
+            .any(|(element, _)| element.contains("Rsh")));
 
         let mut broken = cc.clone();
-        for section in &mut broken.sections {
-            section.results.retain(|r| r != "Req");
-        }
+        into_shared_section(&mut broken, "Req");
         assert!(!formula_problems(&broken).is_empty());
         assert!(guard_change(&broken, &cc, "asignar la sección").is_ok());
         assert!(guard_change(&cc, &broken, "eliminar la sección").is_err());
@@ -2172,8 +2194,19 @@ mod tests {
         assert_eq!(body.result.tolerance, Some(None));
         assert_eq!(body.section_id, None);
         assert!(validate_result(&cc, &body.result).is_ok());
-        let shared = with_new_result(&cc, &body.result, None);
-        assert!(guard_change(&cc, &shared, "guardar el mensurando").is_err());
+        let inferred = with_new_result(&cc, &body.result, None);
+        assert_eq!(inferred.result_part("X"), Some("p2-cc-serie"));
+        assert!(guard_change(&cc, &inferred, "guardar el mensurando").is_ok());
+
+        let crossing: ResultInput =
+            serde_json::from_str(r#"{"symbol":"X","name":"X","unit":"","formula":"Vg_s * Vg_p"}"#)
+                .unwrap();
+        let unsectioned = with_new_result(&cc, &crossing, None);
+        assert_eq!(unsectioned.result_part("X"), None);
+        assert!(guard_change(&cc, &unsectioned, "guardar el mensurando").is_err());
+        let shared_section = cc.sections.iter().find(|s| s.part_id.is_none()).unwrap();
+        let in_shared = with_new_result(&cc, &body.result, Some(&shared_section.id));
+        assert!(guard_change(&cc, &in_shared, "guardar el mensurando").is_err());
 
         let serie = cc
             .sections
@@ -2255,6 +2288,68 @@ mod tests {
         };
         assert!(validate_intermediate(&cc, &intermediate("I*I*R"), None).is_ok());
         assert!(validate_intermediate(&cc, &intermediate("I*Vg_p"), None).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_regression_with_a_layout_part_keeps_its_series() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        practices::create_part(
+            &pool,
+            "fluidos-1",
+            &practices::PartInput {
+                title: "Unica".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let def = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        let part = &def.parts[0];
+        assert_eq!(part.kind(), "regresion_lineal");
+        assert!(def.part_has_content(part));
+        assert!(
+            structure_problems(&def).is_empty(),
+            "{:?}",
+            structure_problems(&def)
+        );
+
+        let mut no_axes = def.clone();
+        no_axes.parts[0].x_formula = None;
+        assert!(structure_problems(&no_axes)
+            .iter()
+            .any(|p| p.contains("ejes")));
+
+        let mut only_point_results = def.clone();
+        only_point_results.results.clear();
+        assert!(!only_point_results.point_results.is_empty());
+        assert!(!structure_problems(&only_point_results)
+            .iter()
+            .any(|p| p == "no tiene mensurandos"));
+    }
+
+    #[tokio::test]
+    async fn the_series_part_is_chosen_by_position() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let mut cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let serie = cc
+            .sections
+            .iter()
+            .position(|s| s.part_id.as_deref() == Some("p2-cc-serie"))
+            .unwrap();
+        cc.sections[serie].quantities.push("I".into());
+        for section in cc
+            .sections
+            .iter_mut()
+            .filter(|s| s.part_id.as_deref() != Some("p2-cc-serie"))
+        {
+            section.quantities.retain(|q| q != "I");
+        }
+        assert_eq!(cc.series_parts(), ["p2-cc-serie", "p2-cc-potencia"]);
     }
 
     #[tokio::test]

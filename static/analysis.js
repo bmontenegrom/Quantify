@@ -23,7 +23,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
         const finalAggregateSymbols = new Set(
           (definition?.aggregates ?? []).filter((a) => a.is_final).map((a) => a.symbol),
         );
-        for (const { analysis } of sections) {
+        for (const { title, analysis } of sections) {
           if (analysis.operators?.length) continue;
           const comparableAggregates = (analysis.aggregates ?? [])
             .filter((a) => finalAggregateSymbols.has(a.symbol))
@@ -32,8 +32,9 @@ export function renderAnalysis(target, submission, includeReview = false, defini
             [...(analysis.derived ?? []), ...comparableAggregates],
             studentResults,
             submission.result_tolerances ?? {},
+            title,
           );
-          body += pointResultsComparisonMarkup(analysis, studentResults);
+          body += pointResultsComparisonMarkup(analysis, studentResults, title);
         }
       }
     } else {
@@ -273,7 +274,10 @@ function formAnalysisMarkup(analysis) {
   const sections = analysisSections(analysis);
   if (sections.length === 1) return singleAnalysisMarkup(analysis);
   const [shared, ...parts] = sections;
-  const sharedHasData = (shared.analysis.quantities?.length ?? 0) + (shared.analysis.derived?.length ?? 0) > 0;
+  const sharedHasData =
+    (shared.analysis.quantities?.length ?? 0) +
+      (shared.analysis.derived?.length ?? 0) +
+      (shared.analysis.operators?.length ?? 0) > 0;
   return [...(sharedHasData ? [shared] : []), ...parts]
     .map(
       (s) => `

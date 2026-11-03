@@ -27,7 +27,24 @@ impl PracticeDefinition {
     }
 
     pub fn result_part(&self, symbol: &str) -> Option<&str> {
-        self.part_of(symbol, false)
+        if self
+            .sections
+            .iter()
+            .any(|s| s.results.iter().any(|r| r == symbol))
+        {
+            return self.part_of(symbol, false);
+        }
+        let result = self.results.iter().find(|r| r.symbol == symbol)?;
+        let mut parts: Vec<&str> = crate::computation::formula_symbols(&result.formula)
+            .iter()
+            .filter_map(|s| self.symbol_part(s))
+            .collect();
+        parts.sort();
+        parts.dedup();
+        match parts.as_slice() {
+            [part] => Some(part),
+            _ => None,
+        }
     }
 
     pub fn shared_view(&self) -> PracticeDefinition {
@@ -145,19 +162,22 @@ impl PracticeDefinition {
                 .results
                 .iter()
                 .any(|r| self.result_part(&r.symbol) == Some(part.id.as_str()))
-            || (is_point_based(Some(part.kind())) && !self.curves.is_empty())
+            || (is_point_based(Some(part.kind()))
+                && (!self.curves.is_empty()
+                    || self.quantities.iter().any(|q| q.per_point && !q.is_given)))
     }
 
     pub fn series_parts(&self) -> Vec<String> {
-        let mut parts: Vec<String> = self
+        let mut parts: Vec<&super::PracticePart> = self
             .quantities
             .iter()
             .filter(|q| q.per_point && !q.is_given)
-            .filter_map(|q| self.quantity_part(&q.symbol).map(String::from))
+            .filter_map(|q| self.quantity_part(&q.symbol))
+            .filter_map(|id| self.parts.iter().find(|p| p.id == id))
             .collect();
-        parts.sort();
-        parts.dedup();
-        parts
+        parts.sort_by_key(|p| (p.position, p.id.clone()));
+        parts.dedup_by(|a, b| a.id == b.id);
+        parts.into_iter().map(|p| p.id.clone()).collect()
     }
 
     pub(super) fn resolve_part_kinds(&mut self) {

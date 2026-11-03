@@ -2284,6 +2284,14 @@ async fn shared_results_keep_the_operator_shape_of_the_form() {
         .await
         .unwrap();
     assert_eq!(analysis.operators.len(), 2);
+    for part in &analysis.parts {
+        for op in &part.analysis.operators {
+            assert!(op
+                .quantities
+                .iter()
+                .all(|q| q.symbol != "T1" && q.symbol != "L"));
+        }
+    }
     for op in &analysis.operators {
         let g1 = op.derived.iter().find(|d| d.symbol == "g1").unwrap();
         assert!(
@@ -2299,7 +2307,8 @@ async fn shared_results_that_use_curve_values_move_into_the_series_part() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
     sqlx::query(
-        "UPDATE practice_results SET section_id = NULL \
+        "UPDATE practice_results SET section_id = \
+         (SELECT id FROM practice_sections WHERE practice_id = 'p2-cc' AND part_id IS NULL) \
          WHERE practice_id = 'p2-cc' AND symbol IN ('P_max_e', 'RP_max_e')",
     )
     .execute(&pool)
