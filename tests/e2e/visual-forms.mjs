@@ -101,6 +101,17 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
     .catch(() => "(sin campo Re)");
   assert(restored, `el borrador debía restaurar el Re de la corrida (vi: "${restoredRe}")`);
 
+  await openPractice(page, "hidrostatica");
+  await page.locator("#practice-part-tabs .part-tab").nth(1).click();
+  const slot = page.locator('#measurement-fields input[placeholder^="ranura"]').first();
+  await slot.waitFor();
+  const layout = await slot.evaluate((input) => {
+    const unit = input.parentElement.querySelector(".replica-unit");
+    const box = input.getBoundingClientRect();
+    return { width: box.width, overlaps: unit ? unit.getBoundingClientRect().left < box.right : false };
+  });
+  assert(layout.width >= 120 && !layout.overlaps, `el campo de ranura quedó angosto o tapado: ${JSON.stringify(layout)}`);
+
   await openPractice(page, "fluidos-2");
   await assertInputContrast(page);
   await page.screenshot({ path: join(ARTIFACTS, "visual-fluidos2-dark.png"), fullPage: true });
