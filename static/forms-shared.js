@@ -53,7 +53,7 @@ export function givenValueInputHtml(q) {
   const attrs = q.slot_count ? `min="1" max="${n}" step="1"` : `step="any"`;
   const placeholder = q.slot_count ? `ranura 1 a ${n}` : "valor";
   const value = q.default_value != null ? ` value="${escapeHtml(String(q.default_value))}"` : "";
-  return `${q.slot_count ? "" : prefixSelectHtml()}<input class="measure-given-value" type="number" ${attrs} placeholder="${placeholder}"${value} />`;
+  return `${q.slot_count ? `<span class="prefix-placeholder" aria-hidden="true"></span>` : prefixSelectHtml()}<input class="measure-given-value" type="number" ${attrs} placeholder="${placeholder}"${value} />`;
 }
 
 export function renderReplicaInput(unit, defaultValue = null) {
