@@ -136,6 +136,9 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
                 .to_string(),
         );
     }
+    if def.results.is_empty() && def.curves.is_empty() {
+        problems.push("no tiene mensurandos".to_string());
+    }
     for part in def.parts.iter().filter(|p| def.part_has_content(p)) {
         problems.extend(
             kind_problems(&def.part_view(part))
@@ -2196,6 +2199,31 @@ mod tests {
         assert_eq!(after.result_part("I_serie"), Some("p2-cc-serie"));
         assert!(guard_change(&cc, &after, "guardar el mensurando").is_ok());
         assert!(with_updated_result(&cc, "no-existe", &input).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_practice_with_parts_still_needs_some_result_to_publish() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let hidro = practices::definition(&pool, "hidrostatica")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut only_shared = hidro.clone();
+        only_shared.results.clear();
+        for section in &mut only_shared.sections {
+            section.part_id = None;
+            section.results.clear();
+        }
+        assert!(only_shared
+            .parts
+            .iter()
+            .all(|p| !only_shared.part_has_content(p)));
+        assert!(structure_problems(&only_shared)
+            .iter()
+            .any(|p| p == "no tiene mensurandos"));
+        assert!(publish_problems(&only_shared)
+            .iter()
+            .any(|p| p.contains("no tiene mensurandos")));
     }
 
     #[tokio::test]
