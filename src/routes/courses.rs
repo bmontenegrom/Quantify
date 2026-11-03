@@ -203,9 +203,14 @@ pub(super) async fn create_subgroup(
     not_blank(&input.name, "nombre de subgrupo es requerido")?;
     not_blank(&input.practice_id, "practica es requerida")?;
     not_blank(&input.group_id, "grupo es requerido")?;
-    Ok(Json(
-        db::create_subgroup(&state.pool, &course_id, input).await?,
-    ))
+    db::create_subgroup(&state.pool, &course_id, input)
+        .await?
+        .map(Json)
+        .ok_or_else(|| {
+            AppError::bad_request(
+                "Solo se crean subgrupos de una practica publicada y habilitada en el curso.",
+            )
+        })
 }
 
 /// `POST /api/academic/groups/{id}/members`: agrega un estudiante a un grupo (solo docente/admin).

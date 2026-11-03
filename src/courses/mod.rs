@@ -560,9 +560,50 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("p1 está publicada y habilitada en el curso");
         assert_eq!(subgroup.name, "Sub A");
         assert_eq!(subgroup.practice_id, "p1-estadistica");
+
+        // Un borrador no admite subgrupos (llegarían a los estudiantes en el contexto académico).
+        sqlx::query(
+            "INSERT INTO practices (id, name, description, status) \
+             VALUES ('borrador-x', 'Borrador', '', 'borrador')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO course_practices (course_id, practice_id, created_at) \
+             VALUES (?1, 'borrador-x', '2026-01-01')",
+        )
+        .bind(COURSE)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let draft = create_subgroup(
+            &pool,
+            COURSE,
+            CreateSubgroup {
+                practice_id: "borrador-x".into(),
+                group_id: GROUP.into(),
+                name: "Sub B".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(draft.is_none());
+
+        // Uno ya creado deja de listarse cuando su práctica se archiva.
+        sqlx::query("UPDATE practices SET status = 'archivada' WHERE id = 'p1-estadistica'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(subgroups_for_course(&pool, COURSE)
+            .await
+            .unwrap()
+            .iter()
+            .all(|s| s.practice.id != "p1-estadistica"));
     }
 
     #[tokio::test]
