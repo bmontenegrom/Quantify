@@ -222,6 +222,10 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   const table = sPage.locator("#measurement-fields .series-table");
   await seriesTabs.nth(0).click();
   assert(!(await table.isVisible()), "la serie no debía verse en la pestaña Datos");
+  const rmTitle = sPage.locator('.measurement-section:has([data-final-result="1"][data-symbol="Rm"]) .measurement-section-title');
+  assert((await rmTitle.textContent()) === "Resumen", "Rm debía verse bajo su sección Resumen");
   await seriesTabs.nth(1).click();
   assert(await table.isVisible(), "la serie debía verse en la pestaña Serie");
+  const visibleFinals = await sPage.locator("#measurement-fields .final-results-section:visible").count();
+  assert(visibleFinals === 0, "la pestaña Serie no debía mostrar un bloque de resultado final vacío");
 });

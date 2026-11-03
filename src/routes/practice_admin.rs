@@ -1388,9 +1388,15 @@ pub(super) async fn update_section(
     require_teacher(&state, &headers).await?;
     require_title(&input.title)?;
     let before = load_definition(&state, &id).await?;
+    let part_id = input.part_id.clone().filter(|p| !p.is_empty());
+    if let Some(part) = &part_id {
+        if !before.parts.iter().any(|p| &p.id == part) {
+            return Err(AppError::bad_request("La parte no es de esta practica."));
+        }
+    }
     let mut after = before.clone();
     if let Some(section) = after.sections.iter_mut().find(|s| s.id == sid) {
-        section.part_id = input.part_id.clone().filter(|p| !p.is_empty());
+        section.part_id = part_id;
     }
     guard_series_part(&before, &after, "cambiar la parte de la seccion")?;
     match practices::update_section(&state.pool, &id, &sid, &input).await? {
@@ -1445,8 +1451,15 @@ async fn set_section(
 ) -> Result<Json<Health>, AppError> {
     require_teacher(state, headers).await?;
     let section_id = body.section_id.as_deref().filter(|s| !s.is_empty());
+    let before = load_definition(state, practice_id).await?;
+    let exists = match member {
+        practices::SectionMember::Quantity => before.quantities.iter().any(|q| q.id == member_id),
+        practices::SectionMember::Result => before.results.iter().any(|r| r.id == member_id),
+    };
+    if !exists {
+        return Err(AppError::not_found("elemento no encontrado en la practica"));
+    }
     if let practices::SectionMember::Quantity = member {
-        let before = load_definition(state, practice_id).await?;
         let mut after = before.clone();
         if let Some(symbol) = after
             .quantities
@@ -1466,9 +1479,7 @@ async fn set_section(
     if !practices::set_member_section(&state.pool, practice_id, member, member_id, section_id)
         .await?
     {
-        return Err(AppError::bad_request(
-            "La seccion o el elemento no son de esta practica.",
-        ));
+        return Err(AppError::bad_request("La seccion no es de esta practica."));
     }
     Ok(Json(Health { status: "ok" }))
 }
