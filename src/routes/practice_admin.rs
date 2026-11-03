@@ -1121,16 +1121,8 @@ pub(super) async fn update_result(
         .iter_mut()
         .find(|x| x.id == rid)
         .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
-    let old_symbol = std::mem::replace(&mut item.symbol, input.symbol.trim().to_string());
+    item.symbol = input.symbol.trim().to_string();
     item.formula = input.formula.trim().to_string();
-    let new_symbol = item.symbol.clone();
-    for section in &mut after.sections {
-        for symbol in &mut section.results {
-            if *symbol == old_symbol {
-                symbol.clone_from(&new_symbol);
-            }
-        }
-    }
     guard_change(&def, &after, "guardar el mensurando")?;
     let updated = practices::update_result(&state.pool, &rid, input)
         .await?
