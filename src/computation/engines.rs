@@ -1,8 +1,8 @@
 use super::formula::{compile_formula, eval_compiled, CONSTANTS};
 use super::{
     AggregateComputation, CurveSpec, DerivedComputation, FormAnalysis, MeasurementInput,
-    OperatorComputation, PointResultComputation, QuantityComputation, RegressionResult,
-    ScatterResult,
+    OperatorComputation, PartAnalysis, PointResultComputation, QuantityComputation,
+    RegressionResult, ScatterResult,
 };
 use crate::analysis;
 use crate::db::{InstrumentScale, PracticeQuantity, PracticeResult};
@@ -196,6 +196,7 @@ pub fn compute(
             point_results: Vec::new(),
             aggregates: Vec::new(),
             warnings,
+            parts: Vec::new(),
         });
     }
 
@@ -250,6 +251,7 @@ pub fn compute(
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
+        parts: Vec::new(),
     })
 }
 
@@ -570,12 +572,18 @@ pub fn compute_regresion(
     }
     let mut pr_allowed: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
     pr_allowed.extend(intermediates.iter().map(|it| it.symbol.clone()));
-    pr_allowed.extend(results.iter().map(|r| r.symbol.clone()));
+    pr_allowed.extend(derived.iter().map(|d| d.symbol.clone()));
     pr_allowed.push("slope".into());
     pr_allowed.push("intercept".into());
     let mut point_results_out = Vec::with_capacity(point_results.len());
     for pr in point_results {
-        let tree = compile_formula(&pr.formula, &pr_allowed)?;
+        let tree = match compile_formula(&pr.formula, &pr_allowed) {
+            Ok(tree) => tree,
+            Err(e) => {
+                warnings.push(skipped("la derivada por punto", &pr.symbol, &e));
+                continue;
+            }
+        };
         let values: Vec<f64> = contexts
             .iter()
             .map(|ctx| {
@@ -635,7 +643,13 @@ pub fn compute_regresion(
     let mut referenced_endpoints: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     for agg in aggregates {
-        let tree = compile_formula(&agg.formula, &agg_allowed)?;
+        let tree = match compile_formula(&agg.formula, &agg_allowed) {
+            Ok(tree) => tree,
+            Err(e) => {
+                warnings.push(skipped("el mensurando agregado", &agg.symbol, &e));
+                continue;
+            }
+        };
         for v in tree.iter_variable_identifiers() {
             referenced_endpoints.insert(v.to_string());
         }
@@ -690,6 +704,7 @@ pub fn compute_regresion(
         point_results: point_results_out,
         aggregates: aggregates_out,
         warnings,
+        parts: Vec::new(),
     })
 }
 
@@ -764,8 +779,13 @@ pub fn compute_curva(
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
+        parts: Vec::new(),
     };
     Ok((analysis, contexts))
+}
+
+fn skipped(what: &str, symbol: &str, error: &anyhow::Error) -> String {
+    format!("No se calculó {what} {symbol}: {error}. Revisá su fórmula en la práctica.")
 }
 
 fn derive_results(
@@ -777,7 +797,13 @@ fn derive_results(
 ) -> anyhow::Result<Vec<DerivedComputation>> {
     let mut derived = Vec::with_capacity(results.len());
     for result in results {
-        let tree = compile_formula(&result.formula, allowed)?;
+        let tree = match compile_formula(&result.formula, allowed) {
+            Ok(tree) => tree,
+            Err(e) => {
+                warnings.push(skipped("el mensurando", &result.symbol, &e));
+                continue;
+            }
+        };
         let vars: Vec<String> = tree
             .iter_variable_identifiers()
             .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
@@ -875,6 +901,83 @@ pub async fn analyze(
         }
     }
 
+    if definition.parts.is_empty() {
+        return run_kind(&definition, &scales, measurements);
+    }
+    let shared = definition.shared_view();
+    let mut analysis = run_kind(&shared, &scales, &measurements_of(&shared, measurements))?;
+    let shared_symbols: Vec<&str> = shared
+        .quantities
+        .iter()
+        .map(|q| q.symbol.as_str())
+        .collect();
+    for part in &definition.parts {
+        if !definition.part_has_content(part) {
+            continue;
+        }
+        let view = definition.part_view(part);
+        let mut part_analysis = match run_kind(
+            &view,
+            &scales,
+            &measurements_of(&view, measurements),
+        ) {
+            Ok(part_analysis) => part_analysis,
+            Err(e) => {
+                analysis.warnings.push(format!(
+                        "No se pudo calcular la parte \"{}\": {e}. Revisá su configuración en la práctica.",
+                        part.title
+                    ));
+                continue;
+            }
+        };
+        part_analysis
+            .quantities
+            .retain(|q| !shared_symbols.contains(&q.symbol.as_str()));
+        for operator in &mut part_analysis.operators {
+            operator
+                .quantities
+                .retain(|q| !shared_symbols.contains(&q.symbol.as_str()));
+        }
+        part_analysis
+            .warnings
+            .retain(|w| !analysis.warnings.contains(w));
+        analysis.parts.push(PartAnalysis {
+            part_id: part.id.clone(),
+            title: part.title.clone(),
+            analysis_kind: definition.part_kind(part).to_string(),
+            analysis: part_analysis,
+        });
+    }
+    Ok(analysis)
+}
+
+fn run_kind(
+    definition: &crate::practices::PracticeDefinition,
+    scales: &HashMap<String, InstrumentScale>,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<FormAnalysis> {
+    let mut analysis = run_kind_raw(definition, scales, measurements)?;
+    let mut seen = std::collections::HashSet::new();
+    analysis.warnings.retain(|w| seen.insert(w.clone()));
+    Ok(analysis)
+}
+
+fn measurements_of(
+    definition: &crate::practices::PracticeDefinition,
+    measurements: &[MeasurementInput],
+) -> Vec<MeasurementInput> {
+    measurements
+        .iter()
+        .filter(|m| definition.quantities.iter().any(|q| q.id == m.quantity_id))
+        .cloned()
+        .collect()
+}
+
+fn run_kind_raw(
+    definition: &crate::practices::PracticeDefinition,
+    scales: &HashMap<String, InstrumentScale>,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<FormAnalysis> {
     if definition.analysis_kind.as_deref() == Some("regresion_lineal") {
         let (Some(x_formula), Some(y_formula)) = (
             definition.x_formula.as_deref(),
@@ -890,7 +993,7 @@ pub async fn analyze(
             &definition.results,
             &definition.point_results,
             &definition.aggregates,
-            &scales,
+            scales,
             x_formula,
             y_formula,
             measurements,
@@ -931,7 +1034,7 @@ pub async fn analyze(
         analysis.quantities = compute_quantities(
             &scalar_qtys,
             &by_quantity,
-            &scales,
+            scales,
             None,
             &mut means,
             &mut us,
@@ -1002,7 +1105,7 @@ pub async fn analyze(
     compute(
         &definition.quantities,
         &definition.results,
-        &scales,
+        scales,
         measurements,
         definition.operator_count,
     )

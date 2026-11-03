@@ -13,6 +13,29 @@ fn close(a: f64, b: f64, tol: f64) -> bool {
     (a - b).abs() < tol
 }
 
+pub(crate) async fn drop_parts(pool: &SqlitePool, practice_id: &str) {
+    sqlx::query("DELETE FROM practice_parts WHERE practice_id = ?1")
+        .bind(practice_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+pub(crate) fn flattened(mut analysis: FormAnalysis) -> FormAnalysis {
+    for part in std::mem::take(&mut analysis.parts) {
+        let a = part.analysis;
+        analysis.quantities.extend(a.quantities);
+        analysis.derived.extend(a.derived);
+        analysis.scatters.extend(a.scatters);
+        analysis.operators.extend(a.operators);
+        analysis.point_results.extend(a.point_results);
+        analysis.aggregates.extend(a.aggregates);
+        analysis.warnings.extend(a.warnings);
+        analysis.regression = analysis.regression.or(a.regression);
+    }
+    analysis
+}
+
 pub(crate) async fn setup() -> (SqlitePool, TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let url = format!("sqlite:{}", dir.path().join("t.db").to_string_lossy());
@@ -399,6 +422,7 @@ fn compute_with_operators_derives_per_operator() {
 #[tokio::test]
 async fn analyze_uses_type_a_with_replicas() {
     let (pool, _dir) = setup().await;
+    drop_parts(&pool, "p1-estadistica").await;
     let def = crate::practices::definition(&pool, "p1-estadistica")
         .await
         .unwrap()
@@ -715,6 +739,7 @@ async fn create_form_submission_rejects_unknown_student_result_symbol() {
 #[tokio::test]
 async fn operator_submission_stores_operator_index_per_operator() {
     let (pool, _dir) = setup().await;
+    drop_parts(&pool, "p1-estadistica").await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -796,6 +821,7 @@ async fn operator_submission_stores_operator_index_per_operator() {
 #[tokio::test]
 async fn point_based_submission_stores_point_index_per_point() {
     let (pool, _dir) = setup().await;
+    drop_parts(&pool, "p1-estadistica").await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -902,6 +928,7 @@ async fn point_based_submission_stores_point_index_per_point() {
 #[tokio::test]
 async fn point_based_submission_stores_variable_replicas_per_point() {
     let (pool, _dir) = setup().await;
+    drop_parts(&pool, "p1-estadistica").await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -1010,6 +1037,7 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
 #[tokio::test]
 async fn update_form_submission_replaces_measurements_and_is_editable() {
     let (pool, _dir) = setup().await;
+    drop_parts(&pool, "p1-estadistica").await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -2136,6 +2164,7 @@ async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
 #[tokio::test]
 async fn analyze_routes_curva_to_scatter() {
     let (pool, _dir) = setup().await;
+    drop_parts(&pool, "p1-estadistica").await;
     crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
         .await
         .unwrap();
@@ -2172,6 +2201,7 @@ async fn analyze_routes_curva_to_scatter() {
 #[tokio::test]
 async fn analyze_curva_graphs_each_curve_in_the_list() {
     let (pool, _dir) = setup().await;
+    drop_parts(&pool, "p1-estadistica").await;
     crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
         .await
         .unwrap();
@@ -2228,6 +2258,14 @@ async fn analyze_curva_without_curves_errors() {
     crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
         .await
         .unwrap();
+    let by_part = analyze(&pool, "p1-estadistica", &[]).await.unwrap();
+    assert!(by_part
+        .warnings
+        .iter()
+        .any(|w| w.contains("No se pudo calcular la parte") && w.contains("curvas")));
+    assert!(!by_part.parts.is_empty());
+
+    drop_parts(&pool, "p1-estadistica").await;
     let result = analyze(&pool, "p1-estadistica", &[]).await;
     assert!(result.is_err());
 }
@@ -2343,7 +2381,7 @@ async fn analyze_hidrostatica_torque_cero_avisa_sin_romper_la_serializacion() {
         })
         .collect();
 
-    let analysis = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    let analysis = flattened(analyze(&pool, "hidrostatica", &measurements).await.unwrap());
     for symbol in ["rho1", "rho2", "rho3", "rho_medio"] {
         assert!(
             analysis
@@ -2448,7 +2486,7 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     goma.instrument_id = Some(instrument_id);
     goma.scale_id = Some(scale_id);
 
-    let analysis = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    let analysis = flattened(analyze(&pool, "hidrostatica", &measurements).await.unwrap());
     let u_b_goma = analysis
         .quantities
         .iter()
@@ -2516,4 +2554,56 @@ async fn analyze_rejects_a_slot_outside_the_balance() {
     assert!(analyze(&pool, "hidrostatica", &with_value(4.0))
         .await
         .is_ok());
+}
+
+#[test]
+fn compute_skips_a_result_it_cannot_evaluate_and_keeps_the_rest() {
+    let quantities = vec![quantity("l"), quantity("a")];
+    let results = vec![result("ok", "l*a"), result("roto", "l*zzz")];
+    let measurements = vec![measurement("l", &[2.0]), measurement("a", &[3.0])];
+    let analysis = compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
+    let symbols: Vec<&str> = analysis.derived.iter().map(|d| d.symbol.as_str()).collect();
+    assert_eq!(symbols, ["ok"]);
+    assert!(analysis
+        .warnings
+        .iter()
+        .any(|w| w.contains("roto") && w.contains("zzz")));
+}
+
+#[test]
+fn a_point_result_that_uses_a_skipped_result_is_skipped_too() {
+    let quantities = vec![quantity("f"), quantity("a")];
+    let results = vec![result("tau", "slope * zzz")];
+    let point_results = vec![PracticePointResult {
+        id: "pr".into(),
+        practice_id: "p1-estadistica".into(),
+        position: 0,
+        symbol: "w".into(),
+        name: "w".into(),
+        unit: "".into(),
+        formula: "f * tau".into(),
+    }];
+    let measurements = vec![
+        measurement("f", &[1.0, 2.0, 3.0]),
+        measurement("a", &[4.0, 9.0, 16.0]),
+    ];
+    let analysis = compute_regresion(
+        &quantities,
+        &[],
+        &results,
+        &point_results,
+        &[],
+        &HashMap::new(),
+        "f",
+        "a",
+        &measurements,
+    )
+    .unwrap();
+    assert!(analysis.derived.is_empty());
+    assert!(analysis.point_results.is_empty());
+    assert!(analysis.warnings.iter().any(|w| w.contains("tau")));
+    assert!(analysis
+        .warnings
+        .iter()
+        .any(|w| w.contains("derivada por punto w")));
 }

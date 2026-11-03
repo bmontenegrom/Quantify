@@ -1,164 +1,964 @@
 {
   "aggregates": [],
-  "derived": [
+  "derived": [],
+  "operators": [],
+  "parts": [
     {
-      "formula": "((m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)/b_E)*g_ac/1000",
-      "has_uncertainty": true,
-      "name": "Empuje - medida 1",
-      "symbol": "E1",
-      "u": 0.0001393128972294389,
-      "u_expanded": 0.0002786257944588778,
-      "unit": "N",
-      "value": 0.01666
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "((m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)/b_E)*g_ac/1000",
+            "has_uncertainty": true,
+            "name": "Empuje - medida 1",
+            "symbol": "E1",
+            "u": 0.0001393128972294389,
+            "u_expanded": 0.0002786257944588778,
+            "unit": "N",
+            "value": 0.01666
+          },
+          {
+            "formula": "rho_f*m_goma*b_E*1000/(m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)",
+            "has_uncertainty": true,
+            "name": "Densidad de la goma - medida 1",
+            "symbol": "rho1",
+            "u": 229.30426125624916,
+            "u_expanded": 458.6085225124983,
+            "unit": "kg/m3",
+            "value": 7338.235294117647
+          },
+          {
+            "formula": "((m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)/b_E)*g_ac/1000",
+            "has_uncertainty": true,
+            "name": "Empuje - medida 2",
+            "symbol": "E2",
+            "u": 0.00013874008287708612,
+            "u_expanded": 0.00027748016575417225,
+            "unit": "N",
+            "value": 0.0165816
+          },
+          {
+            "formula": "rho_f*m_goma*b_E*1000/(m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)",
+            "has_uncertainty": true,
+            "name": "Densidad de la goma - medida 2",
+            "symbol": "rho2",
+            "u": 230.3982943538479,
+            "u_expanded": 460.7965887076958,
+            "unit": "kg/m3",
+            "value": 7372.931442080379
+          },
+          {
+            "formula": "((m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)/b_E)*g_ac/1000",
+            "has_uncertainty": true,
+            "name": "Empuje - medida 3",
+            "symbol": "E3",
+            "u": 0.00013960399547997826,
+            "u_expanded": 0.0002792079909599565,
+            "unit": "N",
+            "value": 0.0166992
+          },
+          {
+            "formula": "rho_f*m_goma*b_E*1000/(m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)",
+            "has_uncertainty": true,
+            "name": "Densidad de la goma - medida 3",
+            "symbol": "rho3",
+            "u": 228.76168361333268,
+            "u_expanded": 457.52336722666536,
+            "unit": "kg/m3",
+            "value": 7321.0093896713615
+          },
+          {
+            "formula": "((((m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)/b_E)*g_ac/1000) + (((m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)/b_E)*g_ac/1000) + (((m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)/b_E)*g_ac/1000))/3",
+            "has_uncertainty": true,
+            "name": "Empuje promedio",
+            "symbol": "E_medio",
+            "u": 0.00013810064276349794,
+            "u_expanded": 0.0002762012855269959,
+            "unit": "N",
+            "value": 0.016646933333333332
+          },
+          {
+            "formula": "((rho_f*m_goma*b_E*1000/(m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)) + (rho_f*m_goma*b_E*1000/(m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)) + (rho_f*m_goma*b_E*1000/(m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)))/3",
+            "has_uncertainty": true,
+            "name": "Densidad de la goma promedio",
+            "symbol": "rho_medio",
+            "u": 229.35652422575188,
+            "u_expanded": 458.71304845150377,
+            "unit": "kg/m3",
+            "value": 7344.058708623129
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [
+          {
+            "name": "Masa de la goma",
+            "result": {
+              "mean": 12.5,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.3761094698798919,
+              "u_c": 0.3761094698798919,
+              "u_expanded": 0.7522189397597838
+            },
+            "symbol": "m_goma",
+            "unit": "g",
+            "values": [
+              12.5
+            ]
+          },
+          {
+            "name": "Densidad del fluido",
+            "result": {
+              "mean": 0.998,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0010801234497346435,
+              "u_c": 0.0010801234497346435,
+              "u_expanded": 0.002160246899469287
+            },
+            "symbol": "rho_f",
+            "unit": "g/cm3",
+            "values": [
+              0.998
+            ]
+          },
+          {
+            "name": "Brazo fijo del empuje",
+            "result": {
+              "mean": 10.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b_E",
+            "unit": "cm",
+            "values": [
+              10.0
+            ]
+          },
+          {
+            "name": "Brazo de la ranura 1",
+            "result": {
+              "mean": 1.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b1",
+            "unit": "cm",
+            "values": [
+              1.0
+            ]
+          },
+          {
+            "name": "Brazo de la ranura 2",
+            "result": {
+              "mean": 2.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b2",
+            "unit": "cm",
+            "values": [
+              2.0
+            ]
+          },
+          {
+            "name": "Brazo de la ranura 3",
+            "result": {
+              "mean": 3.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b3",
+            "unit": "cm",
+            "values": [
+              3.0
+            ]
+          },
+          {
+            "name": "Brazo de la ranura 4",
+            "result": {
+              "mean": 4.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b4",
+            "unit": "cm",
+            "values": [
+              4.0
+            ]
+          },
+          {
+            "name": "Brazo de la ranura 5",
+            "result": {
+              "mean": 5.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b5",
+            "unit": "cm",
+            "values": [
+              5.0
+            ]
+          },
+          {
+            "name": "Brazo de la ranura 6",
+            "result": {
+              "mean": 6.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b6",
+            "unit": "cm",
+            "values": [
+              6.0
+            ]
+          },
+          {
+            "name": "Brazo de la ranura 7",
+            "result": {
+              "mean": 7.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b7",
+            "unit": "cm",
+            "values": [
+              7.0
+            ]
+          },
+          {
+            "name": "Brazo de la ranura 8",
+            "result": {
+              "mean": 8.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b8",
+            "unit": "cm",
+            "values": [
+              8.0
+            ]
+          },
+          {
+            "name": "Brazo de la ranura 9",
+            "result": {
+              "mean": 9.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.05,
+              "u_c": 0.05,
+              "u_expanded": 0.1
+            },
+            "symbol": "b9",
+            "unit": "cm",
+            "values": [
+              9.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa en la ranura 1",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m1_1",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa en la ranura 2",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m1_2",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa en la ranura 3",
+            "result": {
+              "mean": 1.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.002886751345948129,
+              "u_c": 0.002886751345948129,
+              "u_expanded": 0.005773502691896258
+            },
+            "symbol": "m1_3",
+            "unit": "g",
+            "values": [
+              1.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa en la ranura 4",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m1_4",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa en la ranura 5",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m1_5",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa en la ranura 6",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m1_6",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa en la ranura 7",
+            "result": {
+              "mean": 2.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.002886751345948129,
+              "u_c": 0.002886751345948129,
+              "u_expanded": 0.005773502691896258
+            },
+            "symbol": "m1_7",
+            "unit": "g",
+            "values": [
+              2.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa en la ranura 8",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m1_8",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa en la ranura 9",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m1_9",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 2 - masa en la ranura 1",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m2_1",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 2 - masa en la ranura 2",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m2_2",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 2 - masa en la ranura 3",
+            "result": {
+              "mean": 1.02,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.002886751345948129,
+              "u_c": 0.002886751345948129,
+              "u_expanded": 0.005773502691896258
+            },
+            "symbol": "m2_3",
+            "unit": "g",
+            "values": [
+              1.02
+            ]
+          },
+          {
+            "name": "Medida 2 - masa en la ranura 4",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m2_4",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 2 - masa en la ranura 5",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m2_5",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 2 - masa en la ranura 6",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m2_6",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 2 - masa en la ranura 7",
+            "result": {
+              "mean": 1.98,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.002886751345948129,
+              "u_c": 0.002886751345948129,
+              "u_expanded": 0.005773502691896258
+            },
+            "symbol": "m2_7",
+            "unit": "g",
+            "values": [
+              1.98
+            ]
+          },
+          {
+            "name": "Medida 2 - masa en la ranura 8",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m2_8",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 2 - masa en la ranura 9",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m2_9",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 3 - masa en la ranura 1",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m3_1",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 3 - masa en la ranura 2",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m3_2",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 3 - masa en la ranura 3",
+            "result": {
+              "mean": 0.99,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.002886751345948129,
+              "u_c": 0.002886751345948129,
+              "u_expanded": 0.005773502691896258
+            },
+            "symbol": "m3_3",
+            "unit": "g",
+            "values": [
+              0.99
+            ]
+          },
+          {
+            "name": "Medida 3 - masa en la ranura 4",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m3_4",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 3 - masa en la ranura 5",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m3_5",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 3 - masa en la ranura 6",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m3_6",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 3 - masa en la ranura 7",
+            "result": {
+              "mean": 2.01,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.002886751345948129,
+              "u_c": 0.002886751345948129,
+              "u_expanded": 0.005773502691896258
+            },
+            "symbol": "m3_7",
+            "unit": "g",
+            "values": [
+              2.01
+            ]
+          },
+          {
+            "name": "Medida 3 - masa en la ranura 8",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m3_8",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          },
+          {
+            "name": "Medida 3 - masa en la ranura 9",
+            "result": {
+              "mean": 0.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "m3_9",
+            "unit": "g",
+            "values": [
+              0.0
+            ]
+          }
+        ],
+        "regression": null,
+        "scatters": [],
+        "warnings": []
+      },
+      "analysis_kind": "estadistico",
+      "part_id": "hidrostatica-arq",
+      "title": "Parte 1: Arquimedes"
     },
     {
-      "formula": "rho_f*m_goma*b_E*1000/(m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)",
-      "has_uncertainty": true,
-      "name": "Densidad de la goma - medida 1",
-      "symbol": "rho1",
-      "u": 229.30426125624916,
-      "u_expanded": 458.6085225124983,
-      "unit": "kg/m3",
-      "value": 7338.235294117647
-    },
-    {
-      "formula": "((m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)/b_E)*g_ac/1000",
-      "has_uncertainty": true,
-      "name": "Empuje - medida 2",
-      "symbol": "E2",
-      "u": 0.00013874008287708612,
-      "u_expanded": 0.00027748016575417225,
-      "unit": "N",
-      "value": 0.0165816
-    },
-    {
-      "formula": "rho_f*m_goma*b_E*1000/(m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)",
-      "has_uncertainty": true,
-      "name": "Densidad de la goma - medida 2",
-      "symbol": "rho2",
-      "u": 230.3982943538479,
-      "u_expanded": 460.7965887076958,
-      "unit": "kg/m3",
-      "value": 7372.931442080379
-    },
-    {
-      "formula": "((m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)/b_E)*g_ac/1000",
-      "has_uncertainty": true,
-      "name": "Empuje - medida 3",
-      "symbol": "E3",
-      "u": 0.00013960399547997826,
-      "u_expanded": 0.0002792079909599565,
-      "unit": "N",
-      "value": 0.0166992
-    },
-    {
-      "formula": "rho_f*m_goma*b_E*1000/(m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)",
-      "has_uncertainty": true,
-      "name": "Densidad de la goma - medida 3",
-      "symbol": "rho3",
-      "u": 228.76168361333268,
-      "u_expanded": 457.52336722666536,
-      "unit": "kg/m3",
-      "value": 7321.0093896713615
-    },
-    {
-      "formula": "((((m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)/b_E)*g_ac/1000) + (((m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)/b_E)*g_ac/1000) + (((m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)/b_E)*g_ac/1000))/3",
-      "has_uncertainty": true,
-      "name": "Empuje promedio",
-      "symbol": "E_medio",
-      "u": 0.00013810064276349794,
-      "u_expanded": 0.0002762012855269959,
-      "unit": "N",
-      "value": 0.016646933333333332
-    },
-    {
-      "formula": "((rho_f*m_goma*b_E*1000/(m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)) + (rho_f*m_goma*b_E*1000/(m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)) + (rho_f*m_goma*b_E*1000/(m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)))/3",
-      "has_uncertainty": true,
-      "name": "Densidad de la goma promedio",
-      "symbol": "rho_medio",
-      "u": 229.35652422575188,
-      "u_expanded": 458.71304845150377,
-      "unit": "kg/m3",
-      "value": 7344.058708623129
-    },
-    {
-      "formula": "mw1*g_ac*dw1*100/(2*l*d*1000)",
-      "has_uncertainty": false,
-      "name": "Tension superficial - medida 1",
-      "symbol": "gamma1",
-      "u": 0.00011316065276970882,
-      "u_expanded": 0.00022632130553941764,
-      "unit": "N/m",
-      "value": 0.019600000000000003
-    },
-    {
-      "formula": "mw2*g_ac*dw2*100/(2*l*d*1000)",
-      "has_uncertainty": false,
-      "name": "Tension superficial - medida 2",
-      "symbol": "gamma2",
-      "u": 0.00011316065275198921,
-      "u_expanded": 0.00022632130550397843,
-      "unit": "N/m",
-      "value": 0.020384000000000003
-    },
-    {
-      "formula": "mw3*g_ac*dw3*100/(2*l*d*1000)",
-      "has_uncertainty": false,
-      "name": "Tension superficial - medida 3",
-      "symbol": "gamma3",
-      "u": 0.00011316065276889123,
-      "u_expanded": 0.00022632130553778247,
-      "unit": "N/m",
-      "value": 0.019208000000000003
-    },
-    {
-      "formula": "((mw1*g_ac*dw1*100/(2*l*d*1000)) + (mw2*g_ac*dw2*100/(2*l*d*1000)) + (mw3*g_ac*dw3*100/(2*l*d*1000)))/3",
-      "has_uncertainty": false,
-      "name": "Tension superficial promedio",
-      "symbol": "gamma_medio",
-      "u": 0.00006533333333825154,
-      "u_expanded": 0.00013066666667650308,
-      "unit": "N/m",
-      "value": 0.01973066666666667
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "mw1*g_ac*dw1*100/(2*l*d*1000)",
+            "has_uncertainty": false,
+            "name": "Tension superficial - medida 1",
+            "symbol": "gamma1",
+            "u": 0.00011316065276970882,
+            "u_expanded": 0.00022632130553941764,
+            "unit": "N/m",
+            "value": 0.019600000000000003
+          },
+          {
+            "formula": "mw2*g_ac*dw2*100/(2*l*d*1000)",
+            "has_uncertainty": false,
+            "name": "Tension superficial - medida 2",
+            "symbol": "gamma2",
+            "u": 0.00011316065275198921,
+            "u_expanded": 0.00022632130550397843,
+            "unit": "N/m",
+            "value": 0.020384000000000003
+          },
+          {
+            "formula": "mw3*g_ac*dw3*100/(2*l*d*1000)",
+            "has_uncertainty": false,
+            "name": "Tension superficial - medida 3",
+            "symbol": "gamma3",
+            "u": 0.00011316065276889123,
+            "u_expanded": 0.00022632130553778247,
+            "unit": "N/m",
+            "value": 0.019208000000000003
+          },
+          {
+            "formula": "((mw1*g_ac*dw1*100/(2*l*d*1000)) + (mw2*g_ac*dw2*100/(2*l*d*1000)) + (mw3*g_ac*dw3*100/(2*l*d*1000)))/3",
+            "has_uncertainty": false,
+            "name": "Tension superficial promedio",
+            "symbol": "gamma_medio",
+            "u": 0.00006533333333825154,
+            "u_expanded": 0.00013066666667650308,
+            "unit": "N/m",
+            "value": 0.01973066666666667
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [
+          {
+            "name": "Base del marco",
+            "result": {
+              "mean": 5.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "l",
+            "unit": "cm",
+            "values": [
+              5.0
+            ]
+          },
+          {
+            "name": "Brazo fijo del marco",
+            "result": {
+              "mean": 10.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "d",
+            "unit": "cm",
+            "values": [
+              10.0
+            ]
+          },
+          {
+            "name": "Medida 1 - masa de la pesa (Wilhelmy)",
+            "result": {
+              "mean": 0.5,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.002886751345948129,
+              "u_c": 0.002886751345948129,
+              "u_expanded": 0.005773502691896258
+            },
+            "symbol": "mw1",
+            "unit": "g",
+            "values": [
+              0.5
+            ]
+          },
+          {
+            "name": "Medida 1 - ranura de la pesa (cm)",
+            "result": {
+              "mean": 4.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "dw1",
+            "unit": "cm",
+            "values": [
+              4.0
+            ]
+          },
+          {
+            "name": "Medida 2 - masa de la pesa (Wilhelmy)",
+            "result": {
+              "mean": 0.52,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.002886751345948129,
+              "u_c": 0.002886751345948129,
+              "u_expanded": 0.005773502691896258
+            },
+            "symbol": "mw2",
+            "unit": "g",
+            "values": [
+              0.52
+            ]
+          },
+          {
+            "name": "Medida 2 - ranura de la pesa (cm)",
+            "result": {
+              "mean": 4.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "dw2",
+            "unit": "cm",
+            "values": [
+              4.0
+            ]
+          },
+          {
+            "name": "Medida 3 - masa de la pesa (Wilhelmy)",
+            "result": {
+              "mean": 0.49,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.002886751345948129,
+              "u_c": 0.002886751345948129,
+              "u_expanded": 0.005773502691896258
+            },
+            "symbol": "mw3",
+            "unit": "g",
+            "values": [
+              0.49
+            ]
+          },
+          {
+            "name": "Medida 3 - ranura de la pesa (cm)",
+            "result": {
+              "mean": 4.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "dw3",
+            "unit": "cm",
+            "values": [
+              4.0
+            ]
+          }
+        ],
+        "regression": null,
+        "scatters": [],
+        "warnings": []
+      },
+      "analysis_kind": "estadistico",
+      "part_id": "hidrostatica-ts",
+      "title": "Parte 2: Tension superficial"
     }
   ],
-  "operators": [],
   "point_results": [],
   "quantities": [
-    {
-      "name": "Masa de la goma",
-      "result": {
-        "mean": 12.5,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.3761094698798919,
-        "u_c": 0.3761094698798919,
-        "u_expanded": 0.7522189397597838
-      },
-      "symbol": "m_goma",
-      "unit": "g",
-      "values": [
-        12.5
-      ]
-    },
-    {
-      "name": "Densidad del fluido",
-      "result": {
-        "mean": 0.998,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0010801234497346435,
-        "u_c": 0.0010801234497346435,
-        "u_expanded": 0.002160246899469287
-      },
-      "symbol": "rho_f",
-      "unit": "g/cm3",
-      "values": [
-        0.998
-      ]
-    },
     {
       "name": "Aceleracion gravitatoria",
       "result": {
@@ -174,771 +974,6 @@
       "unit": "m/s2",
       "values": [
         9.8
-      ]
-    },
-    {
-      "name": "Brazo fijo del empuje",
-      "result": {
-        "mean": 10.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b_E",
-      "unit": "cm",
-      "values": [
-        10.0
-      ]
-    },
-    {
-      "name": "Brazo de la ranura 1",
-      "result": {
-        "mean": 1.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b1",
-      "unit": "cm",
-      "values": [
-        1.0
-      ]
-    },
-    {
-      "name": "Brazo de la ranura 2",
-      "result": {
-        "mean": 2.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b2",
-      "unit": "cm",
-      "values": [
-        2.0
-      ]
-    },
-    {
-      "name": "Brazo de la ranura 3",
-      "result": {
-        "mean": 3.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b3",
-      "unit": "cm",
-      "values": [
-        3.0
-      ]
-    },
-    {
-      "name": "Brazo de la ranura 4",
-      "result": {
-        "mean": 4.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b4",
-      "unit": "cm",
-      "values": [
-        4.0
-      ]
-    },
-    {
-      "name": "Brazo de la ranura 5",
-      "result": {
-        "mean": 5.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b5",
-      "unit": "cm",
-      "values": [
-        5.0
-      ]
-    },
-    {
-      "name": "Brazo de la ranura 6",
-      "result": {
-        "mean": 6.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b6",
-      "unit": "cm",
-      "values": [
-        6.0
-      ]
-    },
-    {
-      "name": "Brazo de la ranura 7",
-      "result": {
-        "mean": 7.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b7",
-      "unit": "cm",
-      "values": [
-        7.0
-      ]
-    },
-    {
-      "name": "Brazo de la ranura 8",
-      "result": {
-        "mean": 8.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b8",
-      "unit": "cm",
-      "values": [
-        8.0
-      ]
-    },
-    {
-      "name": "Brazo de la ranura 9",
-      "result": {
-        "mean": 9.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.05,
-        "u_c": 0.05,
-        "u_expanded": 0.1
-      },
-      "symbol": "b9",
-      "unit": "cm",
-      "values": [
-        9.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa en la ranura 1",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m1_1",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa en la ranura 2",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m1_2",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa en la ranura 3",
-      "result": {
-        "mean": 1.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.002886751345948129,
-        "u_c": 0.002886751345948129,
-        "u_expanded": 0.005773502691896258
-      },
-      "symbol": "m1_3",
-      "unit": "g",
-      "values": [
-        1.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa en la ranura 4",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m1_4",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa en la ranura 5",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m1_5",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa en la ranura 6",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m1_6",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa en la ranura 7",
-      "result": {
-        "mean": 2.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.002886751345948129,
-        "u_c": 0.002886751345948129,
-        "u_expanded": 0.005773502691896258
-      },
-      "symbol": "m1_7",
-      "unit": "g",
-      "values": [
-        2.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa en la ranura 8",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m1_8",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa en la ranura 9",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m1_9",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 2 - masa en la ranura 1",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m2_1",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 2 - masa en la ranura 2",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m2_2",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 2 - masa en la ranura 3",
-      "result": {
-        "mean": 1.02,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.002886751345948129,
-        "u_c": 0.002886751345948129,
-        "u_expanded": 0.005773502691896258
-      },
-      "symbol": "m2_3",
-      "unit": "g",
-      "values": [
-        1.02
-      ]
-    },
-    {
-      "name": "Medida 2 - masa en la ranura 4",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m2_4",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 2 - masa en la ranura 5",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m2_5",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 2 - masa en la ranura 6",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m2_6",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 2 - masa en la ranura 7",
-      "result": {
-        "mean": 1.98,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.002886751345948129,
-        "u_c": 0.002886751345948129,
-        "u_expanded": 0.005773502691896258
-      },
-      "symbol": "m2_7",
-      "unit": "g",
-      "values": [
-        1.98
-      ]
-    },
-    {
-      "name": "Medida 2 - masa en la ranura 8",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m2_8",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 2 - masa en la ranura 9",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m2_9",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 3 - masa en la ranura 1",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m3_1",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 3 - masa en la ranura 2",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m3_2",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 3 - masa en la ranura 3",
-      "result": {
-        "mean": 0.99,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.002886751345948129,
-        "u_c": 0.002886751345948129,
-        "u_expanded": 0.005773502691896258
-      },
-      "symbol": "m3_3",
-      "unit": "g",
-      "values": [
-        0.99
-      ]
-    },
-    {
-      "name": "Medida 3 - masa en la ranura 4",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m3_4",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 3 - masa en la ranura 5",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m3_5",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 3 - masa en la ranura 6",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m3_6",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 3 - masa en la ranura 7",
-      "result": {
-        "mean": 2.01,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.002886751345948129,
-        "u_c": 0.002886751345948129,
-        "u_expanded": 0.005773502691896258
-      },
-      "symbol": "m3_7",
-      "unit": "g",
-      "values": [
-        2.01
-      ]
-    },
-    {
-      "name": "Medida 3 - masa en la ranura 8",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m3_8",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Medida 3 - masa en la ranura 9",
-      "result": {
-        "mean": 0.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "m3_9",
-      "unit": "g",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "name": "Base del marco",
-      "result": {
-        "mean": 5.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "l",
-      "unit": "cm",
-      "values": [
-        5.0
-      ]
-    },
-    {
-      "name": "Brazo fijo del marco",
-      "result": {
-        "mean": 10.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "d",
-      "unit": "cm",
-      "values": [
-        10.0
-      ]
-    },
-    {
-      "name": "Medida 1 - masa de la pesa (Wilhelmy)",
-      "result": {
-        "mean": 0.5,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.002886751345948129,
-        "u_c": 0.002886751345948129,
-        "u_expanded": 0.005773502691896258
-      },
-      "symbol": "mw1",
-      "unit": "g",
-      "values": [
-        0.5
-      ]
-    },
-    {
-      "name": "Medida 1 - ranura de la pesa (cm)",
-      "result": {
-        "mean": 4.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "dw1",
-      "unit": "cm",
-      "values": [
-        4.0
-      ]
-    },
-    {
-      "name": "Medida 2 - masa de la pesa (Wilhelmy)",
-      "result": {
-        "mean": 0.52,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.002886751345948129,
-        "u_c": 0.002886751345948129,
-        "u_expanded": 0.005773502691896258
-      },
-      "symbol": "mw2",
-      "unit": "g",
-      "values": [
-        0.52
-      ]
-    },
-    {
-      "name": "Medida 2 - ranura de la pesa (cm)",
-      "result": {
-        "mean": 4.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "dw2",
-      "unit": "cm",
-      "values": [
-        4.0
-      ]
-    },
-    {
-      "name": "Medida 3 - masa de la pesa (Wilhelmy)",
-      "result": {
-        "mean": 0.49,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.002886751345948129,
-        "u_c": 0.002886751345948129,
-        "u_expanded": 0.005773502691896258
-      },
-      "symbol": "mw3",
-      "unit": "g",
-      "values": [
-        0.49
-      ]
-    },
-    {
-      "name": "Medida 3 - ranura de la pesa (cm)",
-      "result": {
-        "mean": 4.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "dw3",
-      "unit": "cm",
-      "values": [
-        4.0
       ]
     }
   ],

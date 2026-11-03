@@ -446,3 +446,58 @@ pub(super) async fn migrate_legacy_layout(pool: &SqlitePool) -> anyhow::Result<(
     tx.commit().await?;
     Ok(())
 }
+
+const SHARED_RESULTS_TO_PARTS: &str = "2026-11-mensurandos-compartidos-a-su-parte";
+
+pub(super) async fn migrate_shared_results_to_parts(pool: &SqlitePool) -> anyhow::Result<()> {
+    let (done,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+        .bind(SHARED_RESULTS_TO_PARTS)
+        .fetch_one(pool)
+        .await?;
+    if done > 0 {
+        return Ok(());
+    }
+    let practice_ids: Vec<String> =
+        sqlx::query_scalar("SELECT DISTINCT practice_id FROM practice_parts")
+            .fetch_all(pool)
+            .await?;
+    let mut moves: Vec<(String, Option<String>)> = Vec::new();
+    for practice_id in practice_ids {
+        let Some(def) = super::definition(pool, &practice_id).await? else {
+            continue;
+        };
+        for result in &def.results {
+            if def.result_part(&result.symbol).is_some() {
+                continue;
+            }
+            let Some(part) = def.inferred_part(&result.formula) else {
+                continue;
+            };
+            let in_part = || {
+                def.sections
+                    .iter()
+                    .filter(|s| s.part_id.as_deref() == Some(part))
+            };
+            let section = in_part()
+                .find(|s| !s.results.is_empty())
+                .or_else(|| in_part().next())
+                .map(|s| s.id.clone());
+            moves.push((result.id.clone(), section));
+        }
+    }
+    let mut tx = pool.begin().await?;
+    for (result_id, section_id) in moves {
+        sqlx::query("UPDATE practice_results SET section_id = ?1 WHERE id = ?2")
+            .bind(section_id)
+            .bind(result_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(SHARED_RESULTS_TO_PARTS)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}

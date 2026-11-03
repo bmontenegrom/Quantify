@@ -162,21 +162,21 @@ pub async fn duplicate_practice(
         .execute(&mut *tx)
         .await?;
     }
-    let parts: Vec<(String, String, i64)> =
-        sqlx::query_as("SELECT id, title, position FROM practice_parts WHERE practice_id = ?1")
+    let parts: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM practice_parts WHERE practice_id = ?1")
             .bind(source_id)
             .fetch_all(&mut *tx)
             .await?;
     let mut part_map = std::collections::HashMap::new();
-    for (old, title, position) in parts {
+    for old in parts {
         let new = uuid::Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO practice_parts (id, practice_id, title, position) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO practice_parts (id, practice_id, title, position) \
+             SELECT ?1, ?2, title, position FROM practice_parts WHERE id = ?3",
         )
         .bind(&new)
         .bind(&id)
-        .bind(title)
-        .bind(position)
+        .bind(&old)
         .execute(&mut *tx)
         .await?;
         part_map.insert(old, new);

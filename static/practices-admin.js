@@ -275,7 +275,7 @@ export function renderPracticesPage() {
       count: def?.results?.length ?? 0,
       list: renderResultsList(def, practice.id),
       addLabel: "Nuevo mensurando",
-      form: renderResultForm(null, practice.id),
+      form: renderResultForm(null, practice.id, def),
     })}
     ${kind === "regresion_lineal" ? renderPointResultsSection(practice, def) : ""}
     ${kind === "regresion_lineal" ? renderAggregatesSection(practice, def) : ""}
@@ -803,7 +803,16 @@ function renderQuantitiesList(def, practiceId) {
   `;
 }
 
-function renderResultForm(res, practiceId) {
+function newResultSectionHtml(def) {
+  const sections = def?.sections ?? [];
+  if (!sections.length) return "";
+  const options = [`<option value="">Sin sección (va a la parte de los datos que usa)</option>`]
+    .concat(sections.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(sectionLabel(def, s))}</option>`))
+    .join("");
+  return `<label>Sección <select name="section_id">${options}</select></label>`;
+}
+
+function renderResultForm(res, practiceId, def = null) {
   const v = (f) => res ? escapeHtml(String(res[f] ?? "")) : "";
   const formId = res ? "edit-result-form" : "new-result-form";
   const formAttr = res ? `data-edit-result-form data-rid="${escapeHtml(res.id)}"` : "";
@@ -815,6 +824,7 @@ function renderResultForm(res, practiceId) {
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" /></label>
+      ${res ? "" : newResultSectionHtml(def)}
       <label>Tolerancia (%)
         <input name="tolerance" type="number" min="0" step="any"
           value="${res?.tolerance != null ? escapeHtml(String(res.tolerance)) : ""}"
@@ -1198,6 +1208,7 @@ async function saveNewResult(event) {
         tolerance: parseTolerance(raw.tolerance ?? ""),
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
+        section_id: raw.section_id || null,
       });
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },

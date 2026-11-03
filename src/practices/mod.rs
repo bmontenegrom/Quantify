@@ -198,6 +198,7 @@ pub struct PracticeInfoInput {
 mod crud;
 mod layout;
 mod lifecycle;
+mod parts;
 mod seed;
 #[cfg(test)]
 mod tests;
@@ -205,4 +206,5 @@ mod tests;
 pub use crud::*;
 pub use layout::*;
 pub use lifecycle::*;
+pub use parts::is_point_based;
 pub use seed::seed_definitions;

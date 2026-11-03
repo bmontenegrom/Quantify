@@ -610,12 +610,23 @@ pub async fn create_result(
     pool: &SqlitePool,
     practice_id: &str,
     input: ResultInput,
+    section_id: Option<&str>,
 ) -> anyhow::Result<PracticeResult> {
     let position = next_position(pool, "practice_results", "practice_id", practice_id).await?;
-    let id = {
-        let mut conn = pool.acquire().await?;
-        insert_result(&mut conn, practice_id, position, &input).await?
-    };
+    let mut tx = pool.begin().await?;
+    let id = insert_result(&mut tx, practice_id, position, &input).await?;
+    if let Some(section_id) = section_id {
+        sqlx::query(
+            "UPDATE practice_results SET section_id = ?1 WHERE id = ?2 \
+             AND EXISTS (SELECT 1 FROM practice_sections WHERE id = ?1 AND practice_id = ?3)",
+        )
+        .bind(section_id)
+        .bind(&id)
+        .bind(practice_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
     fetch_result(pool, &id).await
 }
 

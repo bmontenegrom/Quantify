@@ -135,7 +135,7 @@ async fn update_and_delete_quantity() {
 #[tokio::test]
 async fn create_and_delete_result() {
     let (pool, _dir) = setup().await;
-    let r = create_result(&pool, "p1-estadistica", sample_result())
+    let r = create_result(&pool, "p1-estadistica", sample_result(), None)
         .await
         .unwrap();
     assert_eq!(r.symbol, "Q");
@@ -155,6 +155,7 @@ async fn create_and_update_result_toggles_is_final() {
             is_final: true,
             ..sample_result()
         },
+        None,
     )
     .await
     .unwrap();
@@ -209,7 +210,7 @@ async fn symbol_taken_detects_cross_table_collision() {
     .await
     .unwrap());
 
-    let r = create_result(&pool, "p1-estadistica", sample_result())
+    let r = create_result(&pool, "p1-estadistica", sample_result(), None)
         .await
         .unwrap();
 
@@ -811,9 +812,11 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
         mk("T1", t1_vals, None),
     ];
 
-    let analysis = crate::computation::analyze(&pool, "p1-estadistica", &measurements)
-        .await
-        .unwrap();
+    let analysis = crate::computation::tests::flattened(
+        crate::computation::analyze(&pool, "p1-estadistica", &measurements)
+            .await
+            .unwrap(),
+    );
 
     let t1_q = analysis
         .quantities
@@ -900,7 +903,7 @@ async fn deleting_practice_cascades_to_definition() {
     create_quantity(&pool, "p1-estadistica", sample_quantity())
         .await
         .unwrap();
-    create_result(&pool, "p1-estadistica", sample_result())
+    create_result(&pool, "p1-estadistica", sample_result(), None)
         .await
         .unwrap();
     sqlx::query("DELETE FROM practices WHERE id = 'p1-estadistica'")
@@ -1399,9 +1402,51 @@ async fn analyze_p2_cc_derives_results_and_aliases() {
         pt("I", is),
     ];
 
-    let analysis = crate::computation::analyze(&pool, "p2-cc", &measurements)
+    let by_part = crate::computation::analyze(&pool, "p2-cc", &measurements)
         .await
         .unwrap();
+    let shared: Vec<&str> = by_part
+        .quantities
+        .iter()
+        .map(|q| q.symbol.as_str())
+        .collect();
+    assert_eq!(shared, ["R1", "R2", "R3"]);
+    assert!(by_part.derived.is_empty());
+    let kinds: Vec<(&str, &str)> = by_part
+        .parts
+        .iter()
+        .map(|p| (p.part_id.as_str(), p.analysis_kind.as_str()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("p2-cc-serie", "estadistico"),
+            ("p2-cc-paralelo", "estadistico"),
+            ("p2-cc-potencia", "curva")
+        ]
+    );
+    let part = |id: &str| {
+        &by_part
+            .parts
+            .iter()
+            .find(|p| p.part_id == id)
+            .unwrap()
+            .analysis
+    };
+    assert!(part("p2-cc-paralelo")
+        .derived
+        .iter()
+        .any(|d| d.symbol == "Req"));
+    assert!(part("p2-cc-potencia")
+        .derived
+        .iter()
+        .any(|d| d.symbol == "P_max_e"));
+    assert_eq!(part("p2-cc-potencia").scatters.len(), 1);
+    assert!(part("p2-cc-serie")
+        .quantities
+        .iter()
+        .all(|q| !shared.contains(&q.symbol.as_str())));
+    let analysis = crate::computation::tests::flattened(by_part);
 
     assert_eq!(analysis.quantities.len(), 15);
     assert!(analysis.quantities.iter().any(|q| q.symbol == "VR1_s"));
@@ -2152,4 +2197,223 @@ async fn deleting_parts_and_sections_keeps_the_content() {
     .await
     .unwrap()
     .is_none());
+}
+
+#[tokio::test]
+async fn shared_results_that_use_one_part_move_into_it() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let p1 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    assert_eq!(p1.result_part("Q"), Some("p1-estadistica-op1"));
+    assert_eq!(p1.result_part("gamma"), None);
+    let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(cc.result_part("Req"), Some("p2-cc-paralelo"));
+    let hidro = definition(&pool, "hidrostatica").await.unwrap().unwrap();
+    assert!(hidro
+        .results
+        .iter()
+        .all(|r| hidro.result_part(&r.symbol).is_some()));
+}
+
+#[tokio::test]
+async fn the_series_part_takes_the_practice_kind_and_the_rest_are_statistical() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    let kinds: Vec<&str> = cc.parts.iter().map(|p| cc.part_kind(p)).collect();
+    assert_eq!(kinds, ["estadistico", "estadistico", "curva"]);
+    let hidro = definition(&pool, "hidrostatica").await.unwrap().unwrap();
+    assert!(hidro
+        .parts
+        .iter()
+        .all(|p| hidro.part_kind(p) == "estadistico"));
+
+    let potencia = cc.parts.iter().find(|p| p.id == "p2-cc-potencia").unwrap();
+    let view = cc.part_view(potencia);
+    let symbols: Vec<&str> = view.quantities.iter().map(|q| q.symbol.as_str()).collect();
+    assert!(symbols.contains(&"R1") && symbols.contains(&"I") && !symbols.contains(&"Vg_s"));
+    assert_eq!(view.curves.len(), cc.curves.len());
+    let serie = cc.parts.iter().find(|p| p.id == "p2-cc-serie").unwrap();
+    assert!(cc.part_view(serie).curves.is_empty());
+    let shared = cc.shared_view();
+    assert!(shared
+        .quantities
+        .iter()
+        .all(|q| ["R1", "R2", "R3"].contains(&q.symbol.as_str())));
+}
+
+#[tokio::test]
+async fn shared_results_keep_the_operator_shape_of_the_form() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    set_operator_count(&pool, "p1-estadistica", 2)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE practice_sections SET part_id = NULL WHERE part_id = 'p1-estadistica-op1'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    assert_eq!(def.result_part("g1"), None);
+    let id = |sym: &str| {
+        def.quantities
+            .iter()
+            .find(|q| q.symbol == sym)
+            .unwrap()
+            .id
+            .clone()
+    };
+    let m = |sym: &str, values: Vec<f64>, given_u: Option<f64>, ops: Option<Vec<Vec<f64>>>| {
+        crate::computation::MeasurementInput {
+            quantity_id: id(sym),
+            instrument_id: None,
+            scale_id: None,
+            values,
+            given_u,
+            point_replicas: None,
+            operator_replicas: ops,
+        }
+    };
+    let measurements = vec![
+        m("L", vec![1.0], Some(0.002), None),
+        m("t_med", vec![2.0], Some(0.0), None),
+        m(
+            "T1",
+            vec![],
+            None,
+            Some(vec![vec![2.0, 2.02, 1.98], vec![2.01, 1.99, 2.0]]),
+        ),
+    ];
+    let analysis = crate::computation::analyze(&pool, "p1-estadistica", &measurements)
+        .await
+        .unwrap();
+    assert_eq!(analysis.operators.len(), 2);
+    for part in &analysis.parts {
+        for op in &part.analysis.operators {
+            assert!(op
+                .quantities
+                .iter()
+                .all(|q| q.symbol != "T1" && q.symbol != "L"));
+        }
+    }
+    for op in &analysis.operators {
+        let g1 = op.derived.iter().find(|d| d.symbol == "g1").unwrap();
+        assert!(
+            g1.value.is_finite() && (g1.value - 9.87).abs() < 0.1,
+            "{}",
+            g1.value
+        );
+    }
+}
+
+#[tokio::test]
+async fn shared_results_that_use_curve_values_move_into_the_series_part() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_results SET section_id = \
+         (SELECT id FROM practice_sections WHERE practice_id = 'p2-cc' AND part_id IS NULL) \
+         WHERE practice_id = 'p2-cc' AND symbol IN ('P_max_e', 'RP_max_e')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "DELETE FROM applied_migrations WHERE name = '2026-11-mensurandos-compartidos-a-su-parte'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let loose = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(loose.result_part("P_max_e"), None);
+    assert_eq!(loose.symbol_part("P_max"), Some("p2-cc-potencia"));
+    assert_eq!(loose.symbol_part("R_at_P_max"), Some("p2-cc-potencia"));
+    assert_eq!(loose.symbol_part("P"), Some("p2-cc-potencia"));
+    assert_eq!(loose.symbol_part("R1"), None);
+    assert_eq!(loose.symbol_part("Vg_s"), Some("p2-cc-serie"));
+
+    layout::migrate_shared_results_to_parts(&pool)
+        .await
+        .unwrap();
+    let fixed = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(fixed.result_part("P_max_e"), Some("p2-cc-potencia"));
+    assert_eq!(fixed.result_part("RP_max_e"), Some("p2-cc-potencia"));
+}
+
+#[tokio::test]
+async fn curve_practices_do_not_inherit_a_leftover_operator_count() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let mut cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    cc.operator_count = Some(2);
+    assert_eq!(cc.shared_view().operator_count, None);
+    assert!(cc
+        .parts
+        .iter()
+        .all(|p| cc.part_view(p).operator_count.is_none()));
+    let mut p1 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    p1.operator_count = Some(2);
+    assert_eq!(p1.shared_view().operator_count, Some(2));
+}
+
+#[tokio::test]
+async fn the_migration_leaves_a_result_unsectioned_when_its_part_has_no_section() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query("DELETE FROM practice_sections WHERE part_id IN ('p2-cc-serie', 'p2-cc-potencia')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE practice_results SET section_id = \
+         (SELECT id FROM practice_sections WHERE practice_id = 'p2-cc' AND part_id IS NULL) \
+         WHERE practice_id = 'p2-cc' AND symbol = 'P_max_e'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "DELETE FROM applied_migrations WHERE name = '2026-11-mensurandos-compartidos-a-su-parte'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let before = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(before.result_part("P_max_e"), None);
+
+    layout::migrate_shared_results_to_parts(&pool)
+        .await
+        .unwrap();
+    let after = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert!(after
+        .sections
+        .iter()
+        .all(|s| !s.results.contains(&"P_max_e".to_string())));
+    let series = after.series_part().unwrap().id.clone();
+    assert_eq!(after.result_part("P_max_e"), Some(series.as_str()));
+}
+
+#[tokio::test]
+async fn a_result_used_by_series_artifacts_goes_to_the_series_part() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    create_part(
+        &pool,
+        "fluidos-1",
+        &PartInput {
+            title: "Unica".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut def = definition(&pool, "fluidos-1").await.unwrap().unwrap();
+    let series = def.series_part().unwrap().id.clone();
+    let mut k = def.results[0].clone();
+    k.id = "k".into();
+    k.symbol = "k".into();
+    k.formula = "2".into();
+    def.results.push(k);
+    assert_eq!(def.result_part("k"), None);
+    def.point_results[0].formula = format!("{} * k", def.point_results[0].formula);
+    assert_eq!(def.result_part("k"), Some(series.as_str()));
 }

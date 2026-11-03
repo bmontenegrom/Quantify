@@ -16,6 +16,29 @@ async function fillAndSubmit(page, formSelector, fields, checks = {}) {
   await form.locator('button[type="submit"]').click();
 }
 
+async function assignSection(page, list, symbol, label) {
+  const select = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="${list}"]`);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await select.selectOption({ label });
+    await page.waitForLoadState("networkidle");
+    const ok = await page
+      .waitForFunction(
+        ([list, symbol, label]) => {
+          const row = [...document.querySelectorAll("#practice-workspace tr")].find(
+            (tr) => tr.querySelector("code")?.textContent === symbol,
+          );
+          const sel = row?.querySelector(`[data-section-select="${list}"]`);
+          return sel?.selectedOptions[0]?.textContent === label;
+        },
+        [list, symbol, label],
+        { timeout: 3_000 },
+      )
+      .then(() => true, () => false);
+    if (ok) return;
+  }
+  throw new Error(`no se pudo asignar ${symbol} a ${label}`);
+}
+
 async function waitForStatus(page, text) {
   await page.waitForFunction(
     (t) => (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes(t),
@@ -41,7 +64,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "T", name: "Periodo", unit: "s" });
   await waitForStatus(page, "Magnitud agregada");
 
-  step("docente: dos partes con una sección cada una; L en la primera y T en la segunda");
+  step("docente: dos partes con sus secciones; L sin sección (compartida) y T en la segunda");
   for (const title of ["Parte A", "Parte B"]) {
     await openAddForm(page, "#new-part-form");
     await fillAndSubmit(page, "#new-part-form", { title });
@@ -54,29 +77,28 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     await page.locator('#new-section-form button[type="submit"]').click();
     await page.waitForSelector(`#practice-workspace input[aria-label="Título de la sección"][value="${title}"]`);
   }
-  for (const [symbol, section] of [["L", "Parte A — Seccion A"], ["T", "Parte B — Seccion B"]]) {
-    const row = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}"))`).first();
-    await row.locator('[data-section-select="quantities"]').selectOption({ label: section });
-    await page.waitForLoadState("networkidle");
-  }
+  await assignSection(page, "quantities", "T", "Parte B — Seccion B");
 
   step("docente: publicar sin mensurandos se rechaza");
   await page.click('[data-practice-status="publicada"]');
   await waitForStatus(page, "no tiene mensurandos");
 
-  step("docente: agrega g y publica");
-  await openAddForm(page, "#new-result-form");
-  await fillAndSubmit(
-    page,
-    "#new-result-form",
-    { symbol: "g", name: "Gravedad", unit: "m/s2", formula: "4*pi^2*L/T^2" },
-    { is_final: true },
-  );
-  await waitForStatus(page, "Mensurando agregado");
-  await page
-    .locator('#practice-workspace tr:has(code:text-is("g")) [data-section-select="results"]')
-    .selectOption({ label: "Parte B — Seccion R" });
-  await page.waitForLoadState("networkidle");
+  step("docente: agrega g y Lr, los ubica en sus partes y publica");
+  for (const [symbol, name, formula, section] of [
+    ["g", "Gravedad", "4*pi^2*L/T^2", "Parte B — Seccion R"],
+    ["Lr", "Largo informado", "L", "Parte A — Seccion A"],
+  ]) {
+    await openAddForm(page, "#new-result-form");
+    await page.locator('#new-result-form [name="section_id"]').selectOption({ label: section });
+    await fillAndSubmit(
+      page,
+      "#new-result-form",
+      { symbol, name, unit: symbol === "g" ? "m/s2" : "m", formula },
+      { is_final: true },
+    );
+    await waitForStatus(page, "Mensurando agregado");
+    await page.waitForSelector(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="results"]`);
+  }
   await page.click('[data-practice-status="publicada"]');
   await page.waitForSelector("#practice-workspace .practice-state--publicada");
 
@@ -107,15 +129,16 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await sPage.selectOption("#table-select", "1");
   await sPage.waitForLoadState("networkidle");
   const tabs = sPage.locator("#practice-part-tabs .part-tab");
+  await tabs.nth(1).waitFor();
   assert((await tabs.count()) === 2, "la práctica debía mostrar las dos pestañas");
   const given = sPage.locator(".measurement-row--given").first();
-  const measured = sPage.locator("#measurement-fields .measurement-row:not(.measurement-row--given)").first();
+  const measured = sPage.locator('#measurement-fields .measurement-row:not(.measurement-row--given):not([data-final-result])').first();
   await tabs.nth(0).click();
   assert((await given.isVisible()) && !(await measured.isVisible()), "la parte A debía mostrar L y ocultar T");
   await given.locator(".measure-given-value").fill("1");
   await given.locator(".measure-given-u").fill("0.002");
   await tabs.nth(1).click();
-  assert(!(await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y ocultar L");
+  assert((await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y también L, que es compartida");
   await measured.locator(".measure-value").first().fill("2.006");
   const finalG = sPage.locator('[data-final-result="1"][data-symbol="g"]');
   assert(await finalG.isVisible(), "el resultado final g debía verse en la parte B");
@@ -203,17 +226,15 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     await post(`${base}/curves`, { x_formula: "R", y_formula: "I", x_log: false });
     const partA = await post(`${base}/parts`, { title: "Datos" });
     const partB = await post(`${base}/parts`, { title: "Serie" });
-    const summary = await post(`${base}/sections`, { title: "Resumen", part_id: partA.id });
-    const rmax = await post(`${base}/results`, { symbol: "Rm", name: "R maxima", unit: "", formula: "R_max", is_final: true });
-    await post(`${base}/results/${rmax.id}/section`, { section_id: summary.id });
-    const v = await post(`${base}/quantities`, { symbol: "V", name: "V", unit: "", repeated: false, quantity: null, per_point: false });
-    const source = await post(`${base}/sections`, { title: "Fuente", part_id: partA.id });
-    const vm = await post(`${base}/results`, { symbol: "Vm", name: "V fuente", unit: "", formula: "V", is_final: true });
-    await post(`${base}/quantities/${v.id}/section`, { section_id: source.id });
-    await post(`${base}/results/${vm.id}/section`, { section_id: source.id });
     const section = await post(`${base}/sections`, { title: "Barrido", part_id: partB.id });
     await post(`${base}/quantities/${r.id}/section`, { section_id: section.id });
     await post(`${base}/quantities/${i.id}/section`, { section_id: section.id });
+    const summary = await post(`${base}/sections`, { title: "Resumen", part_id: partB.id });
+    await post(`${base}/results`, { symbol: "Rm", name: "R maxima", unit: "", formula: "R_max", is_final: true, section_id: summary.id });
+    const v = await post(`${base}/quantities`, { symbol: "V", name: "V", unit: "", repeated: false, quantity: null, per_point: false });
+    const source = await post(`${base}/sections`, { title: "Fuente", part_id: partA.id });
+    await post(`${base}/results`, { symbol: "Vm", name: "V fuente", unit: "", formula: "V", is_final: true, section_id: source.id });
+    await post(`${base}/quantities/${v.id}/section`, { section_id: source.id });
     await post(`${base}/status`, { status: "publicada" });
     const { courses } = await (await fetch("/api/academic/context")).json();
     await post(`/api/academic/courses/${courses[0].id}/practices`, { practice_id: practice.id });
