@@ -498,8 +498,12 @@ lo planeado:
   `practices` son los de esa parte. Los operadores solo aplican si la práctica es estadística. El
   tipo de `practices` es un espejo: es el de la parte con serie, o `estadistico` si no hay
   ninguna. Elegir el tipo de una parte lo actualiza.
-- **Sin parte elegida.** Si ninguna parte tiene tipo guardado, la parte con serie es la que tiene
-  las magnitudes por punto, o la primera si la serie no tiene sección.
+- **Sin parte elegida.** Si ninguna parte tiene tipo guardado (prácticas sembradas o anteriores),
+  la parte con serie es la que tiene las magnitudes por punto, o la primera si la serie no tiene
+  sección. Cuando el docente elige el tipo de una parte, se guarda el de todas, y desde ahí solo
+  cuenta lo elegido: una parte nueva nace estadística, y borrar la parte con serie deja la
+  práctica estadística. Las magnitudes por punto tienen que estar en la parte con serie (se valida
+  en cada cambio).
 - **JSON sin adaptador.** `FormAnalysis` suma `parts[]`, que no se serializa si está vacío. Con
   partes, el nivel superior es lo compartido. Las prácticas sin partes no cambian.
 - **Alcance de las fórmulas.**
@@ -517,8 +521,10 @@ lo planeado:
 - **P3 conserva su id** (`p3-relajacion`). La migración conserva la habilitación en cursos, los
   subgrupos y las mesas, y borra las entregas de las dos prácticas viejas.
 
-1. Mover `analysis_kind`, `x_formula`, `y_formula`, `operator_count` a `practice_parts`; las
-   columnas de `practices` quedan como espejo de la primera parte hasta retirarlas.
+1. ~~Mover `analysis_kind`, `x_formula`, `y_formula`, `operator_count` a `practice_parts`; las
+   columnas de `practices` quedan como espejo de la primera parte hasta retirarlas.~~ Hecho
+   distinto: solo `analysis_kind` pasó a la parte; las columnas de `practices` son el espejo de
+   **la parte con serie** (ver Estado arriba).
 2. Motor: `analyze` calcula lo compartido y después cada parte con su motor
    (`compute`/`compute_regresion`/`compute_curva`), recibiendo lo compartido como escalares. El
    resultado pasa a ser `FormAnalysis { shared, parts: [PartAnalysis] }`; se mantiene un

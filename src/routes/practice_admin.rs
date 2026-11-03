@@ -138,13 +138,11 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
                 .to_string(),
         );
     }
-    if let Some(series) = def.series_part() {
-        if def.series_parts().iter().any(|p| *p != series.id) {
-            problems.push(format!(
-                "tiene magnitudes por punto fuera de la parte \"{}\", que es la de la serie",
-                series.title
-            ));
-        }
+    if let Some(series) = def.stray_series() {
+        problems.push(format!(
+            "tiene magnitudes por punto fuera de la parte \"{}\", que es la de la serie",
+            series.title
+        ));
     }
     for part in def
         .parts
@@ -1025,20 +1023,13 @@ fn guard_series_part(
              secciones primero sin parte (compartidas) y después asignales la nueva."
         )));
     }
-    let stray = |def: &practices::PracticeDefinition| {
-        def.series_part().map(|series| {
-            (
-                series.title.clone(),
-                def.series_parts().iter().any(|p| *p != series.id),
-            )
-        })
-    };
-    if let Some((title, true)) = stray(after) {
-        if !matches!(stray(before), Some((_, true))) {
+    if let Some(series) = after.stray_series() {
+        if before.stray_series().is_none() {
             return Err(AppError::bad_request(format!(
                 "No se puede {what}: las magnitudes por punto tienen que estar en la parte de la \
-                 serie (\"{title}\"). Para cambiar de parte la serie, dejá sus secciones sin \
-                 parte, elegí la nueva parte de la serie y después asignáselas."
+                 serie (\"{}\"). Para cambiar de parte la serie, dejá sus secciones sin parte, \
+                 elegí la nueva parte de la serie y después asignáselas.",
+                series.title
             )));
         }
     }
@@ -1465,15 +1456,11 @@ pub(super) async fn create_part(
     require_title(&input.title)?;
     let before = load_definition(&state, &id).await?;
     guard_change(&before, &with_new_part(&before), "agregar la parte")?;
-    let created = practices::create_part(&state.pool, &id, &input).await?;
-    let after = load_definition(&state, &id).await?;
-    Ok(Json(
-        after
-            .parts
-            .into_iter()
-            .find(|p| p.id == created.id)
-            .unwrap_or(created),
-    ))
+    let mut created = practices::create_part(&state.pool, &id, &input).await?;
+    let mut after = before;
+    after.parts.push(created.clone());
+    created.effective_kind = after.part_kind(&created).to_string();
+    Ok(Json(created))
 }
 
 fn with_new_part(def: &practices::PracticeDefinition) -> practices::PracticeDefinition {
@@ -1503,6 +1490,14 @@ fn with_part_kind(
     let was_series = def.series_part().is_some_and(|p| p.id == part_id);
     let mut after = def.clone();
     let point_based = practices::is_point_based(Some(kind));
+    let current: Vec<String> = def
+        .parts
+        .iter()
+        .map(|p| def.part_kind(p).to_string())
+        .collect();
+    for (part, current) in after.parts.iter_mut().zip(current) {
+        part.analysis_kind = Some(current);
+    }
     for part in &mut after.parts {
         if part.id == part_id {
             part.analysis_kind = Some(kind.to_string());
@@ -1537,6 +1532,25 @@ pub(super) async fn set_part_kind(
     guard_change(&before, &after, "cambiar el tipo de la parte")?;
     practices::save_part_kinds(&state.pool, &after).await?;
     Ok(Json(Health { status: "ok" }))
+}
+
+fn with_part_deleted(
+    def: &practices::PracticeDefinition,
+    part_id: &str,
+) -> practices::PracticeDefinition {
+    let mut after = def.clone();
+    after.parts.retain(|p| p.id != part_id);
+    for section in after
+        .sections
+        .iter_mut()
+        .filter(|s| s.part_id.as_deref() == Some(part_id))
+    {
+        section.part_id = None;
+    }
+    if def.series_part().is_some_and(|p| p.id == part_id) {
+        after.analysis_kind = Some("estadistico".into());
+    }
+    after
 }
 
 fn with_part_moved(
@@ -1579,19 +1593,12 @@ pub(super) async fn delete_part(
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
     let before = load_definition(&state, &id).await?;
-    let mut after = before.clone();
-    after.parts.retain(|p| p.id != pid);
-    for section in after
-        .sections
-        .iter_mut()
-        .filter(|s| s.part_id.as_deref() == Some(pid.as_str()))
-    {
-        section.part_id = None;
-    }
+    let after = with_part_deleted(&before, &pid);
     guard_change(&before, &after, "eliminar la parte")?;
     if !practices::delete_part(&state.pool, &id, &pid).await? {
         return Err(AppError::not_found("parte no encontrada"));
     }
+    practices::save_part_kinds(&state.pool, &after).await?;
     Ok(Json(Health { status: "ok" }))
 }
 
@@ -2683,6 +2690,29 @@ mod tests {
         assert!(structure_problems(&without_a)
             .iter()
             .any(|p| p.contains("ninguna parte lleva la serie")));
+    }
+
+    #[tokio::test]
+    async fn explicit_kinds_do_not_move_the_series_by_accident() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let serie_stat = with_part_kind(&cc, "p2-cc-serie", "estadistico").unwrap();
+        assert_eq!(serie_stat.series_part().unwrap().id, "p2-cc-potencia");
+        assert!(guard_change(&cc, &serie_stat, "x").is_ok());
+
+        let with_new = with_new_part(&serie_stat);
+        let new_part = with_new.parts.last().unwrap();
+        assert_eq!(with_new.part_kind(new_part), "estadistico");
+        assert_eq!(with_new.series_part().unwrap().id, "p2-cc-potencia");
+
+        let without_series = with_part_deleted(&serie_stat, "p2-cc-potencia");
+        assert_eq!(without_series.analysis_kind.as_deref(), Some("estadistico"));
+        assert!(without_series.series_part().is_none());
+        let without_other = with_part_deleted(&serie_stat, "p2-cc-serie");
+        assert_eq!(without_other.analysis_kind.as_deref(), Some("curva"));
     }
 
     #[tokio::test]
