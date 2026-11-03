@@ -78,6 +78,35 @@ pub async fn save_part_kinds(
     definition: &super::PracticeDefinition,
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
+    write_kinds(&mut tx, definition).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn delete_part_saving_kinds(
+    pool: &SqlitePool,
+    part_id: &str,
+    after: &super::PracticeDefinition,
+) -> anyhow::Result<bool> {
+    let mut tx = pool.begin().await?;
+    let deleted = sqlx::query("DELETE FROM practice_parts WHERE id = ?1 AND practice_id = ?2")
+        .bind(part_id)
+        .bind(&after.practice_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if deleted == 0 {
+        return Ok(false);
+    }
+    write_kinds(&mut tx, after).await?;
+    tx.commit().await?;
+    Ok(true)
+}
+
+async fn write_kinds(
+    conn: &mut sqlx::SqliteConnection,
+    definition: &super::PracticeDefinition,
+) -> anyhow::Result<()> {
     for part in &definition.parts {
         sqlx::query(
             "UPDATE practice_parts SET analysis_kind = ?1 WHERE id = ?2 AND practice_id = ?3",
@@ -85,15 +114,14 @@ pub async fn save_part_kinds(
         .bind(&part.analysis_kind)
         .bind(&part.id)
         .bind(&definition.practice_id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
     }
     sqlx::query("UPDATE practices SET analysis_kind = ?1 WHERE id = ?2")
         .bind(&definition.analysis_kind)
         .bind(&definition.practice_id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
-    tx.commit().await?;
     Ok(())
 }
 
@@ -112,20 +140,6 @@ pub async fn update_part(
             .await?
             .rows_affected();
     Ok(changed > 0)
-}
-
-pub async fn delete_part(
-    pool: &SqlitePool,
-    practice_id: &str,
-    part_id: &str,
-) -> anyhow::Result<bool> {
-    let deleted = sqlx::query("DELETE FROM practice_parts WHERE id = ?2 AND practice_id = ?1")
-        .bind(practice_id)
-        .bind(part_id)
-        .execute(pool)
-        .await?
-        .rows_affected();
-    Ok(deleted > 0)
 }
 
 async fn belongs(

@@ -1165,15 +1165,20 @@ async function deleteLayoutItem(list, id, practiceId) {
   if (!window.confirm(what)) return;
   await runPracticeAction(async () => {
     await deleteJson(`/api/practices/${practiceId}/${list}/${id}`);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    [state.practiceDefinition, state.practices] = await Promise.all([
+      fetchJson(`/api/practices/${practiceId}/definition`),
+      fetchJson("/api/practices"),
+    ]);
   }, list === "parts" ? "Parte eliminada" : "Sección eliminada");
 }
 
 async function setPartKind(partId, kind, practiceId) {
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/parts/${partId}/analysis-kind`, { analysis_kind: kind });
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.practices = await fetchJson("/api/practices");
+    [state.practiceDefinition, state.practices] = await Promise.all([
+      fetchJson(`/api/practices/${practiceId}/definition`),
+      fetchJson("/api/practices"),
+    ]);
   }, "Análisis de la parte guardado");
 }
 

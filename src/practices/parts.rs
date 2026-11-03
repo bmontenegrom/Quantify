@@ -103,15 +103,31 @@ impl PracticeDefinition {
             .then_some(series)
     }
 
-    pub fn with_effective_kinds(mut self) -> PracticeDefinition {
-        let series = self.series_part().map(|p| p.id.clone());
-        let kinds: Vec<String> = self
-            .parts
+    pub fn part_kinds(&self) -> Vec<String> {
+        let series = self.series_part().map(|p| p.id.as_str());
+        self.parts
             .iter()
-            .map(|p| self.kind_given_series(p, series.as_deref()).to_string())
-            .collect();
+            .map(|p| self.kind_given_series(p, series).to_string())
+            .collect()
+    }
+
+    pub fn with_effective_kinds(mut self) -> PracticeDefinition {
+        let kinds = self.part_kinds();
         for (part, kind) in self.parts.iter_mut().zip(kinds) {
             part.effective_kind = kind;
+        }
+        self
+    }
+
+    pub fn with_mirrored_kind(mut self) -> PracticeDefinition {
+        if self.parts.iter().any(|p| p.analysis_kind.is_some()) {
+            self.analysis_kind = Some(
+                self.parts
+                    .iter()
+                    .filter_map(|p| p.analysis_kind.clone())
+                    .find(|k| is_point_based(Some(k)))
+                    .unwrap_or_else(|| "estadistico".into()),
+            );
         }
         self
     }

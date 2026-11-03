@@ -2166,7 +2166,9 @@ async fn duplicate_keeps_parts_and_sections_with_new_ids() {
 async fn deleting_parts_and_sections_keeps_the_content() {
     let (pool, _dir) = crate::computation::tests::setup().await;
     let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
-    assert!(delete_part(&pool, "p2-cc", "p2-cc-serie").await.unwrap());
+    assert!(delete_part_saving_kinds(&pool, "p2-cc-serie", &cc)
+        .await
+        .unwrap());
     let after = definition(&pool, "p2-cc").await.unwrap().unwrap();
     let serie = after
         .sections
