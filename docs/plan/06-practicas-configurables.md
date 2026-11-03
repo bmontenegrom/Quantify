@@ -420,7 +420,9 @@ restaurar y el recálculo de columnas en vivo). Los puntos 1, 4 y 5 en la PR de 
 
 ### F1 — Práctica como entidad editable ✅ HECHA
 
-**Estado (2026-11-02)**: hecho como se describe abajo, con dos cambios:
+**Estado (2026-11-02)**: hecho como se describe abajo, con estos cambios:
+- **Sin `updated_at`**: solo se agregaron `status`, `created_by` y `created_at`; nada lo usaba
+  todavía.
 - **El id no se edita**: se genera del nombre (slug sin tildes, `-2` si se repite) y queda fijo,
   porque es la clave primaria y las tablas de la definición la referencian sin `ON UPDATE`.
 - **Un solo endpoint de estado** `POST /practices/{id}/status` (`publicada` / `archivada`) en vez

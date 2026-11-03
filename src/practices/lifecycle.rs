@@ -192,11 +192,17 @@ pub async fn set_practice_status(
     if !allowed {
         return Ok(StatusChange::NotAllowed(current.status));
     }
-    sqlx::query("UPDATE practices SET status = ?2 WHERE id = ?1")
+    // Condicionado al estado leído: si otro pedido lo cambió en el medio, no se pisa.
+    let changed = sqlx::query("UPDATE practices SET status = ?2 WHERE id = ?1 AND status = ?3")
         .bind(practice_id)
         .bind(status)
+        .bind(&current.status)
         .execute(pool)
-        .await?;
+        .await?
+        .rows_affected();
+    if changed == 0 {
+        return Ok(StatusChange::NotAllowed(current.status));
+    }
     Ok(StatusChange::Done)
 }
 
