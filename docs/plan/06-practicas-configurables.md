@@ -464,6 +464,11 @@ el uso real conviene no editar estructuralmente prácticas con entregas hasta F5
   `…/results/{rid}/section` (un selector en cada fila del admin), no en su formulario.
 - Los ids de las partes migradas son estables (`p2-cc-serie`, `hidrostatica-arq`…). `PRACTICE_GROUPS`
   (P3) sigue en JS hasta F3.
+- **Cambio visible a propósito** (punto 5): en Hidrostática `g_ac` pasa a una sección compartida
+  "Datos comunes" y se ve en las dos pestañas; antes estaba solo en Arquímedes aunque la usa la
+  parte 2.
+- Solo son pestañas las partes que tienen alguna sección con contenido; en regresión y curva todas
+  las magnitudes por punto quedan en una misma parte (el motor arma una sola serie hasta F3).
 
 1. Schema: `practice_parts`, `practice_sections`, columnas `part_id` y `section_id` en todas las
    tablas de definición; `help_text`.

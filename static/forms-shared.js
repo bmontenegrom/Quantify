@@ -9,8 +9,9 @@ export function definitionSections(definition) {
     symbols: s.quantities,
     results: s.results,
   }));
+  const pointBased = definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva";
   const seriesSymbols = new Set(
-    definition.quantities.filter((q) => q.per_point && !q.is_given).map((q) => q.symbol),
+    pointBased ? definition.quantities.filter((q) => q.per_point && !q.is_given).map((q) => q.symbol) : [],
   );
   const seriesPart = definition.sections.find((s) => s.part_id && s.quantities.some((q) => seriesSymbols.has(q)));
   if (seriesPart) sections.push({ id: seriesPart.part_id, series: true });
@@ -18,7 +19,12 @@ export function definitionSections(definition) {
 }
 
 export function definitionParts(definition) {
-  return (definition?.parts ?? []).map((p) => ({ id: p.id, label: p.title }));
+  const used = new Set(
+    (definition?.sections ?? [])
+      .filter((s) => s.part_id && (s.quantities.length || s.results.length))
+      .map((s) => s.part_id),
+  );
+  return (definition?.parts ?? []).filter((p) => used.has(p.id)).map((p) => ({ id: p.id, label: p.title }));
 }
 
 export function groupBySections(items, sections) {

@@ -201,8 +201,11 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     const r = await qty("R");
     const i = await qty("I");
     await post(`${base}/curves`, { x_formula: "R", y_formula: "I", x_log: false });
-    await post(`${base}/parts`, { title: "Datos" });
+    const partA = await post(`${base}/parts`, { title: "Datos" });
     const partB = await post(`${base}/parts`, { title: "Serie" });
+    const summary = await post(`${base}/sections`, { title: "Resumen", part_id: partA.id });
+    const rmax = await post(`${base}/results`, { symbol: "Rm", name: "R maxima", unit: "", formula: "R_max", is_final: true });
+    await post(`${base}/results/${rmax.id}/section`, { section_id: summary.id });
     const section = await post(`${base}/sections`, { title: "Barrido", part_id: partB.id });
     await post(`${base}/quantities/${r.id}/section`, { section_id: section.id });
     await post(`${base}/quantities/${i.id}/section`, { section_id: section.id });

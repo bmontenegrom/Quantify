@@ -25,31 +25,25 @@ pub async fn sections_for(
     .bind(practice_id)
     .fetch_all(pool)
     .await?;
-    for section in &mut sections {
-        section.quantities = sqlx::query_scalar(
-            "SELECT symbol FROM practice_quantities WHERE section_id = ?1 ORDER BY position, symbol",
-        )
-        .bind(&section.id)
+    for (table, is_quantity) in [("practice_quantities", true), ("practice_results", false)] {
+        let members: Vec<(String, String)> = sqlx::query_as(&format!(
+            "SELECT section_id, symbol FROM {table} \
+             WHERE practice_id = ?1 AND section_id IS NOT NULL ORDER BY position, symbol"
+        ))
+        .bind(practice_id)
         .fetch_all(pool)
         .await?;
-        section.results = sqlx::query_scalar(
-            "SELECT symbol FROM practice_results WHERE section_id = ?1 ORDER BY position, symbol",
-        )
-        .bind(&section.id)
-        .fetch_all(pool)
-        .await?;
+        for (section_id, symbol) in members {
+            if let Some(section) = sections.iter_mut().find(|s| s.id == section_id) {
+                if is_quantity {
+                    section.quantities.push(symbol);
+                } else {
+                    section.results.push(symbol);
+                }
+            }
+        }
     }
     Ok(sections)
-}
-
-async fn next_position(pool: &SqlitePool, table: &str, practice_id: &str) -> anyhow::Result<i64> {
-    let (next,): (i64,) = sqlx::query_as(&format!(
-        "SELECT COALESCE(MAX(position) + 1, 0) FROM {table} WHERE practice_id = ?1"
-    ))
-    .bind(practice_id)
-    .fetch_one(pool)
-    .await?;
-    Ok(next)
 }
 
 pub async fn create_part(
@@ -58,7 +52,8 @@ pub async fn create_part(
     input: &PartInput,
 ) -> anyhow::Result<PracticePart> {
     let id = Uuid::new_v4().to_string();
-    let position = next_position(pool, "practice_parts", practice_id).await?;
+    let position =
+        crate::db::next_position(pool, "practice_parts", "practice_id", practice_id).await?;
     sqlx::query(
         "INSERT INTO practice_parts (id, practice_id, title, position) VALUES (?1, ?2, ?3, ?4)",
     )
@@ -107,21 +102,31 @@ pub async fn delete_part(
     Ok(deleted > 0)
 }
 
+async fn belongs(
+    pool: &SqlitePool,
+    table: &str,
+    id: &str,
+    practice_id: &str,
+) -> anyhow::Result<bool> {
+    let found: Option<(i64,)> = sqlx::query_as(&format!(
+        "SELECT 1 FROM {table} WHERE id = ?1 AND practice_id = ?2"
+    ))
+    .bind(id)
+    .bind(practice_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(found.is_some())
+}
+
 async fn part_belongs(
     pool: &SqlitePool,
     practice_id: &str,
     part_id: Option<&str>,
 ) -> anyhow::Result<bool> {
-    let Some(part_id) = part_id else {
-        return Ok(true);
-    };
-    let found: Option<(i64,)> =
-        sqlx::query_as("SELECT 1 FROM practice_parts WHERE id = ?1 AND practice_id = ?2")
-            .bind(part_id)
-            .bind(practice_id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(found.is_some())
+    match part_id {
+        Some(part_id) => belongs(pool, "practice_parts", part_id, practice_id).await,
+        None => Ok(true),
+    }
 }
 
 pub async fn create_section(
@@ -134,7 +139,8 @@ pub async fn create_section(
         return Ok(None);
     }
     let id = Uuid::new_v4().to_string();
-    let position = next_position(pool, "practice_sections", practice_id).await?;
+    let position =
+        crate::db::next_position(pool, "practice_sections", "practice_id", practice_id).await?;
     sqlx::query(
         "INSERT INTO practice_sections (id, practice_id, part_id, title, position) \
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -208,13 +214,7 @@ pub async fn set_member_section(
     section_id: Option<&str>,
 ) -> anyhow::Result<bool> {
     if let Some(section_id) = section_id {
-        let found: Option<(i64,)> =
-            sqlx::query_as("SELECT 1 FROM practice_sections WHERE id = ?1 AND practice_id = ?2")
-                .bind(section_id)
-                .bind(practice_id)
-                .fetch_optional(pool)
-                .await?;
-        if found.is_none() {
+        if !belongs(pool, "practice_sections", section_id, practice_id).await? {
             return Ok(false);
         }
     }
