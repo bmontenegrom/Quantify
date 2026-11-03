@@ -68,7 +68,7 @@
             "value": 7321.0093896713615
           },
           {
-            "formula": "((((m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)/b_E)*g_ac/1000) + (((m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)/b_E)*g_ac/1000) + (((m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)/b_E)*g_ac/1000))/3",
+            "formula": "(E1 + E2 + E3)/3",
             "has_uncertainty": true,
             "name": "Empuje promedio",
             "symbol": "E_medio",
@@ -78,7 +78,7 @@
             "value": 0.016646933333333332
           },
           {
-            "formula": "((rho_f*m_goma*b_E*1000/(m1_1*b1 + m1_2*b2 + m1_3*b3 + m1_4*b4 + m1_5*b5 + m1_6*b6 + m1_7*b7 + m1_8*b8 + m1_9*b9)) + (rho_f*m_goma*b_E*1000/(m2_1*b1 + m2_2*b2 + m2_3*b3 + m2_4*b4 + m2_5*b5 + m2_6*b6 + m2_7*b7 + m2_8*b8 + m2_9*b9)) + (rho_f*m_goma*b_E*1000/(m3_1*b1 + m3_2*b2 + m3_3*b3 + m3_4*b4 + m3_5*b5 + m3_6*b6 + m3_7*b7 + m3_8*b8 + m3_9*b9)))/3",
+            "formula": "(rho1 + rho2 + rho3)/3",
             "has_uncertainty": true,
             "name": "Densidad de la goma promedio",
             "symbol": "rho_medio",
@@ -798,7 +798,7 @@
             "value": 0.019208000000000003
           },
           {
-            "formula": "((mw1*g_ac*dw1*100/(2*l*d*1000)) + (mw2*g_ac*dw2*100/(2*l*d*1000)) + (mw3*g_ac*dw3*100/(2*l*d*1000)))/3",
+            "formula": "(gamma1 + gamma2 + gamma3)/3",
             "has_uncertainty": false,
             "name": "Tension superficial promedio",
             "symbol": "gamma_medio",
