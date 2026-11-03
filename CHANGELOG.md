@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/bmontenegrom/Quantify/compare/v0.1.1...v0.2.0) (2026-11-03)
+
+
+### Funcionalidades
+
+* **practicas:** crear, duplicar, publicar, archivar y borrar prácticas desde la UI ([#83](https://github.com/bmontenegrom/Quantify/issues/83)) ([f519d9b](https://github.com/bmontenegrom/Quantify/commit/f519d9babeb9b882d453d2af01b886e066bf8dce))
+
 ## [0.1.1](https://github.com/bmontenegrom/Quantify/compare/v0.1.0...v0.1.1) (2026-11-02)
 
 
