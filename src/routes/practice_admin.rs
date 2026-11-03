@@ -618,6 +618,8 @@ fn validate_intermediate(
     input: &IntermediateInput,
     exclude_id: Option<&str>,
 ) -> Result<(), AppError> {
+    let view = def.point_view();
+    let def = &view;
     let symbol = input.symbol.trim();
     let formula = input.formula.trim();
     if symbol.is_empty() || formula.is_empty() {
@@ -716,6 +718,8 @@ fn validate_point_result(
     def: &practices::PracticeDefinition,
     input: &PointResultInput,
 ) -> Result<(), AppError> {
+    let view = def.point_view();
+    let def = &view;
     let symbol = input.symbol.trim();
     let formula = input.formula.trim();
     if symbol.is_empty() || formula.is_empty() {
@@ -819,6 +823,8 @@ fn validate_aggregate(
     input: &AggregateInput,
     exclude_id: Option<&str>,
 ) -> Result<(), AppError> {
+    let view = def.point_view();
+    let def = &view;
     let symbol = input.symbol.trim();
     let formula = input.formula.trim();
     if symbol.is_empty() || formula.is_empty() {
@@ -1048,6 +1054,7 @@ fn guard_change(
 }
 
 fn axis_scope(def: &practices::PracticeDefinition) -> Vec<String> {
+    let def = def.point_view();
     def.quantities
         .iter()
         .map(|q| q.symbol.clone())
@@ -2224,6 +2231,30 @@ mod tests {
         assert!(publish_problems(&only_shared)
             .iter()
             .any(|p| p.contains("no tiene mensurandos")));
+    }
+
+    #[tokio::test]
+    async fn series_artifacts_only_see_the_series_part() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let curve = |x: &str, y: &str| CurveInput {
+            x_formula: x.into(),
+            y_formula: y.into(),
+            x_log: false,
+        };
+        assert!(validate_curve(&cc, &curve("R", "I*R1")).is_ok());
+        assert!(validate_curve(&cc, &curve("R", "Vg_s")).is_err());
+        let intermediate = |formula: &str| IntermediateInput {
+            symbol: "Pn".into(),
+            name: "Pn".into(),
+            unit: "".into(),
+            formula: formula.into(),
+        };
+        assert!(validate_intermediate(&cc, &intermediate("I*I*R"), None).is_ok());
+        assert!(validate_intermediate(&cc, &intermediate("I*Vg_p"), None).is_err());
     }
 
     #[tokio::test]

@@ -2293,3 +2293,36 @@ async fn shared_results_keep_the_operator_shape_of_the_form() {
         );
     }
 }
+
+#[tokio::test]
+async fn shared_results_that_use_curve_values_move_into_the_series_part() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_results SET section_id = NULL \
+         WHERE practice_id = 'p2-cc' AND symbol IN ('P_max_e', 'RP_max_e')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "DELETE FROM applied_migrations WHERE name = '2026-11-mensurandos-compartidos-a-su-parte'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let loose = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(loose.result_part("P_max_e"), None);
+    assert_eq!(loose.symbol_part("P_max"), Some("p2-cc-potencia"));
+    assert_eq!(loose.symbol_part("R_at_P_max"), Some("p2-cc-potencia"));
+    assert_eq!(loose.symbol_part("P"), Some("p2-cc-potencia"));
+    assert_eq!(loose.symbol_part("R1"), None);
+    assert_eq!(loose.symbol_part("Vg_s"), Some("p2-cc-serie"));
+
+    layout::migrate_shared_results_to_parts(&pool)
+        .await
+        .unwrap();
+    let fixed = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(fixed.result_part("P_max_e"), Some("p2-cc-potencia"));
+    assert_eq!(fixed.result_part("RP_max_e"), Some("p2-cc-potencia"));
+}

@@ -478,7 +478,7 @@ pub(super) async fn migrate_shared_results_to_parts(pool: &SqlitePool) -> anyhow
             }
             let mut parts: Vec<&str> = crate::computation::formula_symbols(&result.formula)
                 .iter()
-                .filter_map(|s| def.quantity_part(s))
+                .filter_map(|s| def.symbol_part(s))
                 .collect();
             parts.sort();
             parts.dedup();

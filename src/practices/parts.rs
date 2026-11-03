@@ -106,6 +106,37 @@ impl PracticeDefinition {
         }
     }
 
+    pub fn point_view(&self) -> PracticeDefinition {
+        if self.parts.is_empty() {
+            return self.clone();
+        }
+        match self.parts.iter().find(|p| is_point_based(Some(p.kind()))) {
+            Some(part) => self.part_view(part),
+            None => self.shared_view(),
+        }
+    }
+
+    pub fn symbol_part(&self, symbol: &str) -> Option<&str> {
+        if let Some(part) = self.quantity_part(symbol) {
+            return Some(part);
+        }
+        let point_part = self.parts.iter().find(|p| is_point_based(Some(p.kind())))?;
+        let series: Vec<&str> = self
+            .quantities
+            .iter()
+            .filter(|q| q.per_point && !q.is_given)
+            .map(|q| q.symbol.as_str())
+            .chain(self.intermediates.iter().map(|it| it.symbol.as_str()))
+            .collect();
+        let from_series = ["slope", "intercept"].contains(&symbol)
+            || series.contains(&symbol)
+            || series.iter().any(|s| {
+                symbol == format!("{s}_max")
+                    || series.iter().any(|t| symbol == format!("{t}_at_{s}_max"))
+            });
+        from_series.then_some(point_part.id.as_str())
+    }
+
     pub fn part_has_content(&self, part: &PracticePart) -> bool {
         self.quantities
             .iter()
