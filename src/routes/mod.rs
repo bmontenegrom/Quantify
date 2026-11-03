@@ -149,6 +149,30 @@ pub fn api_router(state: SharedState) -> Router {
             post(update_practice).delete(delete_practice),
         )
         .route("/practices/{id}/duplicate", post(duplicate_practice))
+        .route("/practices/{id}/parts", post(create_part))
+        .route(
+            "/practices/{id}/parts/{pid}",
+            post(update_part).delete(delete_part),
+        )
+        .route("/practices/{id}/parts/{pid}/move", post(move_part))
+        .route(
+            "/practices/{id}/parts/{pid}/analysis-kind",
+            post(set_part_kind),
+        )
+        .route("/practices/{id}/sections", post(create_section))
+        .route(
+            "/practices/{id}/sections/{sid}",
+            post(update_section).delete(delete_section),
+        )
+        .route("/practices/{id}/sections/{sid}/move", post(move_section))
+        .route(
+            "/practices/{id}/quantities/{qid}/section",
+            post(set_quantity_section),
+        )
+        .route(
+            "/practices/{id}/results/{rid}/section",
+            post(set_result_section),
+        )
         .route("/practices/{id}/status", post(set_practice_status))
         .route("/practices/{id}/definition", get(practice_definition))
         .route("/practices/{id}/analyze-preview", post(analyze_preview))

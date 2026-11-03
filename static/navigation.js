@@ -1,7 +1,6 @@
 import { state } from "./state.js";
 import { sidebar, navToggle, practiceNavChildren, courseSelect, practiceSelect } from "./dom.js";
 import { escapeHtml, canReview } from "./lib.js";
-import { PRACTICE_GROUPS } from "./constants.js";
 import { renderAccount } from "./auth.js";
 import { loadGrades, renderGradebookAdmin } from "./gradebook.js";
 import { renderStudentsPage } from "./students.js";
@@ -46,22 +45,7 @@ export function renderPracticeNav() {
       if (!seen.has(practice.id)) seen.set(practice.id, practice);
     }
   }
-  const all = [...seen.values()];
-  const shownGroups = new Set();
-  const items = [];
-  for (const practice of all) {
-    const group = PRACTICE_GROUPS[practice.id]?.group;
-    if (group) {
-      if (shownGroups.has(group)) continue;
-      shownGroups.add(group);
-      const rep = all
-        .filter((p) => PRACTICE_GROUPS[p.id]?.group === group)
-        .sort((a, b) => PRACTICE_GROUPS[a.id].order - PRACTICE_GROUPS[b.id].order)[0];
-      items.push(rep);
-    } else {
-      items.push(practice);
-    }
-  }
+  const items = [...seen.values()];
 
   practiceNavChildren.innerHTML = items.length
     ? items
@@ -97,11 +81,8 @@ export function selectPracticeFromNav(practiceId) {
 export function highlightPracticeNav() {
   if (!practiceNavChildren) return;
   const current = practiceSelect.value;
-  const currentGroup = PRACTICE_GROUPS[current]?.group;
   practiceNavChildren.querySelectorAll(".nav-child").forEach((btn) => {
-    const id = btn.dataset.practiceId;
-    const match = currentGroup ? PRACTICE_GROUPS[id]?.group === currentGroup : id === current;
-    btn.classList.toggle("active", match);
+    btn.classList.toggle("active", btn.dataset.practiceId === current);
   });
 }
 

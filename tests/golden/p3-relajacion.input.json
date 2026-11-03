@@ -1,25 +1,25 @@
 {
   "practice_id": "p3-relajacion",
-  "note": "Descarga RC con R = 10 kohm, C = 47 uF.",
+  "note": "Parte 1: descarga RC con R = 10 kohm, C = 47 uF. Parte 2: desfasaje RC con tau = 1 ms, b de la elipse para 4 frecuencias, con ruido.",
   "measurements": [
     {
       "symbol": "R",
       "values": [
-        9980.0
+        9980
       ],
       "scale": "Tester EXTECH MN35 (resistencia) / 20 kohm"
     },
     {
       "symbol": "Rint",
       "values": [
-        50.0
+        50
       ],
-      "given_u": 1.0
+      "given_u": 1
     },
     {
       "symbol": "C",
       "values": [
-        4.71e-05
+        0.0000471
       ],
       "scale": "Tester UA78A (capacidad) / 100 uF"
     },
@@ -36,6 +36,33 @@
         0.33
       ],
       "scale": "Osciloscopio GW Instek GDS-1052-U (tiempo) / tiempo (1% de la medida)"
+    },
+    {
+      "symbol": "f",
+      "values": [
+        50,
+        100,
+        200,
+        400
+      ]
+    },
+    {
+      "symbol": "a",
+      "values": [
+        4,
+        4,
+        4,
+        4
+      ]
+    },
+    {
+      "symbol": "b",
+      "values": [
+        1.21,
+        2.113,
+        3.136,
+        3.714
+      ]
     }
   ]
 }

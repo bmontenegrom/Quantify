@@ -1,116 +1,185 @@
 {
   "aggregates": [],
-  "derived": [
-    {
-      "formula": "(R + Rint) * C",
-      "has_uncertainty": true,
-      "name": "Tiempo de relajacion teorico",
-      "symbol": "tau_teorico",
-      "u": 0.012534348063136507,
-      "u_expanded": 0.025068696126273014,
-      "unit": "s",
-      "value": 0.47241299999999997
-    },
-    {
-      "formula": "tmedio / math::ln(2)",
-      "has_uncertainty": true,
-      "name": "Tiempo de relajacion experimental",
-      "symbol": "tau_exp",
-      "u": 0.002380446817440429,
-      "u_expanded": 0.004760893634880858,
-      "unit": "s",
-      "value": 0.47608936349335795
-    }
-  ],
+  "derived": [],
   "operators": [],
-  "point_results": [],
-  "quantities": [
+  "parts": [
     {
-      "name": "Resistencia",
-      "result": {
-        "mean": 9980.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 49.92,
-        "u_c": 49.92,
-        "u_expanded": 99.84
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "(R + Rint) * C",
+            "has_uncertainty": true,
+            "name": "Tiempo de relajacion teorico",
+            "symbol": "tau_teorico",
+            "u": 0.012534348063136507,
+            "u_expanded": 0.025068696126273014,
+            "unit": "s",
+            "value": 0.47241299999999997
+          },
+          {
+            "formula": "tmedio / math::ln(2)",
+            "has_uncertainty": true,
+            "name": "Tiempo de relajacion experimental",
+            "symbol": "tau_exp",
+            "u": 0.002380446817440429,
+            "u_expanded": 0.004760893634880858,
+            "unit": "s",
+            "value": 0.47608936349335795
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [
+          {
+            "name": "Resistencia",
+            "result": {
+              "mean": 9980.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 49.92,
+              "u_c": 49.92,
+              "u_expanded": 99.84
+            },
+            "symbol": "R",
+            "unit": "ohm",
+            "values": [
+              9980.0
+            ]
+          },
+          {
+            "name": "Resistencia interna de la fuente",
+            "result": {
+              "mean": 50.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.5,
+              "u_c": 0.5,
+              "u_expanded": 1.0
+            },
+            "symbol": "Rint",
+            "unit": "ohm",
+            "values": [
+              50.0
+            ]
+          },
+          {
+            "name": "Capacitancia",
+            "result": {
+              "mean": 0.0000471,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 1.2275000000000001e-6,
+              "u_c": 1.2275000000000001e-6,
+              "u_expanded": 2.4550000000000002e-6
+            },
+            "symbol": "C",
+            "unit": "F",
+            "values": [
+              0.0000471
+            ]
+          },
+          {
+            "name": "Periodo de la onda cuadrada",
+            "result": {
+              "mean": 0.5,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0025,
+              "u_c": 0.0025,
+              "u_expanded": 0.005
+            },
+            "symbol": "T_oc",
+            "unit": "s",
+            "values": [
+              0.5
+            ]
+          },
+          {
+            "name": "Tiempo de semidescarga (t1/2)",
+            "result": {
+              "mean": 0.33,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0016500000000000002,
+              "u_c": 0.0016500000000000002,
+              "u_expanded": 0.0033000000000000004
+            },
+            "symbol": "tmedio",
+            "unit": "s",
+            "values": [
+              0.33
+            ]
+          }
+        ],
+        "regression": null,
+        "scatters": [],
+        "warnings": []
       },
-      "symbol": "R",
-      "unit": "ohm",
-      "values": [
-        9980.0
-      ]
+      "analysis_kind": "estadistico",
+      "part_id": "p3-relajacion-directa",
+      "title": "Parte 1: Relajación directa"
     },
     {
-      "name": "Resistencia interna de la fuente",
-      "result": {
-        "mean": 50.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.5,
-        "u_c": 0.5,
-        "u_expanded": 1.0
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "slope",
+            "has_uncertainty": true,
+            "name": "Constante de tiempo RC (desfasaje)",
+            "symbol": "tau",
+            "u": 4.973421053429599e-6,
+            "u_expanded": 9.946842106859197e-6,
+            "unit": "s",
+            "value": 0.0009943636333428563
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [],
+        "regression": {
+          "intercept": 0.004274896560570118,
+          "points": [
+            [
+              314.1592653589793,
+              0.31736892955237733
+            ],
+            [
+              628.3185307179587,
+              0.6221374561377724
+            ],
+            [
+              1256.6370614359173,
+              1.26296629927753
+            ],
+            [
+              2513.2741228718346,
+              2.5004551295347595
+            ]
+          ],
+          "r_squared": 0.9999499702584531,
+          "slope": 0.0009943636333428563,
+          "u_intercept": 0.007202521583268458,
+          "u_slope": 4.9734210535596445e-6,
+          "x_label": "2*pi*f",
+          "y_label": "b / math::sqrt(a*a - b*b)"
+        },
+        "scatters": [],
+        "warnings": []
       },
-      "symbol": "Rint",
-      "unit": "ohm",
-      "values": [
-        50.0
-      ]
-    },
-    {
-      "name": "Capacitancia",
-      "result": {
-        "mean": 0.0000471,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 1.2275000000000001e-6,
-        "u_c": 1.2275000000000001e-6,
-        "u_expanded": 2.4550000000000002e-6
-      },
-      "symbol": "C",
-      "unit": "F",
-      "values": [
-        0.0000471
-      ]
-    },
-    {
-      "name": "Periodo de la onda cuadrada",
-      "result": {
-        "mean": 0.5,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0025,
-        "u_c": 0.0025,
-        "u_expanded": 0.005
-      },
-      "symbol": "T_oc",
-      "unit": "s",
-      "values": [
-        0.5
-      ]
-    },
-    {
-      "name": "Tiempo de semidescarga (t1/2)",
-      "result": {
-        "mean": 0.33,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0016500000000000002,
-        "u_c": 0.0016500000000000002,
-        "u_expanded": 0.0033000000000000004
-      },
-      "symbol": "tmedio",
-      "unit": "s",
-      "values": [
-        0.33
-      ]
+      "analysis_kind": "regresion_lineal",
+      "part_id": "p3-relajacion-desfasaje",
+      "title": "Parte 2: Desfasaje"
     }
   ],
+  "point_results": [],
+  "quantities": [],
   "regression": null,
   "scatters": [],
   "warnings": []

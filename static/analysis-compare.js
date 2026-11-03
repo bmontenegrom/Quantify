@@ -35,7 +35,11 @@ export function measuredVsTheoreticalMarkup(quantities, derived) {
   `;
 }
 
-export function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
+function partSuffix(title) {
+  return title ? ` — ${escapeHtml(title)}` : "";
+}
+
+export function comparisonMarkup(autoDerived, studentResults, tolerances = {}, title = null) {
   const rows = compareResults(autoDerived, studentResults, tolerances);
   if (!rows.length) return "";
   const hasVerdicts = rows.some((r) => r.verdict != null);
@@ -46,7 +50,7 @@ export function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
     return `<td class="verdict-none">—</td>`;
   };
   return `
-    <h3>Comparación: tus cálculos vs automático</h3>
+    <h3>Comparación: tus cálculos vs automático${partSuffix(title)}</h3>
     <div class="data-table-wrap">
       <table class="data-table compare-table">
         <thead>
@@ -78,7 +82,7 @@ export function comparisonMarkup(autoDerived, studentResults, tolerances = {}) {
   `;
 }
 
-export function pointResultsComparisonMarkup(analysis, studentResults) {
+export function pointResultsComparisonMarkup(analysis, studentResults, title = null) {
   const pointResults = analysis.point_results ?? [];
   if (!pointResults.length) return "";
   const byStudent = new Map((studentResults ?? []).map((s) => [s.symbol, s]));
@@ -102,7 +106,7 @@ export function pointResultsComparisonMarkup(analysis, studentResults) {
     return `<tr><td class="directory-primary">Corrida ${k + 1}</td>${cells}</tr>`;
   }).join("");
   return `
-    <h3>Comparación por corrida: tus cálculos vs automático</h3>
+    <h3>Comparación por corrida: tus cálculos vs automático${partSuffix(title)}</h3>
     <div class="data-table-wrap">
       <table class="data-table compare-table">
         <thead><tr><th>Corrida</th>${headCells}</tr></thead>

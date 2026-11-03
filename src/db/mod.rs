@@ -265,6 +265,8 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f.";
+
 pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     let practices = [
         (
@@ -286,15 +288,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         (
             "p3-relajacion",
             "Relajacion Exponencial",
-            "Determinacion del tiempo de relajacion tau de un circuito RC (parte 1: medida directa).",
-            "estadistico",
-            None,
-            None,
-        ),
-        (
-            "p3-relajacion-desfasaje",
-            "Relajacion Exponencial - Desfasaje",
-            "Determinacion de tau = RC por desfasaje (parte 2): ajuste lineal de tg(phi) contra omega = 2*pi*f.",
+            P3_DESCRIPTION,
             "regresion_lineal",
             Some("2*pi*f"),
             Some("b / math::sqrt(a*a - b*b)"),
@@ -467,7 +461,6 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "p1-estadistica",
         "p2-cc",
         "p3-relajacion",
-        "p3-relajacion-desfasaje",
         "fluidos-1",
         "viscosidad",
         "fluidos-2",
@@ -759,7 +752,7 @@ mod tests {
         assert!(ids.contains(&"p1-estadistica".to_string()));
         assert!(ids.contains(&"p2-cc".to_string()));
         assert!(ids.contains(&"p3-relajacion".to_string()));
-        assert!(ids.contains(&"p3-relajacion-desfasaje".to_string()));
+        assert!(!ids.contains(&"p3-relajacion-desfasaje".to_string()));
         assert!(!ids.contains(&"p2-serie".to_string()));
         assert!(!ids.contains(&"p2-corriente-continua".to_string()));
         assert!(!ids.contains(&"p2-potencia".to_string()));
@@ -798,17 +791,17 @@ mod tests {
                 .unwrap()
         );
         assert!(
-            user_can_submit(&pool, &student, COURSE, GROUP, "p3-relajacion-desfasaje")
+            user_can_submit(&pool, &student, COURSE, GROUP, "p3-relajacion")
                 .await
                 .unwrap()
         );
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 9);
 
         assert!(disable_course_practice(&pool, COURSE, "p1-estadistica")
             .await
             .unwrap());
         seed_academic(&pool).await.unwrap();
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 9);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 8);
         assert!(
             !user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
                 .await
@@ -823,7 +816,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
+        assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 9);
     }
 
     #[test]
