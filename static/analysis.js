@@ -14,15 +14,11 @@ export function renderAnalysis(target, submission, includeReview = false, defini
   if (submission.entry_mode === "form") {
     const isTeacher = canReview(state.user);
     const studentResults = submission.student_results ?? [];
-    // Motor D: con operadores los mensurandos son por operador (g por operador). Se muestran para
-    // comparar visualmente, sin entrada del alumno ni veredicto alumno-vs-automático.
     const hasOperators = (submission.analysis?.operators?.length ?? 0) > 0;
     let body = "";
     if (submission.analysis) {
       body += formAnalysisMarkup(submission.analysis);
       if (studentResults.length && !hasOperators) {
-        // Agregados (Motor F) marcados is_final en la definición: comparables igual que un
-        // resultado final común, pero sin incertidumbre (el motor de agregados no la calcula).
         const finalAggregateSymbols = new Set(
           (definition?.aggregates ?? []).filter((a) => a.is_final).map((a) => a.symbol),
         );
@@ -78,7 +74,6 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     return;
   }
 
-  // Entregas CSV (legacy): estadística por columna + regresión.
   const analysis = submission.analysis;
   const regression = analysis.regression;
   target.innerHTML = `
@@ -184,7 +179,6 @@ function measurementMetaMarkup(submission, definition) {
   return `<section class="panel meta-panel"><h4>Depuración de series</h4>${blocks}</section>`;
 }
 
-/** Tabla de incertidumbres por magnitud (n, media, s, u_A, u_B, u_c, U). */
 function quantitiesTableMarkup(quantities) {
   if (!quantities.length) return `<p class="submission-meta">Sin magnitudes cargadas.</p>`;
   return `
@@ -214,8 +208,6 @@ function quantitiesTableMarkup(quantities) {
     </div>`;
 }
 
-/** Bloque de mensurandos derivados (valor ± U + fórmula). `heading` controla el título opcional.
- *  Los mensurandos con `has_uncertainty: false` se muestran sin ±U (van sin incertidumbre por diseño). */
 export function derivedBlockMarkup(derived, heading = "Mensurandos") {
   if (!derived.length) return "";
   return `
@@ -234,8 +226,6 @@ export function derivedBlockMarkup(derived, heading = "Mensurandos") {
     </div>`;
 }
 
-/// Tabla de magnitudes derivadas por punto (Motor E): una fila por corrida, una columna por
-/// magnitud. Vacío si no hay ninguna.
 function pointResultsMarkup(pointResults) {
   if (!pointResults.length) return "";
   const n = Math.max(0, ...pointResults.map((p) => p.values.length));
@@ -256,7 +246,6 @@ function pointResultsMarkup(pointResults) {
     </div>`;
 }
 
-/// Lista de mensurandos agregados (Motor F): un valor escalar por agregado. Vacío si no hay ninguno.
 function aggregatesMarkup(aggregates) {
   if (!aggregates.length) return "";
   const rows = aggregates
@@ -298,15 +287,12 @@ function formAnalysisMarkup(analysis) {
     const title = scatters.length > 1 ? "Curvas (puntos sin ajuste)" : "Curva (puntos sin ajuste)";
     const blocks = scatters
       .map((s) => {
-        // Con varias curvas, encabeza cada una con "y vs x" para distinguirlas.
         const heading = scatters.length > 1
           ? `<h4>${escapeHtml(s.y_label)} vs ${escapeHtml(s.x_label)}${s.x_log ? " (x log)" : ""}</h4>`
           : "";
         return `${heading}${scatterMarkup(s)}`;
       })
       .join("");
-    // Los escalares medidos (p. ej. las tensiones con multímetro) también se muestran acá,
-    // con su tabla de incertidumbres y la comparación contra los teóricos automáticos.
     const quantitiesSection = quantities.length
       ? `<h3>Incertidumbres por magnitud</h3>${quantitiesTable}`
       : "";
@@ -320,8 +306,6 @@ function formAnalysisMarkup(analysis) {
     `;
   }
 
-  // Motor D: con operadores, las magnitudes compartidas van arriba y cada operador trae su propio
-  // bloque (sus magnitudes repetidas + sus mensurandos), comparados lado a lado sin promedio.
   const operators = analysis.operators ?? [];
   if (operators.length) {
     const sharedTable = quantities.length
@@ -353,12 +337,7 @@ function formAnalysisMarkup(analysis) {
   `;
 }
 
-
-
 function studentResultsFormMarkup(submission, definition, isTeacher = false) {
-  // Los agregados (Motor F: Re_max/Re_min/Re_medio/M_teorico en Fluidos II) no tienen
-  // incertidumbre propia (no existe el campo en el motor); se tratan como `has_uncertainty: false`
-  // al mezclarlos con los resultados finales comunes.
   const finalAggregates = (definition?.aggregates ?? [])
     .filter((a) => a.is_final)
     .map((a) => ({ ...a, has_uncertainty: false }));
@@ -375,7 +354,6 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
       const v = s ? escapeHtml(String(s.value)) : "";
       const u = s && s.u_expanded != null ? escapeHtml(String(s.u_expanded)) : "";
       const dis = locked ? "disabled" : "";
-      // Los resultados con has_uncertainty: false no llevan input U.
       const uCell = hasUncertainty(m)
         ? `<td><input class="student-u" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${u}" ${dis} placeholder="U" /></td>`
         : `<td class="submission-meta">sin U</td>`;
@@ -410,14 +388,8 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
   `;
 }
 
-/** Tabla de entrada de los resultados por corrida (Motor E): una fila por corrida, símbolo `Re#k`.
- *  Reusa la clase `.student-value` para que `saveStudentResults` los recolecte sin cambios. */
 function pointResultsEntryMarkup(submission, definition, saved, locked) {
   const pointResults = definition?.point_results ?? [];
-  // Número de corridas (puntos) que cargó el alumno, tomado del máximo point_index de las
-  // lecturas. Invariante: el motor calcula un valor de point_result por corrida completa, así
-  // que este conteo coincide con `analysis.point_results[*].values.length` y con el índice `k`
-  // de los `Re#k` guardados.
   const idx = (submission.measurements ?? []).map((m) => m.point_index ?? 0);
   const n = idx.length ? Math.max(...idx) + 1 : 0;
   if (!pointResults.length || n <= 0) return "";

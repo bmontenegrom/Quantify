@@ -1,9 +1,6 @@
 use super::ensure_lab_group_columns;
 use sqlx::SqlitePool;
 
-/// Crea las tablas si no existen y aplica las migraciones idempotentes de columnas.
-/// Es seguro ejecutarla en cada arranque: usa `CREATE TABLE IF NOT EXISTS` y
-/// `add_column_if_missing`, por lo que no destruye datos existentes.
 pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
@@ -199,8 +196,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // Mensurandos finales calculados por el estudiante (a mano), para comparar con el cálculo
-    // automático. Uno por símbolo de mensurando; `u_expanded` opcional (puede no calcular U).
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS submission_student_results (
@@ -220,9 +215,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "submissions", "submitted_by_user_id", "TEXT").await?;
     add_column_if_missing(pool, "submissions", "course_id", "TEXT").await?;
     add_column_if_missing(pool, "submissions", "group_id", "TEXT").await?;
-    // Modo de carga de la entrega: 'csv' (legacy) o 'form' (lecturas crudas). NULL = csv.
     add_column_if_missing(pool, "submissions", "entry_mode", "TEXT").await?;
-    // Visibilidad del calculo automatico para el estudiante (la habilita el docente). 0 = oculto.
     add_column_if_missing(
         pool,
         "submissions",
@@ -230,13 +223,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
-    // Metadatos de depuración por magnitud (JSON): nº de bins del histograma y valores
-    // descartados por el alumno. Visible para el docente. NULL en entregas sin depuración.
     add_column_if_missing(pool, "submissions", "measurement_meta_json", "TEXT").await?;
-    // Observaciones/comentarios libres del alumno sobre su propia entrega (opcional, cualquier
-    // practica). No se gatea: se ve siempre, igual que los resultados finales del alumno.
     add_column_if_missing(pool, "submissions", "student_comment", "TEXT").await?;
-    // Horas durante las que el alumno puede editar su entrega (desde submitted_at). Default 4h.
     add_column_if_missing(
         pool,
         "courses",
@@ -247,15 +235,19 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     add_column_if_missing(pool, "users", "email", "TEXT").await?;
     add_column_if_missing(pool, "users", "default_group_id", "TEXT").await?;
     add_column_if_missing(pool, "practices", "analysis_kind", "TEXT").await?;
-    // Fórmulas de eje (x, y) del ajuste lineal, para prácticas `regresion_lineal`.
     add_column_if_missing(pool, "practices", "x_formula", "TEXT").await?;
     add_column_if_missing(pool, "practices", "y_formula", "TEXT").await?;
-    // Motor D (Fase 15): cantidad de operadores de una práctica estadística (cada uno carga su
-    // propia serie de las magnitudes repetidas). NULL o ≤1 = sin operadores (comportamiento actual).
     add_column_if_missing(pool, "practices", "operator_count", "INTEGER").await?;
+    add_column_if_missing(
+        pool,
+        "practices",
+        "status",
+        "TEXT NOT NULL DEFAULT 'publicada'",
+    )
+    .await?;
+    add_column_if_missing(pool, "practices", "created_by", "TEXT").await?;
+    add_column_if_missing(pool, "practices", "created_at", "TEXT").await?;
 
-    // Motor B (Fase 15): una práctica `curva` define una o varias curvas sobre el mismo barrido,
-    // cada una con su par de fórmulas de eje y su flag de eje x logarítmico (p. ej. dos en Filtros).
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS practice_curves (
@@ -271,9 +263,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // Motor C (Fase 15): magnitud intermedia por punto en regresión/curva. Su `formula` se evalúa
-    // por réplica de cada punto y se promedia → un valor por punto, disponible como símbolo en las
-    // fórmulas de eje (p. ej. Q = V/t por réplica, promediado, para graficar h/Q² vs 1/Q).
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS practice_intermediates (
@@ -290,9 +279,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // Motor E (Fase 15): magnitud derivada **por punto, post-ajuste** en regresión. Su `formula` se
-    // evalúa en cada punto con las magnitudes/intermedias del punto + slope/intercept + los
-    // mensurandos derivados, produciendo una columna por corrida (p. ej. el número de Reynolds).
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS practice_point_results (
@@ -309,10 +295,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // Motor F (Fase 15): mensurando **agregado** escalar (un valor) en regresión, evaluado tras el
-    // ajuste. Su `formula` puede usar escalares compartidos, slope/intercept, los mensurandos, los
-    // agregados anteriores (encadenable), y los **valores de extremo** de cada magnitud por punto
-    // (`X_first`, `X_first2`, `X_last`, `X_last2`). P. ej. Reynolds máx/mín con el primer/último par.
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS practice_aggregates (
@@ -437,7 +419,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // Magnitud dada por la cátedra (valor ± U directo, sin instrumento ni réplicas).
     add_column_if_missing(
         pool,
         "practice_quantities",
@@ -445,13 +426,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
-    // Incertidumbre expandida U del dato aportado por el alumno.
     add_column_if_missing(pool, "submission_measurements", "value_u", "REAL").await?;
-    // Réplicas esperadas por punto (solo magnitudes `repeated` en regresión/curva con grilla).
     add_column_if_missing(pool, "practice_quantities", "replicas_per_point", "INTEGER").await?;
-    // Motor E (Fase 15): en regresión/curva, si `per_point` es true la magnitud se carga en la
-    // tabla de la serie (un valor o réplicas por punto); si es false (o es `is_given`) es un escalar
-    // compartido que se carga una sola vez. Default true = comportamiento previo (todo en la serie).
     add_column_if_missing(
         pool,
         "practice_quantities",
@@ -459,8 +435,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 1",
     )
     .await?;
-    // Índice de punto en análisis por puntos (regresión/curva). En estadístico/CSV queda 0;
-    // `replicate_index` pasa a ser la réplica dentro del punto.
     add_column_if_missing(
         pool,
         "submission_measurements",
@@ -468,7 +442,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
-    // Índice de operador en el estadístico con operadores (Motor D). 0 si no hay operadores.
     add_column_if_missing(
         pool,
         "submission_measurements",
@@ -477,9 +450,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
-    // Términos de calibración de la escala, sumados en cuadratura sobre el modelo tipo B base
-    // (Hidrostática: balanza 3 % de la medida, densímetro 0.001 g/cm3, brazos de Mohr 0.5 mm).
-    // 0 = escala sin calibración declarada, idéntico al comportamiento previo.
     add_column_if_missing(
         pool,
         "instrument_scales",
@@ -494,13 +464,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "REAL NOT NULL DEFAULT 0",
     )
     .await?;
-    // Valor inicial que el formulario muestra en la magnitud (Hidrostática: ranuras vacías de la
-    // balanza de Mohr con masa 0). NULL = input vacío, comportamiento previo.
     add_column_if_missing(pool, "practice_quantities", "default_value", "REAL").await?;
-    // Cantidad de ranuras si el valor es una ranura de un instrumento (entero 1..=n). NULL = libre.
     add_column_if_missing(pool, "practice_quantities", "slot_count", "INTEGER").await?;
-    // Práctica deshabilitada por el docente en el curso: la fila queda (con enabled = FALSE) para que
-    // la siembra del curso de ejemplo, que inserta con ON CONFLICT DO NOTHING, no la re-habilite.
     add_column_if_missing(
         pool,
         "course_practices",
@@ -509,9 +474,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
-    // Número de mesa del informe compartido (NULL en entregas legacy/CSV).
     add_column_if_missing(pool, "submissions", "table_number", "INTEGER").await?;
-    // Ventana de aceptación de invitaciones (horas). Default 4. Acotada a 0..=72.
     add_column_if_missing(
         pool,
         "courses",
@@ -520,8 +483,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
-    // Membresía de un informe compartido por mesa. Owner: role='owner', status='accepted'.
-    // Los demás miembros de la mesa reciben una invitación (status='pending') al crear el informe.
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS report_members (
@@ -544,8 +505,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // Migraciones de datos de una sola vez (resiembras de definiciones, limpiezas): cada una se
-    // registra al correr y no vuelve a correr, aunque más tarde la base vuelva a parecer vieja.
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS applied_migrations (
@@ -557,7 +516,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // Mesa por defecto del alumno por grupo (pre-rellena el formulario; puede variar por práctica).
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS user_default_tables (
@@ -572,7 +530,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // Candado: un único informe por (práctica, grupo, mesa). Solo para entregas con mesa asignada.
     sqlx::query(
         r#"
         CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_report_unique
@@ -583,8 +540,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    // Backfill: cada entrega existente pasa a ser un informe de 1 miembro (owner accepted).
-    // Idempotente: solo inserta si no existe ya la fila en report_members.
     sqlx::query(
         r#"
         INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at)
@@ -619,12 +574,8 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
-    // Tolerancia porcentual configurable por el docente para el veredicto de comparación.
     add_column_if_missing(pool, "practice_results", "tolerance", "REAL").await?;
 
-    // Resultado central que el alumno debe entregar (valor ± U), p. ej. `g` en el péndulo.
-    // Editable por el docente desde la UI; acá solo se backfillea el obvio de cada práctica
-    // sembrada (no-op para instalaciones nuevas, que ya siembran el flag en `seed_definitions`).
     add_column_if_missing(
         pool,
         "practice_results",
@@ -649,10 +600,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
-    // Igual que `practice_results.is_final`, pero para mensurandos agregados (Motor F): habilita
-    // "Mis cálculos"/comparación alumno-vs-automático para agregados puntuales (p. ej. Re_max en
-    // Fluidos II). El backfill para prácticas ya sembradas vive en `seed_fluidos2` (auto-curación
-    // en cada boot), no acá.
     add_column_if_missing(
         pool,
         "practice_aggregates",
@@ -661,11 +608,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
 
-    // `has_uncertainty` (magnitudes dadas y mensurandos): generaliza el antiguo hack de ocultar la
-    // U de ciertos símbolos a mano en el frontend (`RESULTS_WITHOUT_U`). En `false`, la magnitud
-    // dada no pide U al alumno (queda en 0, sin campo) y el mensurando se muestra sin ±U aunque el
-    // valor propagado de fondo no sea exactamente cero (p. ej. `Q`, que sí usa la incertidumbre del
-    // período). Default `true` = comportamiento previo (con incertidumbre).
     add_column_if_missing(
         pool,
         "practice_quantities",
@@ -680,7 +622,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 1",
     )
     .await?;
-    // Backfill: migra los símbolos que hoy dependen del hack `RESULTS_WITHOUT_U` del frontend.
     for (practice_id, symbol) in [
         ("p2-cc", "P_max_e"),
         ("p2-cc", "P_max_t"),
@@ -696,8 +637,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
-    // Magnitud opcional (Motor... ninguno: entrega normal con campos opcionales, p. ej. operadores
-    // 2 y 3 de p1-estadistica): si no tiene lecturas, no bloquea el envío del formulario.
     add_column_if_missing(
         pool,
         "practice_quantities",
@@ -709,8 +648,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Agrega `column` (con la `definition` dada) a `table` solo si todavía no existe,
-/// inspeccionando `PRAGMA table_info`. Permite evolucionar el esquema sin migraciones destructivas.
 async fn add_column_if_missing(
     pool: &SqlitePool,
     table: &str,

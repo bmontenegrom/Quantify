@@ -1,5 +1,3 @@
-//! Binario de Quantify: arranca el servidor HTTP usando la biblioteca `quantify`.
-
 use anyhow::Context;
 use axum::Router;
 use quantify::db::{self, AppState};
@@ -13,8 +11,6 @@ use tokio::net::TcpListener;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Punto de entrada del binario: configura logging, prepara la base de datos
-/// (migraciones + seeds) y arranca el servidor Axum escuchando en `APP_BIND_ADDR`.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
@@ -37,8 +33,6 @@ async fn main() -> anyhow::Result<()> {
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
         .unwrap_or(false);
 
-    // En un deploy real (cookies Secure ⇒ TLS) la clave debe ser estable: con una clave
-    // efímera, todos los tokens CSRF se invalidan en cada reinicio. Exigirla evita ese fallo.
     let secret_key = match configured_secret {
         Some(key) => key,
         None if secure_cookies => {
@@ -70,8 +64,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // `foreign_keys(true)` hace que SQLite respete las claves foráneas y los `ON DELETE CASCADE`
-    // declarados en el esquema (por defecto SQLite las ignora).
     let connect_options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true)
         .foreign_keys(true);

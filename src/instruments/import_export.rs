@@ -4,8 +4,6 @@ use super::{
 };
 use sqlx::SqlitePool;
 
-/// Exporta el catálogo de un curso a una estructura autocontenida (sin ids), apta para
-/// reutilizarlo en otro curso vía [`import_course`].
 pub async fn export_course(pool: &SqlitePool, course_id: &str) -> anyhow::Result<CatalogExport> {
     let instruments = list_instruments(pool, course_id).await?;
     let exported = instruments
@@ -41,9 +39,6 @@ pub async fn export_course(pool: &SqlitePool, course_id: &str) -> anyhow::Result
     })
 }
 
-/// Importa un catálogo a un curso destino, recreando instrumentos y escalas con ids nuevos.
-/// Corre dentro de una transacción: si algún instrumento o escala falla, no queda nada
-/// importado (todo o nada). Devuelve la cantidad de instrumentos importados.
 pub async fn import_course(
     pool: &SqlitePool,
     course_id: &str,

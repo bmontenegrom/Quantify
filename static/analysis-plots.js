@@ -25,11 +25,6 @@ export function regressionMarkup(regression) {
   `;
 }
 
-/**
- * Markup SVG común a los gráficos de ajuste y de dispersión: ejes, puntos y rótulos.
- * `lineMarkup` inyecta la recta del ajuste (vacío para scatter); `xText`/`yLabel`/`ariaLabel`
- * deben venir ya escapados por el llamador.
- */
 function plotSvg(plot, { ariaLabel, lineMarkup = "", xText, yLabel }) {
   const f = (n) => n.toFixed(1);
   const points = plot.scatter

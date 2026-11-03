@@ -1,6 +1,3 @@
-# Resetea la base de desarrollo: borra la base SQLite (+ archivos -wal/-shm) y los uploads.
-# El proximo `cargo run` recrea el esquema y vuelve a sembrar los datos de prueba.
-# Respeta DATABASE_URL y UPLOAD_DIR si estan definidas (mismos defaults que el server).
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 

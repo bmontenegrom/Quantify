@@ -1,22 +1,9 @@
-// Smoke E2E de un análisis `analysis_kind = "curva"` (scatter sin ajuste, Motor B), sobre la
-// práctica sembrada Filtros (barrido en frecuencia, dos curvas: razon/omega y phi/omega).
-//
-// No hay flujo E2E que ejercite este tipo de análisis todavía (run.mjs cubre estadístico,
-// smoke-fluidos2.mjs cubre regresión). Recorre:
-//   1. Estudiante: abre Filtros, completa los escalares medidos + el dato de cátedra L,
-//      carga un barrido de puntos (f, VRpp, Vgpp, a, b) y entrega.
-//   2. Docente: abre la entrega en revisión y ve las dos curvas (scatter + tabla, sin
-//      mensurandos con incertidumbre — comportamiento esperado de "curva").
-//
-// Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
-// E2E_SKIP_BUILD, E2E_HEADED.
 
 import { STUDENT, TEACHER, assert, step, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8149";
 
 await withE2E({ port: PORT, dbName: "quantify-curva.db" }, async ({ login }) => {
-  // ── 1) Estudiante entrega Filtros ────────────────────────────────────────
   step("estudiante: login");
   const { page: sPage } = await login(STUDENT, "estudiante");
 
@@ -25,7 +12,6 @@ await withE2E({ port: PORT, dbName: "quantify-curva.db" }, async ({ login }) => 
   await sPage.waitForSelector(".series-table");
   await sPage.selectOption("#table-select", "1");
 
-  // Mapa símbolo→id desde la definición (robusto frente a cambios de orden).
   const idBySym = await sPage.evaluate(async () => {
     const r = await fetch("/api/practices/filtros/definition");
     const def = await r.json();
@@ -38,7 +24,6 @@ await withE2E({ port: PORT, dbName: "quantify-curva.db" }, async ({ login }) => 
     const row = sPage.locator(`.shared-quantities .measurement-row[data-quantity-id="${idBySym[sym]}"]`);
     await row.locator(".measure-value").first().fill(String(val));
   }
-  // L es dato de cátedra (valor ± U).
   const lRow = sPage.locator(`.measurement-row--given[data-quantity-id="${idBySym["L"]}"]`);
   await lRow.locator(".measure-given-value").fill("0.047");
   await lRow.locator(".measure-given-u").fill("0.001");
@@ -68,7 +53,6 @@ await withE2E({ port: PORT, dbName: "quantify-curva.db" }, async ({ login }) => 
     "la entrega recién creada no debía mostrar el análisis al estudiante (gating)",
   );
 
-  // ── 2) Docente revisa y ve las curvas (scatter sin ajuste) ───────────────
   step("docente: login");
   const { page: tPage } = await login(TEACHER, "docente");
 

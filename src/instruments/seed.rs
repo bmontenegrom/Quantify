@@ -1,23 +1,9 @@
 use super::{create_instrument, create_scale, CreateInstrument, ScaleInput};
 use sqlx::SqlitePool;
 
-/// Etiquetas de escalas agregadas al catálogo **después** de la siembra original, que hay que
-/// llevar a los cursos ya sembrados (su instrumento ya existe, así que no alcanza con el aditivo
-/// por instrumento). Solo estas se completan en un instrumento existente.
-///
-// ponytail: la semántica es "recrear si falta", igual que el aditivo por instrumento de siempre:
-// si el docente borra o renombra una de estas escalas, el próximo arranque la vuelve a crear. Se
-// acota a esta lista para que ese efecto valga solo para las escalas nuevas y no para las ~40 del
-// catálogo. Si hace falta que un borrado sea definitivo, el upgrade es una tabla de migraciones
-// aplicadas (marcar el backfill como corrido) en vez de deducirlo del estado del catálogo.
 const BACKFILL_SCALES: &[&str] = &["0.1 g (calibracion 3 %)"];
 
-/// Siembra un catálogo inicial de instrumentos reales del curso. Aditivo: crea los instrumentos
-/// del catálogo que falten en el curso, y en los que ya existen completa solo las escalas de
-/// [`BACKFILL_SCALES`]. Valores tomados de las hojas de testers y de la técnica de trabajo de
-/// Física 103 (a confirmar/afinar por el docente).
 pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Result<()> {
-    // Escala analógica (apreciación).
     let apre = |label: &str, step: f64, appr: f64, full: Option<f64>, unit: &str| ScaleInput {
         label: label.into(),
         full_scale: full,
@@ -33,7 +19,6 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         u_cal_fixed: None,
         unit: unit.into(),
     };
-    // Escala digital simple (resolución).
     let reso = |label: &str, step: f64, full: Option<f64>, unit: &str| ScaleInput {
         label: label.into(),
         full_scale: full,
@@ -49,7 +34,6 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         u_cal_fixed: None,
         unit: unit.into(),
     };
-    // Escala con especificación de fabricante: U = pct*|v| + coef*step + fijo.
     #[allow(clippy::too_many_arguments)]
     let fab = |label: &str,
                step: f64,
@@ -75,8 +59,6 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         unit: unit.into(),
     };
 
-    // Agrega calibracion (en cuadratura sobre el modelo base) a una escala ya construida:
-    // `pct` en % del valor leido, `fixed` en unidad base. Tecnica de Hidrostatica.
     let cal = |scale: ScaleInput, pct: f64, fixed: f64| ScaleInput {
         u_cal_pct: Some(pct),
         u_cal_fixed: Some(fixed),
@@ -102,20 +84,16 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         ),
         (
             instrument("Cronometro digital", "digital", "tiempo", "s"),
-            // Resolucion R = 0.001 s segun la tecnica de Estadistica.
             vec![reso("milesimas", 0.001, None, "s")],
         ),
         (
             instrument("Balanza digital", "digital", "masa", "g"),
             vec![
                 reso("0.01 g", 0.01, None, "g"),
-                // Tecnica de Hidrostatica: truncamiento R = 0.1 g y calibracion 3 % de la medida.
                 cal(reso("0.1 g (calibracion 3 %)", 0.1, None, "g"), 3.0, 0.0),
             ],
         ),
         (
-            // Tecnica de Hidrostatica: lectura por apreciacion mas u_calibracion fija de
-            // 0.001 g/cm3 (la escala es un papel pegado al vastago: puede estar corrida).
             instrument("Densimetro", "analogico", "densidad", "g/cm3"),
             vec![cal(
                 apre("0.001 g/cm3", 0.001, 0.001, None, "g/cm3"),
@@ -123,9 +101,6 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
                 0.001,
             )],
         ),
-        // Los brazos de la balanza de Mohr no llevan instrumento: son datos de catedra
-        // (`qty_given` b1..b9/b_E en el seed de hidrostatica) y el alumno carga su U de
-        // calibracion (u = 0.5 mm => U = 0.1 cm) junto al valor precargado.
         (
             instrument("Tester A830L (corriente)", "digital", "corriente", "A"),
             vec![
@@ -254,7 +229,6 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
                 "voltaje",
                 "V",
             ),
-            // Eje Y (voltaje): U = 3%*V + 0.1*(VOLTS/DIV) + 1 mV (Tecnica de Alterna).
             vec![
                 fab("5 V/div", 5.0, 3.0, 0.1, 0.001, None, None, None, "V"),
                 fab("2 V/div", 2.0, 3.0, 0.1, 0.001, None, None, None, "V"),
@@ -269,7 +243,6 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
                 "tiempo",
                 "s",
             ),
-            // Eje X (tiempo): U = 1% de la medida (Tecnica de RC). Solo termino porcentual.
             vec![fab(
                 "tiempo (1% de la medida)",
                 1.0,
@@ -289,8 +262,6 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
                 "frecuencia",
                 "Hz",
             ),
-            // Frecuencia de pasaje/bloqueo (Tecnica de Filtros): U = 1% de la medida, mismo
-            // criterio que el eje X (tiempo). Solo termino porcentual.
             vec![fab(
                 "frecuencia (1% de la medida)",
                 1.0,
@@ -304,8 +275,6 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
             )],
         ),
         (
-            // Tester UA78A — hoja de especificaciones, tabla "Capacidad".
-            // U = pct%·|C| + 1·step (1 dg); unidades SI (F).
             instrument("Tester UA78A (capacidad)", "digital", "capacitancia", "F"),
             vec![
                 fab("2 nF", 1e-12, 4.0, 1.0, 0.0, None, None, Some(2e-9), "F"),
@@ -333,10 +302,6 @@ pub async fn seed_instruments(pool: &SqlitePool, course_id: &str) -> anyhow::Res
                 .bind(inst.name.trim())
                 .fetch_optional(pool)
                 .await?;
-        // Instrumento nuevo: se crea con todas sus escalas. Instrumento que ya estaba (base
-        // sembrada por una version anterior): se completan solo las escalas de BACKFILL_SCALES,
-        // que de otro modo nunca llegarian al curso. Las demas escalas no se tocan: si el docente
-        // renombro o borro alguna del catalogo original, queda como la dejo.
         let (instrument_id, fresh) = match existing {
             Some((id,)) => (id, false),
             None => (create_instrument(pool, inst).await?.id, true),

@@ -7,22 +7,21 @@ use crate::db::{next_position, PracticeQuantity, PracticeResult};
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
-/// Fila cruda con la configuración de análisis de una práctica.
 #[derive(sqlx::FromRow)]
 struct PracticeConfigRow {
+    status: String,
     analysis_kind: Option<String>,
     x_formula: Option<String>,
     y_formula: Option<String>,
     operator_count: Option<i64>,
 }
 
-/// Devuelve la definición completa de una práctica (quantities + results).
 pub async fn definition(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
     let row: Option<PracticeConfigRow> = sqlx::query_as(
-        "SELECT analysis_kind, x_formula, y_formula, operator_count FROM practices WHERE id = ?1",
+        "SELECT status, analysis_kind, x_formula, y_formula, operator_count FROM practices WHERE id = ?1",
     )
     .bind(practice_id)
     .fetch_optional(pool)
@@ -38,6 +37,7 @@ pub async fn definition(
     let aggregates = aggregates_for(pool, practice_id).await?;
     Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
+        status: row.status,
         analysis_kind: row.analysis_kind,
         x_formula: row.x_formula,
         y_formula: row.y_formula,
@@ -51,11 +51,6 @@ pub async fn definition(
     }))
 }
 
-/// `point_results` (Motor E), `aggregates` (Motor F) e `intermediates` (Motor C) son, en la base,
-/// la misma forma: `(id, practice_id, position, symbol, name, unit, formula)`, con el mismo CRUD
-/// (fetch-all/create/update/delete/fetch-by-id). Solo cambian de tabla y de tipo Rust — `curves`
-/// no entra acá porque tiene otras columnas (`x_formula`/`y_formula`/`x_log`, sin `name`/`unit`) y
-/// se reordena con `move_item`, que las otras tres no usan.
 trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin {
     const TABLE: &'static str;
 }
@@ -97,9 +92,6 @@ async fn fetch_symbol_formula_row<T: SymbolFormulaRow>(
         .await?)
 }
 
-/// Inserta una fila symbol/name/unit/formula nueva, asignándole la siguiente posición, y la
-/// devuelve. El llamador ya validó y recortó `symbol`/`formula` (el mensaje de error es distinto
-/// por tipo, así que queda del lado de cada wrapper público).
 async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     pool: &SqlitePool,
     practice_id: &str,
@@ -128,7 +120,6 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     fetch_symbol_formula_row::<T>(pool, &id).await
 }
 
-/// Actualiza una fila symbol/name/unit/formula **de esa práctica**. Devuelve `None` si no existe.
 async fn update_symbol_formula_row<T: SymbolFormulaRow>(
     pool: &SqlitePool,
     practice_id: &str,
@@ -158,7 +149,6 @@ async fn update_symbol_formula_row<T: SymbolFormulaRow>(
     Ok(Some(fetch_symbol_formula_row::<T>(pool, row_id).await?))
 }
 
-/// Elimina una fila symbol/name/unit/formula de esa práctica por id. Devuelve `true` si existía.
 async fn delete_symbol_formula_row<T: SymbolFormulaRow>(
     pool: &SqlitePool,
     practice_id: &str,
@@ -176,7 +166,6 @@ async fn delete_symbol_formula_row<T: SymbolFormulaRow>(
     Ok(result.rows_affected() > 0)
 }
 
-/// Lee las magnitudes derivadas por punto de una práctica (Motor E), ordenadas por posición.
 pub async fn point_results_for(
     pool: &SqlitePool,
     practice_id: &str,
@@ -184,7 +173,6 @@ pub async fn point_results_for(
     symbol_formula_rows_for(pool, practice_id).await
 }
 
-/// Crea una magnitud derivada por punto; asigna la siguiente posición. Símbolo y fórmula obligatorios.
 pub async fn create_point_result(
     pool: &SqlitePool,
     practice_id: &str,
@@ -206,7 +194,6 @@ pub async fn create_point_result(
     .await
 }
 
-/// Actualiza una magnitud derivada por punto de esa práctica. Devuelve `None` si no existe.
 pub async fn update_point_result(
     pool: &SqlitePool,
     practice_id: &str,
@@ -230,7 +217,6 @@ pub async fn update_point_result(
     .await
 }
 
-/// Elimina una magnitud derivada por punto de esa práctica por id. Devuelve `true` si existía.
 pub async fn delete_point_result(
     pool: &SqlitePool,
     practice_id: &str,
@@ -239,9 +225,6 @@ pub async fn delete_point_result(
     delete_symbol_formula_row::<PracticePointResult>(pool, practice_id, point_result_id).await
 }
 
-/// Lee los mensurandos agregados de una práctica (Motor F), ordenados por posición.
-/// (No usa el `SymbolFormulaRow` genérico: a diferencia de intermedias/point-results, tiene la
-/// columna extra `is_final`.)
 pub async fn aggregates_for(
     pool: &SqlitePool,
     practice_id: &str,
@@ -265,7 +248,6 @@ async fn fetch_aggregate(pool: &SqlitePool, id: &str) -> anyhow::Result<Practice
     .await?)
 }
 
-/// Crea un mensurando agregado; asigna la siguiente posición. Símbolo y fórmula obligatorios.
 pub async fn create_aggregate(
     pool: &SqlitePool,
     practice_id: &str,
@@ -296,7 +278,6 @@ pub async fn create_aggregate(
     fetch_aggregate(pool, &id).await
 }
 
-/// Actualiza un mensurando agregado de esa práctica. Devuelve `None` si no existe.
 pub async fn update_aggregate(
     pool: &SqlitePool,
     practice_id: &str,
@@ -328,7 +309,6 @@ pub async fn update_aggregate(
     Ok(Some(fetch_aggregate(pool, aggregate_id).await?))
 }
 
-/// Elimina un mensurando agregado de esa práctica por id. Devuelve `true` si existía.
 pub async fn delete_aggregate(
     pool: &SqlitePool,
     practice_id: &str,
@@ -342,7 +322,6 @@ pub async fn delete_aggregate(
     Ok(result.rows_affected() > 0)
 }
 
-/// Lee las magnitudes intermedias por punto de una práctica (Motor C), ordenadas por posición.
 pub async fn intermediates_for(
     pool: &SqlitePool,
     practice_id: &str,
@@ -350,7 +329,6 @@ pub async fn intermediates_for(
     symbol_formula_rows_for(pool, practice_id).await
 }
 
-/// Crea una magnitud intermedia; asigna la siguiente posición. Símbolo y fórmula obligatorios.
 pub async fn create_intermediate(
     pool: &SqlitePool,
     practice_id: &str,
@@ -372,7 +350,6 @@ pub async fn create_intermediate(
     .await
 }
 
-/// Actualiza una magnitud intermedia de esa práctica. Devuelve `None` si no existe.
 pub async fn update_intermediate(
     pool: &SqlitePool,
     practice_id: &str,
@@ -396,7 +373,6 @@ pub async fn update_intermediate(
     .await
 }
 
-/// Elimina una magnitud intermedia de esa práctica por id. Devuelve `true` si existía.
 pub async fn delete_intermediate(
     pool: &SqlitePool,
     practice_id: &str,
@@ -405,7 +381,6 @@ pub async fn delete_intermediate(
     delete_symbol_formula_row::<PracticeIntermediate>(pool, practice_id, intermediate_id).await
 }
 
-/// Lee las curvas de una práctica (Motor B), ordenadas por posición.
 pub async fn curves_for(
     pool: &SqlitePool,
     practice_id: &str,
@@ -419,8 +394,6 @@ pub async fn curves_for(
     .await?)
 }
 
-/// Crea una curva en la práctica; asigna la siguiente posición disponible. Las fórmulas se
-/// recortan; ambas son obligatorias (una curva sin ejes no se puede graficar).
 pub async fn create_curve(
     pool: &SqlitePool,
     practice_id: &str,
@@ -448,8 +421,6 @@ pub async fn create_curve(
     fetch_curve(pool, &id).await
 }
 
-/// Actualiza las fórmulas y el flag `x_log` de una curva **de esa práctica**. Devuelve `None` si
-/// no existe una curva con ese id en la práctica indicada.
 pub async fn update_curve(
     pool: &SqlitePool,
     practice_id: &str,
@@ -478,7 +449,6 @@ pub async fn update_curve(
     Ok(Some(fetch_curve(pool, curve_id).await?))
 }
 
-/// Elimina una curva de esa práctica por id. Devuelve `true` si existía en la práctica indicada.
 pub async fn delete_curve(
     pool: &SqlitePool,
     practice_id: &str,
@@ -492,7 +462,6 @@ pub async fn delete_curve(
     Ok(result.rows_affected() > 0)
 }
 
-/// Listas de una práctica que el docente puede reordenar.
 #[derive(Debug, Clone, Copy)]
 pub enum Orderable {
     Curves,
@@ -501,8 +470,6 @@ pub enum Orderable {
 }
 
 impl Orderable {
-    /// Tabla y orden con que la lista sale en la definición (el desempate de posiciones repetidas
-    /// tiene que ser el mismo, o "subir" movería otro elemento que el que ve el docente).
     fn table_and_order(self) -> (&'static str, &'static str) {
         match self {
             Orderable::Curves => ("practice_curves", "position, id"),
@@ -512,10 +479,6 @@ impl Orderable {
     }
 }
 
-/// Mueve un elemento de una lista de la práctica una posición arriba (`up`) o abajo. Devuelve
-/// `None` si no existe en esa práctica, `Some(false)` si ya está en el extremo y `Some(true)` si se
-/// movió. Renumera toda la lista (0, 1, 2…) con el intercambio aplicado, así funciona aunque haya
-/// posiciones repetidas (siembras viejas).
 pub async fn move_item(
     pool: &SqlitePool,
     list: Orderable,
@@ -524,8 +487,6 @@ pub async fn move_item(
     up: bool,
 ) -> anyhow::Result<Option<bool>> {
     let (table, order) = list.table_and_order();
-    // Lee y reordena dentro de la misma transacción: así dos reordenamientos concurrentes no se
-    // pisan (SQLite aborta el segundo con un error de snapshot en vez de corromper el orden).
     let mut tx = pool.begin().await?;
     let mut ids: Vec<String> = sqlx::query_scalar(&format!(
         "SELECT id FROM {table} WHERE practice_id = ?1 ORDER BY {order}"
@@ -556,7 +517,6 @@ pub async fn move_item(
     Ok(Some(true))
 }
 
-/// Lee una curva por su id.
 async fn fetch_curve(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeCurve> {
     Ok(sqlx::query_as::<_, PracticeCurve>(
         "SELECT id, practice_id, position, x_formula, y_formula, x_log \
@@ -567,7 +527,6 @@ async fn fetch_curve(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeCurv
     .await?)
 }
 
-/// Crea una magnitud en la práctica; asigna la siguiente posición disponible.
 pub async fn create_quantity(
     pool: &SqlitePool,
     practice_id: &str,
@@ -581,8 +540,6 @@ pub async fn create_quantity(
     fetch_quantity(pool, &id).await
 }
 
-/// Actualiza los datos de una magnitud. `default_value` solo cambia si viene en el pedido (el
-/// editor del admin lo manda siempre, precargado con el actual). Devuelve `None` si no existe.
 pub async fn update_quantity(
     pool: &SqlitePool,
     quantity_id: &str,
@@ -617,8 +574,6 @@ pub async fn update_quantity(
     Ok(Some(fetch_quantity(pool, quantity_id).await?))
 }
 
-/// Cuántas entregas tienen alguna lectura de la magnitud que no es una ranura de 1 a `n` (no
-/// entera o fuera de rango). Para no poner `slot_count` sobre datos que el motor después rechaza.
 pub async fn submissions_off_slots(
     pool: &SqlitePool,
     quantity_id: &str,
@@ -635,7 +590,6 @@ pub async fn submissions_off_slots(
     Ok(count)
 }
 
-/// Elimina una magnitud por id. Devuelve `true` si existía.
 pub async fn delete_quantity(pool: &SqlitePool, quantity_id: &str) -> anyhow::Result<bool> {
     let result = sqlx::query("DELETE FROM practice_quantities WHERE id = ?1")
         .bind(quantity_id)
@@ -644,7 +598,6 @@ pub async fn delete_quantity(pool: &SqlitePool, quantity_id: &str) -> anyhow::Re
     Ok(result.rows_affected() > 0)
 }
 
-/// Crea un mensurando derivado en la práctica; asigna la siguiente posición disponible.
 pub async fn create_result(
     pool: &SqlitePool,
     practice_id: &str,
@@ -658,8 +611,6 @@ pub async fn create_result(
     fetch_result(pool, &id).await
 }
 
-/// Actualiza un mensurando derivado. Devuelve `None` si no existe.
-/// Si `input.tolerance` es `None` (campo ausente), la columna `tolerance` no se modifica.
 pub async fn update_result(
     pool: &SqlitePool,
     result_id: &str,
@@ -706,7 +657,6 @@ pub async fn update_result(
     Ok(Some(fetch_result(pool, result_id).await?))
 }
 
-/// Elimina un mensurando derivado por id. Devuelve `true` si existía.
 pub async fn delete_result(pool: &SqlitePool, result_id: &str) -> anyhow::Result<bool> {
     let result = sqlx::query("DELETE FROM practice_results WHERE id = ?1")
         .bind(result_id)
@@ -715,11 +665,6 @@ pub async fn delete_result(pool: &SqlitePool, result_id: &str) -> anyhow::Result
     Ok(result.rows_affected() > 0)
 }
 
-/// `true` si `symbol` ya está tomado por alguna magnitud, mensurando o magnitud intermedia de la
-/// práctica (los tres comparten un mismo espacio de símbolos en las fórmulas).
-///
-/// `exclude_*_id` permiten ignorar la fila que se está editando (para que renombrar a su propio
-/// símbolo no falle).
 #[allow(clippy::too_many_arguments)]
 pub async fn symbol_taken_in_practice(
     pool: &SqlitePool,
@@ -756,7 +701,6 @@ pub async fn symbol_taken_in_practice(
         || count("practice_aggregates", exclude_aggregate_id).await?)
 }
 
-/// Actualiza el tipo de análisis de una práctica. Devuelve `true` si existía.
 pub async fn set_analysis_kind(
     pool: &SqlitePool,
     practice_id: &str,
@@ -770,8 +714,6 @@ pub async fn set_analysis_kind(
     Ok(result.rows_affected() > 0)
 }
 
-/// Fija la cantidad de operadores de una práctica estadística (Motor D). `count <= 1` guarda `NULL`
-/// (sin operadores, comportamiento por defecto). Devuelve `true` si la práctica existía.
 pub async fn set_operator_count(
     pool: &SqlitePool,
     practice_id: &str,
@@ -786,8 +728,6 @@ pub async fn set_operator_count(
     Ok(result.rows_affected() > 0)
 }
 
-/// Actualiza las fórmulas de eje (`x`, `y`) del ajuste lineal de una práctica `regresion_lineal`.
-/// Una cadena vacía guarda `NULL`. Devuelve `true` si la práctica existía.
 pub async fn set_regression_formulas(
     pool: &SqlitePool,
     practice_id: &str,
@@ -811,9 +751,6 @@ pub async fn set_regression_formulas(
     Ok(result.rows_affected() > 0)
 }
 
-/// Fija (o borra) la tolerancia porcentual de un mensurando derivado.
-/// `None` elimina el veredicto para ese mensurando. Devuelve `true` si el mensurando
-/// existe y pertenece a `practice_id`.
 pub async fn set_result_tolerance(
     pool: &SqlitePool,
     result_id: &str,
@@ -831,9 +768,6 @@ pub async fn set_result_tolerance(
     Ok(result.rows_affected() > 0)
 }
 
-// ── Helpers internos ─────────────────────────────────────────────────────────
-
-/// Lee las magnitudes de entrada de una práctica, ordenadas por posición y símbolo.
 async fn quantities_for(
     pool: &SqlitePool,
     practice_id: &str,
@@ -848,7 +782,6 @@ async fn quantities_for(
     .await?)
 }
 
-/// Lee los mensurandos derivados de una práctica, ordenados por posición y símbolo.
 async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticeResult>> {
     Ok(sqlx::query_as::<_, PracticeResult>(
         "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty \
@@ -859,7 +792,6 @@ async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec
     .await?)
 }
 
-/// Lee una magnitud de entrada por su id.
 async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQuantity> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
@@ -871,7 +803,6 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
     .await?)
 }
 
-/// Lee un mensurando derivado por su id.
 async fn fetch_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeResult> {
     Ok(sqlx::query_as::<_, PracticeResult>(
         "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty \
@@ -882,7 +813,6 @@ async fn fetch_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeRes
     .await?)
 }
 
-/// Inserta una magnitud de entrada en la práctica con la posición dada; devuelve su id generado.
 pub(super) async fn insert_quantity(
     conn: &mut SqliteConnection,
     practice_id: &str,
@@ -916,7 +846,6 @@ pub(super) async fn insert_quantity(
     Ok(id)
 }
 
-/// Inserta un mensurando derivado en la práctica con la posición dada; devuelve su id generado.
 pub(super) async fn insert_result(
     conn: &mut SqliteConnection,
     practice_id: &str,

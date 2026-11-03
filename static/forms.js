@@ -36,8 +36,6 @@ export function quantityNameHtml(q) {
   if (SYMBOL_FIRST_QUANTITIES.has(q.symbol)) {
     return `${symbolHtml(q.symbol)} <span class="submission-meta">${base}</span>`;
   }
-  // T_oc no tiene subíndice obvio en el nombre: se agrega el símbolo al final, sin duplicarlo
-  // si el nombre ya lo menciona.
   if (q.symbol === "T_oc" && !/T_?oc/i.test(q.name)) {
     return `${base} ${symbolHtml(q.symbol)}`;
   }
@@ -52,7 +50,6 @@ export function renderStudentSelectors() {
         .join("")
     : `<option value="">Sin cursos asignados</option>`;
 
-  // Pre-seleccionar curso/grupo del perfil del alumno si hay default_group_id
   const defaultGroupId = state.user?.default_group_id;
   if (defaultGroupId) {
     const defaultCourse = courses.find((c) => c.groups.some((g) => g.id === defaultGroupId));
@@ -61,7 +58,6 @@ export function renderStudentSelectors() {
 
   updateStudentSelectors();
 
-  // Seleccionar el grupo por defecto después de actualizar los selects del curso
   if (defaultGroupId && groupSelect.querySelector(`option[value="${CSS.escape(defaultGroupId)}"]`)) {
     groupSelect.value = defaultGroupId;
     updateTableSelector();
@@ -86,7 +82,6 @@ export function updateTableSelector() {
   if (!tableSelect) return;
   const group = selectedCourse()?.groups.find((item) => item.id === groupSelect.value);
   const assignment = selectedTableAssignment();
-  // Mesa por defecto del perfil, solo si es el grupo por defecto del alumno
   const isDefaultGroup = groupSelect.value === (state.user?.default_group_id ?? "");
   const profileTable = isDefaultGroup ? (state.user?.default_table_number ?? null) : null;
   const tableCount = group?.table_count ?? 0;
@@ -121,8 +116,6 @@ export async function loadSubmissionForm() {
   if (canReview(state.user)) return;
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
-  // El textarea de observaciones vive fuera de #measurement-fields (no se destruye al cambiar
-  // de práctica): hay que vaciarlo a mano, salvo que se esté editando (ahí lo prellena applyPrefill).
   if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const practiceId = practiceSelect.value;
   const courseId = courseSelect.value;
@@ -139,7 +132,6 @@ export async function loadSubmissionForm() {
     return;
   }
 
-  // Guard: si ya existe un informe para (práctica, grupo, mesa) mostrar aviso en lugar del form.
   if (!state.editingSubmissionId) {
     const blocked = await checkExistingReport(practiceId);
     if (blocked) return;
@@ -151,8 +143,6 @@ export async function loadSubmissionForm() {
       fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`),
     ]);
     state.practiceForm = { definition, instruments };
-    // Form nuevo: descartá cronómetros/depuración de la práctica anterior para no dejar
-    // instancias huérfanas (p. ej. claves `qid#i` de una config de operadores distinta).
     state.chronometers.clear();
     state.seriesDebug.clear();
     renderMeasurementFields();
@@ -165,8 +155,6 @@ export async function loadSubmissionForm() {
   }
 }
 
-/** Verifica si ya existe un informe para la (práctica, grupo, mesa) seleccionada.
- *  Muestra el aviso correspondiente y devuelve `true` si el form debe bloquearse. */
 async function checkExistingReport(practiceId) {
   const groupId = groupSelect.value;
   const tableNum = Number(tableSelect.value);
@@ -185,7 +173,6 @@ async function checkExistingReport(practiceId) {
           <button type="button" class="view-existing-btn" data-id="${escapeHtml(submission_id)}">Ver informe</button>
         </div>`;
       measurementFields.querySelector(".view-existing-btn")?.addEventListener("click", (e) => {
-        // Capturar el id ANTES del import(): currentTarget es null una vez despachado el evento.
         const id = e.currentTarget.dataset.id;
         import("./submissions.js").then(({ openSubmissionWorkspace }) =>
           openSubmissionWorkspace(id),
@@ -208,7 +195,6 @@ async function checkExistingReport(practiceId) {
       });
       return true;
     }
-    // Hay informe pero el alumno no está invitado ni es miembro
     state.practiceForm = null;
     measurementFields.innerHTML = `
       <div class="edit-banner">
@@ -216,18 +202,15 @@ async function checkExistingReport(practiceId) {
       </div>`;
     return true;
   } catch {
-    return false; // si falla el check, no bloquear
+    return false;
   }
 }
 
-// Parte temática activa de una práctica con PRACTICE_PARTS (tabs que solo alternan secciones
-// de la misma definición, sin cambiar de práctica ni de entrega).
 let activePart = null;
 
 export function renderPartTabs(practiceId) {
   if (!practicePartTabs) return;
 
-  // Partes internas de UNA práctica: las tabs muestran/ocultan secciones, no cambian de práctica.
   const innerParts = PRACTICE_PARTS[practiceId];
   if (innerParts) {
     if (!innerParts.some((p) => p.id === activePart)) activePart = innerParts[0].id;
@@ -280,7 +263,6 @@ export function renderPartTabs(practiceId) {
   });
 }
 
-/** Muestra solo los bloques `[data-section]` de la parte activa; los sin sección quedan siempre. */
 function applyPartVisibility() {
   if (!PRACTICE_PARTS[practiceSelect.value]) return;
   measurementFields.querySelectorAll("[data-section]").forEach((el) => {
@@ -294,15 +276,12 @@ export function renderMeasurementFields() {
     return;
   }
   const { definition, instruments } = state.practiceForm;
-  // El formulario arranca habilitado; los guards de abajo lo deshabilitan si la práctica no está
-  // lista para entregar (p. ej. una curva sin curvas definidas).
   if (submitButton) submitButton.disabled = false;
   if (definition.quantities.length === 0) {
     measurementFields.innerHTML = `<p class="submission-meta">Esta practica todavia no tiene magnitudes definidas.</p>`;
     return;
   }
 
-  // Una curva necesita al menos una curva definida; si no, no hay nada para graficar ni entregar.
   if (definition.analysis_kind === "curva" && (definition.curves?.length ?? 0) === 0) {
     measurementFields.innerHTML = `<p class="submission-meta">Esta práctica de curva todavía no tiene curvas definidas. Pedile al docente que las configure antes de entregar.</p>`;
     if (submitButton) submitButton.disabled = true;
@@ -315,8 +294,6 @@ export function renderMeasurementFields() {
     return;
   }
 
-  // Motor D: en el estadístico, una práctica puede declarar N operadores. Las magnitudes repetidas
-  // (tipo A) se cargan por operador; las dadas o de medida única se comparten.
   const operatorCount =
     definition.analysis_kind == null || definition.analysis_kind === "estadistico"
       ? definition.operator_count ?? 0
@@ -325,12 +302,9 @@ export function renderMeasurementFields() {
   const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
   const legendHtml = (q) => quantityNameHtml(q);
 
-  // `opIndex` (número) marca el bloque de un operador; `null` para magnitudes compartidas.
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
     if (q.is_given) {
-      // Sin has_uncertainty: dato de tabla sin incertidumbre propia (p. ej. un tiempo de
-      // semiamplitud leído de una lectura única) — pide solo "Valor", sin instrumento ni U.
       const uField = !hasUncertainty(q)
         ? ""
         : `<label>Incertidumbre U (expandida)
@@ -403,7 +377,6 @@ export function renderMeasurementFields() {
     `;
   };
 
-  // Render de una magnitud: por-operador (N bloques etiquetados) o una sola fila compartida.
   const quantityRowHtml = (q) => {
     if (!isPerOperator(q)) return measurementRowHtml(q, null);
     const blocks = Array.from(
@@ -422,21 +395,14 @@ export function renderMeasurementFields() {
   const sections = PRACTICE_SECTIONS[practiceSelect.value];
   if (sections) {
     const { grouped, rest } = groupBySections(definition.quantities, sections);
-    // Los resultados finales de una sección (p. ej. g1 en "Operador 1") se incrustan ahí mismo,
-    // junto a la magnitud de la que salen (T1), en vez de amontonarse aparte al final.
     const allFinals = (definition.results ?? []).filter((r) => r.is_final);
     const embedded = new Set();
     const blocks = grouped.map(({ sec, rows }) => {
       if (rows.length === 0) return "";
       const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
-      // `!embedded.has` evita reventarlo dos veces si un símbolo quedara en el `results` de más
-      // de una sección: gana la primera (mismo orden que PRACTICE_SECTIONS).
       const secFinals = allFinals.filter((r) => !embedded.has(r.symbol) && (sec.results ?? []).includes(r.symbol));
       secFinals.forEach((r) => embedded.add(r.symbol));
-      // Se pasa `sec.id` explícito: es la sección donde esta fila realmente queda en el DOM, que
-      // puede no coincidir con lo que `partForResult` (usada por el fallback de `leftoverFinals`)
-      // encontraría si la sección "dueña" del símbolo en PRACTICE_SECTIONS no llegó a renderizar.
       const finalsHtml = secFinals.length
         ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
            ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
@@ -480,17 +446,11 @@ export function renderMeasurementFields() {
   });
 }
 
-/** Parte temática (id de PRACTICE_PARTS) a la que pertenece un resultado final, o `null`. */
 function partForResult(symbol) {
   const sections = PRACTICE_SECTIONS[practiceSelect.value] ?? [];
   return sections.find((sec) => sec.id && (sec.results ?? []).includes(symbol))?.id ?? null;
 }
 
-/** Fila de un resultado final (valor ± U), p. ej. `g`. Los resultados con `has_uncertainty:
- *  false` se entregan sin incertidumbre (sin campo U). `sectionId` es la parte donde se está
- *  incrustando esta fila (si el caller ya sabe en qué `<div data-section>` la está poniendo);
- *  sin ese dato se cae a `partForResult`, que puede no coincidir con dónde termina embebida si
- *  una sección "dueña" del símbolo no llegó a renderizar (ver `renderMeasurementFields`). */
 function finalResultRowHtml(r, sectionId) {
   const part = sectionId !== undefined ? sectionId : partForResult(r.symbol);
   const uField = !hasUncertainty(r)
@@ -518,9 +478,6 @@ function finalResultRowHtml(r, sectionId) {
     </fieldset>`;
 }
 
-/** Sección opcional para que el alumno cargue sus resultados finales (valor ± U). `finals`
- *  por defecto son todos los de la definición; se puede pasar un subconjunto (p. ej. los que
- *  no quedaron ya incrustados en una sección temática, ver `renderMeasurementFields`). */
 function finalResultSectionHtml(definition, finals) {
   const rows = finals ?? (definition.results ?? []).filter((r) => r.is_final);
   if (!rows.length) return "";
@@ -533,7 +490,6 @@ function finalResultSectionHtml(definition, finals) {
   `;
 }
 
-/** Recolecta los resultados finales cargados por el alumno junto con la entrega (si los hay). */
 export function collectFinalResults() {
   const scalar = [...measurementFields.querySelectorAll('[data-final-result="1"]')].reduce((acc, row) => {
     const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
@@ -541,7 +497,6 @@ export function collectFinalResults() {
     if (rawVal === "") return acc;
     const value = Number(rawVal) * prefixFactor(valPrefix);
     if (!Number.isFinite(value)) return acc;
-    // Sin campo U (resultado con has_uncertainty: false) va sin incertidumbre.
     const rawU = row.querySelector(".final-result-u")?.value.trim() ?? "";
     const u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
     acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
@@ -570,7 +525,6 @@ export function collectMeasurements() {
   const seriesTable = measurementFields.querySelector(".series-table");
   if (seriesTable) {
     const quantityIds = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
-    // Magnitudes con grilla de réplicas por punto (tienen inputs .series-replica).
     const replicaIds = new Set(
       [...seriesTable.querySelectorAll(".series-replica")].map((i) => i.dataset.quantityId),
     );
@@ -578,7 +532,6 @@ export function collectMeasurements() {
     const replicaPoints = new Map([...replicaIds].map((id) => [id, []]));
     seriesTable.querySelectorAll(".series-row").forEach((row) => {
       const cells = [...row.querySelectorAll(".series-cell")];
-      // Parsea cada celda a un valor único o a una lista de réplicas; marca si está completa.
       const parsed = cells.map((cell) => {
         const replicaInput = cell.querySelector(".series-replica");
         if (replicaInput) {
@@ -595,7 +548,7 @@ export function collectMeasurements() {
         const v = raw === "" ? NaN : Number(raw) * factor;
         return { id: input.dataset.quantityId, value: v, ok: Number.isFinite(v) };
       });
-      if (parsed.some((p) => !p.ok)) return; // fila incompleta: se ignora el punto
+      if (parsed.some((p) => !p.ok)) return;
       parsed.forEach((p) => {
         if (p.replicas) replicaPoints.get(p.id).push(p.replicas);
         else singleValues.get(p.id).push(p.value);
@@ -606,13 +559,10 @@ export function collectMeasurements() {
         ? { quantity_id: id, instrument_id: null, scale_id: null, values: [], given_u: null, point_replicas: replicaPoints.get(id) }
         : { quantity_id: id, instrument_id: null, scale_id: null, values: singleValues.get(id), given_u: null },
     );
-    // Motor E: escalares compartidos (datos de cátedra / medida única), cargados una vez fuera de
-    // la serie. Se recolectan como filas sueltas y se suman a las magnitudes por punto.
     const shared = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].map(collectStandaloneRow);
     return [...series, ...shared];
   }
 
-  // Motor D: magnitudes por operador → operator_replicas (una serie por bloque de operador).
   const out = [...measurementFields.querySelectorAll(".operator-quantity")].map((container) => {
     const rows = [...container.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
@@ -627,7 +577,6 @@ export function collectMeasurements() {
     };
   });
 
-  // Filas sueltas (compartidas o sin operadores): no están dentro de un contenedor por operador.
   const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
     (row) => !row.closest(".operator-quantity")
   );
@@ -637,17 +586,13 @@ export function collectMeasurements() {
   return out;
 }
 
-/// Recolecta una fila suelta: dato dado (valor ± U) o medida única/réplicas (instrumento/escala +
-/// lecturas). Usada por el estadístico y por la sección de escalares compartidos de regresión.
 function collectStandaloneRow(row) {
   if (row.dataset.isGiven === "1") {
     const valInput = row.querySelector(".measure-given-value");
     const uInput = row.querySelector(".measure-given-u");
-    // Cada prefijo se lee de su propio campo: una ranura (`slot_count`) no tiene selector.
     const prefixOf = (input) => input?.closest(".replica-input-wrap")?.querySelector(".prefix-select")?.value;
     const [valPrefix, uPrefix] = [prefixOf(valInput), prefixOf(uInput)];
     const rawVal = valInput.value.trim();
-    // Sin campo U (magnitud `has_uncertainty: false`, p. ej. t_med): no hay nada que leer, va null.
     const rawU = uInput?.value.trim() ?? "";
     const value = rawVal === "" ? null : Number(rawVal) * prefixFactor(valPrefix);
     const given_u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
@@ -668,7 +613,6 @@ function collectStandaloneRow(row) {
   };
 }
 
-/** Lecturas numéricas de una fila de medición (cronómetro con descartes, o inputs de réplica). */
 function rowSeriesValues(row) {
   if (row.dataset.isChrono === "1") {
     const mode = row.querySelector(".chrono-mode")?.value ?? "consecutivo";
@@ -691,7 +635,6 @@ function rowSeriesValues(row) {
 function collectMeta() {
   const meta = {};
   measurementFields.querySelectorAll('.measurement-row[data-is-chrono="1"]').forEach((row) => {
-    // Por operador, la clave de cronómetro/depuración es `qid#i` (ver chronoKeyFor).
     const key = chronoKeyFor(row);
     const dbg = state.seriesDebug.get(key);
     if (!dbg) return;
@@ -710,8 +653,6 @@ function buildMetaMap(measurements) {
   const map = {};
   const quantities = state.practiceForm?.definition?.quantities ?? [];
   for (const m of measurements) {
-    // El nombre sale de la definición (robusto: las magnitudes por operador no tienen una única
-    // fila con `legend`, sino N bloques bajo un contenedor). isGiven/isChrono salen de una fila real.
     const def = quantities.find((q) => q.id === m.quantity_id);
     const row = measurementFields.querySelector(
       `.measurement-row[data-quantity-id="${CSS.escape(m.quantity_id)}"]`
@@ -720,10 +661,8 @@ function buildMetaMap(measurements) {
       name: def?.name ?? row?.querySelector("legend")?.textContent?.trim() ?? m.quantity_id,
       isGiven: def?.is_given ?? row?.dataset.isGiven === "1",
       isChrono: row?.dataset.isChrono === "1",
-      // En regresión/curva: las magnitudes con per_point=false (o dadas) son escalares compartidos.
       perPoint: def?.per_point ?? true,
       hasUncertainty: hasUncertainty(def),
-      // Puede quedar sin lecturas sin bloquear el envío (p. ej. operador 2/3 opcional).
       optional: def?.optional ?? false,
     };
   }
@@ -805,10 +744,6 @@ export function exitEditMode() {
   state.editPrefillStudentResults = null;
 }
 
-/** Cancela una entrega dentro de la ventana de edición: la borra del servidor y devuelve al
- *  alumno al formulario de carga con todos los valores puestos, para que siga editando y vuelva
- *  a entregar sin re-tipear nada. Pide confirmación antes de borrar. `banner` es el `.edit-banner`
- *  que contiene el botón clickeado, para mostrar un error ahí mismo si falla el borrado. */
 export async function cancelSubmission(submission, banner) {
   const confirmed = window.confirm(
     "¿Cancelar esta entrega? Se va a borrar del servidor; tus valores quedan cargados en el " +
@@ -869,8 +804,6 @@ function editPrefillByQuantity() {
     e.operators.get(oidx).push(m.value);
     if (m.value_u != null) e.value_u = m.value_u;
   }
-  // Normaliza a `pointGroups` (réplicas por punto) y `operatorGroups` (réplicas por operador),
-  // ambas ordenadas por índice; `values` es la lista plana (estadístico de una sola serie).
   for (const e of map.values()) {
     const pIdx = [...e.points.keys()].sort((a, b) => a - b);
     e.pointGroups = pIdx.map((i) => e.points.get(i));
@@ -883,7 +816,6 @@ function editPrefillByQuantity() {
   return map;
 }
 
-/** Prellena el bloque opcional "Resultado final" con `results` (lista `{symbol, value, u_expanded}`). */
 function applyFinalResultsPrefillFrom(results) {
   const saved = new Map((results ?? []).map((s) => [s.symbol, s]));
   measurementFields.querySelectorAll('[data-final-result="1"]').forEach((row) => {
@@ -893,7 +825,6 @@ function applyFinalResultsPrefillFrom(results) {
     const uInput = row.querySelector(".final-result-u");
     if (uInput && s.u_expanded != null) uInput.value = s.u_expanded;
   });
-  // Re por corrida (`Re#k`): k = índice entre filas completas, igual que al recolectar.
   let k = -1;
   measurementFields.querySelectorAll(".series-row").forEach((row) => {
     if (!seriesRowComplete(row)) return;
@@ -905,7 +836,6 @@ function applyFinalResultsPrefillFrom(results) {
   });
 }
 
-/** Restaura una entrega en edición (`applyPrefill`) desde `state.editPrefill*`. */
 export function applyPrefill() {
   if (!state.editingSubmissionId && !state.restoringCancelledSubmission) return;
   applyMeasurementPrefill(
@@ -915,8 +845,6 @@ export function applyPrefill() {
   );
 }
 
-/** Restaura el borrador local guardado para la (curso, grupo, mesa, práctica) actual, si hay uno
- *  y no se está editando/restaurando una entrega existente (esos casos los maneja `applyPrefill`). */
 function applyDraftPrefill() {
   if (state.editingSubmissionId || state.restoringCancelledSubmission) return;
   const draft = loadDraft();
@@ -928,9 +856,6 @@ function applyDraftPrefill() {
   );
 }
 
-/** Pinta en el DOM un `byQ` (Map quantity_id -> {pointGroups, operatorGroups, values, value_u,
- *  instrument_id, scale_id}) ya armado, sin importar si viene de una entrega guardada
- *  (`editPrefillByQuantity`) o de un borrador local (`draftMeasurementsByQuantity`). */
 function applyMeasurementPrefill(byQ, finalResults, comment) {
   if (studentComment) studentComment.value = comment ?? "";
 
@@ -938,24 +863,19 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
   if (seriesTable) {
     const qids = [...seriesTable.querySelectorAll("th[data-quantity-id]")].map((th) => th.dataset.quantityId);
     const nPoints = Math.max(...qids.map((id) => byQ.get(id)?.pointGroups.length ?? 0), 0);
-    // Solo las columnas por punto (las compartidas se rellenan aparte, abajo).
     const cols = state.practiceForm.definition.quantities.filter((q) => q.per_point && !q.is_given);
     const tbody = seriesTable.querySelector("tbody");
     tbody.innerHTML = Array.from({ length: Math.max(nPoints, SERIES_INITIAL_ROWS) }, () => seriesRowHtml(cols)).join("");
     wireSeriesRemove();
     [...tbody.querySelectorAll(".series-row")].forEach((row, i) => {
-      // Columnas de un valor por punto.
       row.querySelectorAll(".series-value").forEach((input) => {
         const v = byQ.get(input.dataset.quantityId)?.pointGroups[i]?.[0];
         if (v != null) input.value = v;
       });
-      // Columnas con grilla de réplicas: rellena cada input del punto i.
       row.querySelectorAll(".series-cell--replicas").forEach((cell) => {
         const id = cell.querySelector(".series-replica")?.dataset.quantityId;
         const reps = byQ.get(id)?.pointGroups[i] ?? [];
         const group = cell.querySelector(".series-replica-group");
-        // Si la entrega guardó más réplicas que el ancho actual de la grilla (el docente redujo
-        // replicas_per_point luego de cargarse), agrega inputs para no perder datos al editar.
         let inputs = [...cell.querySelectorAll(".series-replica")];
         while (group && inputs.length < reps.length) {
           group.insertAdjacentHTML("beforeend", replicaInputHtml(id, inputs.length));
@@ -966,18 +886,14 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
         });
       });
     });
-    // Escalares compartidos (Motor E): se rellenan como filas sueltas fuera de la serie.
     measurementFields
       .querySelectorAll(".shared-quantities .measurement-row")
       .forEach((row) => prefillStandaloneRow(row, byQ));
-    // Después de reconstruir las filas: los Re#k viven en ellas y se indexan por fila completa.
     applyFinalResultsPrefillFrom(finalResults);
-    // Con todo cargado: los compartidos también entran en columnas en vivo (v = dx/t̄).
     refreshSeries();
     return;
   }
 
-  // Motor D: magnitudes por operador → rellena cada bloque con la serie de ese operador.
   measurementFields.querySelectorAll(".operator-quantity").forEach((groupEl) => {
     const e = byQ.get(groupEl.dataset.quantityId);
     if (!e) return;
@@ -987,7 +903,6 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
     blocks.forEach((row, i) => fillReplicaRow(row, e, e.operatorGroups[i] ?? []));
   });
 
-  // Filas sueltas (compartidas o sin operadores).
   const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
     (row) => !row.closest(".operator-quantity")
   );
@@ -997,7 +912,6 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
   applyFinalResultsPrefillFrom(finalResults);
 }
 
-/// Rellena una fila suelta (dato dado o medida única/réplicas) desde el prefill de edición.
 function prefillStandaloneRow(row, byQ) {
   const e = byQ.get(row.dataset.quantityId);
   if (!e) return;
@@ -1011,7 +925,6 @@ function prefillStandaloneRow(row, byQ) {
   fillReplicaRow(row, e, e.values);
 }
 
-/** Rellena una fila de réplicas con `values`, restaurando instrumento/escala desde el prefill. */
 function fillReplicaRow(row, e, values) {
   const inst = row.querySelector(".measure-instrument");
   if (inst && e.instrument_id) {
@@ -1032,15 +945,10 @@ function fillReplicaRow(row, e, values) {
   });
 }
 
-// ── Listeners top-level ────────────────────────────────────────────────────────
-
-// "Entregar" (submit del form / Enter): crea la entrega por formulario.
 submissionForm.addEventListener("submit", (event) => {
   event.preventDefault();
   submitFormSubmission();
 });
-// `measurementFields` es un nodo estable (solo se reemplaza su innerHTML, nunca el nodo): un
-// único listener delegado alcanza para autoguardar el borrador sin tocar los renders.
 measurementFields.addEventListener("input", scheduleDraftSave);
 measurementFields.addEventListener("change", scheduleDraftSave);
 studentComment?.addEventListener("input", scheduleDraftSave);

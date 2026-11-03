@@ -1,62 +1,36 @@
-//! Motor de incertidumbres de Fisica 103.
-//!
-//! Funciones puras (sin base de datos) para calcular:
-//! - incertidumbre tipo A (estadistica): `u_A = s / sqrt(n)`
-//! - incertidumbre tipo B (del instrumento), segun el modelo de la escala
-//! - incertidumbre combinada `u_c = sqrt(u_A^2 + u_B^2)` y expandida `U = k * u_c` (k = 2)
-//! - propagacion de varianzas para determinaciones indirectas (numerica, diferencias finitas)
-
 use serde::{Deserialize, Serialize};
 
-/// Factor de cobertura para la incertidumbre expandida (95 %, convencion del curso).
 pub const EXPANSION_K: f64 = 2.0;
 
 const SQRT_3: f64 = 1.732_050_807_568_877_2;
 const SQRT_6: f64 = 2.449_489_742_783_178;
 
-/// Modelo de incertidumbre tipo B de una escala de instrumento.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BModel {
-    /// Digital simple (resolucion finita): `u_B = step / (2*sqrt(3))`.
     Resolucion,
-    /// Analogico (apreciacion del operador): `u_B = appreciation / sqrt(6)`.
     Apreciacion,
-    /// Tester u osciloscopio: la hoja/tecnica da U expandida (k=2) como
-    /// `U_spec = pct*|valor| + coef*step + fijo`, de donde `u_B = U_spec / 2`.
     Fabricante,
 }
 
-/// Especificacion de incertidumbre tipo B de una escala concreta.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScaleSpec {
     pub b_model: BModel,
-    /// Resolucion (digital), menor division (analogico) o VOLTS/DIV (osciloscopio).
     pub step: f64,
-    /// Apreciacion efectiva del operador (analogico); si es `None` se usa `step`.
     pub appreciation: Option<f64>,
-    /// Fabricante: porcentaje del valor leido (p. ej. 3.0 = 3 %).
     pub spec_pct_reading: f64,
-    /// Fabricante: coeficiente que multiplica `step` (5 = "5 dgt"; 0.1 osciloscopio).
     pub spec_step_coeff: f64,
-    /// Fabricante: termino fijo en unidad base (p. ej. 0.001 V = 1 mV).
     pub spec_fixed: f64,
-    /// Calibracion: porcentaje del valor leido que se suma **en cuadratura** sobre el modelo
-    /// base (p. ej. 3.0 = 3 %, balanza digital de Hidrostatica). Ya es una `u`, no se divide.
     #[serde(default)]
     pub u_cal_pct: f64,
-    /// Calibracion: termino fijo en unidad base que se suma **en cuadratura** sobre el modelo
-    /// base (p. ej. 0.001 g/cm3 del densimetro, 0.5 mm de los brazos de la balanza de Mohr).
     #[serde(default)]
     pub u_cal_fixed: f64,
 }
 
-/// Resultado de incertidumbre de una magnitud medida directamente.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuantityResult {
     pub n: usize,
     pub mean: f64,
-    /// Desviacion estandar muestral.
     pub s: f64,
     pub u_a: f64,
     pub u_b: f64,
@@ -65,9 +39,6 @@ pub struct QuantityResult {
 }
 
 /// Incertidumbre tipo A. Devuelve `(media, s_muestral, u_A)`.
-/// Con `n < 2` la dispersion no es estimable: `s = 0` y `u_A = 0`.
-///
-/// # Ejemplos
 ///
 /// ```
 /// let (media, s, u_a) = quantify::uncertainty::type_a(&[1.0, 2.0, 3.0]);
@@ -97,11 +68,6 @@ pub fn type_a(values: &[f64]) -> (f64, f64, f64) {
 }
 
 /// Incertidumbre tipo B de una lectura, evaluada en `value` (relevante para `Fabricante`).
-///
-/// Sobre el modelo base se suman **en cuadratura** los terminos de calibracion de la escala
-/// (`u_cal_pct`, `u_cal_fixed`), que valen 0 en las escalas que no los declaran.
-///
-/// # Ejemplos
 ///
 /// ```
 /// use quantify::uncertainty::{type_b, BModel, ScaleSpec};
@@ -150,8 +116,6 @@ pub fn type_b(spec: &ScaleSpec, value: f64) -> f64 {
 
 /// Combina tipo A y tipo B en cuadratura.
 ///
-/// # Ejemplos
-///
 /// ```
 /// assert_eq!(quantify::uncertainty::combine(3.0, 4.0), 5.0);
 /// ```
@@ -161,8 +125,6 @@ pub fn combine(u_a: f64, u_b: f64) -> f64 {
 
 /// Incertidumbre expandida `U = k * u`.
 ///
-/// # Ejemplos
-///
 /// ```
 /// assert_eq!(quantify::uncertainty::expand(2.5, 2.0), 5.0);
 /// ```
@@ -171,9 +133,6 @@ pub fn expand(u: f64, k: f64) -> f64 {
 }
 
 /// Calcula el resultado completo de una magnitud medida con `values` replicas
-/// usando la escala `spec` (si hay instrumento asociado). La tipo B se evalua en la media.
-///
-/// # Ejemplos
 ///
 /// ```
 /// // Sin instrumento (sin tipo B): u_c == u_A y U = 2 * u_A.
@@ -199,9 +158,6 @@ pub fn measured_quantity(values: &[f64], spec: Option<&ScaleSpec>) -> QuantityRe
 }
 
 /// Resultado de una magnitud dada por la cátedra como `valor ± U` (incertidumbre expandida).
-/// El alumno ingresa `U` directamente; internamente se guarda `u_c = U / k`.
-///
-/// # Ejemplos
 ///
 /// ```
 /// use quantify::uncertainty::{measured_given, EXPANSION_K};
@@ -225,12 +181,6 @@ pub fn measured_given(value: f64, u_expanded: f64) -> QuantityResult {
 }
 
 /// Propagacion de varianzas para `Q = f(x_1, ..., x_n)` por diferencias finitas
-/// centradas. `means` son los valores medios de las variables de entrada y `us`
-/// sus incertidumbres estandar. Devuelve `(valor, u_Q)`.
-///
-/// `u_Q^2 = sum_i (df/dx_i)^2 * u_i^2`, con `df/dx_i ~= (f(x_i+h) - f(x_i-h)) / (2h)`.
-///
-/// # Ejemplos
 ///
 /// ```
 /// // Q = l * a ; con incertidumbres nulas, u_Q = 0 y el valor es el producto.
@@ -246,9 +196,6 @@ where
     let mut variance = 0.0;
     let mut x = means.to_vec();
     for i in 0..means.len() {
-        // Paso relativo al valor: preciso también para magnitudes muy chicas (p. ej.
-        // capacitancias ~1e-8). Un piso absoluto grande perturbaría tanto que el punto
-        // evaluado podría cambiar de signo. Para x = 0 se usa un paso absoluto pequeño.
         let h = if means[i] == 0.0 {
             1e-6
         } else {
@@ -278,7 +225,7 @@ mod tests {
     fn type_a_sample_std_and_mean() {
         let (mean, s, u_a) = type_a(&[1.0, 2.0, 3.0]);
         assert!(close(mean, 2.0, 1e-12));
-        assert!(close(s, 1.0, 1e-12)); // var muestral = (1+0+1)/2 = 1
+        assert!(close(s, 1.0, 1e-12));
         assert!(close(u_a, 1.0 / 3.0_f64.sqrt(), 1e-12));
     }
 
@@ -322,7 +269,6 @@ mod tests {
 
     #[test]
     fn type_b_fabricante_tester() {
-        // pct=1.0 %, coef=5 dgt, step=1.0, fijo=0, valor=100 -> U=1+5=6 -> u_B=3
         let spec = ScaleSpec {
             b_model: BModel::Fabricante,
             step: 1.0,
@@ -338,8 +284,6 @@ mod tests {
 
     #[test]
     fn type_b_fabricante_osciloscopio() {
-        // GDS-1052-U: 3% + 0.1*(VOLTS/DIV) + 1 mV; V/div=2, valor=5
-        // U = 0.03*5 + 0.1*2 + 0.001 = 0.15 + 0.2 + 0.001 = 0.351 -> u_B = 0.1755
         let spec = ScaleSpec {
             b_model: BModel::Fabricante,
             step: 2.0,
@@ -355,7 +299,6 @@ mod tests {
 
     #[test]
     fn type_b_calibracion_se_suma_en_cuadratura() {
-        // Densimetro de Hidrostatica: apreciacion 0.001 g/cm3 y u_calibracion fija 0.001 g/cm3.
         let spec = ScaleSpec {
             b_model: BModel::Apreciacion,
             step: 0.001,
@@ -369,11 +312,9 @@ mod tests {
         let base = 0.001 / SQRT_6;
         let esperado = (base * base + 0.001 * 0.001_f64).sqrt();
         assert!(close(type_b(&spec, 0.998), esperado, 1e-15));
-        // Es mayor que cualquiera de los dos terminos por separado, pero menor que su suma.
         assert!(esperado > base && esperado > 0.001);
         assert!(esperado < base + 0.001);
 
-        // Brazos de la balanza de Mohr: solo calibracion (0.5 mm), sin termino base.
         let brazos = ScaleSpec {
             step: 0.0,
             appreciation: None,
@@ -383,7 +324,6 @@ mod tests {
         };
         assert!(close(type_b(&brazos, 0.09), 0.0005, 1e-15));
 
-        // Invariante: con los dos terminos en 0 el resultado es el del modelo base de siempre.
         let sin_cal = ScaleSpec {
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
@@ -400,22 +340,16 @@ mod tests {
 
     #[test]
     fn propagate_matches_analytic_for_product_sum() {
-        // Q = l*a + l*b ; dQ/dl = a+b, dQ/da = l, dQ/db = l
         let f = |x: &[f64]| x[0] * x[1] + x[0] * x[2];
         let means = [2.0, 3.0, 4.0];
         let us = [0.1, 0.2, 0.2];
         let (value, u_q) = propagate(f, &means, &us);
         assert!(close(value, 14.0, 1e-9));
-        // u_Q^2 = 7^2*0.01 + 4*0.04 + 4*0.04 = 0.49+0.16+0.16 = 0.81 -> 0.9
         assert!(close(u_q, 0.9, 1e-6));
     }
 
     #[test]
     fn propagate_is_accurate_for_tiny_nonlinear_magnitudes() {
-        // f = 1/x con x = 1e-8 (escala de una capacitancia). df/dx = -1/x^2 = -1e16.
-        // u_q = |df/dx| * u_x = 1e16 * 1e-10 = 1e6.
-        // Con un paso absoluto (piso 1.0) el punto evaluado cambiaba de signo y daba basura;
-        // con paso relativo la propagacion es correcta.
         let (value, u_q) = propagate(|x| 1.0 / x[0], &[1e-8], &[1e-10]);
         assert!(close(value, 1e8, 1.0));
         assert!((u_q - 1e6).abs() / 1e6 < 1e-3);
@@ -433,7 +367,6 @@ mod tests {
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
         };
-        // Sin tipo B (step=0): u_c == u_A, U = 2*u_A
         let r = measured_quantity(&[1.0, 2.0, 3.0], Some(&spec));
         assert!(close(r.u_b, 0.0, 1e-15));
         assert!(close(r.u_c, 1.0 / 3.0_f64.sqrt(), 1e-12));

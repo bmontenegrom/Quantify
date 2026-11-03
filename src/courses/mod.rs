@@ -55,7 +55,6 @@ pub struct CreateCourse {
 pub struct UpdateCourse {
     pub name: String,
     pub term: String,
-    /// Horas de edición de entregas (opcional; si viene, se acota a 0..=72).
     #[serde(default)]
     pub submission_edit_hours: Option<f64>,
 }
@@ -65,8 +64,6 @@ pub struct SetCoursePractice {
     pub practice_id: String,
 }
 
-/// Arma el contexto académico que ve un usuario: docentes/admin ven todos los cursos,
-/// estudiantes solo los suyos. Incluye prácticas y, para docentes, listas de estudiantes y usuarios.
 pub async fn academic_context(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -79,7 +76,7 @@ pub async fn academic_context(
 
     Ok(AcademicContext {
         courses,
-        practices: crate::db::practices(pool).await?,
+        practices: crate::db::practices_for_role(pool, &user.role).await?,
         students: if matches!(user.role.as_str(), "docente" | "admin") {
             crate::users::students(pool).await?
         } else {
@@ -93,7 +90,6 @@ pub async fn academic_context(
     })
 }
 
-/// Crea un curso activo (nombre + período) y lo devuelve.
 pub async fn create_course(pool: &SqlitePool, input: CreateCourse) -> anyhow::Result<Course> {
     let id = Uuid::new_v4().to_string();
     sqlx::query(
@@ -117,7 +113,6 @@ pub async fn create_course(pool: &SqlitePool, input: CreateCourse) -> anyhow::Re
     .await?)
 }
 
-/// Actualiza nombre y período de un curso. Devuelve `None` si el curso no existe.
 pub async fn update_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -154,8 +149,6 @@ pub async fn update_course(
     ))
 }
 
-/// Inscribe a un estudiante en un curso (vía `enroll_course_member`).
-/// Devuelve `None` si el usuario no existe o no es estudiante.
 pub async fn add_course_member(
     pool: &SqlitePool,
     course_id: &str,
@@ -176,12 +169,19 @@ pub async fn add_course_member(
     Ok(Some(()))
 }
 
-/// Habilita una práctica en un curso (o la re-habilita si estaba deshabilitada). Idempotente.
 pub async fn enable_course_practice(
     pool: &SqlitePool,
     course_id: &str,
     input: SetCoursePractice,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
+    let published: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM practices WHERE id = ?1 AND status = 'publicada'")
+            .bind(&input.practice_id)
+            .fetch_optional(pool)
+            .await?;
+    if published.is_none() {
+        return Ok(false);
+    }
     sqlx::query(
         r#"
         INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -194,13 +194,9 @@ pub async fn enable_course_practice(
     .bind(Utc::now())
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(true)
 }
 
-/// Deshabilita una práctica en un curso: los estudiantes ya no pueden entregarla. Las entregas
-/// existentes, los subgrupos y las mesas se conservan para cuando se re-habilite. La fila queda
-/// con `enabled = FALSE` (no se borra) para que la siembra no la vuelva a habilitar al arrancar.
-/// Devuelve `true` si estaba habilitada.
 pub async fn disable_course_practice(
     pool: &SqlitePool,
     course_id: &str,
@@ -217,8 +213,6 @@ pub async fn disable_course_practice(
     Ok(result.rows_affected() > 0)
 }
 
-/// Indica si un usuario puede entregar en (curso, grupo, práctica). Docentes/admin siempre
-/// pueden; un estudiante puede solo si está inscripto, pertenece al grupo y la práctica está habilitada.
 pub async fn user_can_submit(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -236,6 +230,7 @@ pub async fn user_can_submit(
         FROM course_members cm
         JOIN lab_groups g ON g.course_id = cm.course_id
         JOIN course_practices cp ON cp.course_id = g.course_id
+        JOIN practices p ON p.id = cp.practice_id AND p.status = 'publicada'
         JOIN group_members gm ON gm.group_id = g.id
         WHERE cm.user_id = ?1
           AND g.id = ?2
@@ -255,7 +250,6 @@ pub async fn user_can_submit(
     Ok(allowed.is_some())
 }
 
-/// Resúmenes de todos los cursos (vista docente/admin), ordenados por período y nombre.
 async fn all_course_summaries(pool: &SqlitePool) -> anyhow::Result<Vec<CourseSummary>> {
     let courses = sqlx::query_as::<_, Course>(
         "SELECT id, name, term, active, submission_edit_hours, acceptance_window_hours FROM courses ORDER BY term DESC, name",
@@ -265,7 +259,6 @@ async fn all_course_summaries(pool: &SqlitePool) -> anyhow::Result<Vec<CourseSum
     course_summaries(pool, courses).await
 }
 
-/// Resúmenes de los cursos activos en los que está inscripto un estudiante.
 async fn student_course_summaries(
     pool: &SqlitePool,
     user_id: &str,
@@ -282,10 +275,18 @@ async fn student_course_summaries(
     .bind(user_id)
     .fetch_all(pool)
     .await?;
-    course_summaries(pool, courses).await
+    let mut summaries = course_summaries(pool, courses).await?;
+    summaries.iter_mut().for_each(hide_unpublished);
+    Ok(summaries)
 }
 
-/// Enriquece una lista de cursos con sus miembros, grupos, prácticas, subgrupos y mesas.
+pub(crate) fn hide_unpublished(summary: &mut CourseSummary) {
+    summary.practices.retain(|p| p.status == "publicada");
+    summary
+        .subgroups
+        .retain(|s| s.practice.status == "publicada");
+}
+
 async fn course_summaries(
     pool: &SqlitePool,
     courses: Vec<Course>,
@@ -314,7 +315,6 @@ async fn course_summaries(
     Ok(summaries)
 }
 
-/// Lista los estudiantes miembros de un curso (para el resumen de curso).
 async fn course_members_for_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -333,17 +333,16 @@ async fn course_members_for_course(
     .await?)
 }
 
-/// Lista las prácticas habilitadas en un curso, ordenadas por nombre.
 pub async fn practices_for_course(
     pool: &SqlitePool,
     course_id: &str,
 ) -> anyhow::Result<Vec<Practice>> {
     Ok(sqlx::query_as::<_, Practice>(
         r#"
-        SELECT p.id, p.name, p.description, p.analysis_kind
+        SELECT p.id, p.name, p.description, p.analysis_kind, p.status
         FROM course_practices cp
         JOIN practices p ON p.id = cp.practice_id
-        WHERE cp.course_id = ?1 AND cp.enabled = TRUE
+        WHERE cp.course_id = ?1 AND cp.enabled = TRUE AND p.status <> 'borrador'
         ORDER BY p.name
         "#,
     )
@@ -473,7 +472,6 @@ mod tests {
         )
         .await
         .unwrap();
-        // table_count fuera de rango se acota a 24; tipo inválido -> regular.
         let group = create_group(
             &pool,
             &course.id,
@@ -548,9 +546,57 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("p1 está publicada y habilitada en el curso");
         assert_eq!(subgroup.name, "Sub A");
         assert_eq!(subgroup.practice_id, "p1-estadistica");
+
+        sqlx::query(
+            "INSERT INTO practices (id, name, description, status) \
+             VALUES ('borrador-x', 'Borrador', '', 'borrador')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO course_practices (course_id, practice_id, created_at) \
+             VALUES (?1, 'borrador-x', '2026-01-01')",
+        )
+        .bind(COURSE)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let draft = create_subgroup(
+            &pool,
+            COURSE,
+            CreateSubgroup {
+                practice_id: "borrador-x".into(),
+                group_id: GROUP.into(),
+                name: "Sub B".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(draft.is_none());
+
+        sqlx::query("UPDATE practices SET status = 'archivada' WHERE id = 'p1-estadistica'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let teacher = all_course_summaries(&pool).await.unwrap();
+        let course = teacher.iter().find(|c| c.id == COURSE).unwrap();
+        assert!(course
+            .subgroups
+            .iter()
+            .any(|s| s.practice.id == "p1-estadistica" && s.practice.status == "archivada"));
+        let student = find_user(&pool, STUDENT).await;
+        let student_view = student_course_summaries(&pool, &student.id).await.unwrap();
+        let course = student_view.iter().find(|c| c.id == COURSE).unwrap();
+        assert!(course
+            .subgroups
+            .iter()
+            .all(|s| s.practice.id != "p1-estadistica"));
+        assert!(course.practices.iter().all(|p| p.id != "p1-estadistica"));
     }
 
     #[tokio::test]
@@ -574,7 +620,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Debe existir el grupo "General" creado por ensure_default_group.
         let groups = groups_for_course(&pool, COURSE).await.unwrap();
         assert!(groups.iter().any(|g| g.name == "General"));
     }
@@ -585,7 +630,6 @@ mod tests {
         let teacher = find_user(&pool, TEACHER).await;
         let student = find_user(&pool, STUDENT).await;
 
-        // Un docente no es estudiante: add_group_member devuelve None.
         assert!(add_group_member(
             &pool,
             GROUP,
@@ -597,7 +641,6 @@ mod tests {
         .unwrap()
         .is_none());
 
-        // El estudiante ya es miembro; agregarlo de nuevo es idempotente y devuelve Some.
         assert!(add_group_member(
             &pool,
             GROUP,
@@ -636,7 +679,6 @@ mod tests {
         .unwrap();
         assert_eq!(ok.table_number, 2);
 
-        // Mesa fuera de rango (table_count = 4).
         assert!(set_practice_table_assignment(
             &pool,
             GROUP,
@@ -735,19 +777,16 @@ mod tests {
         let teacher = find_user(&pool, TEACHER).await;
         let student = find_user(&pool, STUDENT).await;
 
-        // Docente siempre puede.
         assert!(
             user_can_submit(&pool, &teacher, COURSE, GROUP, "p1-estadistica")
                 .await
                 .unwrap()
         );
-        // Estudiante con curso/grupo/práctica válidos.
         assert!(
             user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
                 .await
                 .unwrap()
         );
-        // Práctica no habilitada / inexistente -> false.
         assert!(
             !user_can_submit(&pool, &student, COURSE, GROUP, "p9-inexistente")
                 .await

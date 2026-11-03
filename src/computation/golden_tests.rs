@@ -1,19 +1,9 @@
-//! Tests "golden": congelan el análisis completo de cada práctica sembrada.
-//!
-//! Por cada `tests/golden/<practica>.input.json` (mediciones por símbolo, con el instrumento y la
-//! escala por nombre) se corre `analyze` y se compara el JSON resultante con
-//! `tests/golden/<practica>.expected.json`, con tolerancia numérica relativa. Cualquier cambio en
-//! el cálculo de una práctica hace fallar este test: si el cambio es intencional, se regeneran los
-//! esperados con `QUANTIFY_UPDATE_GOLDEN=1 cargo test golden` y el diff de los `.expected.json`
-//! queda a la vista en la PR.
-
 use super::tests::setup;
 use super::*;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-/// Una medición de entrada, identificada por símbolo (los ids de la base cambian en cada siembra).
 #[derive(Deserialize)]
 struct GoldenMeasurement {
     symbol: String,
@@ -25,7 +15,6 @@ struct GoldenMeasurement {
     point_replicas: Option<Vec<Vec<f64>>>,
     #[serde(default)]
     operator_replicas: Option<Vec<Vec<f64>>>,
-    /// `"Instrumento / escala"`, tal como se llaman en el catálogo sembrado.
     #[serde(default)]
     scale: Option<String>,
 }
@@ -42,8 +31,6 @@ fn golden_dir() -> PathBuf {
         .join("golden")
 }
 
-/// Saca los ids generados al sembrar (`quantity_id`, `instrument_id`, `scale_id`), que no son
-/// parte del cálculo y cambian en cada base.
 fn strip_ids(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -57,10 +44,6 @@ fn strip_ids(value: &mut Value) {
     }
 }
 
-/// Compara dos JSON: números con tolerancia relativa 1e-9, el resto exacto. Sin piso absoluto
-/// general (en SI hay valores legítimos de 1e-10, como la incertidumbre de un capacitor, que un
-/// piso los dejaría sin verificar): solo un esperado de cero exacto acepta ruido de redondeo de
-/// hasta 1e-12, que puede variar entre plataformas. Devuelve la primera diferencia con su ruta.
 fn diff(path: &str, actual: &Value, expected: &Value) -> Option<String> {
     match (actual, expected) {
         (Value::Number(a), Value::Number(e)) => {
@@ -117,7 +100,6 @@ async fn golden_practices_match() {
         .filter(|p| p.to_string_lossy().ends_with(".input.json"))
         .collect();
     inputs.sort();
-    // Toda práctica sembrada tiene su golden: una nueva sin entrada no quedaría cubierta.
     for practice in crate::db::practices(&pool).await.unwrap() {
         let input = golden_dir().join(format!("{}.input.json", practice.id));
         assert!(

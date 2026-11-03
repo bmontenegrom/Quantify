@@ -1,9 +1,6 @@
 name: CI
 
 on:
-  # Las PRs cubren development y staging: sus reglas exigen la rama al día con la base, así que
-  # lo que queda mergeado es lo que ya probó la PR. En main el push sí suma: la PR de release de
-  # release-please la abre el token de Actions y no dispara la CI.
   push:
     branches: [main]
   pull_request:
@@ -42,7 +39,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      # Sin dependencias: node:test es nativo, no hace falta npm install.
       - name: node --test
         run: npm test
 

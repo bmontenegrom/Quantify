@@ -47,12 +47,27 @@ pub struct SetPracticeTable {
     pub table_number: i64,
 }
 
-/// Crea un subgrupo de práctica (combinación curso/práctica/grupo + nombre) y lo devuelve.
 pub async fn create_subgroup(
     pool: &SqlitePool,
     course_id: &str,
     input: CreateSubgroup,
-) -> anyhow::Result<PracticeSubgroup> {
+) -> anyhow::Result<Option<PracticeSubgroup>> {
+    let offered: Option<(i64,)> = sqlx::query_as(
+        r#"
+        SELECT 1
+        FROM course_practices cp
+        JOIN practices p ON p.id = cp.practice_id
+        WHERE cp.course_id = ?1 AND cp.practice_id = ?2 AND cp.enabled = TRUE
+          AND p.status = 'publicada'
+        "#,
+    )
+    .bind(course_id)
+    .bind(&input.practice_id)
+    .fetch_optional(pool)
+    .await?;
+    if offered.is_none() {
+        return Ok(None);
+    }
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         r#"
@@ -69,21 +84,20 @@ pub async fn create_subgroup(
     .execute(pool)
     .await?;
 
-    Ok(sqlx::query_as::<_, PracticeSubgroup>(
-        r#"
+    Ok(Some(
+        sqlx::query_as::<_, PracticeSubgroup>(
+            r#"
         SELECT id, course_id, practice_id, group_id, name
         FROM practice_subgroups
         WHERE id = ?1
         "#,
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await?)
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await?,
+    ))
 }
 
-/// Asigna (o reasigna) la mesa de trabajo de un estudiante para una práctica en un grupo.
-/// Valida que la mesa esté en rango y que el estudiante pertenezca al grupo y la práctica
-/// esté habilitada en el curso; devuelve `None` si algo no aplica.
 pub async fn set_practice_table_assignment(
     pool: &SqlitePool,
     group_id: &str,
@@ -161,17 +175,18 @@ pub async fn set_practice_table_assignment(
     ))
 }
 
-/// Lista los subgrupos de práctica de un curso, resolviendo práctica, grupo y miembros de cada uno.
 pub(super) async fn subgroups_for_course(
     pool: &SqlitePool,
     course_id: &str,
 ) -> anyhow::Result<Vec<SubgroupSummary>> {
     let subgroups = sqlx::query_as::<_, PracticeSubgroup>(
         r#"
-        SELECT id, course_id, practice_id, group_id, name
-        FROM practice_subgroups
-        WHERE course_id = ?1
-        ORDER BY practice_id, name
+        SELECT s.id, s.course_id, s.practice_id, s.group_id, s.name
+        FROM practice_subgroups s
+        JOIN course_practices cp ON cp.course_id = s.course_id AND cp.practice_id = s.practice_id
+        JOIN practices p ON p.id = s.practice_id
+        WHERE s.course_id = ?1 AND cp.enabled = TRUE AND p.status <> 'borrador'
+        ORDER BY s.practice_id, s.name
         "#,
     )
     .bind(course_id)
@@ -180,9 +195,10 @@ pub(super) async fn subgroups_for_course(
 
     let mut summaries = Vec::with_capacity(subgroups.len());
     for subgroup in subgroups {
-        let practice = sqlx::query_as::<_, Practice>(
-            "SELECT id, name, description, analysis_kind FROM practices WHERE id = ?1",
-        )
+        let practice = sqlx::query_as::<_, Practice>(&format!(
+            "SELECT {} FROM practices WHERE id = ?1",
+            crate::db::PRACTICE_COLS
+        ))
         .bind(&subgroup.practice_id)
         .fetch_one(pool)
         .await?;
@@ -238,7 +254,6 @@ pub(super) async fn subgroups_for_course(
     Ok(summaries)
 }
 
-/// Lista las asignaciones de mesa por práctica/grupo/estudiante de un curso.
 pub(super) async fn table_assignments_for_course(
     pool: &SqlitePool,
     course_id: &str,

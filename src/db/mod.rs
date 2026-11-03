@@ -12,34 +12,22 @@ pub use crate::users::*;
 mod password;
 mod schema;
 
-// digest_password solo lo usa el test de migración de hash legacy en sessions.rs; el check de
-// unused_imports no ve ese uso al compilar el target `lib` sin `cfg(test)`.
 #[allow(unused_imports)]
 pub(crate) use password::{digest_password, hash_password, verify_password, VerifyResult};
 pub use schema::migrate;
 
-/// Intentos fallidos consecutivos que disparan el bloqueo de login.
 pub const MAX_LOGIN_ATTEMPTS: u8 = 5;
-/// Duración del bloqueo (en minutos) tras superar [`MAX_LOGIN_ATTEMPTS`].
 pub const LOGIN_BLOCK_MINUTES: i64 = 15;
 
-/// Registro de intentos fallidos de login por email (para rate-limiting).
 #[derive(Debug, Default)]
 pub struct AttemptInfo {
-    /// Número de intentos fallidos consecutivos desde el último éxito.
     pub count: u8,
-    /// Si está seteado, no se permiten logins hasta este instante.
     pub blocked_until: Option<DateTime<Utc>>,
-    /// Instante del último intento fallido; se usa para purgar entradas inactivas.
     pub last_seen: Option<DateTime<Utc>>,
 }
 
 impl AttemptInfo {
     /// Indica si el email está bloqueado en el instante `now`. Si el bloqueo ya
-    /// expiró, lo limpia y resetea el contador (arranca una ventana nueva de intentos),
-    /// devolviendo `false`.
-    ///
-    /// # Ejemplos
     ///
     /// ```
     /// use chrono::{Duration, Utc};
@@ -69,9 +57,6 @@ impl AttemptInfo {
     }
 
     /// Registra un intento fallido en `now`; al alcanzar [`MAX_LOGIN_ATTEMPTS`] activa
-    /// el bloqueo por [`LOGIN_BLOCK_MINUTES`] minutos.
-    ///
-    /// # Ejemplos
     ///
     /// ```
     /// use chrono::Utc;
@@ -95,10 +80,6 @@ impl AttemptInfo {
 }
 
 /// Elimina del mapa de rate-limiting las entradas inactivas: sin bloqueo vigente y
-/// sin actividad dentro de la última ventana de [`LOGIN_BLOCK_MINUTES`] minutos.
-/// Acota el crecimiento de memoria ante intentos de enumeración de emails.
-///
-/// # Ejemplos
 ///
 /// ```
 /// use std::collections::HashMap;
@@ -138,13 +119,8 @@ pub fn purge_expired_attempts(map: &mut HashMap<String, AttemptInfo>, now: DateT
 pub struct AppState {
     pub pool: SqlitePool,
     pub upload_dir: PathBuf,
-    /// Clave secreta para derivar los tokens CSRF (HMAC-SHA256 del token de sesión).
-    /// Se lee de `APP_SECRET_KEY` o se genera aleatoriamente al arranque.
     pub secret_key: String,
-    /// Si es `true`, la cookie de sesión incluye el flag `Secure` (requerido con TLS).
-    /// Se activa con `APP_SECURE_COOKIES=true`.
     pub secure_cookies: bool,
-    /// Mapa email → intentos de login fallidos (rate-limiting en memoria).
     pub login_attempts: std::sync::Arc<Mutex<HashMap<String, AttemptInfo>>>,
 }
 
@@ -153,129 +129,77 @@ pub struct Practice {
     pub id: String,
     pub name: String,
     pub description: String,
-    /// Tipo de análisis: `estadistico` o `regresion_lineal`. (El kind `relajacion_exponencial`
-    /// se eliminó: τ se obtiene por medida directa y por desfasaje, ambas cubiertas.)
     pub analysis_kind: Option<String>,
+    pub status: String,
 }
 
-/// Magnitud medida directamente dentro de una práctica (variable de entrada).
+pub(crate) const PRACTICE_COLS: &str = "id, name, description, analysis_kind, status";
+
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct PracticeQuantity {
     pub id: String,
     pub practice_id: String,
-    /// Símbolo corto usado en fórmulas: `l`, `a`, `T`, `V`, `i`.
     pub symbol: String,
     pub name: String,
     pub unit: String,
-    /// `true` si admite varias réplicas (tipo A); `false` para medida única.
     pub repeated: bool,
-    /// Magnitud física (para sugerir instrumentos compatibles).
     pub quantity: Option<String>,
     pub position: i64,
-    /// `true` si es un dato dado (valor ± U entregado por la cátedra), no medido por el alumno.
     pub is_given: bool,
-    /// Solo `repeated` en regresión/curva: cuántas réplicas por punto muestra la grilla de carga.
-    /// `None` = medida única por punto (sin grilla de réplicas).
     pub replicas_per_point: Option<i64>,
-    /// En regresión/curva: `true` si la magnitud se mide **por punto** (va en la tabla de la serie);
-    /// `false` si es un **escalar compartido** que se carga una sola vez (Motor E). Los `is_given`
-    /// son siempre compartidos. En el estadístico no aplica.
     pub per_point: bool,
-    /// `false` solo tiene efecto combinado con `is_given`: el formulario pide únicamente el campo
-    /// "Valor" (sin instrumento ni incertidumbre U), y se computa con U = 0. Reemplaza el hack de
-    /// forzar U a mano para datos que no tienen incertidumbre propia (p. ej. un tiempo de tabla).
     pub has_uncertainty: bool,
-    /// `true` si la magnitud puede quedar sin lecturas sin bloquear el envío del formulario
-    /// (p. ej. el operador 2/3 de una práctica donde solo el operador 1 es obligatorio).
     pub optional: bool,
-    /// Valor con el que el formulario inicializa el campo (Hidrostática: las ranuras vacías de la
-    /// balanza de Mohr arrancan en masa 0). `None` = input vacío.
     #[sqlx(default)]
     pub default_value: Option<f64>,
-    /// `Some(n)`: el valor es una de las `n` ranuras de un instrumento, un entero de 1 a `n`. El
-    /// formulario lo restringe y el motor rechaza cualquier otro valor. `None` = sin restricción.
     #[sqlx(default)]
     pub slot_count: Option<i64>,
 }
 
-/// Mensurando derivado de una práctica (determinación indirecta).
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct PracticeResult {
     pub id: String,
     pub practice_id: String,
-    /// Símbolo del mensurando: `Q`, `g`, `tau`.
     pub symbol: String,
     pub name: String,
     pub unit: String,
-    /// Expresión matemática en función de los símbolos de `practice_quantities`.
     pub formula: String,
     pub position: i64,
-    /// Tolerancia máxima aceptable como diferencia porcentual |Δ%| entre el valor del alumno y
-    /// el automático. `None` = sin veredicto. Configurable por el docente por mensurando.
     pub tolerance: Option<f64>,
-    /// `true` si es el resultado central que el alumno debe entregar (valor ± U) para esta
-    /// práctica, p. ej. `g` en el péndulo. Habilita la sección "Resultado final" en la entrega.
     pub is_final: bool,
-    /// `false` oculta la ±U de este mensurando en toda la UI (vista previa, resultado final,
-    /// comparación auto-vs-alumno), aunque el valor propagado de fondo no sea cero. Reemplaza el
-    /// Set hardcodeado `RESULTS_WITHOUT_U` del frontend por un flag por-práctica en la definición.
     pub has_uncertainty: bool,
 }
 
-/// Instrumento de medida del catálogo de un curso. El `kind` (`analogico`/`digital`) es
-/// la clasificación física; el modelo de incertidumbre concreto vive en cada escala.
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct Instrument {
     pub id: String,
     pub course_id: String,
     pub name: String,
     pub kind: String,
-    /// Magnitud que mide (longitud, masa, tiempo, voltaje, corriente...).
     pub quantity: String,
-    /// Unidad base del instrumento (m, kg, s, V, A...).
     pub unit: String,
 }
 
-/// Escala de un instrumento, con los datos necesarios para calcular la incertidumbre tipo B.
-/// `b_model` selecciona la fórmula: `resolucion` (`step`), `apreciacion` (`appreciation`) o
-/// `fabricante` (`spec_pct_reading`/`spec_step_coeff`/`spec_fixed`). Ver [`crate::uncertainty`].
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct InstrumentScale {
     pub id: String,
     pub instrument_id: String,
     pub label: String,
-    /// Fondo de escala (valor máximo); opcional.
     pub full_scale: Option<f64>,
-    /// Resolución (digital), menor división (analógico) o VOLTS/DIV (osciloscopio).
     pub step: f64,
-    /// Apreciación efectiva del operador (analógico); por defecto se usa `step`.
     pub appreciation: Option<f64>,
-    /// Resistencia interna de la escala (P2; ohm), opcional.
     pub internal_res: Option<f64>,
-    /// Incertidumbre de la resistencia interna (p. ej. ±10 en 1002±10), opcional.
     pub internal_res_u: Option<f64>,
-    /// Modelo de incertidumbre tipo B: `resolucion`, `apreciacion` o `fabricante`.
     pub b_model: String,
-    /// Fabricante: porcentaje del valor leído (p. ej. 3.0 = 3 %).
     pub spec_pct_reading: Option<f64>,
-    /// Fabricante: coeficiente que multiplica `step` (5 = "5 dgt"; 0.1 osciloscopio).
     pub spec_step_coeff: Option<f64>,
-    /// Fabricante: término fijo en unidad base (p. ej. 0.001 V = 1 mV).
     pub spec_fixed: Option<f64>,
-    /// Calibración: porcentaje del valor leído sumado **en cuadratura** sobre el modelo base
-    /// (3.0 = 3 %, balanza digital de Hidrostática). Es una `u`, no se divide por k.
-    /// Sin `#[sqlx(default)]`: un `SELECT` que la omita falla en vez de calcular sin calibración.
     pub u_cal_pct: f64,
-    /// Calibración: término fijo en unidad base sumado **en cuadratura** sobre el modelo base
-    /// (0.001 g/cm3 del densímetro, 0.5 mm de los brazos de la balanza de Mohr).
     pub u_cal_fixed: f64,
     pub unit: String,
     pub position: i64,
 }
 
-/// Calcula la próxima posición disponible para una fila nueva en `table`, dentro del scope dado
-/// por `scope_col = scope_val` (p. ej. `practice_id`, `course_id`, `instrument_id`). `table` y
-/// `scope_col` son siempre literales fijos del código, nunca entrada de usuario.
 pub async fn next_position(
     pool: &SqlitePool,
     table: &str,
@@ -291,8 +215,6 @@ pub async fn next_position(
     Ok(position.0)
 }
 
-/// Inserta los usuarios iniciales de desarrollo (admin, docente, estudiante) si no existen.
-/// Las contraseñas salen de las variables `SEED_*_PASSWORD` o usan valores por defecto.
 pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     let users = [
         (
@@ -343,12 +265,7 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra las prácticas del primer bloque de Física 103 en la tabla `practices` (id, nombre,
-/// descripción, tipo de análisis y, en regresión, las fórmulas de eje). Idempotente: usa
-/// `ON CONFLICT(id) DO NOTHING`, así que no pisa ediciones del docente entre reinicios.
 pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
-    // Practicas reales del primer bloque de Fisica 103. Las columnas `x_formula`/`y_formula`
-    // solo se usan en el camino `regresion_lineal`; en las estadisticas van en `None`.
     let practices = [
         (
             "p1-estadistica",
@@ -358,12 +275,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
-        // P2 unificada — corriente continua en una sola entrega con tres partes tematicas:
-        // circuito serie, circuito paralelo y curva de potencia. R1, R2 y R3 se miden una vez y
-        // se comparten; Vg y RA se miden por parte (Vg_s/RA_s, Vg_p/RA_p, Vg_c/RA_c). Las
-        // tensiones VRi_s / VRi_p se miden con multimetro y se comparan con las teoricas
-        // (VRi_s_t / VRi_p_t, resultados finales). La curva usa R e I por punto con la
-        // intermedia P = I^2*R; P_max_e / RP_max_e salen de los alias de extremos de la tabla.
         (
             "p2-cc",
             "Corriente continua",
@@ -380,9 +291,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
-        // P3-parte2 — desfasaje por figura de Lissajous: se ajusta tg(phi) vs omega y la
-        // pendiente del ajuste es RC = tau. El alumno carga f, a y b por punto; las formulas
-        // de eje derivan x = 2*pi*f y y = b/sqrt(a^2 - b^2).
         (
             "p3-relajacion-desfasaje",
             "Relajacion Exponencial - Desfasaje",
@@ -391,9 +299,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             Some("2*pi*f"),
             Some("b / math::sqrt(a*a - b*b)"),
         ),
-        // Fluidos I (Hagen-Poiseuille): por altura se miden V y t (replicas); Q = V/t (intermedia,
-        // Motor C). Ajuste de h/Q^2 vs 1/Q -> la viscosidad sale de la pendiente. R, L, g (catedra)
-        // y rho (medida unica) son escalares compartidos; Reynolds es una derivada por corrida (E).
         (
             "fluidos-1",
             "Fluidos I",
@@ -402,10 +307,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             Some("1/Q"),
             Some("h/(Q*Q)"),
         ),
-        // Viscosidad (Stokes): por esfera se mide R y los tiempos (replicas); v_lim = dx/T_medio.
-        // Ajuste v_lim vs R^2 -> la viscosidad de la glicerina sale de la pendiente. dx, rho_e,
-        // rho_f, g son escalares compartidos; Reynolds es una derivada por corrida. Sin intermedia
-        // (v_lim usa la MEDIA de los tiempos, que ya da Motor A al promediar las replicas por punto).
         (
             "viscosidad",
             "Viscosidad",
@@ -414,11 +315,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             Some("R^2"),
             Some("dx/t"),
         ),
-        // Fluidos II (descarga de un recipiente por capilar): por punto se miden h (altura) y t
-        // (tiempo, con t=0 en la altura maxima). Ajuste de t contra (sqrt(h_max) - sqrt(h)); de la
-        // pendiente sale M_medio (coef. medio de perdidas). h_max es un escalar compartido (altura
-        // inicial). Reynolds max/min, Reynolds medio y M teorico son mensurandos agregados (Motor F)
-        // que referencian el primer/ultimo par de puntos.
         (
             "fluidos-2",
             "Fluidos II",
@@ -427,10 +323,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             Some("math::sqrt(h_max) - math::sqrt(h)"),
             Some("t"),
         ),
-        // Filtros — barrido en frecuencia de un circuito RLC. Por punto: f (frecuencia fijada),
-        // VRpp y Vgpp (tensiones pico a pico), a y b (Lissajous). Intermedias: omega=2*pi*f,
-        // razon=VRpp/Vgpp, phi=asin(b/a). Componentes compartidos (catedra): R, C1, C2, L.
-        // Dos curvas (Motor B): razon vs omega y phi vs omega, eje x logaritmico.
         (
             "filtros",
             "Filtros",
@@ -439,12 +331,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
-        // CA (RLC): circuito serie con generador Vg, R, C, L; por canal (R, C, L) se mide la
-        // tension pico a pico y los semiejes de Lissajous (a/b) para el desfasaje experimental.
-        // Mensurandos teoricos (impedancia de un RLC serie) comparados visualmente contra los
-        // experimentales, sin veredicto (mismo patron que Filtros). Magnitudes/mensurandos
-        // separados por canal (no motor de operadores): los desfasajes de R/C/L son
-        // independientes entre si, no repeticiones de la misma medida.
         (
             "ca-rlc",
             "Corriente Alterna (RLC)",
@@ -453,10 +339,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
             None,
             None,
         ),
-        // Hidrostatica y Tension Superficial: densidad de una goma por Arquimedes con balanza de
-        // Mohr (3 determinaciones independientes con pesas en ranuras distintas, promediadas) y
-        // tension superficial por el metodo de Wilhelmy (3 determinaciones, sin incertidumbre por
-        // indicacion de la tecnica).
         (
             "hidrostatica",
             "Hidrostatica y Tension Superficial",
@@ -468,14 +350,11 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     ];
 
     for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
-        // Actualiza nombre y descripción en conflicto para corregir errores de texto entre
-        // versiones, pero preserva los campos editables por el docente (analysis_kind,
-        // x_formula, y_formula) para no pisar cambios hechos desde la UI.
         sqlx::query(
             r#"
             INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description
+            ON CONFLICT(id) DO NOTHING
             "#,
         )
         .bind(id)
@@ -488,11 +367,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
-    // Baja de las practicas de CC viejas (p2-serie, p2-corriente-continua, p2-potencia):
-    // quedaron reemplazadas por p2-cc (entrega unica con tabs), pero como ya no se siembran
-    // arriba, las bases que las tenian de antes de la unificacion (#43) las conservan para
-    // siempre y aparecen duplicadas en el nav. Se dan de baja solo si no tienen entregas reales
-    // (el borrado de `practices` en cascada se llevaria las mediciones si las hubiera).
     for legacy_id in ["p2-serie", "p2-corriente-continua", "p2-potencia"] {
         let has_submissions: (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM submissions WHERE practice_id = ?1")
@@ -510,8 +384,6 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Asegura que `lab_groups` tenga las columnas `table_count` y `group_type`
-/// (migración para bases creadas antes de introducir mesas y tipo de grupo).
 async fn ensure_lab_group_columns(pool: &SqlitePool) -> anyhow::Result<()> {
     let rows = sqlx::query("PRAGMA table_info(lab_groups)")
         .fetch_all(pool)
@@ -536,8 +408,6 @@ async fn ensure_lab_group_columns(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Crea el curso, grupo y estudiante de prueba, lo inscribe y habilita las prácticas P1/P2/P3.
-/// Idempotente vía `ON CONFLICT DO NOTHING`.
 pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
     let course_id = "fisica-experimental-i-2026";
     let group_id = "fisica-exp-i-grupo-1";
@@ -605,7 +475,6 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
         "ca-rlc",
         "hidrostatica",
     ] {
-        // DO NOTHING: si el docente la deshabilitó, la fila sigue (con enabled = FALSE) y no se toca.
         sqlx::query(
             r#"
             INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -623,8 +492,6 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra entregas de prueba para el estudiante de seed, una por práctica habilitada.
-/// Idempotente: no inserta si el estudiante ya tiene entregas.
 pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
     let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
         .fetch_one(pool)
@@ -657,7 +524,6 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
 
     let now = Utc::now();
 
-    // Una entrega por práctica con datos realistas.
     let submissions: &[(&str, &str, &str)] = &[
         ("p1-estadistica", "pendiente", ""),
         ("p3-relajacion", "pendiente", ""),
@@ -717,7 +583,6 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
-        // Insertar al alumno como owner del informe sembrado.
         sqlx::query(
             r#"
             INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at)
@@ -735,18 +600,23 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Lista el catálogo completo de prácticas ordenado por nombre.
 pub async fn practices(pool: &SqlitePool) -> anyhow::Result<Vec<Practice>> {
-    let rows = sqlx::query_as::<_, Practice>(
-        "SELECT id, name, description, analysis_kind FROM practices ORDER BY name",
-    )
+    let rows = sqlx::query_as::<_, Practice>(&format!(
+        "SELECT {PRACTICE_COLS} FROM practices ORDER BY name"
+    ))
     .fetch_all(pool)
     .await?;
     Ok(rows)
 }
 
-/// Colapsa a `0.0` los valores con magnitud despreciable (< 1e-9) para evitar mostrar
-/// "ceros sucios" por error de punto flotante.
+pub async fn practices_for_role(pool: &SqlitePool, role: &str) -> anyhow::Result<Vec<Practice>> {
+    let mut all = practices(pool).await?;
+    if !matches!(role, "docente" | "admin") {
+        all.retain(|p| p.status == "publicada");
+    }
+    Ok(all)
+}
+
 pub(crate) fn clean_zero(value: f64) -> f64 {
     if value.abs() < 1e-9 {
         0.0
@@ -767,12 +637,10 @@ mod tests {
     fn rate_limit_blocks_after_max_attempts() {
         let now = Utc::now();
         let mut info = AttemptInfo::default();
-        // Los primeros MAX-1 fallos no bloquean.
         for _ in 0..MAX_LOGIN_ATTEMPTS - 1 {
             info.register_failure(now);
             assert!(!info.is_blocked(now));
         }
-        // El fallo número MAX dispara el bloqueo.
         info.register_failure(now);
         assert!(info.is_blocked(now));
     }
@@ -785,12 +653,10 @@ mod tests {
             info.register_failure(now);
         }
         assert!(info.is_blocked(now));
-        // Pasada la ventana, deja de estar bloqueado y el contador arranca de cero.
         let later = now + Duration::minutes(LOGIN_BLOCK_MINUTES + 1);
         assert!(!info.is_blocked(later));
         assert_eq!(info.count, 0);
         assert!(info.blocked_until.is_none());
-        // Un nuevo fallo NO re-bloquea inmediatamente (ventana fresca de intentos).
         info.register_failure(later);
         assert!(!info.is_blocked(later));
     }
@@ -829,8 +695,6 @@ mod tests {
         assert!(map.contains_key("blocked@x"));
     }
 
-    /// Crea un pool sobre una base SQLite temporal con el esquema ya migrado.
-    /// Devuelve también el `TempDir` para mantenerlo vivo mientras dure el test.
     async fn pool() -> (SqlitePool, TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
@@ -847,7 +711,6 @@ mod tests {
         (pool, dir)
     }
 
-    /// Igual que `pool` pero con las semillas aplicadas (prácticas, usuarios y curso de prueba).
     async fn seeded() -> (SqlitePool, TempDir) {
         let (pool, dir) = pool().await;
         seed_practices(&pool).await.unwrap();
@@ -856,7 +719,6 @@ mod tests {
         (pool, dir)
     }
 
-    /// Busca un usuario sembrado por email.
     async fn find_user(pool: &SqlitePool, email: &str) -> AuthUser {
         users(pool)
             .await
@@ -873,7 +735,6 @@ mod tests {
     #[tokio::test]
     async fn migrate_is_idempotent() {
         let (pool, _dir) = pool().await;
-        // Volver a migrar no debe fallar (cubre add_column_if_missing y ensure_lab_group_columns).
         migrate(&pool).await.unwrap();
     }
 
@@ -899,7 +760,6 @@ mod tests {
         assert!(ids.contains(&"p2-cc".to_string()));
         assert!(ids.contains(&"p3-relajacion".to_string()));
         assert!(ids.contains(&"p3-relajacion-desfasaje".to_string()));
-        // Las tres practicas de CC viejas ya no se siembran.
         assert!(!ids.contains(&"p2-serie".to_string()));
         assert!(!ids.contains(&"p2-corriente-continua".to_string()));
         assert!(!ids.contains(&"p2-potencia".to_string()));
@@ -909,14 +769,13 @@ mod tests {
     async fn seed_practices_does_not_clobber_edits() {
         let (pool, _dir) = pool().await;
         seed_practices(&pool).await.unwrap();
-        // El docente edita el tipo de análisis de una práctica.
         sqlx::query(
-            "UPDATE practices SET analysis_kind = 'regresion_lineal' WHERE id = 'p1-estadistica'",
+            "UPDATE practices SET analysis_kind = 'regresion_lineal', name = 'Pendulo (editado)' \
+             WHERE id = 'p1-estadistica'",
         )
         .execute(&pool)
         .await
         .unwrap();
-        // Un reinicio re-corre el seed: NO debe pisar la edición.
         seed_practices(&pool).await.unwrap();
         let p = practices(&pool)
             .await
@@ -925,6 +784,8 @@ mod tests {
             .find(|p| p.id == "p1-estadistica")
             .unwrap();
         assert_eq!(p.analysis_kind.as_deref(), Some("regresion_lineal"));
+        assert_eq!(p.name, "Pendulo (editado)");
+        assert_eq!(p.status, "publicada");
     }
 
     #[tokio::test]
@@ -943,7 +804,6 @@ mod tests {
         );
         assert_eq!(practices_for_course(&pool, COURSE).await.unwrap().len(), 10);
 
-        // Deshabilitada por el docente, la siembra no la vuelve a habilitar al rearrancar.
         assert!(disable_course_practice(&pool, COURSE, "p1-estadistica")
             .await
             .unwrap());
@@ -1001,15 +861,15 @@ mod tests {
         .bind("scale-1")
         .bind("inst-1")
         .bind("0-150 mm")
-        .bind(Option::<f64>::None) // full_scale
-        .bind(0.05_f64) // step
-        .bind(Some(0.05_f64)) // appreciation
-        .bind(Option::<f64>::None) // internal_res
-        .bind(Option::<f64>::None) // internal_res_u
+        .bind(Option::<f64>::None)
+        .bind(0.05_f64)
+        .bind(Some(0.05_f64))
+        .bind(Option::<f64>::None)
+        .bind(Option::<f64>::None)
         .bind("apreciacion")
-        .bind(Option::<f64>::None) // spec_pct_reading
-        .bind(Option::<f64>::None) // spec_step_coeff
-        .bind(Option::<f64>::None) // spec_fixed
+        .bind(Option::<f64>::None)
+        .bind(Option::<f64>::None)
+        .bind(Option::<f64>::None)
         .bind("mm")
         .bind(0_i64)
         .bind(now)
@@ -1058,7 +918,6 @@ mod tests {
         .await
         .unwrap();
 
-        // El CHECK de b_model debe rechazar un valor fuera del conjunto permitido.
         let result = sqlx::query(
             "INSERT INTO instrument_scales (id, instrument_id, label, step, b_model, unit, position, created_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",

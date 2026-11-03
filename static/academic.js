@@ -12,7 +12,6 @@ export async function loadAcademic() {
   state.academic = await fetchJson("/api/academic/context");
   state.practices = state.academic.practices;
 
-  // Importar lazily: estos módulos no existen aún (se crearán pronto)
   const { renderStudentSelectors } = await import("./forms.js");
   const { renderPracticeNav } = await import("./navigation.js");
   const { renderInstrumentCourseOptions } = await import("./instruments.js");

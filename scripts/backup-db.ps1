@@ -1,5 +1,3 @@
-# Copia la base SQLite a data/backups/ con timestamp. Respeta DATABASE_URL si esta definida
-# (mismo default que el server). Pensado para correr a mano o desde el Task Scheduler en un deploy LAN.
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 

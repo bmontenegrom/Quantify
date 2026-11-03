@@ -1,7 +1,3 @@
-// Recorre las vistas del docente a ancho de escritorio y de tablet y verifica que el layout no se
-// rompa: sin scroll horizontal de la página, ningún panel más ancho que su contenedor y checkboxes
-// de tamaño normal (el bug que los estiraba a 100% de ancho). Deja una captura por vista en
-// tests/e2e/artifacts/teacher-*.png para revisar a ojo.
 
 import { join } from "node:path";
 import { ARTIFACTS, STUDENT, TEACHER, assert, step, withE2E } from "./lib.mjs";
@@ -9,7 +5,6 @@ import { ARTIFACTS, STUDENT, TEACHER, assert, step, withE2E } from "./lib.mjs";
 const PORT = process.env.E2E_PORT ?? "8161";
 const WIDTHS = [1366, 900];
 
-/** Problemas de layout de la vista visible: desbordes horizontales y checkboxes gigantes. */
 async function layoutProblems(page) {
   return page.evaluate(() => {
     const problems = [];
@@ -39,8 +34,6 @@ async function layoutProblems(page) {
   });
 }
 
-/** Captura la vista a cada ancho (y en tema oscuro al ancho de escritorio) y acumula sus problemas
- *  en `found`, para reportarlos todos juntos. */
 async function check(page, name, found) {
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 });
@@ -63,7 +56,6 @@ await withE2E({ port: PORT, dbName: "quantify-visual-teacher.db" }, async ({ log
     const { courses } = await (await fetch("/api/academic/context")).json();
     const course = courses[0];
     const def = await (await fetch("/api/practices/hidrostatica/definition")).json();
-    // Valores plausibles: ranuras y brazos con su default (o 1), el resto 1.
     const measurements = def.quantities.map((q) => ({
       quantity_id: q.id,
       instrument_id: null,
@@ -110,7 +102,6 @@ await withE2E({ port: PORT, dbName: "quantify-visual-teacher.db" }, async ({ log
     await page.click('.tab[data-view="practices"]:visible');
     await page.click(`[data-practice-open][data-practice-id="${practice}"]`);
     await page.waitForSelector("#practice-workspace:not(.hidden) #new-quantity-form", { state: "attached" });
-    // Con las altas plegadas y también abiertas: los forms son lo que antes se superponía.
     await check(page, `practice-${practice}`, found);
     await page.$$eval("details[data-add-panel]", (all) => all.forEach((d) => (d.open = true)));
     await check(page, `practice-${practice}-forms`, found);

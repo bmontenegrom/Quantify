@@ -1,9 +1,3 @@
-// Smoke E2E de alta desde el admin de prácticas: un solo flujo que crea una magnitud, un
-// mensurando y un agregado, y verifica que los tres aparecen — no un flujo por entidad (sería
-// caro de mantener sin agregar cobertura real).
-//
-// Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
-// E2E_SKIP_BUILD, E2E_HEADED.
 
 import { TEACHER, assert, openAddForm, step, symbolText, withE2E } from "./lib.mjs";
 

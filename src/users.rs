@@ -14,8 +14,6 @@ pub struct AuthUser {
     pub role: String,
 }
 
-/// Usuario autenticado con defaults de perfil (grupo y mesa por defecto).
-/// Devuelto por `GET /api/auth/me` y `POST /api/auth/profile`.
 #[derive(Debug, Serialize, FromRow)]
 pub struct MeUser {
     pub id: String,
@@ -27,7 +25,6 @@ pub struct MeUser {
     pub default_table_number: Option<i64>,
 }
 
-/// Input para actualizar el perfil propio (nombre, email, y opcionalmente grupo/mesa por defecto).
 #[derive(Debug, Deserialize)]
 pub struct UpdateProfileInput {
     pub display_name: String,
@@ -64,7 +61,6 @@ pub struct ChangePassword {
     pub new_password: String,
 }
 
-/// Lista todos los usuarios ordenados por rol y nombre.
 pub async fn users(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     Ok(sqlx::query_as::<_, AuthUser>(
         "SELECT id, username, email, display_name, role FROM users ORDER BY role, display_name",
@@ -73,7 +69,6 @@ pub async fn users(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     .await?)
 }
 
-/// Lista los usuarios con rol `estudiante`, ordenados por nombre.
 pub async fn students(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     Ok(sqlx::query_as::<_, AuthUser>(
         "SELECT id, username, email, display_name, role FROM users WHERE role = 'estudiante' ORDER BY display_name",
@@ -82,7 +77,6 @@ pub async fn students(pool: &SqlitePool) -> anyhow::Result<Vec<AuthUser>> {
     .await?)
 }
 
-/// Crea un usuario nuevo (email normalizado a minúsculas, contraseña hasheada) y lo devuelve.
 pub async fn create_user(pool: &SqlitePool, input: CreateUser) -> anyhow::Result<AuthUser> {
     let id = Uuid::new_v4().to_string();
     let email = input.email.trim().to_lowercase();
@@ -110,8 +104,6 @@ pub async fn create_user(pool: &SqlitePool, input: CreateUser) -> anyhow::Result
     .await?)
 }
 
-/// Restablece (sobrescribe) la contraseña de un usuario por id, como acción docente/admin.
-/// Devuelve `true` si el usuario existía y se actualizó.
 pub async fn reset_password(
     pool: &SqlitePool,
     user_id: &str,
@@ -125,7 +117,6 @@ pub async fn reset_password(
     Ok(result.rows_affected() > 0)
 }
 
-/// Actualiza email (= username), nombre y rol de un usuario. Devuelve `None` si no existe.
 pub async fn update_user(
     pool: &SqlitePool,
     user_id: &str,
@@ -166,8 +157,6 @@ pub async fn update_user(
     ))
 }
 
-/// Cambia la contraseña del propio usuario validando la actual. Si tiene éxito invalida
-/// todas sus sesiones. Devuelve `false` si el usuario no existe o la contraseña actual no coincide.
 pub async fn change_password(
     pool: &SqlitePool,
     user_id: &str,
@@ -204,7 +193,6 @@ pub async fn change_password(
     Ok(true)
 }
 
-/// Devuelve el usuario con sus defaults de perfil (grupo y mesa por defecto).
 pub async fn me_user(pool: &SqlitePool, user_id: &str) -> anyhow::Result<Option<MeUser>> {
     Ok(sqlx::query_as::<_, MeUser>(
         r#"
@@ -222,7 +210,6 @@ pub async fn me_user(pool: &SqlitePool, user_id: &str) -> anyhow::Result<Option<
     .await?)
 }
 
-/// Actualiza el grupo por defecto del usuario en su perfil.
 pub async fn set_user_default_group(
     pool: &SqlitePool,
     user_id: &str,
@@ -236,9 +223,6 @@ pub async fn set_user_default_group(
     Ok(())
 }
 
-/// Guarda o actualiza la mesa por defecto del alumno para un grupo. Valida que el alumno
-/// pertenezca al grupo y que la mesa esté en rango (1..=table_count).
-/// Devuelve `None` si el grupo no existe o el alumno no pertenece a él.
 pub async fn set_user_default_table(
     pool: &SqlitePool,
     user_id: &str,

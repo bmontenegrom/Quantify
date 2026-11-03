@@ -1,6 +1,5 @@
 let csrfToken = null;
 
-/** Guarda el token CSRF recibido del servidor (en login y en /auth/me). */
 export function setCsrfToken(token) {
   csrfToken = token ?? null;
 }

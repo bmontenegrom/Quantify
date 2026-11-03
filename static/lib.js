@@ -1,8 +1,4 @@
-// Lógica pura y testeable del frontend (sin DOM, sin red, sin efectos al cargar).
-// Se importa desde app.js y desde los tests en tests/. Cada función exportada
-// lleva su doc (JSDoc) y tiene un test en tests/lib.test.js (espeja la convención Rust).
 
-/** Escapa los caracteres con significado especial en HTML para interpolar texto seguro. */
 export function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -12,33 +8,16 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-// p2-cc: sufijo de parte (_s serie, _p paralelo, _c curva de potencia) y, en los teóricos, un
-// _t adicional (VR1_s, VR1_s_t...). La pestaña ya distingue la parte, así que el símbolo se
-// muestra igual que su base — sólo se aplica si la base es una de las conocidas, para no afectar
-// símbolos de otras prácticas que puedan terminar en _s/_p/_c por coincidencia.
 const CC_PART_SUFFIX = /_[spc](?:_t)?$/;
 const CC_BASE_SYMBOLS = new Set(["Vg", "RA", "VR1", "VR2", "VR3", "I"]);
 
-// Letras griegas escritas con su nombre en el símbolo guardado (rho_f, gamma1, mu_agua): se
-// muestran con la letra. Solo al principio del símbolo, que es donde son la magnitud, y solo si
-// el nombre termina ahí (seguido de "_", un dígito o nada): `mult` o `taux` no se tocan.
 const GREEK_NAMES = { rho: "ρ", gamma: "γ", mu: "μ", phi: "φ", tau: "τ", omega: "ω" };
 const GREEK_PREFIX = new RegExp(`^(${Object.keys(GREEK_NAMES).join("|")})(?=_|\\d|$)`);
 
-// Subíndices de un símbolo: todo lo que sigue al primer guion bajo, con los guiones siguientes
-// como coma (`f_res_exp` → `f<sub>res,exp</sub>`), o los dígitos pegados a una letra con lo que
-// les siga tras un guion bajo (`R1`, `m1_2` → `m<sub>1,2</sub>`).
-// Las letras son `\p{L}` (con `u`), no ASCII: así `v_máx` no corta el subíndice en la tilde.
 const SYMBOL_SUBSCRIPT =
   /([A-Za-zα-ω])(?:_([\p{L}\p{N}/]+(?:_[\p{L}\p{N}/]+)*)|(\d+(?:\/\d+)?(?:_[\p{L}\p{N}/]+)*))/gu;
-// En texto libre (nombres) solo `_` + 1-2 caracteres (`T_oc`): `tabla_resumen` es una palabra.
 const NAME_SUBSCRIPT = /([A-Za-zα-ω])(?:_([\p{L}\p{N}/]{1,2})(?![\p{L}\p{N}])|(\d+(?:\/\d+)?))/gu;
 
-/**
- * Aplica `pattern` (uno de los de arriba) sobre texto ya escapado, en una sola pasada para que
- * `R_load2` no anide `<sub>`. Cada tramo de 1-2 caracteres va en mayúscula (`rho_f` →
- * `ρ<sub>F</sub>`); las palabras se dejan como están (`E_medio` → `E<sub>medio</sub>`).
- */
 function subscriptHtml(escaped, pattern) {
   return escaped.replace(pattern, (_, base, sub, digits) => {
     const parts = (sub ?? digits).split("_");
@@ -47,23 +26,13 @@ function subscriptHtml(escaped, pattern) {
   });
 }
 
-/**
- * Escapa un símbolo y lo muestra con notación física: dígitos pegados a letras y lo que sigue a
- * un guion bajo como subíndice (`R1` → `R<sub>1</sub>`, `E_medio` → `E<sub>medio</sub>`), y los
- * nombres de letras griegas como la letra (`rho_medio` → `ρ<sub>medio</sub>`). Los subíndices de
- * 1-2 caracteres van en mayúscula (`rho_f` → `ρ<sub>F</sub>`); las palabras se dejan como están.
- */
 export function symbolHtml(value) {
   const specials = {
     tmedio: "t<sub>1/2</sub>",
     T_oc: "T<sub>OC</sub>",
     T_OC: "T<sub>OC</sub>",
-    // Vg/RA no llevan guion bajo en el símbolo guardado, pero se muestran con subíndice como
-    // el resto de las magnitudes (R1, rho_e, VR1...) para que la tipografía sea coherente.
     Vg: "V<sub>G</sub>",
     RA: "R<sub>A</sub>",
-    // CA (RLC): voltajes pico a pico (sin guion bajo) y subíndices que arrancan antes del guion
-    // bajo ("R,teo"), que el regex genérico no arma; phi se muestra con el símbolo φ.
     VRpp: "V<sub>R,PP</sub>",
     VCpp: "V<sub>C,PP</sub>",
     VLpp: "V<sub>L,PP</sub>",
@@ -90,25 +59,16 @@ export function symbolHtml(value) {
   );
 }
 
-/**
- * Escapa texto visible y aplica convenciones tipográficas chicas para símbolos en nombres:
- * subíndices (`R1`, `t1/2`, `T_oc`) y potencias escritas con `^`.
- */
 export function inlineMathHtml(value) {
   return subscriptHtml(escapeHtml(value), NAME_SUBSCRIPT).replace(/\^(-?\d+)/g, "<sup>$1</sup>");
 }
 
-/** Escapa y formatea unidades simples: `m3`, `m/s2`, `kg/m3`, `R^2`. */
 export function unitHtml(value) {
   return escapeHtml(value)
     .replace(/\^(-?\d+)/g, "<sup>$1</sup>")
     .replace(/([A-Za-zµΩ]+)(-?\d+)/g, "$1<sup>$2</sup>");
 }
 
-/**
- * Escapa un valor para usarlo dentro de un selector CSS; usa `CSS.escape` si está
- * disponible (browser) y cae a un escape mínimo de comillas en su ausencia (Node/tests).
- */
 export function cssEscape(value) {
   if (typeof window !== "undefined" && window.CSS?.escape) {
     return window.CSS.escape(String(value));
@@ -116,22 +76,18 @@ export function cssEscape(value) {
   return String(value).replaceAll('"', '\\"');
 }
 
-/** Formatea un número con locale es-UY y hasta 5 cifras significativas. */
 export function format(value) {
   return Number(value).toLocaleString("es-UY", { maximumSignificantDigits: 5 });
 }
 
-/** Formatea un número (o "—" si es null) para una celda de tabla de comparación. */
 export function num(value) {
   return value == null ? "—" : escapeHtml(format(value));
 }
 
-/** Formatea un porcentaje (o "—" si es null) para una celda de tabla de comparación. */
 export function pct(value) {
   return value == null ? "—" : `${escapeHtml(format(value))} %`;
 }
 
-/** Formatea un timestamp (ISO o Date) como fecha y hora cortas en locale es-UY. */
 export function formatDate(value) {
   return new Date(value).toLocaleString("es-UY", {
     dateStyle: "short",
@@ -139,10 +95,6 @@ export function formatDate(value) {
   });
 }
 
-/**
- * Agrupa los elementos de `items` por la clave que devuelve `keyFn`; las claves
- * nulas o vacías caen en el grupo "-".
- */
 export function groupBy(items, keyFn) {
   return items.reduce((groups, item) => {
     const key = keyFn(item) || "-";
@@ -152,19 +104,10 @@ export function groupBy(items, keyFn) {
   }, {});
 }
 
-/**
- * Traduce el tipo de grupo a su etiqueta legible (cualquier valor distinto de
- * "recuperacion" se muestra como "Regular").
- */
 export function renderGroupType(value) {
   return value === "recuperacion" ? "Recuperacion" : "Regular";
 }
 
-/**
- * Convierte los campos crudos de una escala (strings de un formulario) al payload
- * del API: `step` siempre numérico; el resto de los campos opcionales pasan a número
- * o `null` si vienen vacíos.
- */
 export function scalePayload(raw) {
   const num = (key) => (raw[key] !== "" && raw[key] != null ? Number(raw[key]) : null);
   return {
@@ -184,23 +127,16 @@ export function scalePayload(raw) {
   };
 }
 
-// ── Selectores de datos ───────────────────────────────────────────────────────
-// Derivan información del contexto académico (`academic`) o las libretas
-// (`gradebooks`); reciben el estado por parámetro para ser puros y testeables.
-
-/** `true` si el usuario tiene rol docente o admin (puede revisar/administrar). */
 export function canReview(user) {
   return !!(user && ["docente", "admin"].includes(user.role));
 }
 
-/** Cursos en los que el estudiante figura como miembro. */
 export function studentCourses(academic, studentId) {
   return academic.courses.filter((course) =>
     course.members.some((member) => member.id === studentId),
   );
 }
 
-/** Todos los grupos de todos los cursos, anotados con datos del curso. */
 export function allGroups(academic) {
   return academic.courses.flatMap((course) =>
     course.groups.map((group) => ({
@@ -212,7 +148,6 @@ export function allGroups(academic) {
   );
 }
 
-/** Grupos en los que el estudiante es miembro, anotados con nombre/periodo del curso. */
 export function studentGroups(academic, studentId) {
   return academic.courses.flatMap((course) =>
     course.groups
@@ -221,13 +156,11 @@ export function studentGroups(academic, studentId) {
   );
 }
 
-/** Cursos donde el estudiante todavía NO está inscrito (para ofrecer inscripción). */
 export function availableCoursesForStudent(academic, studentId) {
   const currentCourses = new Set(studentCourses(academic, studentId).map((course) => course.id));
   return academic.courses.filter((course) => !currentCourses.has(course.id));
 }
 
-/** Grupos disponibles (dentro de los cursos del estudiante) a los que aún no pertenece. */
 export function availableGroupsForStudent(academic, studentId) {
   const currentGroups = new Set(studentGroups(academic, studentId).map((group) => group.id));
   return studentCourses(academic, studentId).flatMap((course) =>
@@ -237,7 +170,6 @@ export function availableGroupsForStudent(academic, studentId) {
   );
 }
 
-/** Libretas del estudiante: pares curso + resumen, solo donde tiene resumen cargado. */
 export function studentGradebooks(gradebooks, studentId) {
   return gradebooks
     .map((book) => ({
@@ -247,10 +179,6 @@ export function studentGradebooks(gradebooks, studentId) {
     .filter((item) => item.summary);
 }
 
-/**
- * Totales acumulados (puntos / posibles) del estudiante sobre todas sus libretas;
- * `null` si no tiene ninguna nota cargada.
- */
 export function studentTotals(gradebooks, studentId) {
   const books = studentGradebooks(gradebooks, studentId);
   if (books.length === 0) return null;
@@ -263,18 +191,12 @@ export function studentTotals(gradebooks, studentId) {
   );
 }
 
-/** Lista de estudiantes: usa `academic.students` si viene, si no filtra `users` por rol. */
 export function allStudents(academic) {
   const direct = academic?.students ?? [];
   if (direct.length > 0) return direct;
   return (academic?.users ?? []).filter((user) => user.role === "estudiante");
 }
 
-/**
- * Devuelve la etiqueta legible del tipo de análisis de una práctica.
- * Valores reconocidos: `estadistico`, `regresion_lineal`, `curva`.
- * Cualquier otro valor (incluido `null`/`undefined`) devuelve `"Sin definir"`.
- */
 export function analysisKindLabel(kind) {
   switch (kind) {
     case "estadistico":
@@ -288,21 +210,12 @@ export function analysisKindLabel(kind) {
   }
 }
 
-/**
- * Instrumentos compatibles con una magnitud física (p. ej. "longitud"): filtra por el campo
- * `quantity` del instrumento. Solo muestra los de la magnitud indicada; si no se da magnitud
- * devuelve todos. Nunca hace fallback al catálogo completo.
- */
 export function compatibleInstruments(instruments, magnitude) {
   const list = instruments ?? [];
   if (!magnitude) return list;
   return list.filter((instrument) => instrument.quantity === magnitude);
 }
 
-/**
- * Prefijos SI disponibles para seleccionar la escala de una lectura.
- * `factor` es el multiplicador para convertir a la unidad base (SI).
- */
 export const SI_PREFIXES = [
   { label: "T",  factor: 1e12  },
   { label: "G",  factor: 1e9   },
@@ -315,48 +228,22 @@ export const SI_PREFIXES = [
   { label: "p",  factor: 1e-12 },
 ];
 
-/**
- * Retorna el factor multiplicador para un prefijo SI dado.
- * Si el prefijo no se reconoce retorna 1 (sin prefijo).
- *
- * @param {string} prefix - Etiqueta del prefijo (p. ej. "m", "k", "µ").
- * @returns {number}
- *
- * @example
- * console.assert(prefixFactor("k") === 1e3);
- * console.assert(prefixFactor("µ") === 1e-6);
- * console.assert(prefixFactor("") === 1);
- * console.assert(prefixFactor("?") === 1);
- */
 export function prefixFactor(prefix) {
   return SI_PREFIXES.find((p) => p.label === prefix)?.factor ?? 1;
 }
 
-/**
- * Formatea una medida como `"valor ± U"` (locale es-UY). Si `u` es nula, no positiva o no
- * finita, muestra solo el valor.
- */
 export function measureText(value, u) {
   const base = format(value);
   if (u == null || !Number.isFinite(u) || u <= 0) return base;
   return `${base} ± ${format(u)}`;
 }
 
-/**
- * Calcula las coordenadas (en píxeles del lienzo SVG, con `y` hacia abajo) para dibujar un
- * scatter de `points` (pares `[x, y]`) junto a la recta ajustada `y = slope*x + intercept`,
- * en un lienzo `width`×`height` con margen `pad`. El rango se ajusta al bounding box de los
- * datos extendido con los extremos de la recta. Función pura (sin DOM): el SVG se arma en
- * `app.js` a partir de lo que devuelve. Devuelve `null` si hay menos de 2 puntos o el rango
- * en `x` o `y` es nulo (no se puede escalar).
- */
 export function regressionPlot(points, slope, intercept, width = 320, height = 220, pad = 32) {
   if (!Array.isArray(points) || points.length < 2) return null;
   const xs = points.map((p) => p[0]);
   const ys = points.map((p) => p[1]);
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
-  // Extiende el rango en Y para que la recta entre en el lienzo en ambos extremos de X.
   const lineYmin = slope * minX + intercept;
   const lineYmax = slope * maxX + intercept;
   const minY = Math.min(...ys, lineYmin, lineYmax);
@@ -367,7 +254,6 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
   const innerW = width - 2 * pad;
   const innerH = height - 2 * pad;
   const sx = (x) => pad + ((x - minX) / spanX) * innerW;
-  // Eje Y invertido: el píxel 0 está arriba, así que los valores grandes van arriba.
   const sy = (y) => height - pad - ((y - minY) / spanY) * innerH;
   return {
     width,
@@ -379,12 +265,6 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
   };
 }
 
-/**
- * Proyecta una serie de puntos a coordenadas de SVG para un gráfico de dispersión **sin recta**
- * (`analysis_kind = "curva"`). Si `xLog` es `true`, el eje x se escala logarítmicamente (base 10),
- * útil para barridos en frecuencia. Devuelve `null` si hay menos de 2 puntos, si el rango en algún
- * eje es nulo, o si `xLog` y algún `x <= 0`.
- */
 export function scatterPlot(points, { width = 320, height = 220, pad = 32, xLog = false } = {}) {
   if (!Array.isArray(points) || points.length < 2) return null;
   if (xLog && points.some((p) => p[0] <= 0)) return null;
@@ -412,12 +292,6 @@ export function scatterPlot(points, { width = 320, height = 220, pad = 32, xLog 
   };
 }
 
-/**
- * Estadísticos de una serie de medidas: `n`, media (`mean`), desviación estándar muestral
- * (`std`, con divisor n-1) y error estándar de la media (`stdMean = s/√n`). Ignora valores no
- * finitos. Devuelve `NaN` en mean/std si no hay datos; `std=stdMean=0` si hay un solo dato.
- * Función pura (sin DOM): la lista ordenada y el histograma del formulario se arman con esto.
- */
 export function seriesStats(values) {
   const xs = (values ?? []).filter((v) => Number.isFinite(v));
   const n = xs.length;
@@ -429,12 +303,6 @@ export function seriesStats(values) {
   return { n, mean, std, stdMean: std / Math.sqrt(n) };
 }
 
-/**
- * Histograma de `values` en `bins` intervalos iguales sobre `[min, max]` de los datos. Devuelve
- * `{ min, max, bins, width, counts, edges }` (counts.length === bins, edges.length === bins+1).
- * El valor máximo cae en el último bin. Si todos los valores son iguales devuelve un único bin.
- * Devuelve `null` si no hay datos finitos o `bins < 1`. Función pura.
- */
 export function histogram(values, bins) {
   const xs = (values ?? []).filter((v) => Number.isFinite(v));
   if (xs.length === 0 || bins < 1) return null;
@@ -447,7 +315,7 @@ export function histogram(values, bins) {
   const counts = new Array(bins).fill(0);
   for (const x of xs) {
     let idx = Math.floor((x - min) / width);
-    if (idx >= bins) idx = bins - 1; // el máximo entra en el último bin
+    if (idx >= bins) idx = bins - 1;
     if (idx < 0) idx = 0;
     counts[idx] += 1;
   }
@@ -455,11 +323,6 @@ export function histogram(values, bins) {
   return { min, max, bins, width, counts, edges };
 }
 
-/**
- * Muestrea la densidad normal (pdf) de media `mean` y desviación `std` en `steps+1` puntos
- * equiespaciados de `[min, max]`. Devuelve pares `[x, y]` (y = densidad). Lista vacía si
- * `std <= 0` o `max <= min`. Función pura: se usa para superponer la curva al histograma.
- */
 export function normalCurve(mean, std, min, max, steps = 60) {
   if (!(std > 0) || !(max > min)) return [];
   const coef = 1 / (std * Math.sqrt(2 * Math.PI));
@@ -472,7 +335,6 @@ export function normalCurve(mean, std, min, max, steps = 60) {
   return out;
 }
 
-/** Diferencia relativa porcentual `(b - a) / a * 100`, o `null` si no es calculable. */
 function relPct(b, a) {
   if (b == null || a == null || !Number.isFinite(b) || !Number.isFinite(a) || a === 0) {
     return null;
@@ -480,20 +342,6 @@ function relPct(b, a) {
   return ((b - a) / a) * 100;
 }
 
-/**
- * Compara los mensurandos automáticos (`autoDerived`: lista con `symbol`, `name`, `unit`, `value`,
- * `u_expanded`) contra los que cargó el estudiante (`studentResults`: lista con `symbol`, `value`,
- * `u_expanded`). Itera sobre los automáticos (la fuente de los mensurandos) y empareja por símbolo.
- * Para cada uno devuelve la medida automática, la del estudiante (o `null` si no la cargó) y las
- * diferencias absoluta y relativa (%) de valor y de U. Las relativas son `null` si el denominador
- * automático es nulo o no finito.
- *
- * `tolerances` es un mapa `{ symbol → porcentaje_máximo }`. Si el símbolo tiene tolerancia y el
- * alumno cargó un valor, `verdict` es `"pass"` o `"fail"`; en otro caso es `null`.
- * Función pura: el render arma la tabla con esto.
- */
-/** `true` salvo que `has_uncertainty` sea explícitamente `false` (magnitud/resultado sin ±U por
- *  diseño, p. ej. un dato de tabla o un mensurando que se muestra sin incertidumbre). */
 export function hasUncertainty(entity) {
   return entity?.has_uncertainty !== false;
 }
@@ -527,24 +375,14 @@ export function compareResults(autoDerived, studentResults, tolerances = {}) {
   });
 }
 
-/** Potencia disipada en una resistencia: P = I²·R. Función pura para la columna en vivo. */
 export function pointPower(r, i) {
   return i * i * r;
 }
 
-/** Caudal instantáneo: Q = V/t. Función pura para las columnas en vivo de Fluidos I. */
 export function flowRate(v, t) {
   return v / t;
 }
 
-/**
- * Convierte la forma *agrupada por magnitud* que devuelve `collectMeasurements()` (una fila por
- * magnitud, con `values`/`point_replicas`/`operator_replicas`) al mismo `Map` que ya espera el
- * prefill de edición (`pointGroups`/`operatorGroups`/`values`/`value_u`/instrumento/escala),
- * para poder restaurar un borrador local con los mismos helpers de pintado que restauran una
- * entrega guardada. Sin magnitudes con réplicas por punto, cada punto se trata como un array de
- * un solo valor (igual que el prefill de edición, que agrupa una lectura por punto).
- */
 export function draftMeasurementsByQuantity(measurements) {
   const map = new Map();
   for (const m of measurements ?? []) {
@@ -560,16 +398,6 @@ export function draftMeasurementsByQuantity(measurements) {
   return map;
 }
 
-/**
- * Empareja cada magnitud MEDIDA con su mensurando teórico automático por convención de símbolos:
- * la magnitud `X` se compara con el derivado `X_t` (p. ej. `VR1_s` medida con multímetro contra
- * `VR1_s_t` calculada por el programa). Devuelve una fila por par encontrado, con la medida
- * experimental (valor ± U del instrumento), la teórica (valor ± U propagada) y las diferencias
- * absolutas y relativas (%) de valor y de U (`null` si el denominador teórico es nulo/no finito).
- *
- * `quantities` es `analysis.quantities` (con `symbol`, `name`, `unit`, `result: {mean, u_expanded}`)
- * y `derived` es `analysis.derived`. Función pura: el render arma la tabla con esto.
- */
 export function compareMeasuredVsTheoretical(quantities, derived) {
   const byQuantity = new Map((quantities ?? []).map((q) => [q.symbol, q]));
   return (derived ?? []).reduce((rows, d) => {
@@ -594,22 +422,8 @@ export function compareMeasuredVsTheoretical(quantities, derived) {
   }, []);
 }
 
-/**
- * Valida que las medidas del formulario sean suficientes para el tipo de análisis.
- * Devuelve un mensaje de error en español, o `null` si todo está bien.
- *
- * `metaMap` es un mapa `{ [quantity_id]: { name, isGiven, isChrono } }` con la metadata de cada
- * magnitud (extraída del DOM por el llamador). Si falta la metadata de una magnitud se usa su id
- * como nombre. Función pura: no accede al DOM.
- *
- * @param {Array<{quantity_id: string, values: number[], given_u: number|null}>} measurements
- * @param {string} analysisKind
- * @param {Record<string, {name: string, isGiven: boolean, isChrono: boolean}>} [metaMap]
- * @returns {string|null}
- */
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
   if (analysisKind === "regresion_lineal" || analysisKind === "curva") {
-    // Cantidad de puntos por magnitud: réplicas por punto si las hay, si no los valores planos.
     const pointCount = (m) => m.point_replicas?.length ?? m.values.length;
     const points = Math.max(0, ...measurements.map(pointCount));
     if (points < 2) {
@@ -617,8 +431,6 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
         ? "Cargá al menos 2 puntos completos para graficar la curva."
         : "Cargá al menos 2 puntos completos para el ajuste lineal.";
     }
-    // Motor E: los escalares compartidos (datos de cátedra / medida única) también deben estar
-    // completos, aunque no formen parte de la serie de puntos.
     for (const m of measurements) {
       const meta = metaMap[m.quantity_id] ?? {};
       const name = meta.name ?? m.quantity_id;
@@ -638,7 +450,7 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
     const meta = metaMap[m.quantity_id] ?? {};
     const name = meta.name ?? m.quantity_id;
     if (meta.optional) {
-      continue; // puede quedar sin lecturas sin bloquear el envío (p. ej. operador 2/3).
+      continue;
     }
     if (meta.isGiven) {
       if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
@@ -647,7 +459,6 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
           : `El dato "${name}" requiere valor e incertidumbre U.`;
       }
     } else if (m.operator_replicas) {
-      // Motor D: cada operador debe tener al menos una lectura de la magnitud repetida.
       const empty = m.operator_replicas.findIndex((reps) => reps.length === 0);
       if (m.operator_replicas.length === 0 || empty !== -1) {
         return `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;

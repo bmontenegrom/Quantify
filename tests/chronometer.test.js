@@ -106,13 +106,11 @@ test("Chronometer: readings('consecutivo') requiere ≥2 marcas", () => {
 });
 
 test("Chronometer: readings('pares') da T[i]=mark[i+2]-mark[i], n-2 lecturas", () => {
-  // Péndulo: marcas cada T/2; T=2s → marks a 1,2,3,4,5 s
   const ms = [0, 1000, 2000, 3000, 4000, 5000];
   const c = new Chronometer(clock(ms));
   c.start();
   ms.slice(1).forEach(() => c.mark());
   const r = c.readings("pares");
-  // T[i] = mark[i+2]-mark[i]: (3-1)=2, (4-2)=2, (5-3)=2 → 3 lecturas de 2s c/u
   assert.equal(r.length, 3);
   r.forEach((t) => assert.ok(Math.abs(t - 2) < 1e-9));
 });
@@ -126,25 +124,22 @@ test("Chronometer: readings('pares') requiere ≥3 marcas", () => {
 });
 
 test("Chronometer: readings('periodo') da T[k]=mark[2k+1]-mark[2k], pares no solapados", () => {
-  // Técnica del péndulo: dt1=t1-t0, dt2=t3-t2. Marcas a 1, 2.1, 3, 4.05 s desde inicio.
   const ms = [0, 1000, 2100, 3000, 4050];
   const c = new Chronometer(clock(ms));
   c.start();
-  ms.slice(1).forEach(() => c.mark()); // 4 marcas
+  ms.slice(1).forEach(() => c.mark());
   const r = c.readings("periodo");
-  // pares (m0,m1),(m2,m3): (2100-1000)=1.1, (4050-3000)=1.05 → 2 períodos
   assert.equal(r.length, 2);
   assert.ok(Math.abs(r[0] - 1.1) < 1e-9);
   assert.ok(Math.abs(r[1] - 1.05) < 1e-9);
 });
 
 test("Chronometer: readings('periodo') con marca impar descarta la última suelta", () => {
-  const ms = [0, 1000, 2000, 3000]; // 3 marcas
+  const ms = [0, 1000, 2000, 3000];
   const c = new Chronometer(clock(ms));
   c.start();
   ms.slice(1).forEach(() => c.mark());
   const r = c.readings("periodo");
-  // solo el par (m0,m1) → 1 período; la marca m2 queda suelta
   assert.equal(r.length, 1);
   assert.ok(Math.abs(r[0] - 1) < 1e-9);
 });

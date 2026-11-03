@@ -1,12 +1,8 @@
-// Grupos de prácticas hermanas: varias prácticas reales que el menú muestra como un solo ítem
-// con tabs para saltar entre ellas (cada tab cambia de práctica y de entrega).
 export const PRACTICE_GROUPS = {
   "p3-relajacion": { group: "p3", label: "Parte 1: Relajacion directa", order: 1 },
   "p3-relajacion-desfasaje": { group: "p3", label: "Parte 2: Desfasaje", order: 2 },
 };
 
-// Partes temáticas DENTRO de una misma práctica (una sola definición y una sola entrega):
-// las tabs solo muestran/ocultan las secciones con data-section correspondiente.
 export const PRACTICE_PARTS = {
   "p1-estadistica": [
     { id: "op1", label: "Operador 1" },
@@ -24,14 +20,9 @@ export const PRACTICE_PARTS = {
   ],
 };
 
-// Ranuras calibradas del brazo de la balanza de Mohr (1..9 cm) y determinaciones por parte, en
-// espejo con `MOHR_RANURAS`/`HIDRO_MEDIDAS` del seed (src/practices/seed.rs).
 const MOHR_RANURAS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 const HIDRO_MEDIDAS = [1, 2, 3];
 
-// Secciones temáticas del formulario. `symbols` agrupa magnitudes bajo un título; `results`
-// asigna resultados finales a la sección; `series: true` marca dónde va la tabla por punto.
-// `id` vincula la sección a una parte de PRACTICE_PARTS (sin `id` ⇒ siempre visible).
 export const PRACTICE_SECTIONS = {
   "p1-estadistica": [
     { id: "op1", title: "Operador 1 — Períodos", symbols: ["T1"], results: ["g1"] },
@@ -83,10 +74,6 @@ export const PRACTICE_SECTIONS = {
   ],
 };
 
-// Columnas calculadas en vivo en la tabla de series (solo lectura, el cliente las computa al
-// tipear): `inputs` son los símbolos de las columnas de entrada, en el orden que espera `fn`
-// de lib.js (hoy solo pointPower). fluidos-1 es un caso especial manejado a mano en
-// `updateSeriesLive` (V y t tienen 2 réplicas cada una: Q_1=V1/t1, Q_2=V2/t2, Q_medio=su media).
 export const SERIES_LIVE_COLUMNS = {
   "p2-cc": [{ symbol: "P", unit: "W", inputs: ["R", "I"] }],
   "fluidos-1": [
@@ -94,26 +81,12 @@ export const SERIES_LIVE_COLUMNS = {
     { symbol: "Q_2", unit: "m3/s" },
     { symbol: "Q_medio", unit: "m3/s" },
   ],
-  // Velocidad media por punto = dx / t̄ (dx compartida, t con réplicas por punto).
   viscosidad: [{ symbol: "v_medio", unit: "m/s" }],
 };
 
-// Prácticas cuyas magnitudes de tiempo de medida única se leen directo de un instrumento con
-// lectura propia (p. ej. un osciloscopio), no a mano con cronómetro: no ofrecen el cronómetro
-// de ayuda genérico (ver `needsChronoHelper` en forms.js).
 export const PRACTICES_WITHOUT_CHRONO_HELPER = new Set(["p3-relajacion"]);
 
-// p2-cc: mismo orden que el "Resultado final" (símbolo primero, nombre como aclaración muted),
-// para las magnitudes cuyo símbolo no es obvio a simple vista o que ya se comparan 1 a 1 con su
-// teórica (VR1 medida vs VR1 teórica). Se derivan de las secciones por parte (serie/paralelo/
-// potencia, identificadas por su `id`) en vez de mantener una lista aparte: son exactamente esas
-// magnitudes, no las compartidas (Resistencias) que quedan fuera de una parte.
 export const SYMBOL_FIRST_QUANTITIES = new Set([
   ...PRACTICE_SECTIONS["p2-cc"].filter((sec) => sec.id).flatMap((sec) => sec.symbols ?? []),
-  // CA (RLC): voltajes (generador y pico a pico por canal) y semiejes de Lissajous — mismo
-  // criterio, el símbolo no es obvio a simple vista en el nombre. Hardcodeados (no derivados
-  // de una sección como p2-cc) porque esta práctica no tiene entrada en PRACTICE_SECTIONS: no
-  // usa sub-partes, es un único bloque estadístico. Si se renombra alguno de estos símbolos en
-  // `seed_ca_rlc` (src/practices/seed.rs), actualizar también acá.
   "Vg", "VRpp", "VCpp", "VLpp", "a_R", "b_R", "a_C", "b_C", "a_L", "b_L",
 ]);
