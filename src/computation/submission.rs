@@ -295,6 +295,7 @@ pub async fn validate_student_results(
 ///     practice_id: "p".into(), status: "publicada".into(), analysis_kind: None,
 ///     x_formula: None, y_formula: None, quantities: vec![], results: vec![g], curves: vec![],
 ///     operator_count: None, intermediates: vec![], point_results: vec![], aggregates: vec![],
+///     parts: vec![], sections: vec![],
 /// };
 /// let result = |symbol: &str| StudentResultInput { symbol: symbol.into(), value: 9.8, u_expanded: None };
 /// assert!(check_student_result_symbols(&def, &[result("g")]).is_ok());

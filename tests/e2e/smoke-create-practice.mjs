@@ -41,6 +41,25 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "T", name: "Periodo", unit: "s" });
   await waitForStatus(page, "Magnitud agregada");
 
+  step("docente: dos partes con una sección cada una; L en la primera y T en la segunda");
+  for (const title of ["Parte A", "Parte B"]) {
+    await openAddForm(page, "#new-part-form");
+    await fillAndSubmit(page, "#new-part-form", { title });
+    await waitForStatus(page, "Parte guardada");
+  }
+  for (const [title, part] of [["Seccion A", "Parte A"], ["Seccion B", "Parte B"]]) {
+    await openAddForm(page, "#new-section-form");
+    await page.locator('#new-section-form [name="title"]').fill(title);
+    await page.locator('#new-section-form [name="part_id"]').selectOption({ label: part });
+    await page.locator('#new-section-form button[type="submit"]').click();
+    await waitForStatus(page, "Sección guardada");
+  }
+  for (const [symbol, section] of [["L", "Parte A — Seccion A"], ["T", "Parte B — Seccion B"]]) {
+    const row = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}"))`).first();
+    await row.locator('[data-section-select="quantities"]').selectOption({ label: section });
+    await waitForStatus(page, "Sección asignada");
+  }
+
   step("docente: publicar sin mensurandos se rechaza");
   await page.click('[data-practice-status="publicada"]');
   await waitForStatus(page, "no tiene mensurandos");
@@ -78,10 +97,17 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await sPage.waitForSelector("#measurement-fields .measurement-row");
   await sPage.selectOption("#table-select", "1");
   await sPage.waitForLoadState("networkidle");
+  const tabs = sPage.locator("#practice-part-tabs .part-tab");
+  assert((await tabs.count()) === 2, "la práctica debía mostrar las dos pestañas");
   const given = sPage.locator(".measurement-row--given").first();
+  const measured = sPage.locator("#measurement-fields .measurement-row:not(.measurement-row--given)").first();
+  await tabs.nth(0).click();
+  assert((await given.isVisible()) && !(await measured.isVisible()), "la parte A debía mostrar L y ocultar T");
   await given.locator(".measure-given-value").fill("1");
   await given.locator(".measure-given-u").fill("0.002");
-  await sPage.locator("#measurement-fields .measurement-row:not(.measurement-row--given) .measure-value").first().fill("2.006");
+  await tabs.nth(1).click();
+  assert(!(await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y ocultar L");
+  await measured.locator(".measure-value").first().fill("2.006");
   await sPage.click("#submit-button");
   await sPage.waitForSelector('#submit-status:has-text("Entrega guardada")', { timeout: 15_000 });
 

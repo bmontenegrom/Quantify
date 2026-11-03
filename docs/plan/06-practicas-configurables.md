@@ -451,7 +451,19 @@ resultado), la publica, la habilita en un curso y un alumno la entrega. Smoke E2
 **Nota**: mientras no exista F5, una práctica con entregas se edita como hoy (sin versión). Para
 el uso real conviene no editar estructuralmente prácticas con entregas hasta F5.
 
-### F2 — Partes y secciones en la base
+### F2 — Partes y secciones en la base ✅ HECHA
+
+**Estado (2026-11-03)**: hecho, con estas diferencias:
+- **Sin `part_id` por tabla**: magnitudes y mensurandos tienen solo `section_id`, y la parte de un
+  elemento es la de su sección (una sección sin parte es compartida). Evita dos datos que pueden
+  contradecirse; F3 deriva la parte desde la sección.
+- **La tabla de la serie** va en la parte de la sección de sus magnitudes por punto (reemplaza el
+  `{ id, series: true }` de JS).
+- **Sin `help_text`**: ninguna sección lo usaba; se agrega cuando haga falta.
+- La sección de una magnitud o mensurando se asigna con `POST …/quantities/{qid}/section` y
+  `…/results/{rid}/section` (un selector en cada fila del admin), no en su formulario.
+- Los ids de las partes migradas son estables (`p2-cc-serie`, `hidrostatica-arq`…). `PRACTICE_GROUPS`
+  (P3) sigue en JS hasta F3.
 
 1. Schema: `practice_parts`, `practice_sections`, columnas `part_id` y `section_id` en todas las
    tablas de definición; `help_text`.

@@ -35,6 +35,8 @@ pub async fn definition(
     let intermediates = intermediates_for(pool, practice_id).await?;
     let point_results = point_results_for(pool, practice_id).await?;
     let aggregates = aggregates_for(pool, practice_id).await?;
+    let parts = super::parts_for(pool, practice_id).await?;
+    let sections = super::sections_for(pool, practice_id).await?;
     Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
         status: row.status,
@@ -48,6 +50,8 @@ pub async fn definition(
         intermediates,
         point_results,
         aggregates,
+        parts,
+        sections,
     }))
 }
 
@@ -467,6 +471,8 @@ pub enum Orderable {
     Curves,
     Quantities,
     Results,
+    Parts,
+    Sections,
 }
 
 impl Orderable {
@@ -475,6 +481,8 @@ impl Orderable {
             Orderable::Curves => ("practice_curves", "position, id"),
             Orderable::Quantities => ("practice_quantities", "position, symbol"),
             Orderable::Results => ("practice_results", "position, symbol"),
+            Orderable::Parts => ("practice_parts", "position, id"),
+            Orderable::Sections => ("practice_sections", "position, id"),
         }
     }
 }

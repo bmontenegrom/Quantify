@@ -13,13 +13,13 @@ import {
   draftMeasurementsByQuantity, hasUncertainty,
 } from "./lib.js";
 import {
-  PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS, SERIES_LIVE_COLUMNS,
+  PRACTICE_GROUPS, SERIES_LIVE_COLUMNS,
   SYMBOL_FIRST_QUANTITIES, PRACTICES_WITHOUT_CHRONO_HELPER,
 } from "./constants.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
-  replicaInputHtml, cellReplicaValues,
+  replicaInputHtml, cellReplicaValues, definitionSections, definitionParts,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -145,6 +145,7 @@ export async function loadSubmissionForm() {
     state.practiceForm = { definition, instruments };
     state.chronometers.clear();
     state.seriesDebug.clear();
+    renderPartTabs(practiceId);
     renderMeasurementFields();
     applyPrefill();
     applyDraftPrefill();
@@ -211,8 +212,9 @@ let activePart = null;
 export function renderPartTabs(practiceId) {
   if (!practicePartTabs) return;
 
-  const innerParts = PRACTICE_PARTS[practiceId];
-  if (innerParts) {
+  const definition = state.practiceForm?.definition;
+  const innerParts = definition?.practice_id === practiceId ? definitionParts(definition) : [];
+  if (innerParts.length) {
     if (!innerParts.some((p) => p.id === activePart)) activePart = innerParts[0].id;
     practicePartTabs.classList.remove("hidden");
     practicePartTabs.innerHTML = innerParts
@@ -264,7 +266,7 @@ export function renderPartTabs(practiceId) {
 }
 
 function applyPartVisibility() {
-  if (!PRACTICE_PARTS[practiceSelect.value]) return;
+  if (!definitionParts(state.practiceForm?.definition).length) return;
   measurementFields.querySelectorAll("[data-section]").forEach((el) => {
     el.hidden = el.dataset.section !== activePart;
   });
@@ -392,7 +394,7 @@ export function renderMeasurementFields() {
     `;
   };
 
-  const sections = PRACTICE_SECTIONS[practiceSelect.value];
+  const sections = definitionSections(definition);
   if (sections) {
     const { grouped, rest } = groupBySections(definition.quantities, sections);
     const allFinals = (definition.results ?? []).filter((r) => r.is_final);
@@ -447,7 +449,7 @@ export function renderMeasurementFields() {
 }
 
 function partForResult(symbol) {
-  const sections = PRACTICE_SECTIONS[practiceSelect.value] ?? [];
+  const sections = definitionSections(state.practiceForm?.definition) ?? [];
   return sections.find((sec) => sec.id && (sec.results ?? []).includes(symbol))?.id ?? null;
 }
 

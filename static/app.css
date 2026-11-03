@@ -1234,6 +1234,22 @@ button.back-link {
   color: var(--muted);
 }
 
+.layout-inline-form {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.layout-inline-form input {
+  flex: 1 1 220px;
+}
+
+.layout-inline-form select {
+  flex: 0 1 220px;
+  width: auto;
+}
+
 .practice-lifecycle {
   align-items: center;
   display: flex;

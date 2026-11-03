@@ -1236,6 +1236,189 @@ fn validate_result(
         .map_err(|e| AppError::bad_request(e.to_string()))
 }
 
+fn require_title(title: &str) -> Result<(), AppError> {
+    if title.trim().is_empty() {
+        return Err(AppError::bad_request("Falta el titulo."));
+    }
+    Ok(())
+}
+
+pub(super) async fn create_part(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<practices::PartInput>,
+) -> Result<Json<practices::PracticePart>, AppError> {
+    require_teacher(&state, &headers).await?;
+    require_title(&input.title)?;
+    load_definition(&state, &id).await?;
+    Ok(Json(
+        practices::create_part(&state.pool, &id, &input).await?,
+    ))
+}
+
+pub(super) async fn update_part(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(input): Json<practices::PartInput>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    require_title(&input.title)?;
+    if !practices::update_part(&state.pool, &id, &pid, &input).await? {
+        return Err(AppError::not_found("parte no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn delete_part(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_part(&state.pool, &id, &pid).await? {
+        return Err(AppError::not_found("parte no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn move_part(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    move_in_list(
+        &state,
+        &headers,
+        practices::Orderable::Parts,
+        &id,
+        &pid,
+        body.up,
+    )
+    .await
+}
+
+pub(super) async fn create_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<practices::SectionInput>,
+) -> Result<Json<practices::PracticeSection>, AppError> {
+    require_teacher(&state, &headers).await?;
+    require_title(&input.title)?;
+    load_definition(&state, &id).await?;
+    practices::create_section(&state.pool, &id, &input)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::bad_request("La parte no es de esta practica."))
+}
+
+pub(super) async fn update_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, sid)): Path<(String, String)>,
+    Json(input): Json<practices::SectionInput>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    require_title(&input.title)?;
+    match practices::update_section(&state.pool, &id, &sid, &input).await? {
+        None => Err(AppError::bad_request("La parte no es de esta practica.")),
+        Some(false) => Err(AppError::not_found("seccion no encontrada")),
+        Some(true) => Ok(Json(Health { status: "ok" })),
+    }
+}
+
+pub(super) async fn delete_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, sid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_section(&state.pool, &id, &sid).await? {
+        return Err(AppError::not_found("seccion no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn move_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, sid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    move_in_list(
+        &state,
+        &headers,
+        practices::Orderable::Sections,
+        &id,
+        &sid,
+        body.up,
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct SetSectionBody {
+    #[serde(default)]
+    section_id: Option<String>,
+}
+
+async fn set_section(
+    state: &SharedState,
+    headers: &HeaderMap,
+    member: practices::SectionMember,
+    practice_id: &str,
+    member_id: &str,
+    body: SetSectionBody,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(state, headers).await?;
+    let section_id = body.section_id.as_deref().filter(|s| !s.is_empty());
+    if !practices::set_member_section(&state.pool, practice_id, member, member_id, section_id)
+        .await?
+    {
+        return Err(AppError::bad_request(
+            "La seccion o el elemento no son de esta practica.",
+        ));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn set_quantity_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, qid)): Path<(String, String)>,
+    Json(body): Json<SetSectionBody>,
+) -> Result<Json<Health>, AppError> {
+    set_section(
+        &state,
+        &headers,
+        practices::SectionMember::Quantity,
+        &id,
+        &qid,
+        body,
+    )
+    .await
+}
+
+pub(super) async fn set_result_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, rid)): Path<(String, String)>,
+    Json(body): Json<SetSectionBody>,
+) -> Result<Json<Health>, AppError> {
+    set_section(
+        &state,
+        &headers,
+        practices::SectionMember::Result,
+        &id,
+        &rid,
+        body,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1280,6 +1463,8 @@ mod tests {
             }],
             point_results: vec![],
             aggregates: vec![],
+            parts: vec![],
+            sections: vec![],
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
             symbol: symbol.into(),
@@ -1359,6 +1544,8 @@ mod tests {
             }],
             point_results: vec![],
             aggregates: vec![agg("a0", "Re_max", 0), agg("a1", "Re_min", 1)],
+            parts: vec![],
+            sections: vec![],
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
             symbol: symbol.into(),
@@ -1457,6 +1644,8 @@ mod tests {
             intermediates: vec![],
             point_results: vec![],
             aggregates: vec![],
+            parts: vec![],
+            sections: vec![],
         };
         let r = |unit: &str| ResultInput {
             symbol: "M_medio".into(),

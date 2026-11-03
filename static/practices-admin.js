@@ -258,6 +258,7 @@ export function renderPracticesPage() {
       ${kind == null || kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
     </section>
 
+    ${renderLayoutSection(practice, def)}
     ${adminSection({
       id: "quantity",
       title: "Magnitudes de entrada",
@@ -332,6 +333,15 @@ export function renderPracticesPage() {
   });
   practiceWorkspace.querySelectorAll("[data-delete-curve]").forEach((btn) => {
     btn.addEventListener("click", () => deletePracticeCurve(btn.dataset.cid, practice.id));
+  });
+  practiceWorkspace.querySelectorAll("[data-layout-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => saveLayoutItem(event, practice.id));
+  });
+  practiceWorkspace.querySelectorAll("[data-layout-delete]").forEach((btn) => {
+    btn.addEventListener("click", () => deleteLayoutItem(btn.dataset.layoutDelete, btn.dataset.id, practice.id));
+  });
+  practiceWorkspace.querySelectorAll("[data-section-select]").forEach((select) => {
+    select.addEventListener("change", () => setItemSection(select.dataset.sectionSelect, select.dataset.id, select.value, practice.id));
   });
   practiceWorkspace.querySelectorAll("[data-move]").forEach((btn) => {
     btn.addEventListener("click", () => movePracticeItem(btn.dataset.move, btn.dataset.id, practice.id, btn.dataset.dir));
@@ -768,6 +778,7 @@ function renderQuantitiesList(def, practiceId) {
         <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
         <td>${q.repeated ? "Sí" : "No"}</td>
+        <td>${sectionSelectHtml(def, "quantities", q)}</td>
         <td class="directory-actions">
           ${moveButtonsHtml("quantities", q.id, i, quantities.length)}
           <button type="button" data-edit-quantity data-qid="${escapeHtml(q.id)}">${editing ? "Cerrar" : "Editar"}</button>
@@ -775,7 +786,7 @@ function renderQuantitiesList(def, practiceId) {
         </td>
       </tr>`;
     const editRow = editing
-      ? `<tr><td colspan="6" class="scale-edit-cell">${renderQuantityForm(q, practiceId)}</td></tr>`
+      ? `<tr><td colspan="7" class="scale-edit-cell">${renderQuantityForm(q, practiceId)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
@@ -784,7 +795,7 @@ function renderQuantitiesList(def, practiceId) {
     <div class="data-table-wrap">
       <table class="data-table">
         <thead>
-          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Magnitud</th><th>Réplicas</th><th>Acciones</th></tr>
+          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Magnitud</th><th>Réplicas</th><th>Sección</th><th>Acciones</th></tr>
         </thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -841,6 +852,7 @@ function renderResultsList(def, practiceId) {
         <td><code>${escapeHtml(r.formula)}</code></td>
         <td>${tolLabel}</td>
         <td>${finalLabel}</td>
+        <td>${sectionSelectHtml(def, "results", r)}</td>
         <td class="directory-actions">
           ${moveButtonsHtml("results", r.id, i, results.length)}
           <button type="button" data-edit-result data-rid="${escapeHtml(r.id)}">${editing ? "Cerrar" : "Editar"}</button>
@@ -848,7 +860,7 @@ function renderResultsList(def, practiceId) {
         </td>
       </tr>`;
     const editRow = editing
-      ? `<tr><td colspan="7" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
+      ? `<tr><td colspan="8" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
@@ -857,7 +869,7 @@ function renderResultsList(def, practiceId) {
     <div class="data-table-wrap">
       <table class="data-table">
         <thead>
-          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Fórmula</th><th>Tolerancia (%)</th><th>Final</th><th>Acciones</th></tr>
+          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Fórmula</th><th>Tolerancia (%)</th><th>Final</th><th>Sección</th><th>Acciones</th></tr>
         </thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -1023,6 +1035,121 @@ async function saveEditCurve(event) {
     "Curva actualizada",
     { resetEditing: true },
   );
+}
+
+function sectionLabel(def, section) {
+  const part = (def?.parts ?? []).find((p) => p.id === section.part_id);
+  return part ? `${part.title} — ${section.title}` : `${section.title} (todas las partes)`;
+}
+
+function sectionSelectHtml(def, list, item) {
+  const sections = def?.sections ?? [];
+  if (!sections.length) return `<span class="submission-meta">—</span>`;
+  const current = sections.find((s) => s[list].includes(item.symbol))?.id ?? "";
+  const options = [`<option value="">Sin sección (siempre visible)</option>`]
+    .concat(sections.map((s) => `<option value="${escapeHtml(s.id)}" ${s.id === current ? "selected" : ""}>${escapeHtml(sectionLabel(def, s))}</option>`))
+    .join("");
+  return `<select data-section-select="${list}" data-id="${escapeHtml(item.id)}" aria-label="Sección">${options}</select>`;
+}
+
+function partOptionsHtml(def, selected) {
+  return [`<option value="">Todas las partes (compartida)</option>`]
+    .concat((def?.parts ?? []).map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === selected ? "selected" : ""}>${escapeHtml(p.title)}</option>`))
+    .join("");
+}
+
+function layoutTable(head, rows, empty) {
+  return rows.length
+    ? `<div class="data-table-wrap"><table class="data-table"><thead><tr>${head}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`
+    : `<p class="submission-meta">${empty}</p>`;
+}
+
+function renderLayoutSection(practice, def) {
+  const parts = def?.parts ?? [];
+  const sections = def?.sections ?? [];
+  const partRows = parts.map((p, i) => `
+    <tr>
+      <td class="directory-primary">
+        <form class="layout-inline-form" data-layout-form="parts" data-id="${escapeHtml(p.id)}">
+          <input name="title" value="${escapeHtml(p.title)}" required aria-label="Título de la parte" />
+          <button type="submit">Guardar</button>
+        </form>
+      </td>
+      <td class="directory-actions">
+        ${moveButtonsHtml("parts", p.id, i, parts.length)}
+        <button type="button" class="btn-danger" data-layout-delete="parts" data-id="${escapeHtml(p.id)}">Eliminar</button>
+      </td>
+    </tr>`);
+  const sectionRows = sections.map((s, i) => `
+    <tr>
+      <td class="directory-primary">
+        <form class="layout-inline-form" data-layout-form="sections" data-id="${escapeHtml(s.id)}">
+          <input name="title" value="${escapeHtml(s.title)}" required aria-label="Título de la sección" />
+          <select name="part_id" aria-label="Parte">${partOptionsHtml(def, s.part_id)}</select>
+          <button type="submit">Guardar</button>
+        </form>
+      </td>
+      <td>${s.quantities.length + s.results.length}</td>
+      <td class="directory-actions">
+        ${moveButtonsHtml("sections", s.id, i, sections.length)}
+        <button type="button" class="btn-danger" data-layout-delete="sections" data-id="${escapeHtml(s.id)}">Eliminar</button>
+      </td>
+    </tr>`);
+  return `
+    <section class="panel workspace-panel admin-section">
+      <h3 class="admin-section-title">Partes y secciones <span class="count-badge">${parts.length}</span></h3>
+      <p class="submission-meta">Cada parte es una pestaña del formulario del alumno. Una sección agrupa magnitudes y resultados bajo un título; sin parte, se ve en todas las pestañas (datos compartidos). La sección de cada magnitud y mensurando se elige en sus tablas.</p>
+      <h4>Partes</h4>
+      ${layoutTable("<th>Título</th><th>Acciones</th>", partRows, "Sin partes: el formulario va en una sola pestaña.")}
+      <details class="add-panel" data-add-panel="part">
+        <summary>Nueva parte</summary>
+        <form id="new-part-form" class="detail-form detail-form-grid" data-layout-form="parts">
+          <label>Título <input name="title" required placeholder="Parte 1: Arquímedes" /></label>
+          <div class="detail-actions"><button type="submit">Agregar</button></div>
+        </form>
+      </details>
+      <h4>Secciones</h4>
+      ${layoutTable("<th>Título y parte</th><th>Elementos</th><th>Acciones</th>", sectionRows, "Sin secciones.")}
+      <details class="add-panel" data-add-panel="section">
+        <summary>Nueva sección</summary>
+        <form id="new-section-form" class="detail-form detail-form-grid" data-layout-form="sections">
+          <label>Título <input name="title" required placeholder="Datos comunes" /></label>
+          <label>Parte <select name="part_id">${partOptionsHtml(def, null)}</select></label>
+          <div class="detail-actions"><button type="submit">Agregar</button></div>
+        </form>
+      </details>
+    </section>`;
+}
+
+async function saveLayoutItem(event, practiceId) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const list = form.dataset.layoutForm;
+  const id = form.dataset.id;
+  const payload = Object.fromEntries(new FormData(form).entries());
+  const body = list === "parts" ? { title: payload.title } : { title: payload.title, part_id: payload.part_id || null };
+  await runPracticeAction(async () => {
+    await postJson(`/api/practices/${practiceId}/${list}${id ? `/${id}` : ""}`, body);
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+  }, list === "parts" ? "Parte guardada" : "Sección guardada");
+}
+
+async function deleteLayoutItem(list, id, practiceId) {
+  const what = list === "parts"
+    ? "¿Eliminar esta parte? Sus secciones pasan a verse en todas las pestañas."
+    : "¿Eliminar esta sección? Sus magnitudes y resultados quedan sin sección.";
+  if (!window.confirm(what)) return;
+  await runPracticeAction(async () => {
+    await deleteJson(`/api/practices/${practiceId}/${list}/${id}`);
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+  }, list === "parts" ? "Parte eliminada" : "Sección eliminada");
+}
+
+async function setItemSection(list, id, sectionId, practiceId) {
+  await runPracticeAction(async () => {
+    await postJson(`/api/practices/${practiceId}/${list}/${id}/section`, { section_id: sectionId || null });
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+  }, "Sección asignada");
 }
 
 function moveButtonsHtml(list, id, index, total) {

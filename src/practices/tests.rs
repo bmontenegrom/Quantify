@@ -2033,3 +2033,123 @@ async fn only_published_practices_reach_courses_and_students() {
     let teacher_catalog = db::practices_for_role(&pool, "docente").await.unwrap();
     assert!(teacher_catalog.iter().any(|p| p.id == "borrador"));
 }
+
+#[tokio::test]
+async fn legacy_layout_becomes_parts_and_sections() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let parts_of = |def: &PracticeDefinition| -> Vec<String> {
+        def.parts.iter().map(|p| p.id.clone()).collect()
+    };
+    let p1 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    assert_eq!(
+        parts_of(&p1),
+        vec![
+            "p1-estadistica-op1",
+            "p1-estadistica-op2",
+            "p1-estadistica-op3"
+        ]
+    );
+    let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(cc.parts.len(), 3);
+    let section_with = |def: &PracticeDefinition, symbol: &str| -> PracticeSection {
+        def.sections
+            .iter()
+            .find(|s| s.quantities.iter().any(|q| q == symbol))
+            .unwrap_or_else(|| panic!("{symbol} sin seccion"))
+            .clone()
+    };
+    assert_eq!(section_with(&cc, "R1").part_id, None);
+    assert_eq!(
+        section_with(&cc, "Vg_s").part_id.as_deref(),
+        Some("p2-cc-serie")
+    );
+    assert_eq!(
+        section_with(&cc, "R").part_id.as_deref(),
+        Some("p2-cc-potencia")
+    );
+    assert!(section_with(&cc, "Vg_s")
+        .results
+        .contains(&"I_s".to_string()));
+
+    let hidro = definition(&pool, "hidrostatica").await.unwrap().unwrap();
+    assert_eq!(hidro.parts.len(), 2);
+    assert_eq!(section_with(&hidro, "g_ac").part_id, None);
+    assert_eq!(
+        section_with(&hidro, "mw1").part_id.as_deref(),
+        Some("hidrostatica-ts")
+    );
+
+    let fluidos = definition(&pool, "fluidos-2").await.unwrap().unwrap();
+    assert!(fluidos.parts.is_empty() && fluidos.sections.is_empty());
+
+    layout::migrate_legacy_layout(&pool).await.unwrap();
+    let again = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(again.sections.len(), cc.sections.len());
+}
+
+#[tokio::test]
+async fn duplicate_keeps_parts_and_sections_with_new_ids() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let copy = duplicate_practice(&pool, "p2-cc", "Copia CC", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    let original = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    let copied = definition(&pool, &copy.id).await.unwrap().unwrap();
+    assert_eq!(copied.parts.len(), 3);
+    assert_eq!(copied.sections.len(), original.sections.len());
+    let ids = |d: &PracticeDefinition| -> Vec<String> {
+        d.sections.iter().map(|s| s.id.clone()).collect()
+    };
+    assert!(ids(&copied).iter().all(|id| !ids(&original).contains(id)));
+    for (a, b) in original.sections.iter().zip(&copied.sections) {
+        assert_eq!(a.quantities, b.quantities);
+        assert_eq!(a.results, b.results);
+        assert_eq!(a.part_id.is_some(), b.part_id.is_some());
+        if let Some(part) = &b.part_id {
+            assert!(copied.parts.iter().any(|p| &p.id == part));
+        }
+    }
+}
+
+#[tokio::test]
+async fn deleting_parts_and_sections_keeps_the_content() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert!(delete_part(&pool, "p2-cc", "p2-cc-serie").await.unwrap());
+    let after = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    let serie = after
+        .sections
+        .iter()
+        .find(|s| s.title == "Circuito serie")
+        .unwrap();
+    assert_eq!(serie.part_id, None);
+
+    assert!(delete_section(&pool, "p2-cc", &serie.id).await.unwrap());
+    let after = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(after.quantities.len(), cc.quantities.len());
+    assert!(after
+        .sections
+        .iter()
+        .all(|s| !s.quantities.contains(&"Vg_s".to_string())));
+
+    let other = definition(&pool, "hidrostatica").await.unwrap().unwrap();
+    let foreign = &other.sections[0].id;
+    let qid = &after.quantities[0].id;
+    assert!(
+        !set_member_section(&pool, "p2-cc", SectionMember::Quantity, qid, Some(foreign))
+            .await
+            .unwrap()
+    );
+    assert!(create_section(
+        &pool,
+        "p2-cc",
+        &SectionInput {
+            title: "x".into(),
+            part_id: Some("hidrostatica-arq".into()),
+        },
+    )
+    .await
+    .unwrap()
+    .is_none());
+}

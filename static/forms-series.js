@@ -2,8 +2,8 @@ import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
 import { escapeHtml, symbolHtml, unitHtml, format, prefixFactor, pointPower, flowRate, compatibleInstruments, canReview, hasUncertainty } from "./lib.js";
-import { PRACTICE_SECTIONS, PRACTICE_PARTS, SERIES_LIVE_COLUMNS } from "./constants.js";
-import { givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
+import { SERIES_LIVE_COLUMNS } from "./constants.js";
+import { definitionSections, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireRemoveReplica, collectMeasurements } from "./forms.js";
 
@@ -21,7 +21,7 @@ export function renderSeriesTable(definition) {
     .map((p) => `<th>${symbolHtml(p.symbol)}${p.unit ? ` <span class="submission-meta">(${unitHtml(p.unit)})</span>` : ""}</th>`)
     .join("");
   const body = Array.from({ length: SERIES_INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
-  const sections = PRACTICE_SECTIONS[practiceSelect.value];
+  const sections = definitionSections(definition);
   let sharedSection = "";
   let seriesSectionAttr = "";
   if (sections && shared.length) {
@@ -44,7 +44,7 @@ export function renderSeriesTable(definition) {
   } else if (shared.length) {
     sharedSection = `<div class="shared-quantities"><h4>Medidas</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
   }
-  const partsNote = PRACTICE_PARTS[practiceSelect.value]
+  const partsNote = definition.parts?.length
     ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
     : "";
   const hasReplicatedTime = [...cols, ...shared].some((q) => q.repeated && q.quantity === "tiempo");

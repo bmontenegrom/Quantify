@@ -466,6 +466,40 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .await?;
     add_column_if_missing(pool, "practice_quantities", "default_value", "REAL").await?;
     add_column_if_missing(pool, "practice_quantities", "slot_count", "INTEGER").await?;
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_parts (
+            id TEXT PRIMARY KEY,
+            practice_id TEXT NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_sections (
+            id TEXT PRIMARY KEY,
+            practice_id TEXT NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+            part_id TEXT REFERENCES practice_parts(id) ON DELETE SET NULL,
+            title TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    for table in ["practice_quantities", "practice_results"] {
+        add_column_if_missing(
+            pool,
+            table,
+            "section_id",
+            "TEXT REFERENCES practice_sections(id) ON DELETE SET NULL",
+        )
+        .await?;
+    }
     add_column_if_missing(
         pool,
         "course_practices",
