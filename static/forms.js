@@ -400,11 +400,11 @@ export function renderMeasurementFields() {
     const allFinals = (definition.results ?? []).filter((r) => r.is_final);
     const embedded = new Set();
     const blocks = grouped.map(({ sec, rows }) => {
-      if (rows.length === 0) return "";
+      const secFinals = allFinals.filter((r) => !embedded.has(r.symbol) && (sec.results ?? []).includes(r.symbol));
+      if (rows.length === 0 && secFinals.length === 0) return "";
+      secFinals.forEach((r) => embedded.add(r.symbol));
       const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
-      const secFinals = allFinals.filter((r) => !embedded.has(r.symbol) && (sec.results ?? []).includes(r.symbol));
-      secFinals.forEach((r) => embedded.add(r.symbol));
       const finalsHtml = secFinals.length
         ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
            ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`

@@ -45,19 +45,19 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   for (const title of ["Parte A", "Parte B"]) {
     await openAddForm(page, "#new-part-form");
     await fillAndSubmit(page, "#new-part-form", { title });
-    await waitForStatus(page, "Parte guardada");
+    await page.waitForSelector(`#practice-workspace input[aria-label="Título de la parte"][value="${title}"]`);
   }
-  for (const [title, part] of [["Seccion A", "Parte A"], ["Seccion B", "Parte B"]]) {
+  for (const [title, part] of [["Seccion A", "Parte A"], ["Seccion B", "Parte B"], ["Seccion R", "Parte B"]]) {
     await openAddForm(page, "#new-section-form");
     await page.locator('#new-section-form [name="title"]').fill(title);
     await page.locator('#new-section-form [name="part_id"]').selectOption({ label: part });
     await page.locator('#new-section-form button[type="submit"]').click();
-    await waitForStatus(page, "Sección guardada");
+    await page.waitForSelector(`#practice-workspace input[aria-label="Título de la sección"][value="${title}"]`);
   }
   for (const [symbol, section] of [["L", "Parte A — Seccion A"], ["T", "Parte B — Seccion B"]]) {
     const row = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}"))`).first();
     await row.locator('[data-section-select="quantities"]').selectOption({ label: section });
-    await waitForStatus(page, "Sección asignada");
+    await page.waitForLoadState("networkidle");
   }
 
   step("docente: publicar sin mensurandos se rechaza");
@@ -66,8 +66,17 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
 
   step("docente: agrega g y publica");
   await openAddForm(page, "#new-result-form");
-  await fillAndSubmit(page, "#new-result-form", { symbol: "g", name: "Gravedad", unit: "m/s2", formula: "4*pi^2*L/T^2" });
+  await fillAndSubmit(
+    page,
+    "#new-result-form",
+    { symbol: "g", name: "Gravedad", unit: "m/s2", formula: "4*pi^2*L/T^2" },
+    { is_final: true },
+  );
   await waitForStatus(page, "Mensurando agregado");
+  await page
+    .locator('#practice-workspace tr:has(code:text-is("g")) [data-section-select="results"]')
+    .selectOption({ label: "Parte B — Seccion R" });
+  await page.waitForLoadState("networkidle");
   await page.click('[data-practice-status="publicada"]');
   await page.waitForSelector("#practice-workspace .practice-state--publicada");
 
@@ -108,6 +117,13 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await tabs.nth(1).click();
   assert(!(await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y ocultar L");
   await measured.locator(".measure-value").first().fill("2.006");
+  const finalG = sPage.locator('[data-final-result="1"][data-symbol="g"]');
+  assert(await finalG.isVisible(), "el resultado final g debía verse en la parte B");
+  const finalSection = sPage.locator('.measurement-section:has([data-final-result="1"][data-symbol="g"]) .measurement-section-title');
+  assert((await finalSection.textContent()) === "Seccion R", "g debía estar en su sección, con su título");
+  await tabs.nth(0).click();
+  assert(!(await finalG.isVisible()), "el resultado final g no debía verse en la parte A");
+  await tabs.nth(1).click();
   await sPage.click("#submit-button");
   await sPage.waitForSelector('#submit-status:has-text("Entrega guardada")', { timeout: 15_000 });
 
