@@ -10,49 +10,167 @@
       "u_expanded": 0.0,
       "unit": "1/s",
       "value": 0.014546635478697698
-    },
-    {
-      "formula": "pi*t_med/(T1*math::ln(2))",
-      "has_uncertainty": false,
-      "name": "Factor de calidad (usa el periodo del Operador 1)",
-      "symbol": "Q",
-      "u": 0.09349161080726258,
-      "u_expanded": 0.18698322161452516,
-      "unit": "",
-      "value": 215.22443645230533
-    },
-    {
-      "formula": "4*pi^2*L/T1^2",
-      "has_uncertainty": true,
-      "name": "Aceleracion de gravedad - Operador 1",
-      "symbol": "g1",
-      "u": 0.012984343064016681,
-      "u_expanded": 0.025968686128033363,
-      "unit": "m/s2",
-      "value": 9.80185493545634
-    },
-    {
-      "formula": "4*pi^2*L/T2^2",
-      "has_uncertainty": true,
-      "name": "Aceleracion de gravedad - Operador 2",
-      "symbol": "g2",
-      "u": 0.02129862482812447,
-      "u_expanded": 0.04259724965624894,
-      "unit": "m/s2",
-      "value": 9.80478603911126
-    },
-    {
-      "formula": "4*pi^2*L/T3^2",
-      "has_uncertainty": true,
-      "name": "Aceleracion de gravedad - Operador 3",
-      "symbol": "g3",
-      "u": null,
-      "u_expanded": null,
-      "unit": "m/s2",
-      "value": null
     }
   ],
   "operators": [],
+  "parts": [
+    {
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "pi*t_med/(T1*math::ln(2))",
+            "has_uncertainty": false,
+            "name": "Factor de calidad (usa el periodo del Operador 1)",
+            "symbol": "Q",
+            "u": 0.09349161080726258,
+            "u_expanded": 0.18698322161452516,
+            "unit": "",
+            "value": 215.22443645230533
+          },
+          {
+            "formula": "4*pi^2*L/T1^2",
+            "has_uncertainty": true,
+            "name": "Aceleracion de gravedad - Operador 1",
+            "symbol": "g1",
+            "u": 0.012984343064016681,
+            "u_expanded": 0.025968686128033363,
+            "unit": "m/s2",
+            "value": 9.80185493545634
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [
+          {
+            "name": "Periodo - Operador 1",
+            "result": {
+              "mean": 2.0069,
+              "n": 10,
+              "s": 0.002601281735350213,
+              "u_a": 0.0008225975119502012,
+              "u_b": 0.0002886751345948129,
+              "u_c": 0.0008717797887081317,
+              "u_expanded": 0.0017435595774162635
+            },
+            "symbol": "T1",
+            "unit": "s",
+            "values": [
+              2.006,
+              2.01,
+              2.003,
+              2.008,
+              2.011,
+              2.005,
+              2.007,
+              2.009,
+              2.004,
+              2.006
+            ]
+          }
+        ],
+        "regression": null,
+        "scatters": [],
+        "warnings": []
+      },
+      "analysis_kind": "estadistico",
+      "part_id": "p1-estadistica-op1",
+      "title": "Operador 1"
+    },
+    {
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "4*pi^2*L/T2^2",
+            "has_uncertainty": true,
+            "name": "Aceleracion de gravedad - Operador 2",
+            "symbol": "g2",
+            "u": 0.02129862482812447,
+            "u_expanded": 0.04259724965624894,
+            "unit": "m/s2",
+            "value": 9.80478603911126
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [
+          {
+            "name": "Periodo - Operador 2",
+            "result": {
+              "mean": 2.0065999999999997,
+              "n": 5,
+              "s": 0.004277849927241515,
+              "u_a": 0.001913112646970911,
+              "u_b": 0.0002886751345948129,
+              "u_c": 0.0019347695814575386,
+              "u_expanded": 0.0038695391629150772
+            },
+            "symbol": "T2",
+            "unit": "s",
+            "values": [
+              2.012,
+              2.001,
+              2.009,
+              2.004,
+              2.007
+            ]
+          }
+        ],
+        "regression": null,
+        "scatters": [],
+        "warnings": []
+      },
+      "analysis_kind": "estadistico",
+      "part_id": "p1-estadistica-op2",
+      "title": "Operador 2"
+    },
+    {
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "4*pi^2*L/T3^2",
+            "has_uncertainty": true,
+            "name": "Aceleracion de gravedad - Operador 3",
+            "symbol": "g3",
+            "u": null,
+            "u_expanded": null,
+            "unit": "m/s2",
+            "value": null
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [
+          {
+            "name": "Periodo - Operador 3",
+            "result": {
+              "mean": 0.0,
+              "n": 0,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0,
+              "u_c": 0.0,
+              "u_expanded": 0.0
+            },
+            "symbol": "T3",
+            "unit": "s",
+            "values": []
+          }
+        ],
+        "regression": null,
+        "scatters": [],
+        "warnings": [
+          "La magnitud \"Periodo - Operador 3\" (T3) no tiene lecturas cargadas.",
+          "El mensurando \"Aceleracion de gravedad - Operador 3\" (g3 = 4*pi^2*L/T3^2) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero)."
+        ]
+      },
+      "analysis_kind": "estadistico",
+      "part_id": "p1-estadistica-op3",
+      "title": "Operador 3"
+    }
+  ],
   "point_results": [],
   "quantities": [
     {
@@ -88,74 +206,9 @@
       "values": [
         95.3
       ]
-    },
-    {
-      "name": "Periodo - Operador 1",
-      "result": {
-        "mean": 2.0069,
-        "n": 10,
-        "s": 0.002601281735350213,
-        "u_a": 0.0008225975119502012,
-        "u_b": 0.0002886751345948129,
-        "u_c": 0.0008717797887081317,
-        "u_expanded": 0.0017435595774162635
-      },
-      "symbol": "T1",
-      "unit": "s",
-      "values": [
-        2.006,
-        2.01,
-        2.003,
-        2.008,
-        2.011,
-        2.005,
-        2.007,
-        2.009,
-        2.004,
-        2.006
-      ]
-    },
-    {
-      "name": "Periodo - Operador 2",
-      "result": {
-        "mean": 2.0065999999999997,
-        "n": 5,
-        "s": 0.004277849927241515,
-        "u_a": 0.001913112646970911,
-        "u_b": 0.0002886751345948129,
-        "u_c": 0.0019347695814575386,
-        "u_expanded": 0.0038695391629150772
-      },
-      "symbol": "T2",
-      "unit": "s",
-      "values": [
-        2.012,
-        2.001,
-        2.009,
-        2.004,
-        2.007
-      ]
-    },
-    {
-      "name": "Periodo - Operador 3",
-      "result": {
-        "mean": 0.0,
-        "n": 0,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0,
-        "u_c": 0.0,
-        "u_expanded": 0.0
-      },
-      "symbol": "T3",
-      "unit": "s",
-      "values": []
     }
   ],
   "regression": null,
   "scatters": [],
-  "warnings": [
-    "La magnitud \"Periodo - Operador 3\" (T3) no tiene lecturas cargadas.",
-    "El mensurando \"Aceleracion de gravedad - Operador 3\" (g3 = 4*pi^2*L/T3^2) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero)."
-  ]
+  "warnings": []
 }

@@ -162,6 +162,55 @@ pub async fn duplicate_practice(
         .execute(&mut *tx)
         .await?;
     }
+    let parts: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM practice_parts WHERE practice_id = ?1")
+            .bind(source_id)
+            .fetch_all(&mut *tx)
+            .await?;
+    let mut part_map = std::collections::HashMap::new();
+    for old in parts {
+        let new = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO practice_parts (id, practice_id, title, position, analysis_kind) \
+             SELECT ?1, ?2, title, position, analysis_kind FROM practice_parts WHERE id = ?3",
+        )
+        .bind(&new)
+        .bind(&id)
+        .bind(&old)
+        .execute(&mut *tx)
+        .await?;
+        part_map.insert(old, new);
+    }
+    let sections: Vec<(String, Option<String>, String, i64)> = sqlx::query_as(
+        "SELECT id, part_id, title, position FROM practice_sections WHERE practice_id = ?1",
+    )
+    .bind(source_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (old, part_id, title, position) in sections {
+        let new = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO practice_sections (id, practice_id, part_id, title, position) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(&new)
+        .bind(&id)
+        .bind(part_id.and_then(|p| part_map.get(&p).cloned()))
+        .bind(title)
+        .bind(position)
+        .execute(&mut *tx)
+        .await?;
+        for table in ["practice_quantities", "practice_results"] {
+            sqlx::query(&format!(
+                "UPDATE {table} SET section_id = ?1 WHERE practice_id = ?2 AND section_id = ?3"
+            ))
+            .bind(&new)
+            .bind(&id)
+            .bind(&old)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
     tx.commit().await?;
     practice(pool, &id).await
 }

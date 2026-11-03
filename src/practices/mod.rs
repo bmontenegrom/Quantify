@@ -64,6 +64,44 @@ pub struct PracticeDefinition {
     pub intermediates: Vec<PracticeIntermediate>,
     pub point_results: Vec<PracticePointResult>,
     pub aggregates: Vec<PracticeAggregate>,
+    pub parts: Vec<PracticePart>,
+    pub sections: Vec<PracticeSection>,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct PracticePart {
+    pub id: String,
+    pub practice_id: String,
+    pub title: String,
+    pub position: i64,
+    pub analysis_kind: Option<String>,
+    #[sqlx(skip)]
+    pub effective_kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct PracticeSection {
+    pub id: String,
+    pub practice_id: String,
+    pub part_id: Option<String>,
+    pub title: String,
+    pub position: i64,
+    #[sqlx(skip)]
+    pub quantities: Vec<String>,
+    #[sqlx(skip)]
+    pub results: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PartInput {
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SectionInput {
+    pub title: String,
+    #[serde(default)]
+    pub part_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -161,11 +199,15 @@ pub struct PracticeInfoInput {
 }
 
 mod crud;
+mod layout;
 mod lifecycle;
+mod parts;
 mod seed;
 #[cfg(test)]
 mod tests;
 
 pub use crud::*;
+pub use layout::*;
 pub use lifecycle::*;
+pub use parts::is_point_based;
 pub use seed::seed_definitions;

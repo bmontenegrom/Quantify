@@ -131,20 +131,29 @@ async fn seed_practice(
     quantities: &[QuantityInput],
     results: &[ResultInput],
 ) -> anyhow::Result<bool> {
+    let mut conn = pool.acquire().await?;
+    seed_practice_in(&mut conn, practice_id, quantities, results).await
+}
+
+async fn seed_practice_in(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+    quantities: &[QuantityInput],
+    results: &[ResultInput],
+) -> anyhow::Result<bool> {
     let count: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1")
             .bind(practice_id)
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await?;
     if count.0 > 0 {
         return Ok(false);
     }
-    let mut conn = pool.acquire().await?;
     for (pos, q) in quantities.iter().enumerate() {
-        insert_quantity(&mut conn, practice_id, pos as i64 + 1, q).await?;
+        insert_quantity(conn, practice_id, pos as i64 + 1, q).await?;
     }
     for (pos, r) in results.iter().enumerate() {
-        insert_result(&mut conn, practice_id, pos as i64 + 1, r).await?;
+        insert_result(conn, practice_id, pos as i64 + 1, r).await?;
     }
     Ok(true)
 }
@@ -369,25 +378,35 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
-    seed_practice(
-        pool,
+    let mut tx = pool.begin().await?;
+    let fresh = seed_practice_in(
+        &mut tx,
         "p3-relajacion",
         &[
-            qty("R", "Resistencia", "ohm", false, "resistencia"),
+            qty_shared("R", "Resistencia", "ohm", "resistencia"),
             qty_given(
                 "Rint",
                 "Resistencia interna de la fuente",
                 "ohm",
                 "resistencia",
             ),
-            qty("C", "Capacitancia", "F", false, "capacitancia"),
-            qty("T_oc", "Periodo de la onda cuadrada", "s", false, "tiempo"),
+            qty_shared("C", "Capacitancia", "F", "capacitancia"),
+            qty_shared("T_oc", "Periodo de la onda cuadrada", "s", "tiempo"),
+            qty_shared("tmedio", "Tiempo de semidescarga (t1/2)", "s", "tiempo"),
+            qty("f", "Frecuencia", "Hz", true, "frecuencia"),
             qty(
-                "tmedio",
-                "Tiempo de semidescarga (t1/2)",
-                "s",
-                false,
-                "tiempo",
+                "a",
+                "Amplitud de la senal en el eje y de la elipse",
+                "div",
+                true,
+                "longitud",
+            ),
+            qty(
+                "b",
+                "Interseccion de la elipse con el eje y",
+                "div",
+                true,
+                "longitud",
             ),
         ],
         &[
@@ -403,9 +422,14 @@ async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
                 "s",
                 "tmedio / math::ln(2)",
             ),
+            res_final("tau", "Constante de tiempo RC (desfasaje)", "s", "slope"),
         ],
     )
     .await?;
+    if fresh {
+        super::layout::apply_p3_layout(&mut tx).await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -565,33 +589,6 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         .await?;
     }
-    Ok(())
-}
-
-async fn seed_p3_relajacion_desfasaje(pool: &SqlitePool) -> anyhow::Result<()> {
-    seed_practice(
-        pool,
-        "p3-relajacion-desfasaje",
-        &[
-            qty("f", "Frecuencia", "Hz", true, "frecuencia"),
-            qty(
-                "a",
-                "Amplitud de la senal en el eje y de la elipse",
-                "div",
-                true,
-                "longitud",
-            ),
-            qty(
-                "b",
-                "Interseccion de la elipse con el eje y",
-                "div",
-                true,
-                "longitud",
-            ),
-        ],
-        &[res_final("tau", "Constante de tiempo RC", "s", "slope")],
-    )
-    .await?;
     Ok(())
 }
 
@@ -1371,11 +1368,122 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+const P3_UNIFIED: &str = "2026-11-p3-unificada";
+
+pub(super) async fn unify_p3(pool: &SqlitePool) -> anyhow::Result<()> {
+    let (done,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+        .bind(P3_UNIFIED)
+        .fetch_one(pool)
+        .await?;
+    if done > 0 {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
+    let (legacy,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM practices WHERE id = 'p3-relajacion-desfasaje') \
+         OR (EXISTS (SELECT 1 FROM practice_quantities WHERE practice_id = 'p3-relajacion') \
+             AND NOT EXISTS (SELECT 1 FROM practice_quantities \
+                             WHERE practice_id = 'p3-relajacion' AND symbol = 'f'))",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let mut csv_paths: Vec<String> = Vec::new();
+    if legacy {
+        csv_paths = sqlx::query_scalar(
+            "SELECT csv_path FROM submissions \
+             WHERE practice_id IN ('p3-relajacion', 'p3-relajacion-desfasaje')",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM submissions \
+             WHERE practice_id IN ('p3-relajacion', 'p3-relajacion-desfasaje')",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE course_practices SET enabled = MAX(enabled, \
+             (SELECT d.enabled FROM course_practices d \
+              WHERE d.course_id = course_practices.course_id \
+              AND d.practice_id = 'p3-relajacion-desfasaje')) \
+             WHERE practice_id = 'p3-relajacion' AND course_id IN \
+             (SELECT course_id FROM course_practices WHERE practice_id = 'p3-relajacion-desfasaje')",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO practice_subgroup_members (subgroup_id, user_id, created_at) \
+             SELECT p.id, m.user_id, m.created_at FROM practice_subgroup_members m \
+             JOIN practice_subgroups d ON d.id = m.subgroup_id \
+             JOIN practice_subgroups p ON p.practice_id = 'p3-relajacion' \
+              AND p.course_id = d.course_id AND p.group_id = d.group_id AND p.name = d.name \
+             WHERE d.practice_id = 'p3-relajacion-desfasaje'",
+        )
+        .execute(&mut *tx)
+        .await?;
+        let (table_conflicts,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM practice_table_assignments d \
+             JOIN practice_table_assignments p ON p.practice_id = 'p3-relajacion' \
+              AND p.group_id = d.group_id AND p.user_id = d.user_id \
+             WHERE d.practice_id = 'p3-relajacion-desfasaje' AND p.table_number != d.table_number",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        tracing::warn!(
+            submissions = csv_paths.len(),
+            table_conflicts,
+            "P3 se unifico en una practica de dos partes: se borraron sus entregas y, \
+             si un estudiante tenia mesas distintas, quedo la de la parte 1"
+        );
+        for table in [
+            "course_practices",
+            "practice_subgroups",
+            "practice_table_assignments",
+        ] {
+            sqlx::query(&format!(
+                "UPDATE OR IGNORE {table} SET practice_id = 'p3-relajacion' \
+                 WHERE practice_id = 'p3-relajacion-desfasaje'"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query("DELETE FROM practices WHERE id = 'p3-relajacion-desfasaje'")
+            .execute(&mut *tx)
+            .await?;
+        wipe_practice_definition(&mut tx, "p3-relajacion").await?;
+        for table in ["practice_sections", "practice_parts"] {
+            sqlx::query(&format!(
+                "DELETE FROM {table} WHERE practice_id = 'p3-relajacion'"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(
+            "UPDATE practices SET analysis_kind = 'regresion_lineal', x_formula = '2*pi*f', \
+             y_formula = 'b / math::sqrt(a*a - b*b)', description = ?1 \
+             WHERE id = 'p3-relajacion'",
+        )
+        .bind(crate::db::P3_DESCRIPTION)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(P3_UNIFIED)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    for path in csv_paths {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    Ok(())
+}
+
 pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
+    unify_p3(pool).await?;
     seed_p1_estadistica(pool).await?;
     seed_p3_relajacion(pool).await?;
     seed_p2_cc(pool).await?;
-    seed_p3_relajacion_desfasaje(pool).await?;
     seed_fluidos1(pool).await?;
     seed_viscosidad(pool).await?;
     seed_fluidos2(pool).await?;
@@ -1384,5 +1492,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     fix_ca_rlc_labels(pool).await?;
     reset_legacy_hidrostatica(pool).await?;
     seed_hidrostatica(pool).await?;
+    super::layout::migrate_legacy_layout(pool).await?;
+    super::layout::migrate_shared_results_to_parts(pool).await?;
     Ok(())
 }

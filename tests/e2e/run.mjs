@@ -12,7 +12,7 @@ async function studentSubmitsP1(page) {
   await page.selectOption("#table-select", "1");
 
   step("estudiante: registra períodos del Operador 1 con el cronómetro");
-  const chronoRow = page.locator('[data-section="op1"] .measurement-row--chrono');
+  const chronoRow = page.locator('[data-section="p1-estadistica-op1"] .measurement-row--chrono');
   await chronoRow.locator(".chrono-start").click();
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(120);

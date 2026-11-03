@@ -398,6 +398,15 @@ export function draftMeasurementsByQuantity(measurements) {
   return map;
 }
 
+export function analysisSections(analysis) {
+  const parts = analysis?.parts ?? [];
+  if (!parts.length) return [{ title: null, analysis }];
+  return [
+    { title: "Datos compartidos", analysis },
+    ...parts.map((p) => ({ title: p.title, analysis: p.analysis })),
+  ];
+}
+
 export function compareMeasuredVsTheoretical(quantities, derived) {
   const byQuantity = new Map((quantities ?? []).map((q) => [q.symbol, q]));
   return (derived ?? []).reduce((rows, d) => {

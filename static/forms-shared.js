@@ -1,6 +1,41 @@
 import { state } from "./state.js";
 import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor } from "./lib.js";
 
+export function definitionSections(definition) {
+  if (!definition?.sections?.length) return null;
+  const sections = definition.sections.map((s) => ({
+    id: s.part_id ?? undefined,
+    title: s.title,
+    symbols: s.quantities,
+    results: s.results,
+  }));
+  const pointBased = definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva";
+  const seriesSymbols = new Set(
+    pointBased ? definition.quantities.filter((q) => q.per_point && !q.is_given).map((q) => q.symbol) : [],
+  );
+  const seriesPart = seriesPartId(definition, seriesSymbols);
+  if (seriesPart) sections.push({ id: seriesPart, series: true });
+  return sections;
+}
+
+function seriesPartId(definition, seriesSymbols) {
+  const chosen = (definition.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico");
+  if (chosen) return chosen.id;
+  return definition.sections.find((s) => s.part_id && s.quantities.some((q) => seriesSymbols.has(q)))?.part_id;
+}
+
+export function definitionParts(definition) {
+  const finals = new Set((definition?.results ?? []).filter((r) => r.is_final).map((r) => r.symbol));
+  const used = new Set(
+    (definition?.sections ?? [])
+      .filter((s) => s.part_id && (s.quantities.length || s.results.some((r) => finals.has(r))))
+      .map((s) => s.part_id),
+  );
+  const series = (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico");
+  if (series && (definition?.quantities ?? []).some((q) => q.per_point && !q.is_given)) used.add(series.id);
+  return (definition?.parts ?? []).filter((p) => used.has(p.id)).map((p) => ({ id: p.id, label: p.title }));
+}
+
 export function groupBySections(items, sections) {
   const used = new Set();
   const grouped = sections.map((sec) => {
@@ -26,7 +61,7 @@ export function givenValueInputHtml(q) {
   const attrs = q.slot_count ? `min="1" max="${n}" step="1"` : `step="any"`;
   const placeholder = q.slot_count ? `ranura 1 a ${n}` : "valor";
   const value = q.default_value != null ? ` value="${escapeHtml(String(q.default_value))}"` : "";
-  return `${q.slot_count ? "" : prefixSelectHtml()}<input class="measure-given-value" type="number" ${attrs} placeholder="${placeholder}"${value} />`;
+  return `${q.slot_count ? `<span class="prefix-placeholder" aria-hidden="true"></span>` : prefixSelectHtml()}<input class="measure-given-value" type="number" ${attrs} placeholder="${placeholder}"${value} />`;
 }
 
 export function renderReplicaInput(unit, defaultValue = null) {
