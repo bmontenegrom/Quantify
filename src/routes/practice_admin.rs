@@ -955,11 +955,13 @@ fn guard_series_part(
     after: &practices::PracticeDefinition,
     what: &str,
 ) -> Result<(), AppError> {
-    let spread = series_parts(after).len();
-    if spread > 1 && spread > series_parts(before).len() {
+    let after_parts = series_parts(after);
+    let before_parts = series_parts(before);
+    if after_parts.len() > 1 && !after_parts.iter().all(|p| before_parts.contains(p)) {
         return Err(AppError::bad_request(format!(
             "No se puede {what}: las magnitudes por punto forman una sola serie y tienen que \
-             estar en secciones de la misma parte."
+             estar en secciones de la misma parte. Para pasarlas a otra parte, dejá sus \
+             secciones primero sin parte (compartidas) y después asignales la nueva."
         )));
     }
     Ok(())
@@ -1119,8 +1121,16 @@ pub(super) async fn update_result(
         .iter_mut()
         .find(|x| x.id == rid)
         .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
-    item.symbol = input.symbol.trim().to_string();
+    let old_symbol = std::mem::replace(&mut item.symbol, input.symbol.trim().to_string());
     item.formula = input.formula.trim().to_string();
+    let new_symbol = item.symbol.clone();
+    for section in &mut after.sections {
+        for symbol in &mut section.results {
+            if *symbol == old_symbol {
+                symbol.clone_from(&new_symbol);
+            }
+        }
+    }
     guard_change(&def, &after, "guardar el mensurando")?;
     let updated = practices::update_result(&state.pool, &rid, input)
         .await?
@@ -1783,6 +1793,14 @@ mod tests {
         }
         assert!(guard_series_part(&cc, &shared, "x").is_ok());
         assert!(guard_series_part(&split, &split, "x").is_ok());
+        let mut elsewhere = cc.clone();
+        for section in &mut elsewhere.sections {
+            section.quantities.retain(|q| q != "R");
+            if section.part_id.as_deref() == Some("p2-cc-paralelo") {
+                section.quantities.push("R".into());
+            }
+        }
+        assert!(guard_series_part(&split, &elsewhere, "x").is_err());
     }
 
     #[tokio::test]
