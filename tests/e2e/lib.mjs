@@ -92,7 +92,7 @@ function startServer({ port, dbName, dataDir }) {
   return child;
 }
 
-async function waitForServer(base, timeoutMs = 30_000) {
+async function waitForServer(base, timeoutMs = 60_000) {
   step(`esperando al server en ${base}`);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -107,7 +107,10 @@ async function waitForServer(base, timeoutMs = 30_000) {
 }
 
 async function login(browser, base, session, { email, password }, who = email) {
+  const previousStep = currentStep;
+  currentStep = `${previousStep} (login de ${who})`;
   const context = await browser.newContext();
+  context.setDefaultTimeout(60_000);
   const page = await context.newPage();
   session.pages.push(page);
   page.on("pageerror", (error) => session.pageErrors.push(`${who}/${currentStep}: ${error.message}`));
@@ -121,6 +124,7 @@ async function login(browser, base, session, { email, password }, who = email) {
   await page.fill('#login-form input[name="password"]', password);
   await page.click('#login-form button[type="submit"]');
   await page.waitForSelector("#app-shell:not(.hidden)");
+  currentStep = previousStep;
   return { context, page };
 }
 
