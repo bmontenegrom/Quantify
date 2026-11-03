@@ -2258,6 +2258,14 @@ async fn analyze_curva_without_curves_errors() {
     crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
         .await
         .unwrap();
+    let by_part = analyze(&pool, "p1-estadistica", &[]).await.unwrap();
+    assert!(by_part
+        .warnings
+        .iter()
+        .any(|w| w.contains("No se pudo calcular la parte") && w.contains("curvas")));
+    assert!(!by_part.parts.is_empty());
+
+    drop_parts(&pool, "p1-estadistica").await;
     let result = analyze(&pool, "p1-estadistica", &[]).await;
     assert!(result.is_err());
 }
@@ -2560,4 +2568,42 @@ fn compute_skips_a_result_it_cannot_evaluate_and_keeps_the_rest() {
         .warnings
         .iter()
         .any(|w| w.contains("roto") && w.contains("zzz")));
+}
+
+#[test]
+fn a_point_result_that_uses_a_skipped_result_is_skipped_too() {
+    let quantities = vec![quantity("f"), quantity("a")];
+    let results = vec![result("tau", "slope * zzz")];
+    let point_results = vec![PracticePointResult {
+        id: "pr".into(),
+        practice_id: "p1-estadistica".into(),
+        position: 0,
+        symbol: "w".into(),
+        name: "w".into(),
+        unit: "".into(),
+        formula: "f * tau".into(),
+    }];
+    let measurements = vec![
+        measurement("f", &[1.0, 2.0, 3.0]),
+        measurement("a", &[4.0, 9.0, 16.0]),
+    ];
+    let analysis = compute_regresion(
+        &quantities,
+        &[],
+        &results,
+        &point_results,
+        &[],
+        &HashMap::new(),
+        "f",
+        "a",
+        &measurements,
+    )
+    .unwrap();
+    assert!(analysis.derived.is_empty());
+    assert!(analysis.point_results.is_empty());
+    assert!(analysis.warnings.iter().any(|w| w.contains("tau")));
+    assert!(analysis
+        .warnings
+        .iter()
+        .any(|w| w.contains("derivada por punto w")));
 }

@@ -572,7 +572,7 @@ pub fn compute_regresion(
     }
     let mut pr_allowed: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
     pr_allowed.extend(intermediates.iter().map(|it| it.symbol.clone()));
-    pr_allowed.extend(results.iter().map(|r| r.symbol.clone()));
+    pr_allowed.extend(derived.iter().map(|d| d.symbol.clone()));
     pr_allowed.push("slope".into());
     pr_allowed.push("intercept".into());
     let mut point_results_out = Vec::with_capacity(point_results.len());
@@ -916,7 +916,20 @@ pub async fn analyze(
             continue;
         }
         let view = definition.part_view(part);
-        let mut part_analysis = run_kind(&view, &scales, &measurements_of(&view, measurements))?;
+        let mut part_analysis = match run_kind(
+            &view,
+            &scales,
+            &measurements_of(&view, measurements),
+        ) {
+            Ok(part_analysis) => part_analysis,
+            Err(e) => {
+                analysis.warnings.push(format!(
+                        "No se pudo calcular la parte \"{}\": {e}. Revisá su configuración en la práctica.",
+                        part.title
+                    ));
+                continue;
+            }
+        };
         part_analysis
             .quantities
             .retain(|q| !shared_symbols.contains(&q.symbol.as_str()));
@@ -938,6 +951,17 @@ pub async fn analyze(
     Ok(analysis)
 }
 
+fn run_kind(
+    definition: &crate::practices::PracticeDefinition,
+    scales: &HashMap<String, InstrumentScale>,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<FormAnalysis> {
+    let mut analysis = run_kind_raw(definition, scales, measurements)?;
+    let mut seen = std::collections::HashSet::new();
+    analysis.warnings.retain(|w| seen.insert(w.clone()));
+    Ok(analysis)
+}
+
 fn measurements_of(
     definition: &crate::practices::PracticeDefinition,
     measurements: &[MeasurementInput],
@@ -949,7 +973,7 @@ fn measurements_of(
         .collect()
 }
 
-fn run_kind(
+fn run_kind_raw(
     definition: &crate::practices::PracticeDefinition,
     scales: &HashMap<String, InstrumentScale>,
     measurements: &[MeasurementInput],

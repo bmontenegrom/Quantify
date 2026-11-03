@@ -473,10 +473,14 @@ pub(super) async fn migrate_shared_results_to_parts(pool: &SqlitePool) -> anyhow
             let Some(part) = def.inferred_part(&result.formula) else {
                 continue;
             };
-            let section = def
-                .sections
-                .iter()
-                .find(|s| s.part_id.as_deref() == Some(part))
+            let in_part = || {
+                def.sections
+                    .iter()
+                    .filter(|s| s.part_id.as_deref() == Some(part))
+            };
+            let section = in_part()
+                .find(|s| !s.results.is_empty())
+                .or_else(|| in_part().next())
                 .map(|s| s.id.clone());
             moves.push((result.id.clone(), section));
         }

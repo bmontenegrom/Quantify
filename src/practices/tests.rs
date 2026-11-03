@@ -135,7 +135,7 @@ async fn update_and_delete_quantity() {
 #[tokio::test]
 async fn create_and_delete_result() {
     let (pool, _dir) = setup().await;
-    let r = create_result(&pool, "p1-estadistica", sample_result())
+    let r = create_result(&pool, "p1-estadistica", sample_result(), None)
         .await
         .unwrap();
     assert_eq!(r.symbol, "Q");
@@ -155,6 +155,7 @@ async fn create_and_update_result_toggles_is_final() {
             is_final: true,
             ..sample_result()
         },
+        None,
     )
     .await
     .unwrap();
@@ -209,7 +210,7 @@ async fn symbol_taken_detects_cross_table_collision() {
     .await
     .unwrap());
 
-    let r = create_result(&pool, "p1-estadistica", sample_result())
+    let r = create_result(&pool, "p1-estadistica", sample_result(), None)
         .await
         .unwrap();
 
@@ -902,7 +903,7 @@ async fn deleting_practice_cascades_to_definition() {
     create_quantity(&pool, "p1-estadistica", sample_quantity())
         .await
         .unwrap();
-    create_result(&pool, "p1-estadistica", sample_result())
+    create_result(&pool, "p1-estadistica", sample_result(), None)
         .await
         .unwrap();
     sqlx::query("DELETE FROM practices WHERE id = 'p1-estadistica'")
@@ -2390,4 +2391,29 @@ async fn the_migration_leaves_a_result_unsectioned_when_its_part_has_no_section(
         .all(|s| !s.results.contains(&"P_max_e".to_string())));
     let series = after.series_part().unwrap().id.clone();
     assert_eq!(after.result_part("P_max_e"), Some(series.as_str()));
+}
+
+#[tokio::test]
+async fn a_result_used_by_series_artifacts_goes_to_the_series_part() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    create_part(
+        &pool,
+        "fluidos-1",
+        &PartInput {
+            title: "Unica".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut def = definition(&pool, "fluidos-1").await.unwrap().unwrap();
+    let series = def.series_part().unwrap().id.clone();
+    let mut k = def.results[0].clone();
+    k.id = "k".into();
+    k.symbol = "k".into();
+    k.formula = "2".into();
+    def.results.push(k);
+    assert_eq!(def.result_part("k"), None);
+    def.point_results[0].formula = format!("{} * k", def.point_results[0].formula);
+    assert_eq!(def.result_part("k"), Some(series.as_str()));
 }

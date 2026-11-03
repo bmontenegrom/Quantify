@@ -333,7 +333,7 @@ function singleAnalysisMarkup(analysis) {
   const operators = analysis.operators ?? [];
   if (operators.length) {
     const sharedTable = quantities.length
-      ? `<h4>Magnitudes compartidas</h4>${quantitiesTable}`
+      ? `<h4>Magnitudes comunes a los operadores</h4>${quantitiesTable}`
       : "";
     const opBlocks = operators
       .map(

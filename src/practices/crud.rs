@@ -610,14 +610,6 @@ pub async fn create_result(
     pool: &SqlitePool,
     practice_id: &str,
     input: ResultInput,
-) -> anyhow::Result<PracticeResult> {
-    create_result_in_section(pool, practice_id, input, None).await
-}
-
-pub async fn create_result_in_section(
-    pool: &SqlitePool,
-    practice_id: &str,
-    input: ResultInput,
     section_id: Option<&str>,
 ) -> anyhow::Result<PracticeResult> {
     let position = next_position(pool, "practice_results", "practice_id", practice_id).await?;

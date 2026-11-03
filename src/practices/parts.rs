@@ -30,6 +30,20 @@ impl PracticeDefinition {
         }
         let result = self.results.iter().find(|r| r.symbol == symbol)?;
         self.inferred_part(&result.formula)
+            .or_else(|| self.used_by_series(symbol))
+    }
+
+    fn used_by_series(&self, symbol: &str) -> Option<&str> {
+        let series = self.series_part()?;
+        let formulas = self
+            .point_results
+            .iter()
+            .map(|p| p.formula.as_str())
+            .chain(self.aggregates.iter().map(|a| a.formula.as_str()));
+        formulas
+            .flat_map(crate::computation::formula_symbols)
+            .any(|s| s == symbol)
+            .then_some(series.id.as_str())
     }
 
     pub fn inferred_part(&self, formula: &str) -> Option<&str> {
@@ -46,6 +60,9 @@ impl PracticeDefinition {
     }
 
     pub fn series_parts(&self) -> Vec<String> {
+        if !is_point_based(self.analysis_kind.as_deref()) {
+            return vec![];
+        }
         self.parts
             .iter()
             .filter(|p| {

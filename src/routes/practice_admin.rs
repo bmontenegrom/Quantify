@@ -132,7 +132,11 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
     {
         problems.push("no tiene mensurandos".to_string());
     }
-    for part in def.parts.iter().filter(|p| def.part_has_content(p)) {
+    for part in def
+        .parts
+        .iter()
+        .filter(|p| def.part_has_content(p) && def.part_kind(p) != "estadistico")
+    {
         problems.extend(
             kind_problems(&def.part_view(part))
                 .into_iter()
@@ -988,20 +992,13 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
     problems
 }
 
-fn series_parts(def: &practices::PracticeDefinition) -> Vec<String> {
-    if !practices::is_point_based(def.analysis_kind.as_deref()) {
-        return vec![];
-    }
-    def.series_parts()
-}
-
 fn guard_series_part(
     before: &practices::PracticeDefinition,
     after: &practices::PracticeDefinition,
     what: &str,
 ) -> Result<(), AppError> {
-    let after_parts = series_parts(after);
-    let before_parts = series_parts(before);
+    let after_parts = after.series_parts();
+    let before_parts = before.series_parts();
     if after_parts.len() > 1 && !after_parts.iter().all(|p| before_parts.contains(p)) {
         return Err(AppError::bad_request(format!(
             "No se puede {what}: las magnitudes por punto forman una sola serie y tienen que \
@@ -1220,7 +1217,7 @@ pub(super) async fn create_result(
         "guardar el mensurando",
     )?;
     Ok(Json(
-        practices::create_result_in_section(&state.pool, &id, input, section_id.as_deref()).await?,
+        practices::create_result(&state.pool, &id, input, section_id.as_deref()).await?,
     ))
 }
 
@@ -1977,7 +1974,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(series_parts(&cc), vec!["p2-cc-potencia".to_string()]);
+        assert_eq!(cc.series_parts(), vec!["p2-cc-potencia".to_string()]);
         let mut split = cc.clone();
         for section in &mut split.sections {
             section.quantities.retain(|q| q != "R");
@@ -2435,6 +2432,40 @@ mod tests {
             true,
         );
         assert!(guard_change(&unsectioned_series, &to_front, "mover la parte").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_statistical_part_can_only_record_data() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let hidro = practices::definition(&pool, "hidrostatica")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut data_only = hidro.clone();
+        let ts = data_only
+            .parts
+            .iter()
+            .find(|p| p.title.contains("Tension") || p.id.ends_with("-ts"))
+            .unwrap()
+            .id
+            .clone();
+        let ts_results: Vec<String> = data_only
+            .results
+            .iter()
+            .filter(|r| data_only.result_part(&r.symbol) == Some(ts.as_str()))
+            .map(|r| r.symbol.clone())
+            .collect();
+        data_only
+            .results
+            .retain(|r| !ts_results.contains(&r.symbol));
+        for section in &mut data_only.sections {
+            section.results.retain(|r| !ts_results.contains(r));
+        }
+        assert!(
+            structure_problems(&data_only).is_empty(),
+            "{:?}",
+            structure_problems(&data_only)
+        );
     }
 
     #[tokio::test]
