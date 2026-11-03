@@ -171,10 +171,8 @@ pub async fn duplicate_practice(
     for old in parts {
         let new = uuid::Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO practice_parts (id, practice_id, title, position, analysis_kind, \
-             x_formula, y_formula, operator_count) \
-             SELECT ?1, ?2, title, position, analysis_kind, x_formula, y_formula, operator_count \
-             FROM practice_parts WHERE id = ?3",
+            "INSERT INTO practice_parts (id, practice_id, title, position) \
+             SELECT ?1, ?2, title, position FROM practice_parts WHERE id = ?3",
         )
         .bind(&new)
         .bind(&id)

@@ -577,7 +577,13 @@ pub fn compute_regresion(
     pr_allowed.push("intercept".into());
     let mut point_results_out = Vec::with_capacity(point_results.len());
     for pr in point_results {
-        let tree = compile_formula(&pr.formula, &pr_allowed)?;
+        let tree = match compile_formula(&pr.formula, &pr_allowed) {
+            Ok(tree) => tree,
+            Err(e) => {
+                warnings.push(skipped("la derivada por punto", &pr.symbol, &e));
+                continue;
+            }
+        };
         let values: Vec<f64> = contexts
             .iter()
             .map(|ctx| {
@@ -637,7 +643,13 @@ pub fn compute_regresion(
     let mut referenced_endpoints: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     for agg in aggregates {
-        let tree = compile_formula(&agg.formula, &agg_allowed)?;
+        let tree = match compile_formula(&agg.formula, &agg_allowed) {
+            Ok(tree) => tree,
+            Err(e) => {
+                warnings.push(skipped("el mensurando agregado", &agg.symbol, &e));
+                continue;
+            }
+        };
         for v in tree.iter_variable_identifiers() {
             referenced_endpoints.insert(v.to_string());
         }
@@ -772,6 +784,10 @@ pub fn compute_curva(
     Ok((analysis, contexts))
 }
 
+fn skipped(what: &str, symbol: &str, error: &anyhow::Error) -> String {
+    format!("No se calculó {what} {symbol}: {error}. Revisá su fórmula en la práctica.")
+}
+
 fn derive_results(
     results: &[PracticeResult],
     allowed: &[String],
@@ -781,7 +797,13 @@ fn derive_results(
 ) -> anyhow::Result<Vec<DerivedComputation>> {
     let mut derived = Vec::with_capacity(results.len());
     for result in results {
-        let tree = compile_formula(&result.formula, allowed)?;
+        let tree = match compile_formula(&result.formula, allowed) {
+            Ok(tree) => tree,
+            Err(e) => {
+                warnings.push(skipped("el mensurando", &result.symbol, &e));
+                continue;
+            }
+        };
         let vars: Vec<String> = tree
             .iter_variable_identifiers()
             .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
@@ -909,7 +931,7 @@ pub async fn analyze(
         analysis.parts.push(PartAnalysis {
             part_id: part.id.clone(),
             title: part.title.clone(),
-            analysis_kind: part.kind().to_string(),
+            analysis_kind: definition.part_kind(part).to_string(),
             analysis: part_analysis,
         });
     }

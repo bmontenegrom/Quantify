@@ -37,7 +37,7 @@ pub async fn definition(
     let aggregates = aggregates_for(pool, practice_id).await?;
     let parts = super::parts_for(pool, practice_id).await?;
     let sections = super::sections_for(pool, practice_id).await?;
-    let mut definition = PracticeDefinition {
+    Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
         status: row.status,
         analysis_kind: row.analysis_kind,
@@ -52,9 +52,7 @@ pub async fn definition(
         aggregates,
         parts,
         sections,
-    };
-    definition.resolve_part_kinds();
-    Ok(Some(definition))
+    }))
 }
 
 trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin {

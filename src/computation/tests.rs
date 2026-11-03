@@ -2547,3 +2547,17 @@ async fn analyze_rejects_a_slot_outside_the_balance() {
         .await
         .is_ok());
 }
+
+#[test]
+fn compute_skips_a_result_it_cannot_evaluate_and_keeps_the_rest() {
+    let quantities = vec![quantity("l"), quantity("a")];
+    let results = vec![result("ok", "l*a"), result("roto", "l*zzz")];
+    let measurements = vec![measurement("l", &[2.0]), measurement("a", &[3.0])];
+    let analysis = compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
+    let symbols: Vec<&str> = analysis.derived.iter().map(|d| d.symbol.as_str()).collect();
+    assert_eq!(symbols, ["ok"]);
+    assert!(analysis
+        .warnings
+        .iter()
+        .any(|w| w.contains("roto") && w.contains("zzz")));
+}

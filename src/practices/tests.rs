@@ -2215,14 +2215,17 @@ async fn shared_results_that_use_one_part_move_into_it() {
 }
 
 #[tokio::test]
-async fn parts_without_a_saved_kind_take_the_practice_one() {
+async fn the_series_part_takes_the_practice_kind_and_the_rest_are_statistical() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
     let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
-    let kinds: Vec<&str> = cc.parts.iter().map(|p| p.kind()).collect();
+    let kinds: Vec<&str> = cc.parts.iter().map(|p| cc.part_kind(p)).collect();
     assert_eq!(kinds, ["estadistico", "estadistico", "curva"]);
     let hidro = definition(&pool, "hidrostatica").await.unwrap().unwrap();
-    assert!(hidro.parts.iter().all(|p| p.kind() == "estadistico"));
+    assert!(hidro
+        .parts
+        .iter()
+        .all(|p| hidro.part_kind(p) == "estadistico"));
 
     let potencia = cc.parts.iter().find(|p| p.id == "p2-cc-potencia").unwrap();
     let view = cc.part_view(potencia);
@@ -2334,4 +2337,57 @@ async fn shared_results_that_use_curve_values_move_into_the_series_part() {
     let fixed = definition(&pool, "p2-cc").await.unwrap().unwrap();
     assert_eq!(fixed.result_part("P_max_e"), Some("p2-cc-potencia"));
     assert_eq!(fixed.result_part("RP_max_e"), Some("p2-cc-potencia"));
+}
+
+#[tokio::test]
+async fn curve_practices_do_not_inherit_a_leftover_operator_count() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let mut cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    cc.operator_count = Some(2);
+    assert_eq!(cc.shared_view().operator_count, None);
+    assert!(cc
+        .parts
+        .iter()
+        .all(|p| cc.part_view(p).operator_count.is_none()));
+    let mut p1 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    p1.operator_count = Some(2);
+    assert_eq!(p1.shared_view().operator_count, Some(2));
+}
+
+#[tokio::test]
+async fn the_migration_leaves_a_result_unsectioned_when_its_part_has_no_section() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query("DELETE FROM practice_sections WHERE part_id IN ('p2-cc-serie', 'p2-cc-potencia')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE practice_results SET section_id = \
+         (SELECT id FROM practice_sections WHERE practice_id = 'p2-cc' AND part_id IS NULL) \
+         WHERE practice_id = 'p2-cc' AND symbol = 'P_max_e'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "DELETE FROM applied_migrations WHERE name = '2026-11-mensurandos-compartidos-a-su-parte'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let before = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(before.result_part("P_max_e"), None);
+
+    layout::migrate_shared_results_to_parts(&pool)
+        .await
+        .unwrap();
+    let after = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert!(after
+        .sections
+        .iter()
+        .all(|s| !s.results.contains(&"P_max_e".to_string())));
+    let series = after.series_part().unwrap().id.clone();
+    assert_eq!(after.result_part("P_max_e"), Some(series.as_str()));
 }

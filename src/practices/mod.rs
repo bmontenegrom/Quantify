@@ -74,13 +74,6 @@ pub struct PracticePart {
     pub practice_id: String,
     pub title: String,
     pub position: i64,
-    pub analysis_kind: Option<String>,
-    pub x_formula: Option<String>,
-    pub y_formula: Option<String>,
-    pub operator_count: Option<i64>,
-    #[sqlx(skip)]
-    #[serde(skip)]
-    pub inherited: bool,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]

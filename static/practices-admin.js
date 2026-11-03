@@ -806,7 +806,7 @@ function renderQuantitiesList(def, practiceId) {
 function newResultSectionHtml(def) {
   const sections = def?.sections ?? [];
   if (!sections.length) return "";
-  const options = [`<option value="">Sin sección (compartido)</option>`]
+  const options = [`<option value="">Sin sección (va a la parte de los datos que usa)</option>`]
     .concat(sections.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(sectionLabel(def, s))}</option>`))
     .join("");
   return `<label>Sección <select name="section_id">${options}</select></label>`;

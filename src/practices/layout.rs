@@ -6,8 +6,7 @@ const LEGACY_LAYOUT: &str = "2026-11-partes-y-secciones";
 
 pub async fn parts_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticePart>> {
     Ok(sqlx::query_as::<_, PracticePart>(
-        "SELECT id, practice_id, title, position, analysis_kind, x_formula, y_formula, \
-         operator_count FROM practice_parts \
+        "SELECT id, practice_id, title, position FROM practice_parts \
          WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
@@ -69,11 +68,6 @@ pub async fn create_part(
         practice_id: practice_id.to_string(),
         title: input.title.trim().to_string(),
         position,
-        analysis_kind: None,
-        x_formula: None,
-        y_formula: None,
-        operator_count: None,
-        inherited: false,
     })
 }
 
@@ -467,7 +461,7 @@ pub(super) async fn migrate_shared_results_to_parts(pool: &SqlitePool) -> anyhow
         sqlx::query_scalar("SELECT DISTINCT practice_id FROM practice_parts")
             .fetch_all(pool)
             .await?;
-    let mut moves: Vec<(String, String)> = Vec::new();
+    let mut moves: Vec<(String, Option<String>)> = Vec::new();
     for practice_id in practice_ids {
         let Some(def) = super::definition(pool, &practice_id).await? else {
             continue;
@@ -476,22 +470,15 @@ pub(super) async fn migrate_shared_results_to_parts(pool: &SqlitePool) -> anyhow
             if def.result_part(&result.symbol).is_some() {
                 continue;
             }
-            let mut parts: Vec<&str> = crate::computation::formula_symbols(&result.formula)
-                .iter()
-                .filter_map(|s| def.symbol_part(s))
-                .collect();
-            parts.sort();
-            parts.dedup();
-            let [part] = parts.as_slice() else {
+            let Some(part) = def.inferred_part(&result.formula) else {
                 continue;
             };
-            if let Some(section) = def
+            let section = def
                 .sections
                 .iter()
                 .find(|s| s.part_id.as_deref() == Some(part))
-            {
-                moves.push((result.id.clone(), section.id.clone()));
-            }
+                .map(|s| s.id.clone());
+            moves.push((result.id.clone(), section));
         }
     }
     let mut tx = pool.begin().await?;

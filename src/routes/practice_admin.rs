@@ -125,17 +125,6 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
         problems.extend(kind_problems(def));
         return problems;
     }
-    let point_parts = def
-        .parts
-        .iter()
-        .filter(|p| practices::is_point_based(Some(p.kind())))
-        .count();
-    if point_parts > 1 {
-        problems.push(
-            "tiene mas de una parte de regresion o curva (por ahora solo una parte puede tener serie)"
-                .to_string(),
-        );
-    }
     if def.results.is_empty()
         && def.curves.is_empty()
         && def.point_results.is_empty()
@@ -1028,7 +1017,6 @@ fn guard_change(
     after: &practices::PracticeDefinition,
     what: &str,
 ) -> Result<(), AppError> {
-    let after = &after.reresolved();
     guard_series_part(before, after, what)?;
     if after.status == "publicada" {
         let before_missing = structure_problems(before);
@@ -1442,10 +1430,41 @@ pub(super) async fn create_part(
 ) -> Result<Json<practices::PracticePart>, AppError> {
     require_teacher(&state, &headers).await?;
     require_title(&input.title)?;
-    ensure_practice(&state, &id).await?;
+    let before = load_definition(&state, &id).await?;
+    guard_change(&before, &with_new_part(&before), "agregar la parte")?;
     Ok(Json(
         practices::create_part(&state.pool, &id, &input).await?,
     ))
+}
+
+fn with_new_part(def: &practices::PracticeDefinition) -> practices::PracticeDefinition {
+    let mut after = def.clone();
+    after.parts.push(practices::PracticePart {
+        id: String::new(),
+        practice_id: def.practice_id.clone(),
+        title: String::new(),
+        position: i64::MAX,
+    });
+    after
+}
+
+fn with_part_moved(
+    def: &practices::PracticeDefinition,
+    part_id: &str,
+    up: bool,
+) -> practices::PracticeDefinition {
+    let mut after = def.clone();
+    if let Some(index) = after.parts.iter().position(|p| p.id == part_id) {
+        let other = if up {
+            index.checked_sub(1)
+        } else {
+            Some(index + 1)
+        };
+        if let Some(other) = other.filter(|o| *o < after.parts.len()) {
+            after.parts.swap(index, other);
+        }
+    }
+    after
 }
 
 pub(super) async fn update_part(
@@ -1491,6 +1510,13 @@ pub(super) async fn move_part(
     Path((id, pid)): Path<(String, String)>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let before = load_definition(&state, &id).await?;
+    guard_change(
+        &before,
+        &with_part_moved(&before, &pid, body.up),
+        "mover la parte",
+    )?;
     move_in_list(
         &state,
         &headers,
@@ -2121,12 +2147,6 @@ mod tests {
                     && message.contains("RA_p")),
             "{problems:?}"
         );
-
-        let mut two_series = cc.clone();
-        two_series.parts[0].analysis_kind = Some("curva".into());
-        assert!(structure_problems(&two_series)
-            .iter()
-            .any(|p| p.contains("mas de una parte")));
     }
 
     #[tokio::test]
@@ -2307,7 +2327,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let part = &def.parts[0];
-        assert_eq!(part.kind(), "regresion_lineal");
+        assert_eq!(def.part_kind(part), "regresion_lineal");
         assert!(def.part_has_content(part));
         assert!(
             structure_problems(&def).is_empty(),
@@ -2316,7 +2336,7 @@ mod tests {
         );
 
         let mut no_axes = def.clone();
-        no_axes.parts[0].x_formula = None;
+        no_axes.x_formula = None;
         assert!(structure_problems(&no_axes)
             .iter()
             .any(|p| p.contains("ejes")));
@@ -2350,6 +2370,71 @@ mod tests {
             section.quantities.retain(|q| q != "I");
         }
         assert_eq!(cc.series_parts(), ["p2-cc-serie", "p2-cc-potencia"]);
+    }
+
+    #[tokio::test]
+    async fn adding_or_moving_parts_cannot_strand_a_result() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let fluidos = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(guard_change(&fluidos, &with_new_part(&fluidos), "agregar la parte").is_ok());
+
+        let mut shared_section = fluidos.clone();
+        shared_section.sections.push(practices::PracticeSection {
+            id: "s".into(),
+            practice_id: fluidos.practice_id.clone(),
+            part_id: None,
+            title: "Resultados".into(),
+            position: 0,
+            quantities: vec![],
+            results: vec!["mu".into()],
+        });
+        assert!(formula_problems(&shared_section).is_empty());
+        assert!(guard_change(
+            &shared_section,
+            &with_new_part(&shared_section),
+            "agregar la parte"
+        )
+        .is_err());
+
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut unsectioned_series = cc.clone();
+        for section in &mut unsectioned_series.sections {
+            section.quantities.retain(|q| q != "R" && q != "I");
+            section
+                .results
+                .retain(|r| r != "P_max_e" && r != "RP_max_e");
+            if section.part_id.as_deref() == Some("p2-cc-serie")
+                && section.quantities.contains(&"Vg_s".to_string())
+            {
+                section.results.push("P_max_e".into());
+                section.results.push("RP_max_e".into());
+            }
+        }
+        assert_eq!(
+            unsectioned_series.series_part().map(|p| p.id.as_str()),
+            Some("p2-cc-serie")
+        );
+        assert!(
+            formula_problems(&unsectioned_series).is_empty(),
+            "{:?}",
+            formula_problems(&unsectioned_series)
+        );
+        let first = unsectioned_series.parts[0].id.clone();
+        let last = unsectioned_series.parts.last().unwrap().id.clone();
+        let moved = with_part_moved(&unsectioned_series, &last, true);
+        assert_eq!(moved.parts[0].id, first);
+        let to_front = with_part_moved(
+            &unsectioned_series,
+            &unsectioned_series.parts[1].id.clone(),
+            true,
+        );
+        assert!(guard_change(&unsectioned_series, &to_front, "mover la parte").is_err());
     }
 
     #[tokio::test]
