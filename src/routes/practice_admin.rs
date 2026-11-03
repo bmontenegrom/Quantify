@@ -132,12 +132,6 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
     {
         problems.push("no tiene mensurandos".to_string());
     }
-    if practices::is_point_based(def.analysis_kind.as_deref()) && def.series_part().is_none() {
-        problems.push(
-            "es de regresion o curva pero ninguna parte lleva la serie (elegila en \"Partes y secciones\")"
-                .to_string(),
-        );
-    }
     if let Some(series) = def.stray_series() {
         problems.push(format!(
             "tiene magnitudes por punto fuera de la parte \"{}\", que es la de la serie",
@@ -1452,8 +1446,15 @@ pub(super) async fn create_part(
     let before = load_definition(&state, &id).await?;
     guard_change(&before, &with_new_part(&before), "agregar la parte")?;
     let mut created = practices::create_part(&state.pool, &id, &input).await?;
+    let chosen = before.parts.iter().any(|p| p.analysis_kind.is_some());
+    if chosen {
+        created.analysis_kind = Some("estadistico".into());
+    }
     let mut after = before;
     after.parts.push(created.clone());
+    if chosen {
+        practices::save_part_kinds(&state.pool, &after).await?;
+    }
     created.effective_kind = after.part_kind(&created).to_string();
     Ok(Json(created))
 }
@@ -2673,9 +2674,6 @@ mod tests {
         without_a.parts.retain(|p| p.id != a);
         without_a.sections[0].part_id = None;
         assert!(without_a.series_part().is_none());
-        assert!(structure_problems(&without_a)
-            .iter()
-            .any(|p| p.contains("ninguna parte lleva la serie")));
     }
 
     #[tokio::test]
@@ -2736,6 +2734,41 @@ mod tests {
         assert_eq!(without_a.analysis_kind.as_deref(), Some("regresion_lineal"));
         assert_eq!(without_a.series_part().unwrap().id, b);
         assert!(guard_change(&two, &without_a, "eliminar la parte").is_ok());
+    }
+
+    #[tokio::test]
+    async fn once_kinds_are_chosen_new_parts_are_statistical() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let chosen = with_part_kind(&cc, "p2-cc-serie", "estadistico").unwrap();
+        practices::save_part_kinds(&pool, &chosen).await.unwrap();
+        let part =
+            practices::create_part(&pool, "p2-cc", &practices::PartInput { title: "C".into() })
+                .await
+                .unwrap();
+        let mut after = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        after
+            .parts
+            .iter_mut()
+            .find(|p| p.id == part.id)
+            .unwrap()
+            .analysis_kind = Some("estadistico".into());
+        practices::save_part_kinds(&pool, &after).await.unwrap();
+        let reloaded = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(reloaded.parts.iter().all(|p| p.analysis_kind.is_some()));
+        let without_potencia = with_part_deleted(&reloaded, "p2-cc-potencia");
+        let without_serie = with_part_deleted(&without_potencia, "p2-cc-serie");
+        assert_eq!(without_serie.analysis_kind.as_deref(), Some("estadistico"));
+        assert!(without_serie.series_part().is_none());
     }
 
     #[tokio::test]

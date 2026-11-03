@@ -1167,7 +1167,7 @@ async function deleteLayoutItem(list, id, practiceId) {
     await deleteJson(`/api/practices/${practiceId}/${list}/${id}`);
     [state.practiceDefinition, state.practices] = await Promise.all([
       fetchJson(`/api/practices/${practiceId}/definition`),
-      fetchJson("/api/practices"),
+      list === "parts" ? fetchJson("/api/practices") : state.practices,
     ]);
   }, list === "parts" ? "Parte eliminada" : "Sección eliminada");
 }
