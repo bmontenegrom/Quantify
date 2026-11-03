@@ -30,7 +30,6 @@ function renderSubmissionFilters() {
   const tableEl = filterTableEl();
   if (!groupEl || !tableEl) return;
 
-  // Construye opciones de grupo desde state.academic (todos los cursos)
   const groups = (state.academic?.courses ?? []).flatMap((c) =>
     c.groups.map((g) => ({ id: g.id, label: `${g.name} (${c.name})` })),
   );
@@ -41,7 +40,6 @@ function renderSubmissionFilters() {
       .map((g) => `<option value="${escapeHtml(g.id)}" ${g.id === currentGroup ? "selected" : ""}>${escapeHtml(g.label)}</option>`)
       .join("");
 
-  // Mesas disponibles en las entregas del grupo seleccionado (o todas)
   const tableNumbers = [
     ...new Set(
       state.submissions
@@ -57,7 +55,6 @@ function renderSubmissionFilters() {
       .map((n) => `<option value="${n}" ${String(n) === String(currentTable) ? "selected" : ""}>Mesa ${n}</option>`)
       .join("");
 
-  // Listeners (registrados solo una vez via dataset flag)
   if (!groupEl.dataset.wired) {
     groupEl.dataset.wired = "1";
     groupEl.addEventListener("change", () => {
@@ -141,7 +138,6 @@ function renderTeacherSubmissionGroups() {
           <h4>${escapeHtml(course)}</h4>
           ${Object.entries(byGroup)
             .map(([group, groupItems]) => {
-              // Si hay table_numbers, agrupa por mesa dentro del grupo
               const hasTables = groupItems.some((s) => s.table_number != null);
               const body = hasTables
                 ? renderTableGroups(groupItems)
@@ -164,7 +160,6 @@ function renderTeacherSubmissionGroups() {
 }
 
 function renderTableGroups(items) {
-  // Primero los que tienen mesa (agrupados), luego los legacy sin mesa
   const withTable = items.filter((s) => s.table_number != null);
   const withoutTable = items.filter((s) => s.table_number == null);
   const byTable = groupBy(withTable, (s) => String(s.table_number));
@@ -200,8 +195,6 @@ function submissionItemHtml(item) {
 
 export async function openSubmissionWorkspace(id) {
   state.activeSubmissionId = id;
-  // El workspace vive en la vista "submissions": activarla por si se llega desde otra vista
-  // (p. ej. "Ver informe" en el formulario de práctica). Import dinámico para evitar el ciclo.
   const { selectView } = await import("./navigation.js");
   selectView("submissions");
   renderSubmissionsPage();
@@ -273,8 +266,6 @@ export function teacherCommentMarkup(submission) {
     </div>`;
 }
 
-/** Observaciones/comentarios libres que el alumno dejó junto a su entrega, si los hay. No se
- *  gatea por `results_visible_to_student`: se ve siempre, igual que los resultados finales. */
 export function studentCommentMarkup(submission) {
   const comment = (submission.student_comment ?? "").trim();
   if (!comment) return "";

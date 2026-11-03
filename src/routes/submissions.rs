@@ -1,6 +1,3 @@
-//! Handlers de `/api/submissions*`: entregas (CSV y formulario), revisión docente, resultados
-//! del alumno, invitaciones/miembros del informe compartido.
-
 use super::{current_user, read_text, require_teacher, required, Health, SharedState};
 use crate::{
     analysis,
@@ -16,7 +13,6 @@ use axum::{
 };
 use serde::Deserialize;
 
-/// `GET /api/submissions`: lista de entregas visibles para el usuario actual.
 pub(super) async fn submissions(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -27,8 +23,6 @@ pub(super) async fn submissions(
     ))
 }
 
-/// `GET /api/submissions/{id}`: detalle de una entrega; un estudiante solo puede ver
-/// informes donde es miembro aceptado (o el owner original).
 pub(super) async fn submission_detail(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -47,13 +41,10 @@ pub(super) async fn submission_detail(
     Ok(Json(gate_analysis(submission, &user)))
 }
 
-/// `true` si hay que ocultarle el cálculo a este viewer: solo los estudiantes, y solo
-/// mientras el docente no haya habilitado la visibilidad de la entrega. Docente/admin nunca.
 fn analysis_hidden_for(role: &str, results_visible: bool) -> bool {
     !matches!(role, "docente" | "admin") && !results_visible
 }
 
-/// Oculta el cálculo automático (`analysis = null`) cuando corresponde según [`analysis_hidden_for`].
 fn gate_analysis(
     mut submission: db::SubmissionDetail,
     user: &db::AuthUser,
@@ -65,8 +56,6 @@ fn gate_analysis(
     submission
 }
 
-/// `POST /api/submissions`: recibe un multipart (curso/grupo/práctica + CSV), analiza el CSV,
-/// valida permisos y crea la entrega.
 pub(super) async fn create_submission(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -129,8 +118,6 @@ pub(super) async fn create_submission(
     Ok(Json(gate_analysis(created, &user)))
 }
 
-/// `POST /api/submissions/form`: crea una entrega por formulario (lecturas crudas) calculando
-/// las incertidumbres automáticamente. Valida acceso al curso/grupo/práctica.
 pub(super) async fn create_form_submission(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -156,23 +143,17 @@ pub(super) async fn create_form_submission(
     Ok(Json(gate_analysis(detail, &user)))
 }
 
-/// Cuerpo para editar una entrega por formulario (lecturas + meta de depuración).
 #[derive(serde::Deserialize)]
 pub(super) struct EditFormBody {
     measurements: Vec<computation::MeasurementInput>,
     #[serde(default)]
     meta: Option<serde_json::Value>,
-    /// `None` = no tocar los cálculos del alumno ya guardados; `Some(vec)` los reemplaza.
     #[serde(default)]
     student_results: Option<Vec<db::StudentResultInput>>,
-    /// Observaciones/comentarios libres del alumno; se reemplaza por completo en cada edición.
     #[serde(default)]
     student_comment: Option<String>,
 }
 
-/// `POST /api/submissions/{id}/edit`: el alumno dueño reemplaza sus lecturas dentro de la
-/// ventana de edición (submitted_at + horas del curso). Recalcula el análisis sin tocar
-/// `submitted_at`. Rechaza si no es el dueño, venció el plazo, o ya fue corregida/visible.
 pub(super) async fn edit_form_submission(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -224,9 +205,6 @@ pub(super) async fn edit_form_submission(
     Ok(Json(gate_analysis(updated, &user)))
 }
 
-/// `DELETE /api/submissions/{id}`: el alumno dueño (o miembro aceptado) cancela su entrega dentro
-/// de la ventana de edición, borrándola por completo (mediciones, resultados propios e integrantes
-/// se van con ella). Mismas reglas de propiedad/ventana que `edit_form_submission`.
 pub(super) async fn cancel_submission(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -262,7 +240,6 @@ pub(super) async fn cancel_submission(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/submissions/{id}/review`: registra la revisión docente (estado/comentario/nota).
 pub(super) async fn review_submission(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -285,15 +262,11 @@ pub(super) async fn review_submission(
     Ok(Json(updated))
 }
 
-/// Cuerpo para guardar los mensurandos calculados por el estudiante.
 #[derive(Debug, Deserialize)]
 pub(super) struct SaveStudentResults {
     results: Vec<db::StudentResultInput>,
 }
 
-/// `POST /api/submissions/{id}/student-results`: el estudiante dueño guarda sus mensurandos
-/// finales (valor ± U) para compararlos con el cálculo automático. Solo se permite mientras el
-/// docente no haya habilitado la visibilidad del cálculo (para no copiar el resultado).
 pub(super) async fn set_student_results(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -316,10 +289,6 @@ pub(super) async fn set_student_results(
             "no podes modificar tus calculos una vez que el docente habilito los resultados",
         ));
     }
-    // Los símbolos deben corresponder a mensurandos de la práctica (resultados finales, agregados
-    // is_final y resultados por corrida `Re#k`). Se resuelve la definición acá (un fallo real de DB
-    // sube como 500 vía `?`, sin filtrar detalles) y se valida con la misma lógica pura que la
-    // entrega por formulario, para no desincronizar los dos caminos.
     let definition = practices::definition(&state.pool, &submission.practice_id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
@@ -332,7 +301,6 @@ pub(super) async fn set_student_results(
     Ok(Json(gate_analysis(updated, &user)))
 }
 
-/// `GET /api/submissions/invitations`: invitaciones vigentes del alumno autenticado.
 pub(super) async fn submission_invitations(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -342,7 +310,6 @@ pub(super) async fn submission_invitations(
     Ok(Json(invitations))
 }
 
-/// Query params para `GET /api/submissions/existing`.
 #[derive(Debug, Deserialize)]
 pub(super) struct ExistingReportQuery {
     practice_id: String,
@@ -350,8 +317,6 @@ pub(super) struct ExistingReportQuery {
     table_number: i64,
 }
 
-/// `GET /api/submissions/existing`: busca si ya existe un informe para (práctica, grupo, mesa).
-/// Devuelve `null` o `{ submission_id, is_member, is_owner }`.
 pub(super) async fn existing_report(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -382,7 +347,6 @@ pub(super) async fn existing_report(
     }
 }
 
-/// `POST /api/submissions/{id}/accept`: el alumno acepta una invitación al informe compartido.
 pub(super) async fn accept_invitation(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -410,8 +374,6 @@ pub(super) async fn accept_invitation(
     Ok(Json(gate_analysis(submission, &user)))
 }
 
-/// `POST /api/submissions/{id}/decline`: el alumno declina la invitación al informe.
-/// Elimina la fila pending del alumno en `report_members`. Idempotente: 200 si ya no existía.
 pub(super) async fn decline_invitation(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -428,7 +390,6 @@ pub(super) async fn decline_invitation(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `GET /api/submissions/{id}/members`: lista los miembros del informe (docente/admin).
 pub(super) async fn submission_members(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -439,7 +400,6 @@ pub(super) async fn submission_members(
     Ok(Json(members))
 }
 
-/// Cuerpo para agregar un miembro a un informe (docente).
 #[derive(Debug, Deserialize)]
 pub(super) struct AddMemberBody {
     user_id: String,
@@ -447,7 +407,6 @@ pub(super) struct AddMemberBody {
     force_accept: bool,
 }
 
-/// `POST /api/submissions/{id}/members`: el docente agrega un miembro (accepted directamente si force_accept).
 pub(super) async fn add_submission_member(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -464,13 +423,11 @@ pub(super) async fn add_submission_member(
     Ok(Json(db::report_members_for(&state.pool, &id).await?))
 }
 
-/// Cuerpo para quitar un miembro de un informe (docente).
 #[derive(Debug, Deserialize)]
 pub(super) struct RemoveMemberBody {
     user_id: String,
 }
 
-/// `POST /api/submissions/{id}/members/remove`: el docente quita un miembro del informe.
 pub(super) async fn remove_submission_member(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -485,14 +442,12 @@ pub(super) async fn remove_submission_member(
     Ok(Json(db::report_members_for(&state.pool, &id).await?))
 }
 
-/// Cuerpo para actualizar grupo y/o mesa de un informe (docente).
 #[derive(Debug, Deserialize)]
 pub(super) struct UpdateReportMeta {
     group_id: Option<String>,
     table_number: Option<i64>,
 }
 
-/// `POST /api/submissions/{id}/report`: el docente actualiza grupo y/o mesa del informe.
 pub(super) async fn update_report_meta(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -518,11 +473,9 @@ mod tests {
 
     #[test]
     fn analysis_hidden_only_for_students_without_visibility() {
-        // Docente/admin: nunca se oculta, esté o no habilitado.
         assert!(!analysis_hidden_for("docente", false));
         assert!(!analysis_hidden_for("admin", false));
         assert!(!analysis_hidden_for("docente", true));
-        // Estudiante: oculto hasta que el docente habilite.
         assert!(analysis_hidden_for("estudiante", false));
         assert!(!analysis_hidden_for("estudiante", true));
     }

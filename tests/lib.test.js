@@ -39,8 +39,6 @@ import {
   validateMeasurements,
 } from "../static/lib.js";
 
-// Fixture chico de contexto académico: 2 cursos, el estudiante s1 está en c1 (grupo g1)
-// pero no en c2; g2 de c1 queda libre para s1.
 function academicFixture() {
   return {
     courses: [
@@ -104,7 +102,6 @@ test("symbolHtml escapa HTML y convierte dígitos pegados a letras en subíndice
   assert.equal(symbolHtml("tmedio"), "t<sub>1/2</sub>");
   assert.equal(symbolHtml("T_oc"), "T<sub>OC</sub>");
   assert.equal(symbolHtml("R_cap"), "R<sub>cap</sub>");
-  // Subíndices de 1-2 caracteres en mayúscula, palabras tal cual.
   assert.equal(symbolHtml("E_medio"), "E<sub>medio</sub>");
   assert.equal(symbolHtml("<R1>"), "&lt;R<sub>1</sub>&gt;");
 });
@@ -115,7 +112,6 @@ test("symbolHtml muestra los nombres de letras griegas como la letra", () => {
   assert.equal(symbolHtml("gamma1"), "γ<sub>1</sub>");
   assert.equal(symbolHtml("mu_agua"), "μ<sub>agua</sub>");
   assert.equal(symbolHtml("tau_exp"), "τ<sub>exp</sub>");
-  // Solo si el nombre griego termina ahí: `mult`/`taux` son símbolos propios, no μ/τ.
   assert.equal(symbolHtml("mult"), "mult");
   assert.equal(symbolHtml("taux"), "taux");
   assert.equal(symbolHtml("rhoA_b"), "rhoA<sub>B</sub>");
@@ -123,37 +119,28 @@ test("symbolHtml muestra los nombres de letras griegas como la letra", () => {
 
 test("symbolHtml no anida subíndices y inlineMathHtml usa la misma regla", () => {
   assert.equal(symbolHtml("R_load2"), "R<sub>load2</sub>");
-  // Varios guiones bajos: todo va al subíndice, separado por coma.
   assert.equal(symbolHtml("crud_test_qty"), "crud<sub>test,qty</sub>");
   assert.equal(symbolHtml("f_res_exp"), "f<sub>res,exp</sub>");
-  // Dígitos y después guion bajo (masas de Hidrostática): un solo subíndice.
   assert.equal(symbolHtml("m1_2"), "m<sub>1,2</sub>");
   assert.equal(symbolHtml("R1_load"), "R<sub>1,load</sub>");
-  // Letras con tilde dentro del subíndice: no lo cortan.
   assert.equal(symbolHtml("v_máx"), "v<sub>máx</sub>");
   assert.equal(inlineMathHtml("T_ñu"), "T<sub>ÑU</sub>");
   assert.equal(inlineMathHtml("ver tabla_índice"), "ver tabla_índice");
-  // En nombres libres solo `_` + 1-2 caracteres: una palabra con guion bajo queda tal cual.
   assert.equal(inlineMathHtml("ver tabla_resumen"), "ver tabla_resumen");
   assert.equal(inlineMathHtml("Tiempo T_oc"), "Tiempo T<sub>OC</sub>");
 });
 
 test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)", () => {
-  // Magnitudes medidas por parte: se muestran igual que su base, sin sufijo. Vg y RA llevan
-  // subíndice (coherente con el resto: R1, rho_e...) aunque el símbolo guardado no tenga "_".
   assert.equal(symbolHtml("Vg_s"), "V<sub>G</sub>");
   assert.equal(symbolHtml("Vg_p"), "V<sub>G</sub>");
   assert.equal(symbolHtml("Vg_c"), "V<sub>G</sub>");
   assert.equal(symbolHtml("RA_s"), "R<sub>A</sub>");
   assert.equal(symbolHtml("VR1_s"), symbolHtml("VR1"));
   assert.equal(symbolHtml("VR2_p"), symbolHtml("VR2"));
-  // Teóricos (sufijo _t adicional): mismo resultado que la magnitud medida.
   assert.equal(symbolHtml("VR1_s_t"), "VR<sub>1</sub>");
   assert.equal(symbolHtml("VR3_p_t"), "VR<sub>3</sub>");
   assert.equal(symbolHtml("I_s"), "I");
   assert.equal(symbolHtml("I_p"), "I");
-  // Sin whitelist de la base, no se toca el sufijo: evita falsos positivos en otras prácticas
-  // (h_max no es "h" de la parte serie, es una magnitud propia de Fluidos II).
   assert.equal(symbolHtml("h_max"), "h<sub>max</sub>");
 });
 
@@ -166,11 +153,8 @@ test("symbolHtml renderiza los símbolos de CA (RLC): voltajes pp, teo/exp y phi
   assert.equal(symbolHtml("VR_teo"), "V<sub>R,teo</sub>");
   assert.equal(symbolHtml("VR_exp"), "V<sub>R,exp</sub>");
   assert.equal(symbolHtml("I_teo"), "I<sub>teo</sub>");
-  // Los semiejes de Lissajous (a_R, b_R...) no necesitan caso especial: el regex genérico
-  // de subíndice de 1 carácter ya los cubre.
   assert.equal(symbolHtml("a_R"), "a<sub>R</sub>");
   assert.equal(symbolHtml("b_R"), "b<sub>R</sub>");
-  // phi se muestra con el símbolo φ, nunca con la palabra "phi".
   assert.equal(symbolHtml("phiR_teo"), "φ<sub>R,teo</sub>");
   assert.equal(symbolHtml("phiR_exp"), "φ<sub>R,exp</sub>");
   assert.equal(symbolHtml("phiC_teo"), "φ<sub>C,teo</sub>");
@@ -187,7 +171,6 @@ test("inlineMathHtml y unitHtml formatean subíndices y superíndices visibles",
 });
 
 test("cssEscape cae al escape de comillas sin window (Node)", () => {
-  // En Node no hay window.CSS, así que usa el fallback.
   assert.equal(cssEscape('a"b'), 'a\\"b');
   assert.equal(cssEscape("simple"), "simple");
 });
@@ -199,9 +182,7 @@ test("format usa locale es-UY con 5 cifras significativas", () => {
 });
 
 test("formatDate formatea fecha y hora cortas en es-UY", () => {
-  // Fecha fija con offset explícito para que no dependa de la zona del runner.
   const result = formatDate("2026-05-29T15:30:00Z");
-  // es-UY usa dd/mm/aa; afirmamos el patrón en vez del valor exacto (depende de TZ).
   assert.match(result, /\d{1,2}\/\d{1,2}\/\d{2}/);
   assert.match(result, /\d{1,2}:\d{2}/);
 });
@@ -289,18 +270,15 @@ test("studentGroups devuelve los grupos del estudiante con datos del curso", () 
 
 test("availableCoursesForStudent excluye los cursos actuales", () => {
   const academic = academicFixture();
-  // s1 está en c1 → disponible solo c2.
   assert.deepEqual(
     availableCoursesForStudent(academic, "s1").map((c) => c.id),
     ["c2"],
   );
-  // s2 está en ambos → no queda ninguno disponible.
   assert.deepEqual(availableCoursesForStudent(academic, "s2"), []);
 });
 
 test("availableGroupsForStudent ofrece grupos no asignados dentro de sus cursos", () => {
   const academic = academicFixture();
-  // s1 está en c1/g1; dentro de c1 le queda g2 disponible (g3 es de c2, donde no está).
   assert.deepEqual(
     availableGroupsForStudent(academic, "s1").map((g) => g.id),
     ["g2"],
@@ -311,22 +289,18 @@ test("studentGradebooks proyecta solo las libretas con resumen del estudiante", 
   const gradebooks = gradebooksFixture();
   const books = studentGradebooks(gradebooks, "s1");
   assert.deepEqual(books.map((b) => b.course.id), ["c1", "c2"]);
-  // s2 solo tiene resumen en c1.
   assert.deepEqual(studentGradebooks(gradebooks, "s2").map((b) => b.course.id), ["c1"]);
 });
 
 test("studentTotals suma sobre todas las libretas, o null sin notas", () => {
   const gradebooks = gradebooksFixture();
-  // s1: (8/10) + (3/5) = 11/15.
   assert.deepEqual(studentTotals(gradebooks, "s1"), { points: 11, possible: 15 });
   assert.deepEqual(studentTotals(gradebooks, "s2"), { points: 5, possible: 10 });
   assert.equal(studentTotals(gradebooks, "sin-notas"), null);
 });
 
 test("allStudents usa academic.students si viene, si no filtra users por rol", () => {
-  // Sin students explícitos → filtra users por rol estudiante.
   assert.deepEqual(allStudents(academicFixture()).map((u) => u.id), ["s1"]);
-  // Con students explícitos → los usa tal cual.
   const withStudents = { students: [{ id: "x" }, { id: "y" }], users: [] };
   assert.deepEqual(allStudents(withStudents).map((u) => u.id), ["x", "y"]);
 });
@@ -343,7 +317,6 @@ test("analysisKindLabel devuelve etiqueta legible o 'Sin definir'", () => {
   assert.equal(analysisKindLabel("estadistico"), "Estadístico");
   assert.equal(analysisKindLabel("regresion_lineal"), "Regresión lineal");
   assert.equal(analysisKindLabel("curva"), "Curva (sin ajuste)");
-  // Kind eliminado (decisión docente 2026-06: τ se obtiene por medida directa y desfasaje).
   assert.equal(analysisKindLabel("relajacion_exponencial"), "Sin definir");
   assert.equal(analysisKindLabel(null), "Sin definir");
   assert.equal(analysisKindLabel(undefined), "Sin definir");
@@ -360,11 +333,8 @@ test("compatibleInstruments filtra estrictamente por magnitud (sin fallback)", (
     compatibleInstruments(instruments, "longitud").map((i) => i.id),
     ["i1", "i2"],
   );
-  // Sin coincidencias -> lista vacía (filtrado estricto, sin fallback).
   assert.equal(compatibleInstruments(instruments, "tiempo").length, 0);
-  // Sin magnitud -> todos.
   assert.equal(compatibleInstruments(instruments, null).length, 3);
-  // Lista vacía/indefinida -> []
   assert.deepEqual(compatibleInstruments(undefined, "longitud"), []);
 });
 
@@ -377,21 +347,17 @@ test("measureText formatea 'valor ± U' y omite U inválida", () => {
 });
 
 test("regressionPlot escala puntos y recta al lienzo (recta conocida)", () => {
-  // y = 2x + 1 sobre x = 0,1,2; lienzo 320x220, pad 32.
   const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1, 320, 220, 32);
   assert.deepEqual(plot.bounds, { minX: 0, maxX: 2, minY: 1, maxY: 5 });
-  // Eje X: minX -> pad, maxX -> width-pad, medio -> centro.
   assert.deepEqual(plot.scatter, [
     { cx: 32, cy: 188 },
     { cx: 160, cy: 110 },
     { cx: 288, cy: 32 },
   ]);
-  // La recta cruza desde (minX, minY) abajo-izquierda hasta (maxX, maxY) arriba-derecha.
   assert.deepEqual(plot.line, { x1: 32, y1: 188, x2: 288, y2: 32 });
 });
 
 test("regressionPlot extiende el rango Y para incluir la recta", () => {
-  // Puntos planos (y=0) pero recta con pendiente: el rango Y debe llegar hasta y=5.
   const plot = regressionPlot([[0, 0], [1, 0]], 5, 0, 320, 220, 32);
   assert.equal(plot.bounds.minY, 0);
   assert.equal(plot.bounds.maxY, 5);
@@ -401,9 +367,7 @@ test("regressionPlot extiende el rango Y para incluir la recta", () => {
 test("regressionPlot devuelve null con <2 puntos o rango nulo", () => {
   assert.equal(regressionPlot([], 1, 0), null);
   assert.equal(regressionPlot([[1, 2]], 1, 0), null);
-  // Todos los x iguales -> spanX 0.
   assert.equal(regressionPlot([[1, 2], [1, 4]], 0, 1), null);
-  // y constante y recta plana -> spanY 0.
   assert.equal(regressionPlot([[0, 3], [2, 3]], 0, 3), null);
 });
 
@@ -412,13 +376,11 @@ test("scatterPlot proyecta puntos sin recta (no expone línea)", () => {
   assert.equal(plot.scatter.length, 3);
   assert.equal(plot.line, undefined);
   assert.equal(plot.xLog, false);
-  // Primer punto a la izquierda-abajo, último a la derecha-arriba (eje Y invertido).
   assert.ok(plot.scatter[0].cx < plot.scatter[2].cx);
   assert.ok(plot.scatter[0].cy > plot.scatter[2].cy);
 });
 
 test("scatterPlot con xLog escala el eje x logarítmicamente", () => {
-  // x = 1, 10, 100 -> log10 = 0, 1, 2: equiespaciados en pantalla.
   const plot = scatterPlot([[1, 5], [10, 6], [100, 7]], { xLog: true });
   assert.equal(plot.xLog, true);
   const d1 = plot.scatter[1].cx - plot.scatter[0].cx;
@@ -429,9 +391,7 @@ test("scatterPlot con xLog escala el eje x logarítmicamente", () => {
 test("scatterPlot devuelve null con <2 puntos, rango nulo o x≤0 en log", () => {
   assert.equal(scatterPlot([]), null);
   assert.equal(scatterPlot([[1, 2]]), null);
-  // Todos los x iguales -> spanX 0.
   assert.equal(scatterPlot([[1, 2], [1, 4]]), null);
-  // Eje log con un x no positivo.
   assert.equal(scatterPlot([[0, 2], [10, 4]], { xLog: true }), null);
 });
 
@@ -442,9 +402,9 @@ test("compareResults empareja por símbolo y calcula Δ abs y %", () => {
   assert.deepEqual(row.auto, { value: 70, u: 2 });
   assert.deepEqual(row.student, { value: 73.5, u: 2.2 });
   assert.ok(Math.abs(row.dValue - 3.5) < 1e-9);
-  assert.ok(Math.abs(row.dValuePct - 5) < 1e-9); // 3.5/70*100
+  assert.ok(Math.abs(row.dValuePct - 5) < 1e-9);
   assert.ok(Math.abs(row.dU - 0.2) < 1e-9);
-  assert.ok(Math.abs(row.dUPct - 10) < 1e-9); // 0.2/2*100
+  assert.ok(Math.abs(row.dUPct - 10) < 1e-9);
 });
 
 test("compareResults marca null cuando el alumno no cargó el mensurando", () => {
@@ -467,11 +427,9 @@ test("compareResults: % null si el automático es 0; Δ U null si falta una U", 
     { symbol: "W", value: 12, u_expanded: null },
   ];
   const rows = compareResults(auto, student);
-  // Z: valor automático 0 -> % null, pero Δ abs sí (5). U automática 0 -> % null.
   assert.ok(Math.abs(rows[0].dValue - 5) < 1e-9);
   assert.equal(rows[0].dValuePct, null);
   assert.equal(rows[0].dUPct, null);
-  // W: el alumno no cargó U -> dU y dUPct null; el valor sí compara.
   assert.ok(Math.abs(rows[1].dValue - 2) < 1e-9);
   assert.equal(rows[1].dU, null);
   assert.equal(rows[1].dUPct, null);
@@ -480,22 +438,18 @@ test("compareResults: % null si el automático es 0; Δ U null si falta una U", 
 test("compareResults: verdict pass/fail según tolerancia", () => {
   const auto = [{ symbol: "Q", name: "Area", unit: "mm2", value: 100, u_expanded: 2 }];
   const student = [{ symbol: "Q", value: 104, u_expanded: 2 }];
-  // Sin tolerancia -> verdict null.
   const [noTol] = compareResults(auto, student);
   assert.equal(noTol.verdict, null);
-  // |Δ%| = 4 ≤ 5 -> pass.
   const [pass] = compareResults(auto, student, { Q: 5 });
   assert.equal(pass.verdict, "pass");
-  // |Δ%| = 4 > 3 -> fail.
   const [fail] = compareResults(auto, student, { Q: 3 });
   assert.equal(fail.verdict, "fail");
 });
 
 test("pointPower calcula P = I²·R", () => {
-  assert.equal(pointPower(100, 0.5), 25); // 0.25 * 100
+  assert.equal(pointPower(100, 0.5), 25);
   assert.equal(pointPower(0, 3), 0);
   assert.equal(pointPower(200, 0), 0);
-  // I negativa (sentido de la corriente) no cambia la potencia disipada.
   assert.equal(pointPower(100, -0.5), 25);
 });
 
@@ -582,7 +536,6 @@ test("compareMeasuredVsTheoretical empareja X con X_t y calcula deltas", () => {
     { symbol: "I_s", name: "Corriente", unit: "A", value: 0.015, u_expanded: 0.001 },
   ];
   const rows = compareMeasuredVsTheoretical(quantities, derived);
-  // Solo VR1_s tiene par (VR1_s_t); I_s no termina en _t y Vg_s no tiene derivado.
   assert.equal(rows.length, 1);
   const [row] = rows;
   assert.equal(row.symbol, "VR1_s");
@@ -590,9 +543,9 @@ test("compareMeasuredVsTheoretical empareja X con X_t y calcula deltas", () => {
   assert.deepEqual(row.exp, { value: 1.5, u: 0.1 });
   assert.deepEqual(row.teo, { value: 1.6, u: 0.08 });
   assert.ok(Math.abs(row.dValue - -0.1) < 1e-9);
-  assert.ok(Math.abs(row.dValuePct - -6.25) < 1e-9); // -0.1/1.6*100
+  assert.ok(Math.abs(row.dValuePct - -6.25) < 1e-9);
   assert.ok(Math.abs(row.dU - 0.02) < 1e-9);
-  assert.ok(Math.abs(row.dUPct - 25) < 1e-9); // 0.02/0.08*100
+  assert.ok(Math.abs(row.dUPct - 25) < 1e-9);
 });
 
 test("compareMeasuredVsTheoretical: deltas null con teórico 0 o U faltante", () => {
@@ -602,8 +555,8 @@ test("compareMeasuredVsTheoretical: deltas null con teórico 0 o U faltante", ()
   const derived = [{ symbol: "X_t", name: "X teorica", unit: "u", value: 0, u_expanded: 0.1 }];
   const [row] = compareMeasuredVsTheoretical(quantities, derived);
   assert.ok(Math.abs(row.dValue - 2) < 1e-9);
-  assert.equal(row.dValuePct, null); // denominador 0
-  assert.equal(row.dU, null); // la medida no tiene U
+  assert.equal(row.dValuePct, null);
+  assert.equal(row.dU, null);
   assert.equal(row.dUPct, null);
 });
 
@@ -634,7 +587,6 @@ test("seriesStats: n=0 devuelve NaN; n=1 std=0; n>1 calcula bien", () => {
   assert.equal(one.std, 0);
   assert.equal(one.stdMean, 0);
 
-  // [2, 4]: media=3, varianza=(1+1)/1=2, std=√2.
   const two = seriesStats([2, 4]);
   assert.equal(two.n, 2);
   assert.equal(two.mean, 3);
@@ -652,13 +604,11 @@ test("histogram: null con vacío o bins<1; un valor -> bins=1; distribución uni
   assert.equal(histogram([], 5), null);
   assert.equal(histogram([1, 2], 0), null);
 
-  // Un solo valor -> bins=1 con width=0.
   const one = histogram([5], 3);
   assert.equal(one.bins, 1);
   assert.equal(one.counts[0], 1);
   assert.equal(one.width, 0);
 
-  // [0,1,2,3] en 2 bins: bin0=[0,2) → {0,1}=2, bin1=[2,4] → {2,3}=2.
   const h = histogram([0, 1, 2, 3], 2);
   assert.equal(h.bins, 2);
   assert.deepEqual(h.counts, [2, 2]);
@@ -671,11 +621,10 @@ test("normalCurve: vacía con std<=0 o rango nulo; steps+1 puntos si válida", (
   assert.deepEqual(normalCurve(0, -1, -1, 1), []);
 
   const pts = normalCurve(0, 1, -3, 3, 10);
-  assert.equal(pts.length, 11); // steps+1
-  // La densidad en la media debe ser el máximo.
+  assert.equal(pts.length, 11);
   const ys = pts.map((p) => p[1]);
   const maxY = Math.max(...ys);
-  const midPt = pts[5]; // x=0 con steps=10
+  const midPt = pts[5];
   assert.ok(Math.abs(midPt[1] - maxY) < 1e-12);
 });
 
@@ -703,7 +652,6 @@ test("validateMeasurements: curva necesita ≥2 puntos y avisa con texto de curv
 });
 
 test("validateMeasurements: cuenta puntos desde point_replicas (réplicas por punto)", () => {
-  // La magnitud de eje 'y' trae réplicas por punto; 'x' un valor por punto. 2 puntos → válido.
   const ok = validateMeasurements(
     [
       { quantity_id: "x", values: [1, 2], given_u: null },
@@ -712,7 +660,6 @@ test("validateMeasurements: cuenta puntos desde point_replicas (réplicas por pu
     "regresion_lineal",
   );
   assert.equal(ok, null);
-  // Un solo punto con réplicas → insuficiente.
   const few = validateMeasurements(
     [{ quantity_id: "y", values: [], given_u: null, point_replicas: [[4, 5]] }],
     "regresion_lineal",
@@ -721,7 +668,6 @@ test("validateMeasurements: cuenta puntos desde point_replicas (réplicas por pu
 });
 
 test("validateMeasurements: regresión exige escalares compartidos completos (Motor E)", () => {
-  // 2 puntos OK, pero el escalar compartido 'R' (medida única) está vacío → error.
   const meta = {
     x: { name: "x", perPoint: true },
     R: { name: "Radio", perPoint: false, isGiven: false },
@@ -734,10 +680,8 @@ test("validateMeasurements: regresión exige escalares compartidos completos (Mo
   ];
   const err = validateMeasurements(measurements, "regresion_lineal", meta);
   assert.ok(typeof err === "string" && err.includes("Radio"));
-  // Con R cargado → válido.
   measurements[1].values = [0.001];
   assert.equal(validateMeasurements(measurements, "regresion_lineal", meta), null);
-  // Dato de cátedra 'g' sin U → error.
   measurements[2].given_u = null;
   const errG = validateMeasurements(measurements, "regresion_lineal", meta);
   assert.ok(typeof errG === "string" && errG.includes("g"));
@@ -754,7 +698,6 @@ test("validateMeasurements: estadistico reporta mensurando sin lecturas", () => 
 
 test("validateMeasurements: operadores exigen una serie por operador", () => {
   const meta = { T: { name: "Periodo", isGiven: false, isChrono: false } };
-  // Operador 2 sin lecturas -> error que lo identifica.
   const err = validateMeasurements(
     [{ quantity_id: "T", values: [], given_u: null, operator_replicas: [[1, 1.1], []] }],
     "estadistico",
@@ -762,7 +705,6 @@ test("validateMeasurements: operadores exigen una serie por operador", () => {
   );
   assert.ok(typeof err === "string");
   assert.ok(err.includes("operador 2"));
-  // Todos los operadores con lecturas -> ok.
   const ok = validateMeasurements(
     [{ quantity_id: "T", values: [], given_u: null, operator_replicas: [[1, 1.1], [2, 2.1]] }],
     "estadistico",
@@ -773,20 +715,15 @@ test("validateMeasurements: operadores exigen una serie por operador", () => {
 
 test("validateMeasurements: isGiven exige valor e incertidumbre", () => {
   const meta = { g1: { name: "Dato", isGiven: true, isChrono: false } };
-  // Sin valor -> error.
   assert.ok(typeof validateMeasurements([{ quantity_id: "g1", values: [], given_u: 0.1 }], "estadistico", meta) === "string");
-  // Sin u -> error.
   assert.ok(typeof validateMeasurements([{ quantity_id: "g1", values: [3], given_u: null }], "estadistico", meta) === "string");
-  // Ambos -> ok.
   assert.equal(validateMeasurements([{ quantity_id: "g1", values: [3], given_u: 0.1 }], "estadistico", meta), null);
 });
 
 test("validateMeasurements: isGiven con hasUncertainty:false no exige U (p. ej. t_med)", () => {
   const meta = { t_med: { name: "t_med", isGiven: true, hasUncertainty: false } };
-  // Sin valor -> sigue siendo error (el valor es obligatorio).
   const err = validateMeasurements([{ quantity_id: "t_med", values: [], given_u: null }], "estadistico", meta);
   assert.ok(typeof err === "string" && err.includes("t_med"));
-  // Con valor y sin U -> ok (no hay campo U para esta magnitud).
   assert.equal(
     validateMeasurements([{ quantity_id: "t_med", values: [12.5], given_u: null }], "estadistico", meta),
     null,
@@ -797,12 +734,10 @@ test("validateMeasurements: magnitud optional puede quedar sin lecturas", () => 
   const meta = {
     T2: { name: "Periodo Operador 2", isGiven: false, isChrono: true, optional: true },
   };
-  // Sin lecturas pero optional -> ok (no bloquea el envío).
   assert.equal(
     validateMeasurements([{ quantity_id: "T2", values: [] }], "estadistico", meta),
     null,
   );
-  // Sin optional, la misma magnitud sí bloquea.
   const metaRequerida = { T2: { ...meta.T2, optional: false } };
   const err = validateMeasurements([{ quantity_id: "T2", values: [] }], "estadistico", metaRequerida);
   assert.ok(typeof err === "string");

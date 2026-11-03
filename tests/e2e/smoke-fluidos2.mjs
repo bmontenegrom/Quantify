@@ -1,17 +1,3 @@
-// Smoke visual (Playwright) de la práctica sembrada Fluidos II (regresión + Motor F).
-//
-// Cubre lo que el E2E automatizado NO toca, siguiendo el flujo real de la app: el
-// formulario de entrega vive en el nav del ESTUDIANTE (los docentes no entregan,
-// solo revisan). Recorre:
-//   1. Estudiante: abre Fluidos II, ve el form de regresión (datos compartidos +
-//      grilla por punto h/t), la vista previa del ajuste aparece, y entrega.
-//   2. Docente: abre la entrega en revisión y ve el análisis — ajuste lineal,
-//      mensurando M_medio y tabla de mensurandos agregados (Re_max/Re_min/
-//      Re_medio/M_teorico).
-//   3. Docente: agrega una magnitud adimensional desde el admin de prácticas.
-//
-// Uso: `npm run test:e2e` (corre todos los tests/e2e/*.mjs). Variables: E2E_PORT,
-// E2E_SKIP_BUILD, E2E_HEADED.
 
 import { ARTIFACTS, STUDENT, TEACHER, assert, openAddForm, step, symbolText, waitForDraft, withE2E } from "./lib.mjs";
 import { join } from "node:path";
@@ -19,7 +5,6 @@ import { join } from "node:path";
 const PORT = process.env.E2E_PORT ?? "8137";
 
 await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => {
-  // ── 1) Estudiante entrega Fluidos II ─────────────────────────────────────
   step("estudiante: login");
   const { page: sPage } = await login(STUDENT, "estudiante");
 
@@ -27,9 +12,6 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   await sPage.click('#practice-nav-children .nav-child:has-text("Fluidos II")');
   await sPage.waitForSelector(".series-table");
 
-  // Mapa símbolo→id desde la definición (robusto frente a cambios de orden). El form no muestra
-  // el símbolo como texto (muestra el nombre completo de la magnitud), así que la estructura se
-  // verifica por `data-quantity-id`, no por texto.
   const idBySym = await sPage.evaluate(async () => {
     const r = await fetch("/api/practices/fluidos-2/definition");
     const def = await r.json();
@@ -52,7 +34,6 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   await sPage.selectOption("#table-select", "1");
 
   step("estudiante: completa los escalares compartidos");
-  // mu_agua/kp son datos de tabla (qty_given sin incertidumbre: solo "Valor", sin U ni instrumento).
   const shared = { h_max: 0.36, R_cap: 0.001, L_cap: 0.1, R_recip: 0.05, rho: 1000, Temp: 20 };
   for (const [sym, val] of Object.entries(shared)) {
     const row = sPage.locator(`.shared-quantities .measurement-row[data-quantity-id="${idBySym[sym]}"]`);
@@ -63,7 +44,6 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
     const row = sPage.locator(`.measurement-row--given[data-quantity-id="${idBySym[sym]}"]`);
     await row.locator(".measure-given-value").fill(String(val));
   }
-  // g es dato de cátedra (valor ± U).
   const gRow = sPage.locator(`.measurement-row--given[data-quantity-id="${idBySym["g"]}"]`);
   await gRow.locator(".measure-given-value").fill("9.8");
   await gRow.locator(".measure-given-u").fill("0.1");
@@ -82,7 +62,6 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   }
 
   step("verifica que la vista previa del ajuste aparece");
-  // El input dispara un preview con debounce (~350ms); esperamos a que pinte algo.
   await sPage.locator(".series-table").dispatchEvent("change");
   await sPage.waitForFunction(
     () => (document.querySelector(".series-preview")?.textContent ?? "").trim().length > 0,
@@ -91,14 +70,10 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   await sPage.screenshot({ path: join(ARTIFACTS, "fluidos2-preview.png"), fullPage: true });
 
   step("estudiante: recarga y el borrador restaura la serie");
-  // Restaurar una serie usa helpers de forms-series.js que forms.js no importaba (ReferenceError).
-  // Las dos columnas de la serie, con todos sus puntos (t es la última que se tipea).
   await waitForDraft(sPage, { quantityId: idBySym["t"], count: points.length });
   await sPage.reload();
   await sPage.waitForSelector("#app-shell:not(.hidden)");
   await sPage.click('#practice-nav-children .nav-child:has-text("Fluidos II")');
-  // Tras recargar puede verse primero el formulario de otra práctica: se espera el de Fluidos II
-  // (sus ids de magnitud) ya restaurado, con la última altura cargada.
   await sPage
     .waitForFunction(
       ({ id, value }) =>
@@ -122,8 +97,6 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
     .first()
     .inputValue();
   assert(restoredRho === String(shared.rho), `el borrador debía restaurar rho (vi: ${restoredRho})`);
-  // Con la serie restaurada el ajuste se recalcula solo, sin tipear nada (no basta cualquier texto:
-  // "Cargá al menos 2 puntos" o el error también llenan el contenedor).
   await sPage.waitForSelector('.series-preview h4:has-text("Vista previa del ajuste")', { timeout: 10_000 });
   await sPage.selectOption("#table-select", "1");
 
@@ -138,7 +111,6 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
     "la entrega recién creada no debía mostrar el análisis al estudiante (gating)",
   );
 
-  // ── 2) Docente revisa y ve el análisis ───────────────────────────────────
   step("docente: login");
   const { page: tPage } = await login(TEACHER, "docente");
 
@@ -155,7 +127,6 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   }
   await tPage.screenshot({ path: join(ARTIFACTS, "fluidos2-analisis.png"), fullPage: true });
 
-  // ── 3) Docente agrega una magnitud ADIMENSIONAL desde el admin ───────────
   step("docente: abre Fluidos II en el admin de prácticas");
   await tPage.click('.tab.teacher-only[data-view="practices"]');
   await tPage.click('[data-practice-open][data-practice-id="fluidos-2"]');
@@ -165,7 +136,6 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
   const qForm = tPage.locator("#new-quantity-form");
   await qForm.locator('input[name="symbol"]').fill("factor_test");
   await qForm.locator('input[name="name"]').fill("Factor de prueba adimensional");
-  // Unidad: la dejamos vacía a propósito.
   await qForm.locator('input[name="unit"]').fill("");
   await qForm.locator('button[type="submit"]').click();
 

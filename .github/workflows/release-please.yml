@@ -1,8 +1,5 @@
 name: Release Please
 
-# En cada push a main (una promoción desde staging o el merge de la PR de release) release-please
-# lee los Conventional Commits nuevos y abre o actualiza la PR de release: sube la versión de
-# Cargo.toml/Cargo.lock y escribe el CHANGELOG. Al mergear esa PR crea el tag y el release.
 on:
   push:
     branches: [main]
@@ -19,7 +16,6 @@ jobs:
       - uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          # Sin esto toma la rama default del repo (development) y abriría la PR de release ahí.
           target-branch: main
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

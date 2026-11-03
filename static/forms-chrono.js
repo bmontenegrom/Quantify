@@ -4,7 +4,6 @@ import { seriesStats, histogram, normalCurve } from "./lib.js";
 import { PRACTICES_WITHOUT_CHRONO_HELPER } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 
-/** Markup interno (sin fieldset) del widget de cronómetro: display, controles y modo. */
 export function chronoWidgetInnerHtml() {
   return `
     <div class="chrono-widget">
@@ -29,11 +28,6 @@ export function chronoWidgetInnerHtml() {
   `;
 }
 
-/**
- * Cronómetro suelto de apoyo (no atado a ninguna magnitud): ayuda a tomar el tiempo para
- * después tipearlo a mano en el input que corresponda. No entra en `collectMeasurements`
- * (usa `.measurement-section`, no `.measurement-row`).
- */
 export function chronoHelperSectionHtml() {
   return `
     <div class="measurement-section chrono-helper" data-chrono-helper="1">
@@ -43,28 +37,21 @@ export function chronoHelperSectionHtml() {
   `;
 }
 
-/** Cablea todos los `.chrono-helper` presentes en el form con una clave única por instancia. */
 export function wireChronoHelpers() {
   measurementFields.querySelectorAll(".chrono-helper").forEach((el, i) => {
     wireChronometerWidget(el, `__chrono_helper__${i}`);
   });
 }
 
-/** `true` si esta magnitud se mide a mano (sin cronómetro propio) pero es un tiempo, y la
- *  práctica no está en `PRACTICES_WITHOUT_CHRONO_HELPER` (instrumento con lectura propia,
- *  p. ej. osciloscopio: relajación exponencial no cronometra T_oc/tmedio a mano). */
 export function needsChronoHelper(q) {
   if (PRACTICES_WITHOUT_CHRONO_HELPER.has(practiceSelect.value)) return false;
   return q.quantity === "tiempo" && !q.repeated && !q.is_given;
 }
 
-/** Clave del cronómetro de una fila: por operador (`qid#i`) si tiene `data-operator-index`. */
 export function chronoKeyFor(row) {
   const op = row.dataset.operatorIndex;
   return op != null ? `${row.dataset.quantityId}#${op}` : row.dataset.quantityId;
 }
-
-// ── Cronómetro ────────────────────────────────────────────────────────────────
 
 function formatElapsed(seconds) {
   const total = Math.max(0, seconds);

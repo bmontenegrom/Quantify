@@ -52,8 +52,7 @@
 
 body {
   margin: 0;
-  /* Firma visual: papel milimetrado sutil (grilla de laboratorio), casi invisible sobre el
-     degradado — hace de fondo un guiño a la libreta de mediciones sin competir con el contenido. */
+
   background:
     radial-gradient(circle at top left, rgba(45, 212, 191, 0.12), transparent 34rem),
     repeating-linear-gradient(
@@ -100,14 +99,12 @@ body {
   min-height: 20px;
 }
 
-/* Shell de dos columnas: sidebar fijo a la izquierda + contenido a la derecha. */
 #app-shell {
   display: grid;
   grid-template-columns: 248px 1fr;
   min-height: 100vh;
 }
 
-/* Mantiene la prioridad de ocultar sobre el display:grid de #app-shell. */
 #app-shell.hidden {
   display: none;
 }
@@ -148,7 +145,6 @@ body {
   padding-top: 12px;
 }
 
-/* Botón hamburguesa: oculto en desktop, visible en móvil (ver media query). */
 .nav-toggle {
   display: none;
   position: fixed;
@@ -226,14 +222,11 @@ h3 {
   margin-bottom: 10px;
 }
 
-/* Ritmo vertical dentro de un panel: un título que abre una sección nueva (no el primero) se
-   separa de lo anterior; si no, "Resultado final entregado" quedaba pegado a la tabla de arriba. */
 .panel h3:not(:first-child),
 .panel h4:not(:first-child) {
   margin-top: 24px;
 }
 
-/* ...salvo el nombre de la ficha, que va justo debajo de "Volver al listado". */
 .workspace-head h3:not(:first-child) {
   margin-top: 6px;
 }
@@ -246,7 +239,6 @@ main {
   width: 100%;
 }
 
-/* Navegación vertical del sidebar. */
 .nav {
   display: flex;
   flex-direction: column;
@@ -269,10 +261,6 @@ main {
   margin-bottom: 4px;
 }
 
-/* Botón por defecto = secundario con contorno: sobre un panel blanco, un botón sin borde del mismo
-   color que el panel se leía como texto suelto (Editar/Eliminar/Exportar...). Va en el selector
-   de elemento (especificidad mínima) para que cualquier clase propia (.part-tab, .back-link...)
-   lo pise sin pelear. Los tabs del nav siguen sin borde. */
 .tab,
 button {
   background: var(--panel-raised);
@@ -291,7 +279,6 @@ button {
   border: 0;
 }
 
-/* Cada ítem de nav ocupa el ancho completo y se alinea a la izquierda. */
 .nav .tab {
   align-items: center;
   border-radius: var(--radius);
@@ -301,17 +288,10 @@ button {
   width: 100%;
 }
 
-/* `.nav .tab` y `.hidden` empatan en especificidad (dos clases); sin esto, `.hidden` pierde el
-   empate por orden de declaración y los tabs student-only/teacher-only ocultos por JS
-   (app.js: classList.toggle("hidden", ...)) vuelven a mostrarse con display:flex. */
 .nav .tab.hidden {
   display: none;
 }
 
-/* Iconos de sidebar: un trazo mínimo por vista, vía mask (hereda currentColor, sin sprite ni
-   librería). El combinador `>` los limita a los tabs de primer nivel (hijos directos de `.nav`):
-   los sub-ítems de práctica cuelgan de `#practice-nav-children`, no de `.nav`, y quedan sin
-   ::before (si no, con mask-image sin setear el navegador rellena el cuadrado 18x18 entero). */
 .nav > .tab::before {
   background-color: currentColor;
   content: "";
@@ -359,7 +339,6 @@ button {
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='3.5'/%3E%3Cpath d='M5.5 20c1-4.2 3.6-6.5 6.5-6.5s5.5 2.3 6.5 6.5'/%3E%3C/svg%3E");
 }
 
-/* Sub-ítems de práctica: indentados y algo más chicos. */
 .nav-child {
   font-size: 0.9rem;
   font-weight: 600;
@@ -378,7 +357,6 @@ button:hover {
   filter: brightness(0.96);
 }
 
-/* Acción destructiva: mismo contorno, en rojo. */
 .btn-danger,
 button.btn-danger {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
@@ -455,8 +433,7 @@ textarea {
   border-radius: var(--radius-sm);
   color: var(--ink);
   font: inherit;
-  /* El `label` que los envuelve va en 650; el valor tipeado no, si no se confunde con el rótulo
-     y el placeholder parece un valor ya cargado. */
+
   font-weight: 400;
   min-height: 40px;
   padding: 8px 10px;
@@ -468,8 +445,6 @@ textarea {
   opacity: 0.75;
 }
 
-/* Checkbox/radio: fuera de la regla de arriba (width:100% + min-height:40px los estiraba a
-   cuadros gigantes), del tamaño nativo y con el color de acento. */
 input[type="checkbox"],
 input[type="radio"] {
   accent-color: var(--accent);
@@ -481,8 +456,6 @@ input[type="radio"] {
   width: 16px;
 }
 
-/* Un label con checkbox es una fila (casilla + texto), ocupa todo el ancho del form-grid y el
-   texto va en color de lectura, no en el gris de los rótulos de campo. */
 label:has(> input[type="checkbox"]),
 label:has(> input[type="radio"]),
 .detail-form-checkbox,
@@ -578,8 +551,6 @@ textarea {
   margin-top: 14px;
 }
 
-/* Solo scroll horizontal: con un tope de alto, las tablas largas (instrumentos, magnitudes)
-   quedaban cortadas a mitad de fila dentro de un segundo scroll; la página ya scrollea. */
 .data-table-wrap {
   max-width: 100%;
   overflow-x: auto;
@@ -609,7 +580,6 @@ textarea {
   z-index: 1;
 }
 
-/* Cebrado + hover: filas de datos de medición largas se siguen mejor con la vista. */
 .data-table tbody tr:nth-child(even) {
   background: color-mix(in srgb, var(--bg-soft) 55%, transparent);
 }
@@ -618,7 +588,6 @@ textarea {
   background: var(--accent-soft);
 }
 
-/* Números de medición alineados por columna (tabular), como en una libreta de laboratorio. */
 .data-table td {
   font-variant-numeric: tabular-nums;
 }
@@ -712,16 +681,10 @@ textarea {
   min-width: 0;
 }
 
-/* Los hijos de un grid no se achican por debajo de su contenido mínimo por default: sin esto,
-   una tabla ancha (p. ej. columnas en vivo extra) empuja todo el grid en vez de scrollear
-   dentro de `.data-table-wrap`, y el resto de los campos (cronómetro, medidas, resultado
-   final) queda visualmente "afuera" de la card. */
 .measurement-fields > * {
   min-width: 0;
 }
 
-/* Ocupa todo el ancho de la card (no va en .form-grid, que es de 3 columnas para
-   curso/grupo/mesa): es un único campo de texto libre. */
 .student-comment-field {
   margin: 14px 0;
 }
@@ -743,7 +706,6 @@ textarea {
   padding: 0 6px;
 }
 
-/* Una sola fila: [instrumento] [escala] | [prefijo] [valor] [unidad] */
 .measure-body {
   align-items: center;
   display: grid;
@@ -752,7 +714,6 @@ textarea {
   margin-top: 4px;
 }
 
-/* Separador visual entre selectores y campo de valor */
 .measure-body .measure-sep {
   width: 1px;
   height: 24px;
@@ -760,7 +721,6 @@ textarea {
   flex: 0 0 auto;
 }
 
-/* Magnitudes con réplicas: selectores arriba, valores apilados abajo */
 .measure-body--stacked {
   align-items: stretch;
   grid-template-columns: 1fr;
@@ -781,7 +741,6 @@ textarea {
   min-width: 0;
 }
 
-/* Selects de instrumento/escala: sin label encima, compactos */
 .measure-selectors select {
   font-size: 0.8rem;
   padding: 5px 4px;
@@ -822,7 +781,6 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(260px, max-content));
 }
 
-/* Selector de prefijo SI: ancho fijo, justo para "µ" "k" "m" */
 .prefix-select {
   font-size: 0.82rem;
   padding: 5px 2px;
@@ -963,9 +921,6 @@ textarea {
   margin-bottom: 14px;
 }
 
-/* Sin esto un item de grid no baja de su ancho de contenido: una tabla ancha en una columna
-   empujaba la grilla y aplastaba la otra (el form "Nuevo mensurando" quedaba en ~70px). Ahora
-   la tabla scrollea dentro de su panel. */
 .workspace-grid > *,
 .panel {
   min-width: 0;
@@ -980,8 +935,6 @@ textarea {
   margin-top: 0;
 }
 
-/* Ficha de práctica: bloques apilados a ancho completo (ver `adminSection` en
-   practices-admin.js), separados por un ritmo vertical fijo. */
 #practice-workspace > .panel + .panel {
   margin-top: 14px;
 }
@@ -1012,8 +965,6 @@ textarea {
   margin: 0 0 12px;
 }
 
-/* Alta plegada: el summary es un botón secundario "+ Nueva …"; al abrirse, el form queda en una
-   caja apenas destacada debajo de la lista. */
 .add-panel {
   margin-top: 12px;
 }
@@ -1061,8 +1012,6 @@ textarea {
   margin-bottom: 14px;
 }
 
-/* Métricas de la cabecera de una ficha (tipo, magnitudes, mensurandos) en una fila, no apiladas:
-   apiladas ocupaban más alto que la descripción de al lado. */
 .metrics.compact-metrics {
   flex: none;
   grid-template-columns: repeat(3, auto);
@@ -1073,8 +1022,6 @@ textarea {
   padding: 8px 12px;
 }
 
-/* Funciona como breadcrumb: "‹ Volver al listado" ya ubica al usuario un nivel arriba,
-   sin necesitar un componente de miga de pan aparte. */
 button.back-link {
   align-items: center;
   background: transparent;
@@ -1098,7 +1045,6 @@ button.back-link {
   text-decoration: underline;
 }
 
-/* Pestañas de partes de una práctica multi-parte (p. ej. P3 relajación). */
 .practice-part-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -1123,7 +1069,6 @@ button.back-link {
   border-color: var(--accent);
 }
 
-/* Comentario del docente: callout prominente en la ficha de entrega. */
 .teacher-comment {
   margin: 16px 0;
   padding: 14px 16px;
@@ -1163,8 +1108,6 @@ button.back-link {
   margin-bottom: 2px;
 }
 
-/* Es un `td`: con display:flex dejaba de ser celda y los botones quedaban desalineados con el
-   resto de la fila. Queda como celda y los botones van en línea, compactos. */
 .directory-actions {
   text-align: right;
   white-space: nowrap;
@@ -1231,15 +1174,11 @@ button.back-link {
   gap: 12px;
 }
 
-/* Tantas columnas como entren (mín. 180px): 3 en un panel ancho, 1 en uno angosto. Antes eran
-   siempre 3, aunque el panel midiera 300px. */
 .detail-form-grid {
   align-items: start;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
-/* Un texto de ayuda dentro de un form-grid va a ancho completo: como celda más estiraba la fila
-   y, con ella, los inputs de al lado a la altura del párrafo. */
 .detail-form > p {
   grid-column: 1 / -1;
   margin: 0;
@@ -1274,8 +1213,6 @@ button.back-link {
   white-space: nowrap;
 }
 
-/* Estado de una práctica: contorno del color del estado, sin fondo, para no competir con el
-   tipo de análisis (status-chip) en la misma fila. */
 .practice-state {
   border: 1px solid currentColor;
   border-radius: 999px;
@@ -1423,8 +1360,6 @@ button.back-link {
   margin: 16px 0;
 }
 
-/* Las fórmulas expandidas (Hidrostática: 9 ranuras por determinación) no tienen espacios donde
-   cortar: sin `anywhere` empujaban la tarjeta y la página entera a scroll horizontal. */
 .metric {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1474,7 +1409,6 @@ button.back-link {
   color: var(--muted);
 }
 
-/* Tablet / ventana angosta: el sidebar ya come 248px, dos paneles lado a lado no entran. */
 @media (max-width: 1100px) {
   .workspace-grid {
     grid-template-columns: 1fr;
@@ -1487,7 +1421,6 @@ button.back-link {
     flex-direction: column;
   }
 
-  /* El shell pasa a una sola columna y el sidebar se vuelve un cajón deslizable. */
   #app-shell {
     grid-template-columns: 1fr;
   }
@@ -1578,7 +1511,6 @@ button.back-link {
   }
 }
 
-/* Gráfico SVG del ajuste lineal (entregas por formulario, modo regresión). */
 .reg-plot {
   width: 100%;
   max-width: 360px;
@@ -1608,7 +1540,6 @@ button.back-link {
   font-size: 11px;
 }
 
-/* Tabla de serie para cargar puntos (modo regresión). */
 .series-table.data-table {
   min-width: 0;
   table-layout: auto;
@@ -1624,9 +1555,6 @@ button.back-link {
   vertical-align: top;
 }
 
-/* Ancho mínimo según la cantidad real de réplicas (`--replicas`, seteado inline por fila),
-   en vez de un fijo pensado para el caso de más réplicas (5, en Viscosidad): con solo 2
-   réplicas (p. ej. V/t en Fluidos I) no hace falta reservar tanto ancho. */
 .series-cell--replicas {
   min-width: min(calc(52px + var(--replicas, 2) * 96px), 70vw);
 }
@@ -1650,7 +1578,6 @@ button.back-link {
   width: 100%;
 }
 
-/* Magnitud por operador (Motor D): agrupa los bloques de cada operador. */
 .operator-quantity {
   margin: 12px 0;
   padding-left: 10px;
@@ -1667,12 +1594,10 @@ button.back-link {
   opacity: 0.8;
 }
 
-/* Resultado por operador en el análisis (g por operador, lado a lado). */
 .operator-result {
   margin-top: 12px;
 }
 
-/* Celda con grilla de réplicas por punto (regresión/curva con magnitud repetida). */
 .series-replica-group {
   display: flex;
   flex-wrap: wrap;
@@ -1704,7 +1629,6 @@ button.back-link {
   padding: 0 10px;
 }
 
-/* Comparación alumno vs automático y formulario "Mis cálculos". */
 .compare-table td:nth-child(n + 4) {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -1723,7 +1647,6 @@ button.back-link {
   color: var(--danger);
 }
 
-/* Secciones temáticas dentro del formulario de entrega (p. ej. el péndulo). */
 .measurement-section {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1738,8 +1661,6 @@ button.back-link {
   font-size: 0.95rem;
 }
 
-/* Subtítulo de un resultado final incrustado dentro de su propia sección (p. ej. g1 en
-   "Operador 1"), para distinguirlo visualmente de las magnitudes medidas de arriba. */
 .measurement-section-subtitle {
   margin: 14px 0 8px;
   padding-top: 10px;
@@ -1749,7 +1670,6 @@ button.back-link {
   opacity: 0.85;
 }
 
-/* Depuración de una serie repetida: lista ordenada + histograma + curva normal. */
 .series-debug {
   margin-top: 12px;
 }
@@ -1844,7 +1764,6 @@ button.back-link {
   border-radius: 6px;
 }
 
-/* Aviso de ventana de edición en la ficha de la entrega. */
 .edit-banner {
   display: flex;
   flex-wrap: wrap;
@@ -1887,7 +1806,6 @@ button.back-link {
   cursor: pointer;
 }
 
-/* Banner de invitaciones a informes compartidos (arriba de todas las vistas). */
 .invitation-banner {
   padding: 12px 16px;
   display: flex;
@@ -1900,7 +1818,6 @@ button.back-link {
   margin: 0 0 4px;
 }
 
-/* Filtros de entregas (docente). */
 .submission-filters {
   display: flex;
   gap: 10px;
@@ -1908,9 +1825,6 @@ button.back-link {
   flex-wrap: wrap;
 }
 
-/* Mismo problema de especificidad que `.nav .tab` vs `.hidden`: una sola clase empata con
-   `.hidden` y gana por orden de declaración, así que el filtro quedaba visible para el
-   estudiante pese al `classList.toggle("hidden", ...)` de app.js. */
 .submission-filters.hidden {
   display: none;
 }
@@ -1923,14 +1837,12 @@ button.back-link {
   color: var(--muted);
 }
 
-/* Sub-grupo de mesa dentro de un grupo (listado docente). */
 .submission-table-group {
   padding: 6px 0 6px 12px;
   border-left: 2px solid var(--line);
   margin: 4px 0;
 }
 
-/* Editor de integrantes del informe (ficha, docente). */
 .members-editor {
   margin-top: 16px;
 }
@@ -1958,7 +1870,6 @@ button.back-link {
   cursor: not-allowed;
 }
 
-/* Bloque de depuración persistida en la ficha de la entrega. */
 .meta-panel {
   margin-top: 16px;
 }
@@ -1977,8 +1888,6 @@ button.back-link {
     grid-template-columns: 1fr;
   }
 }
-
-/* --- Toasts (static/toast.js) --- */
 
 .toast-region {
   bottom: 20px;
@@ -2036,8 +1945,6 @@ button.back-link {
   color: var(--ink);
 }
 
-/* --- Skeletons de carga (CSS-only, sin JS) --- */
-
 .skeleton {
   background: linear-gradient(
     100deg,
@@ -2069,7 +1976,6 @@ button.back-link {
   }
 }
 
-/* --- Accesibilidad: respeta la preferencia de menos movimiento del sistema. --- */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

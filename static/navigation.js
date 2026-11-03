@@ -105,8 +105,6 @@ export function highlightPracticeNav() {
   });
 }
 
-// --- Listeners top-level ---
-
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     closeSidebarOnMobile();

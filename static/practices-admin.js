@@ -4,25 +4,14 @@ import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
 import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel } from "./lib.js";
 import { selectView } from "./navigation.js";
 
-/// Símbolo tal como se ve (ρ<sub>F</sub>) y, al lado, tal como se escribe en las fórmulas (`rho_f`):
-/// el docente necesita el crudo para no tipear `ρ_F` en una fórmula.
 function adminSymbolHtml(symbol) {
   return `<strong>${symbolHtml(symbol)}</strong> <code title="Así se escribe en las fórmulas">${escapeHtml(symbol)}</code>`;
 }
 
-/// `point_results`, `aggregates` e `intermediates` son, en el admin, la misma forma —
-/// símbolo/nombre/unidad/fórmula con alta/edición/borrado — y solo cambian de endpoint, de clave
-/// de estado "en edición" y de textos. `curves` (otras columnas, sin nombre/unidad, con
-/// reordenamiento) y `quantities`/`results` (más campos: réplicas, flags, tolerancia) no entran
-/// acá: forzarlas al mismo molde pediría un form-builder genérico para ganar poco.
-/** `true` si la fila `(kind, id)` es la que está actualmente en edición (a lo sumo una por vez
- *  en todo el workspace de la práctica: ver `state.editing` en state.js). */
 function isEditing(kind, id) {
   return state.editing.kind === kind && state.editing.id === id;
 }
 
-/** Arma statusCreate/Update/Delete a partir de un label y su género gramatical, para no repetir
- *  a mano las 3 variantes (agregada/actualizada/eliminada vs. -o) en cada kind. */
 function statusStrings(label, fem) {
   const suffix = fem
     ? { create: "agregada", update: "actualizada", delete: "eliminada" }
@@ -60,9 +49,6 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "(Re_max + Re_min) / 2",
     ...statusStrings("Mensurando agregado", false),
     confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
-    // Único de esta clase: puede marcarse como resultado final (habilita "Mis cálculos" y la
-    // comparación alumno-vs-automático para el alumno), igual que `PracticeResult.is_final` pero
-    // sin incertidumbre (el motor de agregados nunca la calcula).
     hasFinal: true,
   },
   intermediate: {
@@ -149,10 +135,6 @@ function symbolFormulaPayloadFromForm(form, kind) {
   return payload;
 }
 
-/** Wrapper único para el patrón try/postJson-o-deleteJson/refetch-definition/status/render que
- *  se repite en cada acción del admin de prácticas. `resetEditing` cierra la fila en edición
- *  (alta/edición/borrado); las acciones de nivel práctica (tipo de análisis, operadores,
- *  fórmulas de eje, mover curva) no tocan `state.editing`. */
 async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) {
   try {
     await fn();
@@ -218,8 +200,6 @@ export function renderPracticesPage() {
   }
 
   const def = state.practiceDefinition;
-  // Mientras la definición viaja, no dibujamos el editor: si lo hiciéramos, el re-render de
-  // cuando llega borra lo que el docente ya venía tipeando (y hacía flakear los smokes E2E).
   if (!def) {
     practiceWorkspace.innerHTML = `
       <div class="workspace-head">
@@ -237,8 +217,6 @@ export function renderPracticesPage() {
 
   const kind = def?.analysis_kind;
   const pointBased = kind === "regresion_lineal" || kind === "curva";
-  // Los `<details>` de alta abiertos sobreviven al re-render (cada acción redibuja todo): si no,
-  // agregar tres magnitudes seguidas obligaba a reabrir el form cada vez.
   const openPanels = new Set(
     [...practiceWorkspace.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel),
   );
@@ -401,7 +379,6 @@ export function renderPracticesPage() {
 
 const STATUS_LABELS = { borrador: "Borrador", publicada: "Publicada", archivada: "Archivada" };
 
-/** Etiqueta del estado de una práctica (borrador / publicada / archivada). */
 function practiceStatusChip(status) {
   return `<span class="practice-state practice-state--${escapeHtml(status)}">${escapeHtml(STATUS_LABELS[status] ?? status)}</span>`;
 }
@@ -473,8 +450,6 @@ function renderPracticeDirectory() {
   });
 }
 
-/** Recarga el catálogo y el contexto académico después de una acción sobre la práctica: los
- *  cursos traen el nombre y el estado de sus prácticas (p. ej. "Archivada" en Cursos). */
 async function refreshPractices() {
   const { loadAcademic } = await import("./academic.js");
   await loadAcademic();
@@ -506,7 +481,6 @@ async function duplicatePractice(practiceId) {
   }
 }
 
-/** Botones de estado de la ficha según el estado actual. */
 function practiceLifecycleActions(practice) {
   const id = escapeHtml(practice.id);
   const buttons = {
@@ -596,7 +570,6 @@ function renderRegressionFormulasForm(practice, def) {
   `;
 }
 
-/// Cantidad de operadores de una práctica estadística (Motor D). 0/1 = sin operadores.
 function renderOperatorCountForm(practice, def) {
   const count = def?.operator_count ?? "";
   return `
@@ -613,10 +586,6 @@ function renderOperatorCountForm(practice, def) {
   `;
 }
 
-/// Bloque de la ficha de práctica, todos con la misma forma: título con contador, ayuda corta, la
-/// lista a ancho completo y el alta plegada en un `<details>` nativo (casi siempre el docente
-/// revisa o edita; agregar es lo menos frecuente y no tiene por qué ocupar media pantalla).
-/// `id` identifica el `<details>` para reabrirlo tras un re-render (ver `renderPracticesPage`).
 function adminSection({ id, title, count, help = "", list, addLabel, form }) {
   return `
     <section class="panel workspace-panel admin-section">
@@ -630,7 +599,6 @@ function adminSection({ id, title, count, help = "", list, addLabel, form }) {
     </section>`;
 }
 
-/// Bloque de una de las listas símbolo/fórmula (`SYMBOL_FORMULA_KINDS`).
 function symbolFormulaSection(kindKey, practice, def, { title, help, addLabel }) {
   const kind = SYMBOL_FORMULA_KINDS[kindKey];
   return adminSection({
@@ -644,8 +612,6 @@ function symbolFormulaSection(kindKey, practice, def, { title, help, addLabel })
   });
 }
 
-/// Magnitudes derivadas por punto (Motor E): se evalúan tras el ajuste, una por corrida, usando
-/// magnitudes/intermedias del punto + slope/intercept + mensurandos.
 function renderPointResultsSection(practice, def) {
   return symbolFormulaSection("pointResult", practice, def, {
     title: "Magnitudes derivadas por punto",
@@ -654,9 +620,6 @@ function renderPointResultsSection(practice, def) {
   });
 }
 
-/// Mensurandos agregados (Motor F): se evalúan una vez tras el ajuste (un valor escalar) y pueden
-/// usar escalares compartidos, slope/intercept, los mensurandos, los agregados anteriores y los
-/// extremos de cada magnitud por punto.
 function renderAggregatesSection(practice, def) {
   return symbolFormulaSection("aggregate", practice, def, {
     title: "Mensurandos agregados",
@@ -665,8 +628,6 @@ function renderAggregatesSection(practice, def) {
   });
 }
 
-/// Magnitudes intermedias por punto (Motor C): un símbolo y una fórmula que se promedia por punto
-/// y queda disponible en las fórmulas de eje.
 function renderIntermediatesSection(practice, def) {
   return symbolFormulaSection("intermediate", practice, def, {
     title: "Magnitudes intermedias por punto",
@@ -675,7 +636,6 @@ function renderIntermediatesSection(practice, def) {
   });
 }
 
-/// Curvas de una práctica `curva`: sin curvas no hay nada para graficar.
 function renderCurvesSection(practice, def) {
   return adminSection({
     id: "curve",
@@ -966,7 +926,6 @@ function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
   const repeated = "repeated" in raw;
   const replicas = Number(raw.replicas_per_point);
-  // Un no-entero (2.5) no llega a `validate_quantity`: el JSON ya falla con un error genérico.
   const slots = raw.slot_count ? Number(raw.slot_count) : null;
   if (slots != null && !Number.isInteger(slots)) {
     throw new Error("Las ranuras tienen que ser un entero de 1 en adelante (vacío = sin restricción).");
@@ -977,8 +936,6 @@ function quantityPayloadFromForm(form) {
     unit: raw.unit,
     quantity: raw.quantity || null,
     repeated,
-    // La grilla de réplicas por punto solo aplica a magnitudes `repeated`: si no lo es, no
-    // guardamos un ancho de grilla muerto aunque el campo traiga un número.
     replicas_per_point: repeated && raw.replicas_per_point && replicas > 0 ? replicas : null,
     per_point: "per_point" in raw,
     is_given: "is_given" in raw,
@@ -1068,7 +1025,6 @@ async function saveEditCurve(event) {
   );
 }
 
-/** Botones ▲▼ para reordenar un elemento de una lista de la práctica (`list` = segmento de la API). */
 function moveButtonsHtml(list, id, index, total) {
   const attrs = `data-move="${list}" data-id="${escapeHtml(id)}"`;
   return `
@@ -1095,7 +1051,6 @@ async function deletePracticeCurve(cid, practiceId) {
   );
 }
 
-/** Parsea el campo tolerancia del formulario: número ≥ 0 o null si vacío/negativo. */
 function parseTolerance(raw) {
   const v = parseFloat(raw);
   return isNaN(v) || raw.trim() === "" || v < 0 ? null : v;

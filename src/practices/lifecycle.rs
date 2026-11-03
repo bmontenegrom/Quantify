@@ -1,11 +1,7 @@
-//! Ciclo de vida de una práctica (F1 del roadmap): alta en borrador, edición de nombre y
-//! descripción, duplicado, cambio de estado y borrado de un borrador.
-
 use super::{NewPracticeInput, PracticeInfoInput};
 use crate::db::{Practice, PRACTICE_COLS};
 use sqlx::{SqliteConnection, SqlitePool};
 
-/// Tablas de la definición de una práctica, que se copian al duplicarla.
 const DEFINITION_TABLES: [&str; 6] = [
     "practice_quantities",
     "practice_results",
@@ -15,7 +11,13 @@ const DEFINITION_TABLES: [&str; 6] = [
     "practice_aggregates",
 ];
 
-/// Id legible a partir del nombre: minúsculas, sin tildes, solo `[a-z0-9-]`.
+/// Id legible de una práctica a partir de su nombre: minúsculas, sin tildes, solo `[a-z0-9-]`.
+///
+/// ```
+/// use quantify::practices::slugify;
+/// assert_eq!(slugify("Péndulo de prueba (2026)"), "pendulo-de-prueba-2026");
+/// assert_eq!(slugify("¿?"), "practica");
+/// ```
 pub fn slugify(name: &str) -> String {
     let folded: String = name
         .trim()
@@ -44,7 +46,6 @@ pub fn slugify(name: &str) -> String {
     }
 }
 
-/// Primer id libre a partir de `base`: `base`, `base-2`, `base-3`…
 async fn free_practice_id(conn: &mut SqliteConnection, base: &str) -> anyhow::Result<String> {
     let mut n = 1;
     loop {
@@ -64,7 +65,6 @@ async fn free_practice_id(conn: &mut SqliteConnection, base: &str) -> anyhow::Re
     }
 }
 
-/// Una práctica por id (o `None`).
 pub async fn practice(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Option<Practice>> {
     Ok(sqlx::query_as::<_, Practice>(&format!(
         "SELECT {PRACTICE_COLS} FROM practices WHERE id = ?1"
@@ -74,7 +74,6 @@ pub async fn practice(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Op
     .await?)
 }
 
-/// Crea una práctica vacía en borrador, con id derivado del nombre.
 pub async fn create_practice(
     pool: &SqlitePool,
     input: &NewPracticeInput,
@@ -100,7 +99,6 @@ pub async fn create_practice(
         .ok_or_else(|| anyhow::anyhow!("la practica recien creada no aparece"))
 }
 
-/// Cambia nombre y descripción. `None` si la práctica no existe.
 pub async fn update_practice(
     pool: &SqlitePool,
     practice_id: &str,
@@ -115,8 +113,6 @@ pub async fn update_practice(
     practice(pool, practice_id).await
 }
 
-/// Copia una práctica entera (configuración y definición, con ids nuevos) como borrador. No copia
-/// sus habilitaciones en cursos, subgrupos ni mesas. `None` si el original no existe.
 pub async fn duplicate_practice(
     pool: &SqlitePool,
     source_id: &str,
@@ -132,8 +128,6 @@ pub async fn duplicate_practice(
         return Ok(None);
     }
     let id = free_practice_id(&mut tx, &slugify(name)).await?;
-    // Igual que las tablas de la definición: el resto de las columnas (descripción, tipo, ejes,
-    // operadores y las que se agreguen) se copia tal cual, leídas del esquema.
     let copied: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM pragma_table_info('practices') \
          WHERE name NOT IN ('id', 'name', 'status', 'created_by', 'created_at')",
@@ -152,7 +146,6 @@ pub async fn duplicate_practice(
     .bind(chrono::Utc::now())
     .execute(&mut *tx)
     .await?;
-    // Columnas leídas del esquema: una columna nueva de la definición se copia sin tocar esto.
     for table in DEFINITION_TABLES {
         let columns: Vec<String> = sqlx::query_scalar(&format!(
             "SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('id', 'practice_id')"
@@ -173,17 +166,13 @@ pub async fn duplicate_practice(
     practice(pool, &id).await
 }
 
-/// Resultado de pedir un cambio de estado.
 #[derive(Debug, PartialEq, Eq)]
 pub enum StatusChange {
     Done,
     NotFound,
-    /// Transición no permitida desde el estado actual (que se informa).
     NotAllowed(String),
 }
 
-/// Cambia el estado: `borrador` → `publicada`, `publicada` → `archivada`, `archivada` →
-/// `publicada`. No se vuelve a borrador. Lo que exige publicar lo valida la ruta antes.
 pub async fn set_practice_status(
     pool: &SqlitePool,
     practice_id: &str,
@@ -199,7 +188,6 @@ pub async fn set_practice_status(
     if !allowed {
         return Ok(StatusChange::NotAllowed(current.status));
     }
-    // Condicionado al estado leído: si otro pedido lo cambió en el medio, no se pisa.
     let changed = sqlx::query("UPDATE practices SET status = ?2 WHERE id = ?1 AND status = ?3")
         .bind(practice_id)
         .bind(status)
@@ -213,18 +201,14 @@ pub async fn set_practice_status(
     Ok(StatusChange::Done)
 }
 
-/// Resultado de pedir el borrado de una práctica.
 #[derive(Debug, PartialEq, Eq)]
 pub enum DeletePractice {
     Deleted,
     NotFound,
-    /// Solo se borra un borrador: una publicada o archivada se archiva.
     NotDraft,
-    /// Tiene entregas (no se borran en cascada).
     HasSubmissions,
 }
 
-/// Borra un borrador sin entregas, con toda su definición (las tablas hijas van en cascada).
 pub async fn delete_practice(
     pool: &SqlitePool,
     practice_id: &str,
@@ -243,8 +227,6 @@ pub async fn delete_practice(
     if submissions > 0 {
         return Ok(DeletePractice::HasSubmissions);
     }
-    // Las mismas condiciones en el DELETE: si en el medio se publicó o recibió una entrega, no
-    // se borra (y la FK sin cascada de las entregas no termina en un error 500).
     let deleted = sqlx::query(
         "DELETE FROM practices WHERE id = ?1 AND status = 'borrador' \
          AND NOT EXISTS (SELECT 1 FROM submissions WHERE practice_id = ?1)",

@@ -32,8 +32,6 @@ pub(crate) async fn setup() -> (SqlitePool, TempDir) {
     (pool, dir)
 }
 
-/// `validate_student_results` acepta agregados (Motor F) marcados `is_final` además de
-/// resultados comunes: Re_max/M_teorico en Fluidos II son agregados, no `practice_results`.
 #[tokio::test]
 async fn validate_student_results_accepts_final_aggregates() {
     let (pool, _dir) = setup().await;
@@ -70,8 +68,6 @@ async fn validate_student_results_accepts_final_aggregates() {
     assert!(err.to_string().contains("no_existe"));
 }
 
-/// `validate_student_results` acepta resultados por corrida (Motor E) con símbolo compuesto
-/// `Re#k`, y rechaza índices no numéricos o bases que no son point_result.
 #[tokio::test]
 async fn validate_student_results_accepts_point_results_per_run() {
     let (pool, _dir) = setup().await;
@@ -110,9 +106,6 @@ async fn validate_student_results_accepts_point_results_per_run() {
     }
 }
 
-/// `check_student_result_symbols` (pura): acepta resultados finales, agregados `is_final` y
-/// resultados por corrida `Re#k`; rechaza agregados no finales, símbolos desconocidos, bases que
-/// no son point_result e índices de corrida no numéricos. Lista vacía siempre válida.
 #[test]
 fn check_student_result_symbols_accepts_finals_and_per_run() {
     use crate::practices::{PracticeAggregate, PracticeDefinition, PracticePointResult};
@@ -209,7 +202,6 @@ fn measurement(symbol: &str, values: &[f64]) -> MeasurementInput {
     }
 }
 
-/// Atajo de test: `compute_regresion` sin derivadas por punto, agregados ni escalas (firma previa).
 fn reg(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
@@ -277,17 +269,12 @@ fn scale_spec_maps_models_and_options() {
 fn compile_formula_rejects_unknown_symbol() {
     let symbols = vec!["l".to_string(), "a".to_string()];
     assert!(compile_formula("l*a", &symbols).is_ok());
-    // 'z' no es una magnitud declarada.
     assert!(compile_formula("l*z", &symbols).is_err());
-    // paréntesis sin cerrar -> sintaxis inválida.
     assert!(compile_formula("(l*a", &symbols).is_err());
 }
 
 #[test]
 fn compute_propagates_q_l_a_b() {
-    // Q = l*a + l*b con medias 2,3,4 e incertidumbres dadas -> valor 14, u_Q 0.9
-    // (mismo caso que el test analítico de uncertainty::propagate).
-    // Para forzar u_c = 0.1/0.2/0.2 sin tipo B usamos lecturas con esa s/sqrt(n).
     let quantities = vec![quantity("l"), quantity("a"), quantity("b")];
     let results = vec![PracticeResult {
         id: "r1".into(),
@@ -311,18 +298,14 @@ fn compute_propagates_q_l_a_b() {
     let q_l = &analysis.quantities[0];
     assert_eq!(q_l.symbol, "l");
     assert!(close(q_l.result.mean, 2.0, 1e-12));
-    // Una sola lectura -> u_A = 0, sin escala -> u_B = 0 -> u_c = 0.
     assert!(close(q_l.result.u_c, 0.0, 1e-12));
     assert_eq!(analysis.derived.len(), 1);
     assert!(close(analysis.derived[0].value, 14.0, 1e-9));
-    // u_c todas cero -> u_Q = 0.
     assert!(close(analysis.derived[0].u, 0.0, 1e-9));
 }
 
 #[test]
 fn compute_propagates_uncertainty_to_measurand() {
-    // l con réplicas [9, 11] -> media 10, s = √2, u_A = s/√2 = 1.0; a=2, b=3 (sin u).
-    // Q = l*a + l*b = 50; ∂Q/∂l = a+b = 5 -> u_Q = 5 * 1.0 = 5.0.
     let quantities = vec![quantity("l"), quantity("a"), quantity("b")];
     let results = vec![PracticeResult {
         id: "r1".into(),
@@ -360,11 +343,9 @@ fn compute_warns_on_missing_readings() {
 
 #[test]
 fn compute_with_operators_derives_per_operator() {
-    // Motor D: T (repetida) se carga por operador; L (medida única) es compartida.
-    // g = T + L. op1: T=10 → g=15 ; op2: T=20 → g=25. Sin promedio entre operadores.
-    let t = quantity("T"); // repeated = true → por operador
+    let t = quantity("T");
     let mut l = quantity("L");
-    l.repeated = false; // medida única → compartida
+    l.repeated = false;
     let quantities = vec![t, l];
     let results = vec![PracticeResult {
         id: "r1".into(),
@@ -399,12 +380,10 @@ fn compute_with_operators_derives_per_operator() {
     )
     .unwrap();
 
-    // Compartida L una sola vez en `quantities`; nada en el `derived` de nivel superior.
     assert_eq!(a.quantities.len(), 1);
     assert_eq!(a.quantities[0].symbol, "L");
     assert!(a.derived.is_empty());
 
-    // Un bloque por operador: su T y su g, sin promediar entre operadores.
     assert_eq!(a.operators.len(), 2);
     assert_eq!(a.operators[0].label, "Operador 1");
     assert_eq!(a.operators[0].quantities.len(), 1);
@@ -418,7 +397,6 @@ fn compute_with_operators_derives_per_operator() {
 #[tokio::test]
 async fn analyze_uses_type_a_with_replicas() {
     let (pool, _dir) = setup().await;
-    // P1 sembrada: T (periodo, repetido) + L (dado). Cargo réplicas de T con dispersión conocida.
     let def = crate::practices::definition(&pool, "p1-estadistica")
         .await
         .unwrap()
@@ -455,7 +433,6 @@ async fn analyze_uses_type_a_with_replicas() {
 #[tokio::test]
 async fn create_form_submission_persists_and_reads_back() {
     let (pool, _dir) = setup().await;
-    // Usuario docente (puede entregar sin estar en grupo); curso/grupo de prueba.
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -513,16 +490,12 @@ async fn create_form_submission_persists_and_reads_back() {
     };
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
     assert_eq!(detail.entry_mode, "form");
-    // El analysis es el FormAnalysis serializado (tiene "quantities").
     assert!(detail.analysis.get("quantities").is_some());
-    // La meta de depuración se persiste y se lee de vuelta intacta.
     let meta = detail.measurement_meta.expect("meta persistida");
     assert_eq!(meta["q1"]["bins"], 8);
     assert_eq!(meta["q1"]["discarded"][0], 9.9);
 }
 
-/// Las observaciones/comentarios del alumno son opcionales, se persisten recortando
-/// espacios, y un texto en blanco (o ausente) queda como `None` en vez de una cadena vacía.
 #[tokio::test]
 async fn create_form_submission_trims_and_persists_student_comment() {
     let (pool, _dir) = setup().await;
@@ -582,7 +555,6 @@ async fn create_form_submission_trims_and_persists_student_comment() {
         student_comment: comment.map(String::from),
     };
 
-    // Con texto (con espacios de sobra): se persiste recortado.
     let detail = create_form_submission(&pool, &user, mk(Some("  anduvo mal el generador  ")))
         .await
         .unwrap();
@@ -591,21 +563,17 @@ async fn create_form_submission_trims_and_persists_student_comment() {
         Some("anduvo mal el generador")
     );
 
-    // En blanco: se persiste como None, no como cadena vacía.
     let blank = create_form_submission(&pool, &user, mk(Some("   ")))
         .await
         .unwrap();
     assert_eq!(blank.student_comment, None);
 
-    // Ausente (None): también None.
     let absent = create_form_submission(&pool, &user, mk(None))
         .await
         .unwrap();
     assert_eq!(absent.student_comment, None);
 }
 
-/// El alumno puede entregar opcionalmente su resultado final (p. ej. `g`) junto con la
-/// medición; queda persistido igual que si lo hubiese cargado luego por separado.
 #[tokio::test]
 async fn create_form_submission_persists_optional_student_result() {
     let (pool, _dir) = setup().await;
@@ -674,7 +642,6 @@ async fn create_form_submission_persists_optional_student_result() {
     assert_eq!(detail.student_results[0].value, 9.8);
 }
 
-/// Un símbolo que no es mensurando de la práctica se rechaza antes de crear la entrega.
 #[tokio::test]
 async fn create_form_submission_rejects_unknown_student_result_symbol() {
     let (pool, _dir) = setup().await;
@@ -745,8 +712,6 @@ async fn create_form_submission_rejects_unknown_student_result_symbol() {
 
 #[tokio::test]
 async fn operator_submission_stores_operator_index_per_operator() {
-    // Estadístico con operadores: la magnitud repetida T guarda cada operador con su
-    // operator_index (replicate_index = réplica dentro del operador), para reconstruir al editar.
     let (pool, _dir) = setup().await;
     let course = db::create_course(
         &pool,
@@ -800,7 +765,6 @@ async fn operator_submission_stores_operator_index_per_operator() {
             values: vec![],
             given_u: None,
             point_replicas: None,
-            // Operador 0: [1.0, 1.1] ; operador 1: [2.0, 2.1, 2.2].
             operator_replicas: Some(vec![vec![1.0, 1.1], vec![2.0, 2.1, 2.2]]),
         }],
         meta: None,
@@ -812,8 +776,7 @@ async fn operator_submission_stores_operator_index_per_operator() {
     let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
     let t_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == t_id).collect();
 
-    // Cada operador guarda su cantidad propia de réplicas con replicate_index contiguo.
-    assert_eq!(t_rows.len(), 5); // 2 + 3
+    assert_eq!(t_rows.len(), 5);
     for (op, expected_n) in [(0i64, 2usize), (1, 3)] {
         let mut reps: Vec<i64> = t_rows
             .iter()
@@ -824,17 +787,12 @@ async fn operator_submission_stores_operator_index_per_operator() {
         assert_eq!(reps, (0..expected_n as i64).collect::<Vec<_>>());
     }
 
-    // El análisis trae un bloque por operador (g por operador, sin agregado).
     let operators = detail.analysis["operators"].as_array().unwrap();
     assert_eq!(operators.len(), 2);
 }
 
 #[tokio::test]
 async fn point_based_submission_stores_point_index_per_point() {
-    // Una entrega por puntos (curva/regresión) guarda cada punto con su point_index (no en
-    // replicate_index), para que la edición reconstruya la serie completa. Cubre el fix del
-    // bug de prefill. Se usa `curva` (misma ruta de persistencia point_based, sin derivar
-    // mensurandos que en p1 referencian T/L y no encajarían en el modo regresión).
     let (pool, _dir) = setup().await;
     let course = db::create_course(
         &pool,
@@ -862,8 +820,6 @@ async fn point_based_submission_stores_point_index_per_point() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    // P1 como curva (fixture generico, no la forma real de la practica): T1 (un valor por
-    // punto) vs T2 (réplicas por punto).
     crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
         .await
         .unwrap();
@@ -922,7 +878,6 @@ async fn point_based_submission_stores_point_index_per_point() {
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
     let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
 
-    // T1: un valor por punto → point_index 0,1,2 y replicate_index 0.
     let mut t_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T1")).collect();
     t_rows.sort_by_key(|m| m.point_index);
     assert_eq!(t_rows.len(), 3);
@@ -932,9 +887,8 @@ async fn point_based_submission_stores_point_index_per_point() {
         assert!(close(m.value, (i + 1) as f64, 1e-9));
     }
 
-    // T2: réplicas por punto → point_index = punto, replicate_index = réplica.
     let tmed_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T2")).collect();
-    assert_eq!(tmed_rows.len(), 6); // 3 puntos x 2 réplicas
+    assert_eq!(tmed_rows.len(), 6);
     assert!(tmed_rows
         .iter()
         .any(|m| m.point_index == 0 && m.replicate_index == 1 && close(m.value, 4.2, 1e-9)));
@@ -945,9 +899,6 @@ async fn point_based_submission_stores_point_index_per_point() {
 
 #[tokio::test]
 async fn point_based_submission_stores_variable_replicas_per_point() {
-    // Cada punto puede traer una cantidad distinta de réplicas (p.ej. una esfera medida 1 vez,
-    // otra 3): se persisten todas con replicate_index 0..n del punto y el motor promedia con el
-    // n real de cada punto. Cubre el caso de grilla "irregular".
     let (pool, _dir) = setup().await;
     let course = db::create_course(
         &pool,
@@ -1001,7 +952,6 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
             .id
             .clone()
     };
-    // Punto 0: 1 réplica; punto 1: 3 réplicas; punto 2: 2 réplicas. Medias: 4.0, 5.1, 6.05.
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
@@ -1034,8 +984,6 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
     let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
 
-    // Cada punto guarda su cantidad propia de réplicas (1 + 3 + 2 = 6), con replicate_index
-    // contiguo desde 0 dentro del punto.
     let tmed_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T2")).collect();
     assert_eq!(tmed_rows.len(), 6);
     for (point, expected_n) in [(0i64, 1usize), (1, 3), (2, 2)] {
@@ -1049,7 +997,6 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
         assert_eq!(reps, (0..expected_n as i64).collect::<Vec<_>>());
     }
 
-    // El motor promedia con el n real de cada punto: la curva usa (T, media de réplicas).
     let points = detail.analysis["scatters"][0]["points"].as_array().unwrap();
     assert_eq!(points.len(), 3);
     let y = |i: usize| points[i][1].as_f64().unwrap();
@@ -1119,7 +1066,6 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
     let created = create_form_submission(&pool, &user, mk(vec![5.0, 5.2, 4.9]))
         .await
         .unwrap();
-    // Recién creada: editable (ventana abierta, pendiente, no visible).
     assert!(created.can_edit);
     assert!(created.editable_until.is_some());
 
@@ -1134,7 +1080,6 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
     )
     .await
     .unwrap();
-    // Las lecturas crudas reflejan los nuevos valores (3 réplicas: 10, 12, 11).
     let vals: Vec<f64> = edited.measurements.iter().map(|m| m.value).collect();
     assert_eq!(vals, vec![10.0, 12.0, 11.0]);
     let q_t = edited.analysis["quantities"]
@@ -1146,9 +1091,6 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
     assert!((q_t["result"]["mean"].as_f64().unwrap() - 11.0).abs() < 1e-9);
 }
 
-/// Cancelar (`db::delete_submission`) borra la entrega por completo: deja de existir
-/// (`submission_detail` devuelve `None`) y libera la mesa para una nueva entrega en la
-/// misma (práctica, grupo, mesa) — el índice único ya no choca.
 #[tokio::test]
 async fn cancel_submission_deletes_and_frees_table() {
     let (pool, _dir) = setup().await;
@@ -1213,11 +1155,9 @@ async fn cancel_submission_deletes_and_frees_table() {
     };
     let created = create_form_submission(&pool, &user, mk()).await.unwrap();
 
-    // Antes de cancelar: hay resultado del alumno y un integrante (owner).
     assert_eq!(created.student_results.len(), 1);
     assert_eq!(created.members.len(), 1);
 
-    // Cancelar: la mesa 1 de esta práctica/grupo ya está ocupada por `created`.
     assert!(
         db::find_existing_report(&pool, "p1-estadistica", &group.id, 1)
             .await
@@ -1228,13 +1168,11 @@ async fn cancel_submission_deletes_and_frees_table() {
     let existed = db::delete_submission(&pool, &created.id).await.unwrap();
     assert!(existed);
 
-    // La entrega deja de existir.
     assert!(db::submission_detail(&pool, &created.id)
         .await
         .unwrap()
         .is_none());
 
-    // La mesa quedó libre: ya no hay informe para (práctica, grupo, 1).
     assert!(
         db::find_existing_report(&pool, "p1-estadistica", &group.id, 1)
             .await
@@ -1242,17 +1180,13 @@ async fn cancel_submission_deletes_and_frees_table() {
             .is_none()
     );
 
-    // Cancelar de nuevo (id ya borrado) es un no-op, no un error.
     assert!(!db::delete_submission(&pool, &created.id).await.unwrap());
 
-    // Se puede crear una entrega nueva para la misma mesa sin chocar con el índice único.
     let recreated = create_form_submission(&pool, &user, mk()).await.unwrap();
     assert_ne!(recreated.id, created.id);
     assert_eq!(recreated.table_number, Some(1));
 }
 
-/// `update_form_submission` reemplaza el comentario del alumno igual que las lecturas:
-/// se puede agregar uno donde no había, cambiarlo, y en blanco vuelve a quedar en `None`.
 #[tokio::test]
 async fn update_form_submission_replaces_student_comment() {
     let (pool, _dir) = setup().await;
@@ -1315,7 +1249,6 @@ async fn update_form_submission_replaces_student_comment() {
     let created = create_form_submission(&pool, &user, input).await.unwrap();
     assert_eq!(created.student_comment, None);
 
-    // Agrega un comentario donde no había.
     let edited = update_form_submission(
         &pool,
         &created.id,
@@ -1332,7 +1265,6 @@ async fn update_form_submission_replaces_student_comment() {
         Some("faltó una réplica por corte de luz")
     );
 
-    // Lo borra (en blanco vuelve a None, no queda pegado el anterior).
     let cleared = update_form_submission(
         &pool,
         &created.id,
@@ -1403,7 +1335,6 @@ async fn create_form_submission_rejects_unknown_course_and_rolls_back() {
         student_comment: None,
     };
     assert!(create_form_submission(&pool, &user, input).await.is_err());
-    // Rollback: no debe quedar ninguna entrega ni medición.
     let subs: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
         .fetch_one(&pool)
         .await
@@ -1428,7 +1359,6 @@ fn result(symbol: &str, formula: &str) -> PracticeResult {
 
 #[test]
 fn compute_regresion_fits_known_line() {
-    // y = 2x + 1 con ejes triviales (x = px, y = py).
     let quantities = vec![quantity("px"), quantity("py")];
     let results = vec![result("m", "slope"), result("b0", "intercept")];
     let measurements = vec![
@@ -1441,7 +1371,6 @@ fn compute_regresion_fits_known_line() {
     assert!(close(reg.intercept, 1.0, 1e-9));
     assert!(close(reg.r_squared, 1.0, 1e-9));
     assert_eq!(reg.points.len(), 4);
-    // Los mensurandos derivan de slope/intercept.
     assert!(close(
         a.derived.iter().find(|d| d.symbol == "m").unwrap().value,
         2.0,
@@ -1456,9 +1385,6 @@ fn compute_regresion_fits_known_line() {
 
 #[test]
 fn compute_regresion_uses_per_point_intermediate_averaged_over_replicas() {
-    // Motor C: la intermedia Q = V/t se evalúa por réplica y se promedia por punto, NO como
-    // media(V)/media(t). Punto 0: V=[10,10], t=[1,2] → Q=(10+5)/2=7.5 (media(V)/media(t) daría
-    // 10/1.5≈6.67). Punto 1: V=[20,20], t=[1,2] → Q=(20+10)/2=15.
     let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
     let intermediates = vec![PracticeIntermediate {
         id: "i1".into(),
@@ -1488,7 +1414,6 @@ fn compute_regresion_uses_per_point_intermediate_averaged_over_replicas() {
     assert_eq!(reg.points, vec![(7.5, 100.0), (15.0, 200.0)]);
 }
 
-/// Helper de test: una magnitud con réplicas por punto.
 fn point_rep(id: &str, groups: Vec<Vec<f64>>) -> MeasurementInput {
     MeasurementInput {
         quantity_id: id.into(),
@@ -1503,9 +1428,6 @@ fn point_rep(id: &str, groups: Vec<Vec<f64>>) -> MeasurementInput {
 
 #[test]
 fn intermediate_broadcasts_single_value_magnitudes_over_replicas() {
-    // Difusión: D = h*V/t, con h de un solo valor por punto y V,t con 2 réplicas. h se difunde.
-    // Punto 0: h=2, V=[10,10], t=[1,2] → D=(2*10/1 + 2*10/2)/2 = (20+10)/2 = 15.
-    // Punto 1: h=3, V=[20,20], t=[1,2] → D=(60+30)/2 = 45.
     let quantities = vec![quantity("h"), quantity("V"), quantity("t"), quantity("py")];
     let intermediates = vec![PracticeIntermediate {
         id: "i1".into(),
@@ -1531,8 +1453,6 @@ fn intermediate_broadcasts_single_value_magnitudes_over_replicas() {
 
 #[test]
 fn intermediate_formula_can_use_constants() {
-    // Una intermedia con una constante (pi): A = pi*r*r, r de un solo valor por punto.
-    // pi lo precarga el evaluador; no debe quedar bindeado a NaN. r=[2,3] → A=pi*4, pi*9.
     let quantities = vec![quantity("r"), quantity("py")];
     let intermediates = vec![PracticeIntermediate {
         id: "i1".into(),
@@ -1555,8 +1475,6 @@ fn intermediate_formula_can_use_constants() {
 
 #[test]
 fn intermediate_rejects_mismatched_replica_counts() {
-    // Dos magnitudes replicadas con distinto conteo (V con 2, t con 1) en una intermedia son
-    // dato incompleto: NO se difunde la réplica faltante → el punto da NaN → se rechaza.
     let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
     let intermediates = vec![PracticeIntermediate {
         id: "i1".into(),
@@ -1569,7 +1487,7 @@ fn intermediate_rejects_mismatched_replica_counts() {
     }];
     let measurements = vec![
         point_rep("q-V", vec![vec![10.0, 20.0], vec![10.0, 20.0]]),
-        point_rep("q-t", vec![vec![1.0], vec![1.0]]), // replicada pero con 1 sola réplica
+        point_rep("q-t", vec![vec![1.0], vec![1.0]]),
         measurement("py", &[100.0, 200.0]),
     ];
     assert!(reg(&quantities, &intermediates, &[], "Q", "py", &measurements).is_err());
@@ -1577,8 +1495,6 @@ fn intermediate_rejects_mismatched_replica_counts() {
 
 #[test]
 fn intermediate_can_reference_an_earlier_intermediate() {
-    // Encadenado: Q = V/t (promedio por réplica), R = Q*2 (ve a Q como su valor por punto).
-    // Punto 0: Q=(10/1+10/2)/2=7.5 → R=15 ; punto 1: Q=(20/1+20/2)/2=15 → R=30.
     let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
     let intermediates = vec![
         PracticeIntermediate {
@@ -1614,8 +1530,6 @@ fn intermediate_can_reference_an_earlier_intermediate() {
 
 #[test]
 fn compute_regresion_uses_pi_and_sqrt_in_axis_formulas() {
-    // x = 2*pi*f ; y = math::sqrt(a). f=[1,2,3], a=[4,9,16] -> x=2pi*{1,2,3}, y={2,3,4}.
-    // y crece 1 por unidad de f, x crece 2pi por unidad de f -> slope = 1/(2pi), intercept = 1.
     let quantities = vec![quantity("f"), quantity("a")];
     let results = vec![result("tau", "slope")];
     let measurements = vec![
@@ -1637,7 +1551,6 @@ fn compute_regresion_uses_pi_and_sqrt_in_axis_formulas() {
     let reg = analysis.regression.unwrap();
     assert!(close(reg.slope, 1.0 / (2.0 * std::f64::consts::PI), 1e-9));
     assert!(close(reg.intercept, 1.0, 1e-9));
-    // Las etiquetas de eje conservan las fórmulas para rotular el gráfico.
     assert_eq!(reg.x_label, "2*pi*f");
     assert_eq!(reg.y_label, "math::sqrt(a)");
     assert!(close(
@@ -1654,10 +1567,8 @@ fn compute_regresion_uses_pi_and_sqrt_in_axis_formulas() {
 
 #[test]
 fn compute_regresion_shared_scalar_measurand_and_point_result() {
-    // Motor E: px,py por punto (slope=2, intercept=0); c escalar compartido=10. Mensurando
-    // m = slope*c = 20 (usa un escalar, no solo slope). Derivada por punto Re = px*m por corrida.
     let mut c = quantity("c");
-    c.per_point = false; // escalar compartido (se carga una vez)
+    c.per_point = false;
     let quantities = vec![quantity("px"), quantity("py"), c];
     let results = vec![result("m", "slope * c")];
     let point_results = vec![PracticePointResult {
@@ -1686,13 +1597,11 @@ fn compute_regresion_shared_scalar_measurand_and_point_result() {
         &measurements,
     )
     .unwrap();
-    // El mensurando usa el escalar compartido + slope: m = 2 * 10 = 20.
     assert!(close(
         a.derived.iter().find(|d| d.symbol == "m").unwrap().value,
         20.0,
         1e-9
     ));
-    // La derivada por punto da un valor por corrida: Re = px * m = {20, 40}.
     let re = a.point_results.iter().find(|p| p.symbol == "Re").unwrap();
     assert_eq!(re.values.len(), 2);
     assert!(close(re.values[0], 20.0, 1e-9));
@@ -1701,11 +1610,6 @@ fn compute_regresion_shared_scalar_measurand_and_point_result() {
 
 #[test]
 fn compute_regresion_aggregates_use_endpoints_measurands_and_chain() {
-    // Motor F: px por punto = [1,2,3], py = [2,4,6] → slope=2. c escalar compartido = 10.
-    // Mensurando m = slope*c = 20. Agregados escalares (un valor) que usan:
-    //  - extremos por punto: ep = px_first + px_last = 1 + 3 = 4; mid = px_first2 + px_last2 = 2+2 = 4
-    //  - un mensurando + slope: g = m + slope = 22
-    //  - un agregado anterior (encadenable): chained = ep + g = 26
     let mut c = quantity("c");
     c.per_point = false;
     let quantities = vec![quantity("px"), quantity("py"), c];
@@ -1758,8 +1662,6 @@ fn compute_regresion_aggregates_use_endpoints_measurands_and_chain() {
 
 #[test]
 fn compute_regresion_aggregate_non_finite_warns() {
-    // Motor F: un agregado con división por cero (px_first - px_first = 0) da no finito y debe
-    // avisar (sin abortar el resto del análisis), igual que los mensurandos derivados.
     let quantities = vec![quantity("px"), quantity("py")];
     let aggregates = vec![PracticeAggregate {
         id: "a-bad".into(),
@@ -1799,10 +1701,6 @@ fn compute_regresion_aggregate_non_finite_warns() {
 
 #[test]
 fn compute_regresion_aggregate_endpoints_use_own_series_not_contexts() {
-    // z es magnitud por punto que NO aparece en los ejes (x=px, y=py): build_points la omite
-    // del conditioning set y n_points = 3 (de px/py). Con la lógica anterior z_last leía
-    // contexts[2]["z"] = z[2] = 30 aunque z tiene 4 filas (z[3]=40 es el extremo correcto).
-    // Con la corrección se usa la serie propia de z, no contexts.
     let quantities = vec![quantity("px"), quantity("py"), quantity("z")];
     let agg = |symbol: &str, formula: &str| PracticeAggregate {
         id: format!("a-{symbol}"),
@@ -1854,7 +1752,6 @@ fn compute_regresion_aggregate_endpoints_use_own_series_not_contexts() {
     );
     assert!(close(val("z_beg"), 10.0, 1e-9));
     assert!(close(val("z_beg2"), 20.0, 1e-9));
-    // El extremo de z (4 puntos) sale de su serie propia, pero el ajuste tiene 3: debe avisar.
     assert!(
         a.warnings
             .iter()
@@ -1866,8 +1763,6 @@ fn compute_regresion_aggregate_endpoints_use_own_series_not_contexts() {
 
 #[test]
 fn compute_regresion_aggregate_endpoint_misalignment_warns_only_if_referenced() {
-    // z (por punto) tiene 4 filas vs 3 del ajuste, pero NINGÚN agregado usa un extremo de z:
-    // no debe avisar (sin ruido por magnitudes no referenciadas en extremos).
     let quantities = vec![quantity("px"), quantity("py"), quantity("z")];
     let aggregates = vec![PracticeAggregate {
         id: "a-s".into(),
@@ -1876,7 +1771,7 @@ fn compute_regresion_aggregate_endpoint_misalignment_warns_only_if_referenced() 
         symbol: "s".into(),
         name: "s".into(),
         unit: "".into(),
-        formula: "slope".into(), // no toca z_first/z_last/...
+        formula: "slope".into(),
         is_final: false,
     }];
     let measurements = vec![
@@ -1905,8 +1800,6 @@ fn compute_regresion_aggregate_endpoint_misalignment_warns_only_if_referenced() 
 
 #[test]
 fn intermediate_can_use_shared_scalar_across_points() {
-    // Motor E: una intermedia usa un escalar compartido (c, per_point=false), que se difunde a
-    // todos los puntos. D = px/c con px=[1,2], c=10 → D=[0.1,0.2]. (Antes daba NaN en el 2º punto.)
     let mut c = quantity("c");
     c.per_point = false;
     let quantities = vec![quantity("px"), quantity("py"), c];
@@ -1941,8 +1834,6 @@ fn intermediate_can_use_shared_scalar_across_points() {
 
 #[test]
 fn shared_scalar_with_multiple_readings_collapses_to_one_value() {
-    // Un escalar compartido con varias lecturas (c=[10,20]) se colapsa a su media (15) y se usa
-    // igual en todos los puntos; no varía por punto. D = px/c → {1/15, 2/15} (no {1/10, 2/20}).
     let mut c = quantity("c");
     c.per_point = false;
     let quantities = vec![quantity("px"), quantity("py"), c];
@@ -1958,7 +1849,7 @@ fn shared_scalar_with_multiple_readings_collapses_to_one_value() {
     let measurements = vec![
         measurement("px", &[1.0, 2.0]),
         measurement("py", &[1.0, 2.0]),
-        measurement("c", &[10.0, 20.0]), // dos lecturas de un escalar compartido
+        measurement("c", &[10.0, 20.0]),
     ];
     let pts = compute_regresion(
         &quantities,
@@ -1988,7 +1879,6 @@ fn compute_regresion_needs_at_least_two_points() {
 
 #[test]
 fn compute_curva_builds_scatter_without_fit() {
-    // Curva sin ajuste: evalúa los ejes y produce los puntos, sin slope/intercept ni derivados.
     let quantities = vec![quantity("px"), quantity("py")];
     let measurements = vec![
         measurement("px", &[1.0, 2.0, 3.0]),
@@ -2009,7 +1899,6 @@ fn compute_curva_builds_scatter_without_fit() {
 
 #[test]
 fn compute_curva_builds_one_scatter_per_curve() {
-    // Motor B: varias curvas sobre el mismo barrido producen una entrada en `scatters` cada una.
     let quantities = vec![quantity("px"), quantity("py")];
     let measurements = vec![
         measurement("px", &[1.0, 2.0, 3.0]),
@@ -2044,7 +1933,6 @@ fn compute_curva_needs_at_least_two_points() {
 
 #[test]
 fn compute_curva_rejects_non_positive_x_when_log() {
-    // Con eje x logarítmico, un x <= 0 es inválido.
     let quantities = vec![quantity("px"), quantity("py")];
     let measurements = vec![
         measurement("px", &[0.0, 10.0]),
@@ -2055,13 +1943,10 @@ fn compute_curva_rejects_non_positive_x_when_log() {
 
 #[test]
 fn build_points_ignores_quantities_not_in_axes() {
-    // 'aux' no aparece en las fórmulas de eje y no tiene mediciones: no debe bloquear ni
-    // arrastrar el conteo de puntos (regresión: antes el mínimo común la incluía y daba 0).
     let quantities = vec![quantity("px"), quantity("py"), quantity("aux")];
     let measurements = vec![
         measurement("px", &[1.0, 2.0, 3.0]),
         measurement("py", &[4.0, 5.0, 6.0]),
-        // 'aux' sin mediciones a propósito.
     ];
     let (a, _) =
         compute_curva(&quantities, &[], &[curve("px", "py", false)], &measurements).unwrap();
@@ -2073,8 +1958,6 @@ fn build_points_ignores_quantities_not_in_axes() {
 
 #[test]
 fn build_points_averages_per_point_replicas() {
-    // 'py' mide réplicas por punto: el motor usa la media de cada punto en el eje.
-    // Punto 1: media(3,5)=4 ; punto 2: media(8,10,12)=10.
     let quantities = vec![quantity("px"), quantity("py")];
     let measurements = vec![
         measurement("px", &[1.0, 2.0]),
@@ -2091,11 +1974,9 @@ fn build_points_averages_per_point_replicas() {
     let a = reg(&quantities, &[], &[], "px", "py", &measurements).unwrap();
     let reg = a.regression.unwrap();
     assert_eq!(reg.points, vec![(1.0, 4.0), (2.0, 10.0)]);
-    // Pendiente de (1,4)-(2,10) = 6.
     assert!(close(reg.slope, 6.0, 1e-9));
 }
 
-/// Mediciones reales para una magnitud sembrada, buscando su id por símbolo en la definición.
 fn measurement_for(
     def: &crate::practices::PracticeDefinition,
     symbol: &str,
@@ -2121,8 +2002,6 @@ fn measurement_for(
 
 #[tokio::test]
 async fn seeded_fluidos_1_computes_regression_mu_and_reynolds() {
-    // La práctica Fluidos I sembrada: regresión h/Q² vs 1/Q con Q = V/t (intermedia), escalares
-    // compartidos (R, L, g de cátedra; rho medida única) → μ de la pendiente, Reynolds por corrida.
     let (pool, _dir) = setup().await;
     let def = crate::practices::definition(&pool, "fluidos-1")
         .await
@@ -2154,7 +2033,7 @@ async fn seeded_fluidos_1_computes_regression_mu_and_reynolds() {
         }
     };
     let measurements = vec![
-        mk("h", vec![0.30, 0.10], None, None), // un valor por punto (2 alturas)
+        mk("h", vec![0.30, 0.10], None, None),
         mk(
             "V",
             vec![],
@@ -2176,10 +2055,8 @@ async fn seeded_fluidos_1_computes_regression_mu_and_reynolds() {
     let a = analyze(&pool, "fluidos-1", &measurements).await.unwrap();
     let reg = a.regression.expect("hay ajuste");
     assert_eq!(reg.points.len(), 2);
-    // μ derivado de la pendiente + escalares compartidos: finito.
     let mu = a.derived.iter().find(|d| d.symbol == "mu").expect("mu");
     assert!(mu.value.is_finite() && mu.value > 0.0);
-    // Reynolds: una columna por corrida, valores finitos.
     let re = a
         .point_results
         .iter()
@@ -2191,8 +2068,6 @@ async fn seeded_fluidos_1_computes_regression_mu_and_reynolds() {
 
 #[tokio::test]
 async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
-    // Viscosidad (Stokes): ajuste v_lim (= dx/t medio) vs R^2; μ de la pendiente; Re por esfera.
-    // Sin intermedia: y = dx/t usa la media de las réplicas de t (Motor A).
     let (pool, _dir) = setup().await;
     let def = crate::practices::definition(&pool, "viscosidad")
         .await
@@ -2226,7 +2101,6 @@ async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
             operator_replicas: None,
         }
     };
-    // 2 esferas (puntos): radios distintos, 3 tiempos c/u; dx, densidades, g compartidos.
     let measurements = vec![
         mk("R", vec![1e-3, 2e-3], None, None),
         mk(
@@ -2244,7 +2118,6 @@ async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
     let a = analyze(&pool, "viscosidad", &measurements).await.unwrap();
     let reg = a.regression.expect("hay ajuste");
     assert_eq!(reg.points.len(), 2);
-    // Punto: x = R^2, y = dx/t (t medio). Esfera 1: (1e-6, 0.20/20=0.01).
     assert!(close(reg.points[0].0, 1e-6, 1e-12));
     assert!(close(reg.points[0].1, 0.01, 1e-9));
     let mu = a.derived.iter().find(|d| d.symbol == "mu").expect("mu");
@@ -2261,8 +2134,6 @@ async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
 #[tokio::test]
 async fn analyze_routes_curva_to_scatter() {
     let (pool, _dir) = setup().await;
-    // Configuramos P1 como curva con ejes sobre sus propias magnitudes (fixture generico:
-    // T1 vs T2, no la forma real "estadistico" de la practica).
     crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
         .await
         .unwrap();
@@ -2281,8 +2152,6 @@ async fn analyze_routes_curva_to_scatter() {
         .await
         .unwrap()
         .unwrap();
-    // L y t_med son magnitudes auxiliares (no estan en los ejes T1 vs T2): se omiten a
-    // proposito y build_points debe ignorarlas sin exigirles mediciones.
     let measurements = vec![
         measurement_for(&def, "T1", &[1.0, 2.0, 3.0]),
         measurement_for(&def, "T2", &[4.0, 5.0, 6.0]),
@@ -2291,7 +2160,6 @@ async fn analyze_routes_curva_to_scatter() {
         .await
         .unwrap();
     assert!(analysis.regression.is_none());
-    // Una única curva en la lista → un scatter sin ajuste ni mensurandos.
     assert_eq!(analysis.scatters.len(), 1);
     assert_eq!(
         analysis.scatters[0].points,
@@ -2301,7 +2169,6 @@ async fn analyze_routes_curva_to_scatter() {
 
 #[tokio::test]
 async fn analyze_curva_graphs_each_curve_in_the_list() {
-    // Una práctica `curva` grafica una entrada en `scatters` por cada curva de la lista.
     let (pool, _dir) = setup().await;
     crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
         .await
@@ -2359,7 +2226,6 @@ async fn analyze_curva_without_curves_errors() {
     crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
         .await
         .unwrap();
-    // Sin curvas definidas, el dispatcher debe fallar con un error claro (no entrar al cálculo).
     let result = analyze(&pool, "p1-estadistica", &[]).await;
     assert!(result.is_err());
 }
@@ -2367,9 +2233,6 @@ async fn analyze_curva_without_curves_errors() {
 #[tokio::test]
 async fn analyze_ca_rlc_matches_series_rlc_theory() {
     let (pool, _dir) = setup().await;
-    // RLC serie sintetico: R=100, L=0.1, C=1uF, Vg=5V, f=1000Hz. Los pico a pico y los semiejes
-    // de Lissajous se eligen para que cada canal experimental coincida con su teorico (verifica
-    // que las formulas expandidas del seed son consistentes entre si, no solo que "compilan").
     let def = crate::practices::definition(&pool, "ca-rlc")
         .await
         .unwrap()
@@ -2440,11 +2303,6 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
     assert!(close(get("VC_exp"), i_teo * xc, 1e-9));
     assert!(close(get("VL_teo"), i_teo * xl, 1e-9));
     assert!(close(get("VL_exp"), i_teo * xl, 1e-9));
-    // phiR_teo cae en el rango de asin ([-pi/2, pi/2]), asi que phiR_exp lo recupera exacto.
-    // phiC_teo/phiL_teo no (estan a +-90 grados de fase respecto a R), asi que asin(b/a) solo
-    // puede devolver su valor principal — la ambiguedad de cuadrante de Lissajous es real, no un
-    // bug del seed; el docente confirmo los signos de fase y que las tensiones se miden pico a
-    // pico, sabiendo que esta ambiguedad de asin persiste. Los desfasajes se muestran en grados.
     let to_deg = 180.0 / std::f64::consts::PI;
     assert!(close(get("phiR_teo"), -phi_teo * to_deg, 1e-6));
     assert!(close(get("phiR_exp"), -phi_teo * to_deg, 1e-4));
@@ -2462,10 +2320,6 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
     assert!(close(get("phiL_exp"), sin_l.asin() * to_deg, 1e-4));
 }
 
-/// Con todas las masas en su default de 0 el torque es 0: la densidad no puede calcularse. No es
-/// un caso especial de esta practica — el guard de mensurandos no finitos es compartido — pero al
-/// venir precargadas en 0 es el camino de menor resistencia, asi que se fija el comportamiento:
-/// warnings explicitos por mensurando y `analysis_json` serializable (los no finitos van a null).
 #[tokio::test]
 async fn analyze_hidrostatica_torque_cero_avisa_sin_romper_la_serializacion() {
     let (pool, _dir) = setup().await;
@@ -2473,7 +2327,6 @@ async fn analyze_hidrostatica_torque_cero_avisa_sin_romper_la_serializacion() {
         .await
         .unwrap()
         .unwrap();
-    // Cada magnitud con su default (masas en 0, brazos en 1..9/10); las demas con un valor valido.
     let measurements: Vec<MeasurementInput> = def
         .quantities
         .iter()
@@ -2505,17 +2358,11 @@ async fn analyze_hidrostatica_torque_cero_avisa_sin_romper_la_serializacion() {
             .unwrap();
         assert!(!derived.value.is_finite());
     }
-    // El empuje si es calculable con torque 0 (es 0, no una division): no debe avisar.
     assert!(!analysis.warnings.iter().any(|w| w.contains("(E1 =")));
-    // La entrega se puede persistir: serde_json escribe los no finitos como null, no falla.
     let json = serde_json::to_string(&analysis).unwrap();
     assert!(json.contains("rho_medio"));
 }
 
-/// Hidrostatica sobre la practica real: el empuje y la densidad de la goma salen del balance de
-/// torques de la balanza de Mohr, y la tension superficial del metodo de Wilhelmy. Las 9 ranuras
-/// se cargan siempre: solo dos con masa y el resto en 0 (las vacias no deben aportar al torque).
-/// Las 3 determinaciones se cargan iguales, asi que cada promedio tiene que dar la determinacion.
 #[tokio::test]
 async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     let (pool, _dir) = setup().await;
@@ -2524,16 +2371,14 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
         .unwrap()
         .unwrap();
 
-    // Teoria a mano: pesas de 1 g en la ranura 3 y 2 g en la ranura 7, brazo del empuje 10 cm.
     let g_ac = 9.80;
-    let m_goma = 12.5; // g
-    let rho_f = 0.998; // g/cm3
-    let torque = 1.0 * 3.0 + 2.0 * 7.0; // g*cm
-    let empuje = (torque / 10.0) * g_ac / 1000.0; // N
-    let rho_goma = rho_f * m_goma * 10.0 * 1000.0 / torque; // kg/m3
+    let m_goma = 12.5;
+    let rho_f = 0.998;
+    let torque = 1.0 * 3.0 + 2.0 * 7.0;
+    let empuje = (torque / 10.0) * g_ac / 1000.0;
+    let rho_goma = rho_f * m_goma * 10.0 * 1000.0 / torque;
 
-    // Wilhelmy: pesa de 0.5 g en la ranura 4, marco de 5 cm colgado del brazo fijo de 10 cm.
-    let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 10.0 * 1000.0); // N/m
+    let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 10.0 * 1000.0);
 
     let mut measurements = Vec::new();
     let mut push = |symbol: &str, value: f64| {
@@ -2578,7 +2423,6 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
         push(&format!("dw{k}"), 4.0);
     }
 
-    // La goma se pesa con la escala de 0.1 g que suma 3 % de calibracion en cuadratura.
     db::seed_academic(&pool).await.unwrap();
     crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
         .await
@@ -2634,16 +2478,12 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
         assert!(close(get(&format!("rho{k}")), rho_goma, 1e-12));
         assert!(close(get(&format!("gamma{k}")), gamma, 1e-12));
     }
-    // Con las 3 determinaciones iguales, el promedio es la determinacion.
     assert!(close(get("E_medio"), empuje, 1e-12));
     assert!(close(get("rho_medio"), rho_goma, 1e-12));
     assert!(close(get("gamma_medio"), gamma, 1e-12));
-    // La goma es mas densa que el agua en este caso (control de sanidad del orden de magnitud).
     assert!(rho_goma > rho_f * 1000.0);
 }
 
-/// La ranura de la pesa de Wilhelmy (`dw_k`, `slot_count = 9`) solo acepta un entero de 1 a 9: una
-/// posicion que no existe en la balanza se rechaza en vez de calcular gamma en silencio.
 #[tokio::test]
 async fn analyze_rejects_a_slot_outside_the_balance() {
     let (pool, _dir) = setup().await;
@@ -2671,7 +2511,6 @@ async fn analyze_rejects_a_slot_outside_the_balance() {
             .to_string();
         assert!(err.contains("entero de 1 a 9"), "{bad}: {err}");
     }
-    // Una ranura valida pasa la validacion (el resto de las magnitudes faltan: solo avisos).
     assert!(analyze(&pool, "hidrostatica", &with_value(4.0))
         .await
         .is_ok());

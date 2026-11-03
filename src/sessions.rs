@@ -26,12 +26,9 @@ pub struct LoginRequest {
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
     pub user: MeUser,
-    /// Token CSRF derivado de la sesión; debe enviarse en `X-CSRF-Token` en cada mutación.
     pub csrf_token: String,
 }
 
-/// Valida credenciales (email o username + contraseña) y, si son correctas, crea una
-/// sesión de 12 h. Devuelve `Some((token, usuario))` o `None` si no coinciden.
 pub async fn login(
     pool: &SqlitePool,
     request: LoginRequest,
@@ -101,8 +98,6 @@ pub async fn login(
     )))
 }
 
-/// Resuelve el usuario asociado a un token de sesión vigente (no vencido).
-/// Devuelve `None` si el token no existe o ya expiró.
 pub async fn user_by_session(pool: &SqlitePool, token: &str) -> anyhow::Result<Option<AuthUser>> {
     let user = sqlx::query_as::<_, AuthUser>(
         r#"
@@ -120,7 +115,6 @@ pub async fn user_by_session(pool: &SqlitePool, token: &str) -> anyhow::Result<O
     Ok(user)
 }
 
-/// Elimina la sesión correspondiente al token (cierre de sesión). Es idempotente.
 pub async fn logout(pool: &SqlitePool, token: &str) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM sessions WHERE token = ?1")
         .bind(token)
@@ -212,7 +206,6 @@ mod tests {
         let (pool, _dir) = pool().await;
         let salt = "test-salt-uuid";
         let legacy_hash = format!("{salt}:{}", digest_password(salt, "clave1234"));
-        // Inserta un usuario con hash legacy SHA-256 directamente en la base.
         sqlx::query(
             "INSERT INTO users (id, username, email, display_name, role, password_hash, created_at)
              VALUES ('u1', 'legacy', 'legacy@test.local', 'Legacy', 'estudiante', ?1, '2024-01-01')",
