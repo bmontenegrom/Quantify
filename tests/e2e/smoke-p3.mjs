@@ -50,13 +50,17 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   }
 
   step("estudiante: entrega");
-  await sPage.click("#submit-button");
+  const [response] = await Promise.all([
+    sPage.waitForResponse((r) => r.url().endsWith("/api/submissions/form") && r.request().method() === "POST"),
+    sPage.click("#submit-button"),
+  ]);
+  const { id: submissionId } = await response.json();
   await sPage.waitForSelector('#submit-status:has-text("Entrega guardada")', { timeout: 15_000 });
 
   step("docente: la entrega muestra las dos partes");
   const { page: tPage } = await login(TEACHER, "docente");
   await tPage.click('.tab.teacher-only[data-view="submissions"]');
-  await tPage.click('.submission-item:has-text("Relajacion Exponencial")');
+  await tPage.click(`.submission-item[data-id="${submissionId}"]`);
   await tPage.waitForSelector(".review-form");
   const detail = (await tPage.locator("#submission-detail-body").textContent()) ?? "";
   assert(detail.includes("Relajación directa"), "el análisis debía tener la parte de relajación directa");
