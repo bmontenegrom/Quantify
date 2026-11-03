@@ -1,138 +1,426 @@
 {
   "aggregates": [],
-  "derived": [
+  "derived": [],
+  "operators": [],
+  "parts": [
     {
-      "formula": "Vg_s / (R1 + R2 + R3 + RA_s)",
-      "has_uncertainty": true,
-      "name": "Corriente teorica",
-      "symbol": "I_s",
-      "u": 8.947229252414257e-6,
-      "u_expanded": 0.000017894458504828514,
-      "unit": "A",
-      "value": 0.0015365703749231714
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "Vg_s / (R1 + R2 + R3 + RA_s)",
+            "has_uncertainty": true,
+            "name": "Corriente teorica",
+            "symbol": "I_s",
+            "u": 8.947229252414257e-6,
+            "u_expanded": 0.000017894458504828514,
+            "unit": "A",
+            "value": 0.0015365703749231714
+          },
+          {
+            "formula": "Vg_s * R1 / (R1 + R2 + R3 + RA_s)",
+            "has_uncertainty": true,
+            "name": "Voltaje teorico en R1",
+            "symbol": "VR1_s_t",
+            "u": 0.010978391384667174,
+            "u_expanded": 0.021956782769334347,
+            "unit": "V",
+            "value": 1.533497234173325
+          },
+          {
+            "formula": "Vg_s * R2 / (R1 + R2 + R3 + RA_s)",
+            "has_uncertainty": true,
+            "name": "Voltaje teorico en R2",
+            "symbol": "VR2_s_t",
+            "u": 0.025605564017886228,
+            "u_expanded": 0.051211128035772456,
+            "unit": "V",
+            "value": 3.3650891210817457
+          },
+          {
+            "formula": "Vg_s * R3 / (R1 + R2 + R3 + RA_s)",
+            "has_uncertainty": true,
+            "name": "Voltaje teorico en R3",
+            "symbol": "VR3_s_t",
+            "u": 0.029242470697779195,
+            "u_expanded": 0.05848494139555839,
+            "unit": "V",
+            "value": 5.086047940995698
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [
+          {
+            "name": "Voltaje de la fuente",
+            "result": {
+              "mean": 10.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.035,
+              "u_c": 0.035,
+              "u_expanded": 0.07
+            },
+            "symbol": "Vg_s",
+            "unit": "V",
+            "values": [
+              10.0
+            ]
+          },
+          {
+            "name": "Resistencia interna del amperimetro",
+            "result": {
+              "mean": 10.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.5,
+              "u_c": 0.5,
+              "u_expanded": 1.0
+            },
+            "symbol": "RA_s",
+            "unit": "ohm",
+            "values": [
+              10.0
+            ]
+          },
+          {
+            "name": "Voltaje medido en R1",
+            "result": {
+              "mean": 1.536,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0048400000000000006,
+              "u_c": 0.0048400000000000006,
+              "u_expanded": 0.009680000000000001
+            },
+            "symbol": "VR1_s",
+            "unit": "V",
+            "values": [
+              1.536
+            ]
+          },
+          {
+            "name": "Voltaje medido en R2",
+            "result": {
+              "mean": 3.379,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0184475,
+              "u_c": 0.0184475,
+              "u_expanded": 0.036895
+            },
+            "symbol": "VR2_s",
+            "unit": "V",
+            "values": [
+              3.379
+            ]
+          },
+          {
+            "name": "Voltaje medido en R3",
+            "result": {
+              "mean": 5.069,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.022672499999999998,
+              "u_c": 0.022672499999999998,
+              "u_expanded": 0.045344999999999996
+            },
+            "symbol": "VR3_s",
+            "unit": "V",
+            "values": [
+              5.069
+            ]
+          }
+        ],
+        "regression": null,
+        "scatters": [],
+        "warnings": []
+      },
+      "analysis_kind": "estadistico",
+      "part_id": "p2-cc-serie",
+      "title": "Serie"
     },
     {
-      "formula": "Vg_s * R1 / (R1 + R2 + R3 + RA_s)",
-      "has_uncertainty": true,
-      "name": "Voltaje teorico en R1",
-      "symbol": "VR1_s_t",
-      "u": 0.010978391384667174,
-      "u_expanded": 0.021956782769334347,
-      "unit": "V",
-      "value": 1.533497234173325
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "R1 + RA_p + R2*R3/(R2+R3)",
+            "has_uncertainty": true,
+            "name": "Resistencia equivalente",
+            "symbol": "Req",
+            "u": 9.214845280546514,
+            "u_expanded": 18.42969056109303,
+            "unit": "ohm",
+            "value": 2325.981818181818
+          },
+          {
+            "formula": "Vg_p / (R1 + RA_p + R2*R3/(R2+R3))",
+            "has_uncertainty": true,
+            "name": "Corriente teorica",
+            "symbol": "I_p",
+            "u": 0.000022727221442848946,
+            "u_expanded": 0.00004545444288569789,
+            "unit": "A",
+            "value": 0.00429925974564016
+          },
+          {
+            "formula": "Vg_p * R1 / (R1 + RA_p + R2*R3/(R2+R3))",
+            "has_uncertainty": true,
+            "name": "Voltaje teorico en R1",
+            "symbol": "VR1_p_t",
+            "u": 0.024079217930235684,
+            "u_expanded": 0.04815843586047137,
+            "unit": "V",
+            "value": 4.290661226148879
+          },
+          {
+            "formula": "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+            "has_uncertainty": true,
+            "name": "Voltaje teorico en R2",
+            "symbol": "VR2_p_t",
+            "u": 0.027387593994944736,
+            "u_expanded": 0.05477518798988947,
+            "unit": "V",
+            "value": 5.666346176394719
+          },
+          {
+            "formula": "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+            "has_uncertainty": true,
+            "name": "Voltaje teorico en R3",
+            "symbol": "VR3_p_t",
+            "u": 0.027387593994944736,
+            "u_expanded": 0.05477518798988947,
+            "unit": "V",
+            "value": 5.666346176394719
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [
+          {
+            "name": "Voltaje de la fuente",
+            "result": {
+              "mean": 10.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.035,
+              "u_c": 0.035,
+              "u_expanded": 0.07
+            },
+            "symbol": "Vg_p",
+            "unit": "V",
+            "values": [
+              10.0
+            ]
+          },
+          {
+            "name": "Resistencia interna del amperimetro",
+            "result": {
+              "mean": 10.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.5,
+              "u_c": 0.5,
+              "u_expanded": 1.0
+            },
+            "symbol": "RA_p",
+            "unit": "ohm",
+            "values": [
+              10.0
+            ]
+          },
+          {
+            "name": "Voltaje medido en R1",
+            "result": {
+              "mean": 4.292,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.02073,
+              "u_c": 0.02073,
+              "u_expanded": 0.04146
+            },
+            "symbol": "VR1_p",
+            "unit": "V",
+            "values": [
+              4.292
+            ]
+          },
+          {
+            "name": "Voltaje medido en R2",
+            "result": {
+              "mean": 5.665,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0241625,
+              "u_c": 0.0241625,
+              "u_expanded": 0.048325
+            },
+            "symbol": "VR2_p",
+            "unit": "V",
+            "values": [
+              5.665
+            ]
+          },
+          {
+            "name": "Voltaje medido en R3",
+            "result": {
+              "mean": 5.665,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0241625,
+              "u_c": 0.0241625,
+              "u_expanded": 0.048325
+            },
+            "symbol": "VR3_p",
+            "unit": "V",
+            "values": [
+              5.665
+            ]
+          }
+        ],
+        "regression": null,
+        "scatters": [],
+        "warnings": []
+      },
+      "analysis_kind": "estadistico",
+      "part_id": "p2-cc-paralelo",
+      "title": "Paralelo"
     },
     {
-      "formula": "Vg_s * R2 / (R1 + R2 + R3 + RA_s)",
-      "has_uncertainty": true,
-      "name": "Voltaje teorico en R2",
-      "symbol": "VR2_s_t",
-      "u": 0.025605564017886228,
-      "u_expanded": 0.051211128035772456,
-      "unit": "V",
-      "value": 3.3650891210817457
-    },
-    {
-      "formula": "Vg_s * R3 / (R1 + R2 + R3 + RA_s)",
-      "has_uncertainty": true,
-      "name": "Voltaje teorico en R3",
-      "symbol": "VR3_s_t",
-      "u": 0.029242470697779195,
-      "u_expanded": 0.05848494139555839,
-      "unit": "V",
-      "value": 5.086047940995698
-    },
-    {
-      "formula": "R1 + RA_p + R2*R3/(R2+R3)",
-      "has_uncertainty": true,
-      "name": "Resistencia equivalente",
-      "symbol": "Req",
-      "u": 9.214845280546514,
-      "u_expanded": 18.42969056109303,
-      "unit": "ohm",
-      "value": 2325.981818181818
-    },
-    {
-      "formula": "Vg_p / (R1 + RA_p + R2*R3/(R2+R3))",
-      "has_uncertainty": true,
-      "name": "Corriente teorica",
-      "symbol": "I_p",
-      "u": 0.000022727221442848946,
-      "u_expanded": 0.00004545444288569789,
-      "unit": "A",
-      "value": 0.00429925974564016
-    },
-    {
-      "formula": "Vg_p * R1 / (R1 + RA_p + R2*R3/(R2+R3))",
-      "has_uncertainty": true,
-      "name": "Voltaje teorico en R1",
-      "symbol": "VR1_p_t",
-      "u": 0.024079217930235684,
-      "u_expanded": 0.04815843586047137,
-      "unit": "V",
-      "value": 4.290661226148879
-    },
-    {
-      "formula": "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
-      "has_uncertainty": true,
-      "name": "Voltaje teorico en R2",
-      "symbol": "VR2_p_t",
-      "u": 0.027387593994944736,
-      "u_expanded": 0.05477518798988947,
-      "unit": "V",
-      "value": 5.666346176394719
-    },
-    {
-      "formula": "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
-      "has_uncertainty": true,
-      "name": "Voltaje teorico en R3",
-      "symbol": "VR3_p_t",
-      "u": 0.027387593994944736,
-      "u_expanded": 0.05477518798988947,
-      "unit": "V",
-      "value": 5.666346176394719
-    },
-    {
-      "formula": "RA_c + R2*R3/(R2+R3)",
-      "has_uncertainty": true,
-      "name": "Resistencia de maxima transferencia teorica (Rth)",
-      "symbol": "RP_max_t",
-      "u": 7.745534813737881,
-      "u_expanded": 15.491069627475762,
-      "unit": "ohm",
-      "value": 1327.9818181818182
-    },
-    {
-      "formula": "Vg_c*Vg_c/(4*(RA_c + R2*R3/(R2+R3)))",
-      "has_uncertainty": true,
-      "name": "Potencia maxima teorica",
-      "symbol": "P_max_t",
-      "u": 0.00005047452507333078,
-      "u_expanded": 0.00010094905014666156,
-      "unit": "W",
-      "value": 0.004706389736989827
-    },
-    {
-      "formula": "P_max",
-      "has_uncertainty": true,
-      "name": "Potencia maxima experimental (de la tabla)",
-      "symbol": "P_max_e",
-      "u": 0.0,
-      "u_expanded": 0.0,
-      "unit": "W",
-      "value": 0.0046834335
-    },
-    {
-      "formula": "R_at_P_max",
-      "has_uncertainty": true,
-      "name": "Resistencia de maxima transferencia experimental",
-      "symbol": "RP_max_e",
-      "u": 0.0,
-      "u_expanded": 0.0,
-      "unit": "ohm",
-      "value": 1500.0
+      "analysis": {
+        "aggregates": [],
+        "derived": [
+          {
+            "formula": "RA_c + R2*R3/(R2+R3)",
+            "has_uncertainty": true,
+            "name": "Resistencia de maxima transferencia teorica (Rth)",
+            "symbol": "RP_max_t",
+            "u": 7.745534813737881,
+            "u_expanded": 15.491069627475762,
+            "unit": "ohm",
+            "value": 1327.9818181818182
+          },
+          {
+            "formula": "Vg_c*Vg_c/(4*(RA_c + R2*R3/(R2+R3)))",
+            "has_uncertainty": true,
+            "name": "Potencia maxima teorica",
+            "symbol": "P_max_t",
+            "u": 0.00005047452507333078,
+            "u_expanded": 0.00010094905014666156,
+            "unit": "W",
+            "value": 0.004706389736989827
+          },
+          {
+            "formula": "P_max",
+            "has_uncertainty": true,
+            "name": "Potencia maxima experimental (de la tabla)",
+            "symbol": "P_max_e",
+            "u": 0.0,
+            "u_expanded": 0.0,
+            "unit": "W",
+            "value": 0.0046834335
+          },
+          {
+            "formula": "R_at_P_max",
+            "has_uncertainty": true,
+            "name": "Resistencia de maxima transferencia experimental",
+            "symbol": "RP_max_e",
+            "u": 0.0,
+            "u_expanded": 0.0,
+            "unit": "ohm",
+            "value": 1500.0
+          }
+        ],
+        "operators": [],
+        "point_results": [],
+        "quantities": [
+          {
+            "name": "Voltaje de la fuente",
+            "result": {
+              "mean": 5.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.0225,
+              "u_c": 0.0225,
+              "u_expanded": 0.045
+            },
+            "symbol": "Vg_c",
+            "unit": "V",
+            "values": [
+              5.0
+            ]
+          },
+          {
+            "name": "Resistencia interna del amperimetro",
+            "result": {
+              "mean": 10.0,
+              "n": 1,
+              "s": 0.0,
+              "u_a": 0.0,
+              "u_b": 0.5,
+              "u_c": 0.5,
+              "u_expanded": 1.0
+            },
+            "symbol": "RA_c",
+            "unit": "ohm",
+            "values": [
+              10.0
+            ]
+          }
+        ],
+        "regression": null,
+        "scatters": [
+          {
+            "points": [
+              [
+                200.0,
+                0.0021359648000000005
+              ],
+              [
+                500.0,
+                0.003731912
+              ],
+              [
+                1000.0,
+                0.004605315999999999
+              ],
+              [
+                1500.0,
+                0.0046834335
+              ],
+              [
+                2000.0,
+                0.0045120080000000005
+              ],
+              [
+                3000.0,
+                0.004002075
+              ]
+            ],
+            "x_label": "R",
+            "x_log": false,
+            "y_label": "P"
+          }
+        ],
+        "warnings": []
+      },
+      "analysis_kind": "curva",
+      "part_id": "p2-cc-potencia",
+      "title": "Curva de potencia"
     }
   ],
-  "operators": [],
   "point_results": [],
   "quantities": [
     {
@@ -185,245 +473,9 @@
       "values": [
         3310.0
       ]
-    },
-    {
-      "name": "Voltaje de la fuente",
-      "result": {
-        "mean": 10.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.035,
-        "u_c": 0.035,
-        "u_expanded": 0.07
-      },
-      "symbol": "Vg_s",
-      "unit": "V",
-      "values": [
-        10.0
-      ]
-    },
-    {
-      "name": "Resistencia interna del amperimetro",
-      "result": {
-        "mean": 10.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.5,
-        "u_c": 0.5,
-        "u_expanded": 1.0
-      },
-      "symbol": "RA_s",
-      "unit": "ohm",
-      "values": [
-        10.0
-      ]
-    },
-    {
-      "name": "Voltaje medido en R1",
-      "result": {
-        "mean": 1.536,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0048400000000000006,
-        "u_c": 0.0048400000000000006,
-        "u_expanded": 0.009680000000000001
-      },
-      "symbol": "VR1_s",
-      "unit": "V",
-      "values": [
-        1.536
-      ]
-    },
-    {
-      "name": "Voltaje medido en R2",
-      "result": {
-        "mean": 3.379,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0184475,
-        "u_c": 0.0184475,
-        "u_expanded": 0.036895
-      },
-      "symbol": "VR2_s",
-      "unit": "V",
-      "values": [
-        3.379
-      ]
-    },
-    {
-      "name": "Voltaje medido en R3",
-      "result": {
-        "mean": 5.069,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.022672499999999998,
-        "u_c": 0.022672499999999998,
-        "u_expanded": 0.045344999999999996
-      },
-      "symbol": "VR3_s",
-      "unit": "V",
-      "values": [
-        5.069
-      ]
-    },
-    {
-      "name": "Voltaje de la fuente",
-      "result": {
-        "mean": 10.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.035,
-        "u_c": 0.035,
-        "u_expanded": 0.07
-      },
-      "symbol": "Vg_p",
-      "unit": "V",
-      "values": [
-        10.0
-      ]
-    },
-    {
-      "name": "Resistencia interna del amperimetro",
-      "result": {
-        "mean": 10.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.5,
-        "u_c": 0.5,
-        "u_expanded": 1.0
-      },
-      "symbol": "RA_p",
-      "unit": "ohm",
-      "values": [
-        10.0
-      ]
-    },
-    {
-      "name": "Voltaje medido en R1",
-      "result": {
-        "mean": 4.292,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.02073,
-        "u_c": 0.02073,
-        "u_expanded": 0.04146
-      },
-      "symbol": "VR1_p",
-      "unit": "V",
-      "values": [
-        4.292
-      ]
-    },
-    {
-      "name": "Voltaje medido en R2",
-      "result": {
-        "mean": 5.665,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0241625,
-        "u_c": 0.0241625,
-        "u_expanded": 0.048325
-      },
-      "symbol": "VR2_p",
-      "unit": "V",
-      "values": [
-        5.665
-      ]
-    },
-    {
-      "name": "Voltaje medido en R3",
-      "result": {
-        "mean": 5.665,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0241625,
-        "u_c": 0.0241625,
-        "u_expanded": 0.048325
-      },
-      "symbol": "VR3_p",
-      "unit": "V",
-      "values": [
-        5.665
-      ]
-    },
-    {
-      "name": "Voltaje de la fuente",
-      "result": {
-        "mean": 5.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.0225,
-        "u_c": 0.0225,
-        "u_expanded": 0.045
-      },
-      "symbol": "Vg_c",
-      "unit": "V",
-      "values": [
-        5.0
-      ]
-    },
-    {
-      "name": "Resistencia interna del amperimetro",
-      "result": {
-        "mean": 10.0,
-        "n": 1,
-        "s": 0.0,
-        "u_a": 0.0,
-        "u_b": 0.5,
-        "u_c": 0.5,
-        "u_expanded": 1.0
-      },
-      "symbol": "RA_c",
-      "unit": "ohm",
-      "values": [
-        10.0
-      ]
     }
   ],
   "regression": null,
-  "scatters": [
-    {
-      "points": [
-        [
-          200.0,
-          0.0021359648000000005
-        ],
-        [
-          500.0,
-          0.003731912
-        ],
-        [
-          1000.0,
-          0.004605315999999999
-        ],
-        [
-          1500.0,
-          0.0046834335
-        ],
-        [
-          2000.0,
-          0.0045120080000000005
-        ],
-        [
-          3000.0,
-          0.004002075
-        ]
-      ],
-      "x_label": "R",
-      "x_log": false,
-      "y_label": "P"
-    }
-  ],
+  "scatters": [],
   "warnings": []
 }

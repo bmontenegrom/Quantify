@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  analysisSections,
   escapeHtml,
   symbolHtml,
   inlineMathHtml,
@@ -741,4 +742,15 @@ test("validateMeasurements: magnitud optional puede quedar sin lecturas", () => 
   const metaRequerida = { T2: { ...meta.T2, optional: false } };
   const err = validateMeasurements([{ quantity_id: "T2", values: [] }], "estadistico", metaRequerida);
   assert.ok(typeof err === "string");
+});
+
+test("analysisSections separa lo compartido de cada parte, o devuelve el análisis solo", () => {
+  const plain = { quantities: [], derived: [] };
+  assert.deepEqual(analysisSections(plain), [{ title: null, analysis: plain }]);
+  const serie = { derived: [{ symbol: "I_s" }] };
+  const withParts = { quantities: [{ symbol: "R1" }], parts: [{ part_id: "s", title: "Serie", analysis: serie }] };
+  const sections = analysisSections(withParts);
+  assert.equal(sections.length, 2);
+  assert.equal(sections[0].analysis, withParts);
+  assert.deepEqual(sections[1], { title: "Serie", analysis: serie });
 });

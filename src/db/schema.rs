@@ -491,6 +491,10 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
+    add_column_if_missing(pool, "practice_parts", "analysis_kind", "TEXT").await?;
+    add_column_if_missing(pool, "practice_parts", "x_formula", "TEXT").await?;
+    add_column_if_missing(pool, "practice_parts", "y_formula", "TEXT").await?;
+    add_column_if_missing(pool, "practice_parts", "operator_count", "INTEGER").await?;
     for table in ["practice_quantities", "practice_results"] {
         add_column_if_missing(
             pool,

@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty } from "./lib.js";
+import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -14,23 +14,27 @@ export function renderAnalysis(target, submission, includeReview = false, defini
   if (submission.entry_mode === "form") {
     const isTeacher = canReview(state.user);
     const studentResults = submission.student_results ?? [];
-    const hasOperators = (submission.analysis?.operators?.length ?? 0) > 0;
+    const sections = submission.analysis ? analysisSections(submission.analysis) : [];
+    const hasOperators = sections.some((s) => (s.analysis.operators?.length ?? 0) > 0);
     let body = "";
     if (submission.analysis) {
       body += formAnalysisMarkup(submission.analysis);
-      if (studentResults.length && !hasOperators) {
+      if (studentResults.length) {
         const finalAggregateSymbols = new Set(
           (definition?.aggregates ?? []).filter((a) => a.is_final).map((a) => a.symbol),
         );
-        const comparableAggregates = (submission.analysis.aggregates ?? [])
-          .filter((a) => finalAggregateSymbols.has(a.symbol))
-          .map((a) => ({ ...a, u_expanded: 0, has_uncertainty: false }));
-        body += comparisonMarkup(
-          [...(submission.analysis.derived ?? []), ...comparableAggregates],
-          studentResults,
-          submission.result_tolerances ?? {},
-        );
-        body += pointResultsComparisonMarkup(submission.analysis, studentResults);
+        for (const { analysis } of sections) {
+          if (analysis.operators?.length) continue;
+          const comparableAggregates = (analysis.aggregates ?? [])
+            .filter((a) => finalAggregateSymbols.has(a.symbol))
+            .map((a) => ({ ...a, u_expanded: 0, has_uncertainty: false }));
+          body += comparisonMarkup(
+            [...(analysis.derived ?? []), ...comparableAggregates],
+            studentResults,
+            submission.result_tolerances ?? {},
+          );
+          body += pointResultsComparisonMarkup(analysis, studentResults);
+        }
       }
     } else {
       body += `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
@@ -266,6 +270,22 @@ function aggregatesMarkup(aggregates) {
 }
 
 function formAnalysisMarkup(analysis) {
+  const sections = analysisSections(analysis);
+  if (sections.length === 1) return singleAnalysisMarkup(analysis);
+  const [shared, ...parts] = sections;
+  const sharedHasData = (shared.analysis.quantities?.length ?? 0) + (shared.analysis.derived?.length ?? 0) > 0;
+  return [...(sharedHasData ? [shared] : []), ...parts]
+    .map(
+      (s) => `
+      <section class="analysis-part">
+        <h3 class="analysis-part-title">${escapeHtml(s.title)}</h3>
+        ${singleAnalysisMarkup(s.analysis)}
+      </section>`,
+    )
+    .join("") + (sharedHasData ? "" : renderWarnings(shared.analysis.warnings ?? []));
+}
+
+function singleAnalysisMarkup(analysis) {
   const quantities = analysis.quantities ?? [];
   const derived = analysis.derived ?? [];
   const quantitiesTable = quantitiesTableMarkup(quantities);
@@ -333,6 +353,7 @@ function formAnalysisMarkup(analysis) {
     <h3>Incertidumbres por magnitud</h3>
     ${quantitiesTable}
     ${derivedBlock}
+    ${measuredVsTheoreticalMarkup(quantities, derived)}
     ${renderWarnings(analysis.warnings ?? [])}
   `;
 }

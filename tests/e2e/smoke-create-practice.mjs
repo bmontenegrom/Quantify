@@ -41,7 +41,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "T", name: "Periodo", unit: "s" });
   await waitForStatus(page, "Magnitud agregada");
 
-  step("docente: dos partes con una sección cada una; L en la primera y T en la segunda");
+  step("docente: dos partes con sus secciones; L sin sección (compartida) y T en la segunda");
   for (const title of ["Parte A", "Parte B"]) {
     await openAddForm(page, "#new-part-form");
     await fillAndSubmit(page, "#new-part-form", { title });
@@ -54,7 +54,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     await page.locator('#new-section-form button[type="submit"]').click();
     await page.waitForSelector(`#practice-workspace input[aria-label="Título de la sección"][value="${title}"]`);
   }
-  for (const [symbol, section] of [["L", "Parte A — Seccion A"], ["T", "Parte B — Seccion B"]]) {
+  for (const [symbol, section] of [["T", "Parte B — Seccion B"]]) {
     const row = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}"))`).first();
     await row.locator('[data-section-select="quantities"]').selectOption({ label: section });
     await page.waitForLoadState("networkidle");
@@ -64,19 +64,24 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await page.click('[data-practice-status="publicada"]');
   await waitForStatus(page, "no tiene mensurandos");
 
-  step("docente: agrega g y publica");
-  await openAddForm(page, "#new-result-form");
-  await fillAndSubmit(
-    page,
-    "#new-result-form",
-    { symbol: "g", name: "Gravedad", unit: "m/s2", formula: "4*pi^2*L/T^2" },
-    { is_final: true },
-  );
-  await waitForStatus(page, "Mensurando agregado");
-  await page
-    .locator('#practice-workspace tr:has(code:text-is("g")) [data-section-select="results"]')
-    .selectOption({ label: "Parte B — Seccion R" });
-  await page.waitForLoadState("networkidle");
+  step("docente: agrega g y Lr, los ubica en sus partes y publica");
+  for (const [symbol, name, formula] of [["g", "Gravedad", "4*pi^2*L/T^2"], ["Lr", "Largo informado", "L"]]) {
+    await openAddForm(page, "#new-result-form");
+    await fillAndSubmit(
+      page,
+      "#new-result-form",
+      { symbol, name, unit: symbol === "g" ? "m/s2" : "m", formula },
+      { is_final: true },
+    );
+    await waitForStatus(page, "Mensurando agregado");
+    await page.waitForSelector(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="results"]`);
+  }
+  for (const [symbol, section] of [["g", "Parte B — Seccion R"], ["Lr", "Parte A — Seccion A"]]) {
+    await page
+      .locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="results"]`)
+      .selectOption({ label: section });
+    await page.waitForLoadState("networkidle");
+  }
   await page.click('[data-practice-status="publicada"]');
   await page.waitForSelector("#practice-workspace .practice-state--publicada");
 
@@ -109,13 +114,13 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   const tabs = sPage.locator("#practice-part-tabs .part-tab");
   assert((await tabs.count()) === 2, "la práctica debía mostrar las dos pestañas");
   const given = sPage.locator(".measurement-row--given").first();
-  const measured = sPage.locator("#measurement-fields .measurement-row:not(.measurement-row--given)").first();
+  const measured = sPage.locator('#measurement-fields .measurement-row:not(.measurement-row--given):not([data-final-result])').first();
   await tabs.nth(0).click();
   assert((await given.isVisible()) && !(await measured.isVisible()), "la parte A debía mostrar L y ocultar T");
   await given.locator(".measure-given-value").fill("1");
   await given.locator(".measure-given-u").fill("0.002");
   await tabs.nth(1).click();
-  assert(!(await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y ocultar L");
+  assert((await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y también L, que es compartida");
   await measured.locator(".measure-value").first().fill("2.006");
   const finalG = sPage.locator('[data-final-result="1"][data-symbol="g"]');
   assert(await finalG.isVisible(), "el resultado final g debía verse en la parte B");
@@ -203,7 +208,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     await post(`${base}/curves`, { x_formula: "R", y_formula: "I", x_log: false });
     const partA = await post(`${base}/parts`, { title: "Datos" });
     const partB = await post(`${base}/parts`, { title: "Serie" });
-    const summary = await post(`${base}/sections`, { title: "Resumen", part_id: partA.id });
+    const summary = await post(`${base}/sections`, { title: "Resumen", part_id: partB.id });
     const rmax = await post(`${base}/results`, { symbol: "Rm", name: "R maxima", unit: "", formula: "R_max", is_final: true });
     await post(`${base}/results/${rmax.id}/section`, { section_id: summary.id });
     const v = await post(`${base}/quantities`, { symbol: "V", name: "V", unit: "", repeated: false, quantity: null, per_point: false });

@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
-import { escapeHtml, symbolHtml, unitHtml, format, prefixFactor, pointPower, flowRate, compatibleInstruments, canReview, hasUncertainty } from "./lib.js";
+import { escapeHtml, symbolHtml, unitHtml, format, prefixFactor, pointPower, flowRate, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
 import { SERIES_LIVE_COLUMNS } from "./constants.js";
 import { definitionParts, definitionSections, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
@@ -144,10 +144,13 @@ async function updateRegressionPreview() {
     return;
   }
   try {
-    const analysis = await postJson(
+    const full = await postJson(
       `/api/practices/${encodeURIComponent(practiceSelect.value)}/analyze-preview`,
       { measurements }
     );
+    const analysis = analysisSections(full)
+      .map((s) => s.analysis)
+      .find((a) => a.regression || a.scatters?.length) ?? full;
     if (analysis.regression) {
       const { regressionMarkup } = await import("./analysis.js");
       container.innerHTML = `<h4>Vista previa del ajuste</h4>${regressionMarkup(analysis.regression)}`;

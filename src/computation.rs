@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub use engines::{analyze, compute, compute_curva, compute_regresion, scale_spec, PointContext};
 pub use formula::check_formula;
+pub(crate) use formula::formula_symbols;
 pub use submission::{
     check_student_result_symbols, create_form_submission, update_form_submission,
     validate_student_results, FormSubmissionInput,
@@ -129,6 +130,16 @@ pub struct FormAnalysis {
     #[serde(default)]
     pub aggregates: Vec<AggregateComputation>,
     pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<PartAnalysis>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PartAnalysis {
+    pub part_id: String,
+    pub title: String,
+    pub analysis_kind: String,
+    pub analysis: FormAnalysis,
 }
 
 pub struct CurveSpec<'a> {

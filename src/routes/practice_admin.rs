@@ -121,6 +121,33 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
     if def.quantities.is_empty() {
         problems.push("no tiene magnitudes de entrada".to_string());
     }
+    if def.parts.is_empty() {
+        problems.extend(kind_problems(def));
+        return problems;
+    }
+    let point_parts = def
+        .parts
+        .iter()
+        .filter(|p| practices::is_point_based(Some(p.kind())))
+        .count();
+    if point_parts > 1 {
+        problems.push(
+            "tiene mas de una parte de regresion o curva (por ahora solo una parte puede tener serie)"
+                .to_string(),
+        );
+    }
+    for part in def.parts.iter().filter(|p| def.part_has_content(p)) {
+        problems.extend(
+            kind_problems(&def.part_view(part))
+                .into_iter()
+                .map(|p| format!("la parte \"{}\" {p}", part.title)),
+        );
+    }
+    problems
+}
+
+fn kind_problems(def: &practices::PracticeDefinition) -> Vec<String> {
+    let mut problems = Vec::new();
     match def.analysis_kind.as_deref() {
         Some("curva") if def.curves.is_empty() => {
             problems.push("es de tipo curva y no tiene curvas".to_string());
@@ -847,6 +874,34 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
 }
 
 fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
+    if def.parts.is_empty() {
+        return formula_problems_in(def);
+    }
+    let mut problems: Vec<(String, String)> = formula_problems_in(&def.shared_view())
+        .into_iter()
+        .map(|(element, message)| {
+            (
+                format!("en los datos compartidos, {element}"),
+                format!(
+                    "{message} (lo compartido solo puede usar datos compartidos: pasalo a una                      seccion de la parte que corresponda)"
+                ),
+            )
+        })
+        .collect();
+    for part in def.parts.iter().filter(|p| def.part_has_content(p)) {
+        problems.extend(formula_problems_in(&def.part_view(part)).into_iter().map(
+            |(element, message)| {
+                (
+                    format!("en la parte \"{}\", {element}", part.title),
+                    message,
+                )
+            },
+        ));
+    }
+    problems
+}
+
+fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
     let mut problems = Vec::new();
     let mut note = |what: &str, symbol: &str, result: Result<(), AppError>| {
         if let Err(e) = result {
@@ -928,26 +983,10 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
 }
 
 fn series_parts(def: &practices::PracticeDefinition) -> Vec<String> {
-    if !matches!(
-        def.analysis_kind.as_deref(),
-        Some("regresion_lineal" | "curva")
-    ) {
+    if !practices::is_point_based(def.analysis_kind.as_deref()) {
         return vec![];
     }
-    let mut parts: Vec<String> = def
-        .quantities
-        .iter()
-        .filter(|q| q.per_point && !q.is_given)
-        .filter_map(|q| {
-            def.sections
-                .iter()
-                .find(|s| s.quantities.contains(&q.symbol))
-                .and_then(|s| s.part_id.clone())
-        })
-        .collect();
-    parts.sort();
-    parts.dedup();
-    parts
+    def.series_parts()
 }
 
 fn guard_series_part(
@@ -1021,6 +1060,19 @@ fn check_axes(def: &practices::PracticeDefinition, x: &str, y: &str) -> Result<(
 }
 
 fn result_scope(def: &practices::PracticeDefinition) -> Vec<String> {
+    if def.parts.is_empty() {
+        return result_scope_in(def);
+    }
+    let mut allowed = result_scope_in(&def.shared_view());
+    for part in &def.parts {
+        allowed.extend(result_scope_in(&def.part_view(part)));
+    }
+    allowed.sort();
+    allowed.dedup();
+    allowed
+}
+
+fn result_scope_in(def: &practices::PracticeDefinition) -> Vec<String> {
     let shared = def
         .quantities
         .iter()
@@ -1920,6 +1972,37 @@ mod tests {
                 .unwrap();
             assert!(publish_problems(&def).is_empty(), "{}", practice.id);
         }
+    }
+
+    #[tokio::test]
+    async fn shared_results_only_see_shared_data_and_one_part_has_the_series() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(formula_problems(&cc).is_empty());
+        assert!(structure_problems(&cc).is_empty());
+
+        let mut shared_req = cc.clone();
+        for section in &mut shared_req.sections {
+            section.results.retain(|r| r != "Req");
+        }
+        let problems = formula_problems(&shared_req);
+        assert!(
+            problems
+                .iter()
+                .any(|(element, message)| element.contains("compartidos")
+                    && element.contains("Req")
+                    && message.contains("RA_p")),
+            "{problems:?}"
+        );
+
+        let mut two_series = cc.clone();
+        two_series.parts[0].analysis_kind = Some("curva".into());
+        assert!(structure_problems(&two_series)
+            .iter()
+            .any(|p| p.contains("mas de una parte")));
     }
 
     #[tokio::test]

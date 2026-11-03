@@ -811,9 +811,11 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
         mk("T1", t1_vals, None),
     ];
 
-    let analysis = crate::computation::analyze(&pool, "p1-estadistica", &measurements)
-        .await
-        .unwrap();
+    let analysis = crate::computation::tests::flattened(
+        crate::computation::analyze(&pool, "p1-estadistica", &measurements)
+            .await
+            .unwrap(),
+    );
 
     let t1_q = analysis
         .quantities
@@ -1399,9 +1401,51 @@ async fn analyze_p2_cc_derives_results_and_aliases() {
         pt("I", is),
     ];
 
-    let analysis = crate::computation::analyze(&pool, "p2-cc", &measurements)
+    let by_part = crate::computation::analyze(&pool, "p2-cc", &measurements)
         .await
         .unwrap();
+    let shared: Vec<&str> = by_part
+        .quantities
+        .iter()
+        .map(|q| q.symbol.as_str())
+        .collect();
+    assert_eq!(shared, ["R1", "R2", "R3"]);
+    assert!(by_part.derived.is_empty());
+    let kinds: Vec<(&str, &str)> = by_part
+        .parts
+        .iter()
+        .map(|p| (p.part_id.as_str(), p.analysis_kind.as_str()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("p2-cc-serie", "estadistico"),
+            ("p2-cc-paralelo", "estadistico"),
+            ("p2-cc-potencia", "curva")
+        ]
+    );
+    let part = |id: &str| {
+        &by_part
+            .parts
+            .iter()
+            .find(|p| p.part_id == id)
+            .unwrap()
+            .analysis
+    };
+    assert!(part("p2-cc-paralelo")
+        .derived
+        .iter()
+        .any(|d| d.symbol == "Req"));
+    assert!(part("p2-cc-potencia")
+        .derived
+        .iter()
+        .any(|d| d.symbol == "P_max_e"));
+    assert_eq!(part("p2-cc-potencia").scatters.len(), 1);
+    assert!(part("p2-cc-serie")
+        .quantities
+        .iter()
+        .all(|q| !shared.contains(&q.symbol.as_str())));
+    let analysis = crate::computation::tests::flattened(by_part);
 
     assert_eq!(analysis.quantities.len(), 15);
     assert!(analysis.quantities.iter().any(|q| q.symbol == "VR1_s"));
@@ -2152,4 +2196,44 @@ async fn deleting_parts_and_sections_keeps_the_content() {
     .await
     .unwrap()
     .is_none());
+}
+
+#[tokio::test]
+async fn shared_results_that_use_one_part_move_into_it() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let p1 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    assert_eq!(p1.result_part("Q"), Some("p1-estadistica-op1"));
+    assert_eq!(p1.result_part("gamma"), None);
+    let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(cc.result_part("Req"), Some("p2-cc-paralelo"));
+    let hidro = definition(&pool, "hidrostatica").await.unwrap().unwrap();
+    assert!(hidro
+        .results
+        .iter()
+        .all(|r| hidro.result_part(&r.symbol).is_some()));
+}
+
+#[tokio::test]
+async fn parts_without_a_saved_kind_take_the_practice_one() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    let kinds: Vec<&str> = cc.parts.iter().map(|p| p.kind()).collect();
+    assert_eq!(kinds, ["estadistico", "estadistico", "curva"]);
+    let hidro = definition(&pool, "hidrostatica").await.unwrap().unwrap();
+    assert!(hidro.parts.iter().all(|p| p.kind() == "estadistico"));
+
+    let potencia = cc.parts.iter().find(|p| p.id == "p2-cc-potencia").unwrap();
+    let view = cc.part_view(potencia);
+    let symbols: Vec<&str> = view.quantities.iter().map(|q| q.symbol.as_str()).collect();
+    assert!(symbols.contains(&"R1") && symbols.contains(&"I") && !symbols.contains(&"Vg_s"));
+    assert_eq!(view.curves.len(), cc.curves.len());
+    let serie = cc.parts.iter().find(|p| p.id == "p2-cc-serie").unwrap();
+    assert!(cc.part_view(serie).curves.is_empty());
+    let shared = cc.shared_view();
+    assert!(shared
+        .quantities
+        .iter()
+        .all(|q| ["R1", "R2", "R3"].contains(&q.symbol.as_str())));
 }

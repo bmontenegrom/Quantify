@@ -39,6 +39,12 @@ pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
     compile_formula(formula, allowed).map(|_| ())
 }
 
+pub(crate) fn formula_symbols(formula: &str) -> Vec<String> {
+    build_operator_tree(formula)
+        .map(|tree| tree.iter_variable_identifiers().map(String::from).collect())
+        .unwrap_or_default()
+}
+
 pub(crate) fn eval_compiled(tree: &Node, values: &HashMap<&str, f64>) -> f64 {
     let mut context = HashMapContext::new();
     for (name, value) in CONSTANTS {

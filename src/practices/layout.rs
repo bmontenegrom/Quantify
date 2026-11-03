@@ -6,7 +6,8 @@ const LEGACY_LAYOUT: &str = "2026-11-partes-y-secciones";
 
 pub async fn parts_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticePart>> {
     Ok(sqlx::query_as::<_, PracticePart>(
-        "SELECT id, practice_id, title, position FROM practice_parts \
+        "SELECT id, practice_id, title, position, analysis_kind, x_formula, y_formula, \
+         operator_count FROM practice_parts \
          WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
@@ -68,6 +69,10 @@ pub async fn create_part(
         practice_id: practice_id.to_string(),
         title: input.title.trim().to_string(),
         position,
+        analysis_kind: None,
+        x_formula: None,
+        y_formula: None,
+        operator_count: None,
     })
 }
 
@@ -440,6 +445,64 @@ pub(super) async fn migrate_legacy_layout(pool: &SqlitePool) -> anyhow::Result<(
     }
     sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
         .bind(LEGACY_LAYOUT)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+const SHARED_RESULTS_TO_PARTS: &str = "2026-11-mensurandos-compartidos-a-su-parte";
+
+pub(super) async fn migrate_shared_results_to_parts(pool: &SqlitePool) -> anyhow::Result<()> {
+    let (done,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+        .bind(SHARED_RESULTS_TO_PARTS)
+        .fetch_one(pool)
+        .await?;
+    if done > 0 {
+        return Ok(());
+    }
+    let practice_ids: Vec<String> =
+        sqlx::query_scalar("SELECT DISTINCT practice_id FROM practice_parts")
+            .fetch_all(pool)
+            .await?;
+    let mut moves: Vec<(String, String)> = Vec::new();
+    for practice_id in practice_ids {
+        let Some(def) = super::definition(pool, &practice_id).await? else {
+            continue;
+        };
+        for result in &def.results {
+            if def.result_part(&result.symbol).is_some() {
+                continue;
+            }
+            let mut parts: Vec<&str> = crate::computation::formula_symbols(&result.formula)
+                .iter()
+                .filter_map(|s| def.quantity_part(s))
+                .collect();
+            parts.sort();
+            parts.dedup();
+            let [part] = parts.as_slice() else {
+                continue;
+            };
+            if let Some(section) = def
+                .sections
+                .iter()
+                .find(|s| s.part_id.as_deref() == Some(part))
+            {
+                moves.push((result.id.clone(), section.id.clone()));
+            }
+        }
+    }
+    let mut tx = pool.begin().await?;
+    for (result_id, section_id) in moves {
+        sqlx::query("UPDATE practice_results SET section_id = ?1 WHERE id = ?2")
+            .bind(section_id)
+            .bind(result_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(SHARED_RESULTS_TO_PARTS)
         .bind(chrono::Utc::now())
         .execute(&mut *tx)
         .await?;

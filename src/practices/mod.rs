@@ -74,6 +74,10 @@ pub struct PracticePart {
     pub practice_id: String,
     pub title: String,
     pub position: i64,
+    pub analysis_kind: Option<String>,
+    pub x_formula: Option<String>,
+    pub y_formula: Option<String>,
+    pub operator_count: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -198,6 +202,7 @@ pub struct PracticeInfoInput {
 mod crud;
 mod layout;
 mod lifecycle;
+mod parts;
 mod seed;
 #[cfg(test)]
 mod tests;
@@ -205,4 +210,5 @@ mod tests;
 pub use crud::*;
 pub use layout::*;
 pub use lifecycle::*;
+pub use parts::is_point_based;
 pub use seed::seed_definitions;
