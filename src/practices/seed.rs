@@ -1384,5 +1384,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     fix_ca_rlc_labels(pool).await?;
     reset_legacy_hidrostatica(pool).await?;
     seed_hidrostatica(pool).await?;
+    super::layout::migrate_legacy_layout(pool).await?;
     Ok(())
 }

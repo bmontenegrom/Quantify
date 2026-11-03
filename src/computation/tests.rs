@@ -151,6 +151,8 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
             formula: "rho_f*(dx/t)*2*R/mu".into(),
         }],
         aggregates: vec![aggregate("Re_medio", true), aggregate("Re_min", false)],
+        parts: vec![],
+        sections: vec![],
     };
     let sr = |symbol: &str| db::StudentResultInput {
         symbol: symbol.into(),

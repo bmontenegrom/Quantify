@@ -13,13 +13,13 @@ import {
   draftMeasurementsByQuantity, hasUncertainty,
 } from "./lib.js";
 import {
-  PRACTICE_GROUPS, PRACTICE_PARTS, PRACTICE_SECTIONS, SERIES_LIVE_COLUMNS,
+  PRACTICE_GROUPS, SERIES_LIVE_COLUMNS,
   SYMBOL_FIRST_QUANTITIES, PRACTICES_WITHOUT_CHRONO_HELPER,
 } from "./constants.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
-  replicaInputHtml, cellReplicaValues,
+  replicaInputHtml, cellReplicaValues, definitionSections, definitionParts,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -145,6 +145,7 @@ export async function loadSubmissionForm() {
     state.practiceForm = { definition, instruments };
     state.chronometers.clear();
     state.seriesDebug.clear();
+    renderPartTabs(practiceId);
     renderMeasurementFields();
     applyPrefill();
     applyDraftPrefill();
@@ -211,8 +212,9 @@ let activePart = null;
 export function renderPartTabs(practiceId) {
   if (!practicePartTabs) return;
 
-  const innerParts = PRACTICE_PARTS[practiceId];
-  if (innerParts) {
+  const definition = state.practiceForm?.definition;
+  const innerParts = definition?.practice_id === practiceId ? definitionParts(definition) : [];
+  if (innerParts.length) {
     if (!innerParts.some((p) => p.id === activePart)) activePart = innerParts[0].id;
     practicePartTabs.classList.remove("hidden");
     practicePartTabs.innerHTML = innerParts
@@ -264,7 +266,7 @@ export function renderPartTabs(practiceId) {
 }
 
 function applyPartVisibility() {
-  if (!PRACTICE_PARTS[practiceSelect.value]) return;
+  if (!definitionParts(state.practiceForm?.definition).length) return;
   measurementFields.querySelectorAll("[data-section]").forEach((el) => {
     el.hidden = el.dataset.section !== activePart;
   });
@@ -290,7 +292,7 @@ export function renderMeasurementFields() {
 
   if (definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva") {
     renderSeriesTable(definition);
-    measurementFields.insertAdjacentHTML("beforeend", finalResultSectionHtml(definition));
+    measurementFields.insertAdjacentHTML("beforeend", seriesFinalResultsHtml(definition));
     return;
   }
 
@@ -392,17 +394,17 @@ export function renderMeasurementFields() {
     `;
   };
 
-  const sections = PRACTICE_SECTIONS[practiceSelect.value];
+  const sections = definitionSections(definition);
   if (sections) {
     const { grouped, rest } = groupBySections(definition.quantities, sections);
     const allFinals = (definition.results ?? []).filter((r) => r.is_final);
     const embedded = new Set();
     const blocks = grouped.map(({ sec, rows }) => {
-      if (rows.length === 0) return "";
+      const secFinals = allFinals.filter((r) => !embedded.has(r.symbol) && (sec.results ?? []).includes(r.symbol));
+      if (rows.length === 0 && secFinals.length === 0) return "";
+      secFinals.forEach((r) => embedded.add(r.symbol));
       const helper = rows.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
       const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
-      const secFinals = allFinals.filter((r) => !embedded.has(r.symbol) && (sec.results ?? []).includes(r.symbol));
-      secFinals.forEach((r) => embedded.add(r.symbol));
       const finalsHtml = secFinals.length
         ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
            ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
@@ -447,11 +449,11 @@ export function renderMeasurementFields() {
 }
 
 function partForResult(symbol) {
-  const sections = PRACTICE_SECTIONS[practiceSelect.value] ?? [];
+  const sections = definitionSections(state.practiceForm?.definition) ?? [];
   return sections.find((sec) => sec.id && (sec.results ?? []).includes(symbol))?.id ?? null;
 }
 
-function finalResultRowHtml(r, sectionId) {
+export function finalResultRowHtml(r, sectionId) {
   const part = sectionId !== undefined ? sectionId : partForResult(r.symbol);
   const uField = !hasUncertainty(r)
     ? ""
@@ -478,11 +480,41 @@ function finalResultRowHtml(r, sectionId) {
     </fieldset>`;
 }
 
-function finalResultSectionHtml(definition, finals) {
+function seriesFinalResultsHtml(definition) {
+  const finals = (definition.results ?? []).filter((r) => r.is_final);
+  const sections = (definitionSections(definition) ?? []).filter((sec) => !sec.series);
+  const shared = new Set(definition.quantities.filter((q) => !q.per_point || q.is_given).map((q) => q.symbol));
+  const withRows = sections.filter((sec) => (sec.symbols ?? []).some((sym) => shared.has(sym)));
+  const titled = sections
+    .filter((sec) => !withRows.includes(sec))
+    .map((sec) => ({ sec, rows: finals.filter((r) => (sec.results ?? []).includes(r.symbol)) }))
+    .filter(({ rows }) => rows.length);
+  const embedded = new Set(
+    [...withRows, ...titled.map(({ sec }) => sec)].flatMap((sec) => sec.results ?? []),
+  );
+  const titledHtml = titled.map(({ sec, rows }) => {
+    const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+    return `<div class="measurement-section"${secAttr}>
+        <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+        <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
+        ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
+      </div>`;
+  });
+  const byPart = new Map();
+  for (const r of finals.filter((r) => !embedded.has(r.symbol))) {
+    const part = partForResult(r.symbol);
+    byPart.set(part, [...(byPart.get(part) ?? []), r]);
+  }
+  const partHtml = [...byPart].map(([part, rows]) => finalResultSectionHtml(definition, rows, part));
+  return titledHtml.join("") + partHtml.join("");
+}
+
+function finalResultSectionHtml(definition, finals, part = null) {
   const rows = finals ?? (definition.results ?? []).filter((r) => r.is_final);
   if (!rows.length) return "";
+  const partAttr = part ? ` data-section="${escapeHtml(part)}"` : "";
   return `
-    <div class="measurement-section final-results-section">
+    <div class="measurement-section final-results-section"${partAttr}>
       <h4 class="measurement-section-title">Resultado final <span class="submission-meta">— opcional</span></h4>
       <p class="submission-meta">Si ya calculaste tu resultado, cargalo acá. Podés dejarlo para más adelante; el docente puede cargarlo después.</p>
       ${rows.map((r) => finalResultRowHtml(r)).join("")}

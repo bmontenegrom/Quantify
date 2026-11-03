@@ -1,6 +1,33 @@
 import { state } from "./state.js";
 import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor } from "./lib.js";
 
+export function definitionSections(definition) {
+  if (!definition?.sections?.length) return null;
+  const sections = definition.sections.map((s) => ({
+    id: s.part_id ?? undefined,
+    title: s.title,
+    symbols: s.quantities,
+    results: s.results,
+  }));
+  const pointBased = definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva";
+  const seriesSymbols = new Set(
+    pointBased ? definition.quantities.filter((q) => q.per_point && !q.is_given).map((q) => q.symbol) : [],
+  );
+  const seriesPart = definition.sections.find((s) => s.part_id && s.quantities.some((q) => seriesSymbols.has(q)));
+  if (seriesPart) sections.push({ id: seriesPart.part_id, series: true });
+  return sections;
+}
+
+export function definitionParts(definition) {
+  const finals = new Set((definition?.results ?? []).filter((r) => r.is_final).map((r) => r.symbol));
+  const used = new Set(
+    (definition?.sections ?? [])
+      .filter((s) => s.part_id && (s.quantities.length || s.results.some((r) => finals.has(r))))
+      .map((s) => s.part_id),
+  );
+  return (definition?.parts ?? []).filter((p) => used.has(p.id)).map((p) => ({ id: p.id, label: p.title }));
+}
+
 export function groupBySections(items, sections) {
   const used = new Set();
   const grouped = sections.map((sec) => {

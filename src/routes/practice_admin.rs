@@ -19,6 +19,13 @@ pub(super) struct SetAnalysisKindBody {
     analysis_kind: String,
 }
 
+async fn ensure_practice(state: &SharedState, practice_id: &str) -> Result<(), AppError> {
+    practices::practice(&state.pool, practice_id)
+        .await?
+        .map(|_| ())
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))
+}
+
 async fn load_definition(
     state: &SharedState,
     practice_id: &str,
@@ -356,9 +363,17 @@ pub(super) async fn update_quantity(
         .iter_mut()
         .find(|q| q.id == qid)
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
-    q.symbol = input.symbol.trim().to_string();
+    let old_symbol = std::mem::replace(&mut q.symbol, input.symbol.trim().to_string());
     q.per_point = input.per_point;
     q.is_given = input.is_given;
+    let new_symbol = q.symbol.clone();
+    for section in &mut after.sections {
+        for symbol in &mut section.quantities {
+            if *symbol == old_symbol {
+                symbol.clone_from(&new_symbol);
+            }
+        }
+    }
     guard_change(&before, &after, "guardar la magnitud")?;
     let updated = practices::update_quantity(&state.pool, &qid, input)
         .await?
@@ -912,11 +927,52 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
     problems
 }
 
+fn series_parts(def: &practices::PracticeDefinition) -> Vec<String> {
+    if !matches!(
+        def.analysis_kind.as_deref(),
+        Some("regresion_lineal" | "curva")
+    ) {
+        return vec![];
+    }
+    let mut parts: Vec<String> = def
+        .quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .filter_map(|q| {
+            def.sections
+                .iter()
+                .find(|s| s.quantities.contains(&q.symbol))
+                .and_then(|s| s.part_id.clone())
+        })
+        .collect();
+    parts.sort();
+    parts.dedup();
+    parts
+}
+
+fn guard_series_part(
+    before: &practices::PracticeDefinition,
+    after: &practices::PracticeDefinition,
+    what: &str,
+) -> Result<(), AppError> {
+    let after_parts = series_parts(after);
+    let before_parts = series_parts(before);
+    if after_parts.len() > 1 && !after_parts.iter().all(|p| before_parts.contains(p)) {
+        return Err(AppError::bad_request(format!(
+            "No se puede {what}: las magnitudes por punto forman una sola serie y tienen que \
+             estar en secciones de la misma parte. Para pasarlas a otra parte, dejá sus \
+             secciones primero sin parte (compartidas) y después asignales la nueva."
+        )));
+    }
+    Ok(())
+}
+
 fn guard_change(
     before: &practices::PracticeDefinition,
     after: &practices::PracticeDefinition,
     what: &str,
 ) -> Result<(), AppError> {
+    guard_series_part(before, after, what)?;
     if after.status == "publicada" {
         let before_missing = structure_problems(before);
         if let Some(missing) = structure_problems(after)
@@ -1236,6 +1292,224 @@ fn validate_result(
         .map_err(|e| AppError::bad_request(e.to_string()))
 }
 
+fn require_title(title: &str) -> Result<(), AppError> {
+    if title.trim().is_empty() {
+        return Err(AppError::bad_request("Falta el titulo."));
+    }
+    Ok(())
+}
+
+pub(super) async fn create_part(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<practices::PartInput>,
+) -> Result<Json<practices::PracticePart>, AppError> {
+    require_teacher(&state, &headers).await?;
+    require_title(&input.title)?;
+    ensure_practice(&state, &id).await?;
+    Ok(Json(
+        practices::create_part(&state.pool, &id, &input).await?,
+    ))
+}
+
+pub(super) async fn update_part(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(input): Json<practices::PartInput>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    require_title(&input.title)?;
+    if !practices::update_part(&state.pool, &id, &pid, &input).await? {
+        return Err(AppError::not_found("parte no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn delete_part(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_part(&state.pool, &id, &pid).await? {
+        return Err(AppError::not_found("parte no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn move_part(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    move_in_list(
+        &state,
+        &headers,
+        practices::Orderable::Parts,
+        &id,
+        &pid,
+        body.up,
+    )
+    .await
+}
+
+pub(super) async fn create_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<practices::SectionInput>,
+) -> Result<Json<practices::PracticeSection>, AppError> {
+    require_teacher(&state, &headers).await?;
+    require_title(&input.title)?;
+    ensure_practice(&state, &id).await?;
+    practices::create_section(&state.pool, &id, &input)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::bad_request("La parte no es de esta practica."))
+}
+
+pub(super) async fn update_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, sid)): Path<(String, String)>,
+    Json(input): Json<practices::SectionInput>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    require_title(&input.title)?;
+    let before = load_definition(&state, &id).await?;
+    let part_id = input.part_id.clone().filter(|p| !p.is_empty());
+    if let Some(part) = &part_id {
+        if !before.parts.iter().any(|p| &p.id == part) {
+            return Err(AppError::bad_request("La parte no es de esta practica."));
+        }
+    }
+    let mut after = before.clone();
+    if let Some(section) = after.sections.iter_mut().find(|s| s.id == sid) {
+        section.part_id = part_id;
+    }
+    guard_series_part(&before, &after, "cambiar la parte de la seccion")?;
+    match practices::update_section(&state.pool, &id, &sid, &input).await? {
+        None => Err(AppError::bad_request("La parte no es de esta practica.")),
+        Some(false) => Err(AppError::not_found("seccion no encontrada")),
+        Some(true) => Ok(Json(Health { status: "ok" })),
+    }
+}
+
+pub(super) async fn delete_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, sid)): Path<(String, String)>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if !practices::delete_section(&state.pool, &id, &sid).await? {
+        return Err(AppError::not_found("seccion no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn move_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, sid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    move_in_list(
+        &state,
+        &headers,
+        practices::Orderable::Sections,
+        &id,
+        &sid,
+        body.up,
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct SetSectionBody {
+    #[serde(default)]
+    section_id: Option<String>,
+}
+
+async fn set_section(
+    state: &SharedState,
+    headers: &HeaderMap,
+    member: practices::SectionMember,
+    practice_id: &str,
+    member_id: &str,
+    body: SetSectionBody,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(state, headers).await?;
+    let section_id = body.section_id.as_deref().filter(|s| !s.is_empty());
+    let before = load_definition(state, practice_id).await?;
+    let exists = match member {
+        practices::SectionMember::Quantity => before.quantities.iter().any(|q| q.id == member_id),
+        practices::SectionMember::Result => before.results.iter().any(|r| r.id == member_id),
+    };
+    if !exists {
+        return Err(AppError::not_found("elemento no encontrado en la practica"));
+    }
+    if let practices::SectionMember::Quantity = member {
+        let mut after = before.clone();
+        if let Some(symbol) = after
+            .quantities
+            .iter()
+            .find(|q| q.id == member_id)
+            .map(|q| q.symbol.clone())
+        {
+            for section in &mut after.sections {
+                section.quantities.retain(|q| q != &symbol);
+                if Some(section.id.as_str()) == section_id {
+                    section.quantities.push(symbol.clone());
+                }
+            }
+        }
+        guard_series_part(&before, &after, "asignar la seccion")?;
+    }
+    if !practices::set_member_section(&state.pool, practice_id, member, member_id, section_id)
+        .await?
+    {
+        return Err(AppError::bad_request("La seccion no es de esta practica."));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn set_quantity_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, qid)): Path<(String, String)>,
+    Json(body): Json<SetSectionBody>,
+) -> Result<Json<Health>, AppError> {
+    set_section(
+        &state,
+        &headers,
+        practices::SectionMember::Quantity,
+        &id,
+        &qid,
+        body,
+    )
+    .await
+}
+
+pub(super) async fn set_result_section(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, rid)): Path<(String, String)>,
+    Json(body): Json<SetSectionBody>,
+) -> Result<Json<Health>, AppError> {
+    set_section(
+        &state,
+        &headers,
+        practices::SectionMember::Result,
+        &id,
+        &rid,
+        body,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1280,6 +1554,8 @@ mod tests {
             }],
             point_results: vec![],
             aggregates: vec![],
+            parts: vec![],
+            sections: vec![],
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
             symbol: symbol.into(),
@@ -1359,6 +1635,8 @@ mod tests {
             }],
             point_results: vec![],
             aggregates: vec![agg("a0", "Re_max", 0), agg("a1", "Re_min", 1)],
+            parts: vec![],
+            sections: vec![],
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
             symbol: symbol.into(),
@@ -1457,6 +1735,8 @@ mod tests {
             intermediates: vec![],
             point_results: vec![],
             aggregates: vec![],
+            parts: vec![],
+            sections: vec![],
         };
         let r = |unit: &str| ResultInput {
             symbol: "M_medio".into(),
@@ -1491,6 +1771,39 @@ mod tests {
             let problems = formula_problems(&def);
             assert!(problems.is_empty(), "{}: {problems:?}", def.practice_id);
         }
+    }
+
+    #[tokio::test]
+    async fn the_series_stays_in_a_single_part() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(series_parts(&cc), vec!["p2-cc-potencia".to_string()]);
+        let mut split = cc.clone();
+        for section in &mut split.sections {
+            section.quantities.retain(|q| q != "R");
+            if section.part_id.as_deref() == Some("p2-cc-serie") {
+                section.quantities.push("R".into());
+            }
+        }
+        let err = guard_series_part(&cc, &split, "x").unwrap_err();
+        assert!(err.message().contains("misma parte"), "{}", err.message());
+        let mut shared = cc.clone();
+        for section in &mut shared.sections {
+            section.part_id = None;
+        }
+        assert!(guard_series_part(&cc, &shared, "x").is_ok());
+        assert!(guard_series_part(&split, &split, "x").is_ok());
+        let mut elsewhere = cc.clone();
+        for section in &mut elsewhere.sections {
+            section.quantities.retain(|q| q != "R");
+            if section.part_id.as_deref() == Some("p2-cc-paralelo") {
+                section.quantities.push("R".into());
+            }
+        }
+        assert!(guard_series_part(&split, &elsewhere, "x").is_err());
     }
 
     #[tokio::test]

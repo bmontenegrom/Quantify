@@ -41,14 +41,42 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "T", name: "Periodo", unit: "s" });
   await waitForStatus(page, "Magnitud agregada");
 
+  step("docente: dos partes con una sección cada una; L en la primera y T en la segunda");
+  for (const title of ["Parte A", "Parte B"]) {
+    await openAddForm(page, "#new-part-form");
+    await fillAndSubmit(page, "#new-part-form", { title });
+    await page.waitForSelector(`#practice-workspace input[aria-label="Título de la parte"][value="${title}"]`);
+  }
+  for (const [title, part] of [["Seccion A", "Parte A"], ["Seccion B", "Parte B"], ["Seccion R", "Parte B"]]) {
+    await openAddForm(page, "#new-section-form");
+    await page.locator('#new-section-form [name="title"]').fill(title);
+    await page.locator('#new-section-form [name="part_id"]').selectOption({ label: part });
+    await page.locator('#new-section-form button[type="submit"]').click();
+    await page.waitForSelector(`#practice-workspace input[aria-label="Título de la sección"][value="${title}"]`);
+  }
+  for (const [symbol, section] of [["L", "Parte A — Seccion A"], ["T", "Parte B — Seccion B"]]) {
+    const row = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}"))`).first();
+    await row.locator('[data-section-select="quantities"]').selectOption({ label: section });
+    await page.waitForLoadState("networkidle");
+  }
+
   step("docente: publicar sin mensurandos se rechaza");
   await page.click('[data-practice-status="publicada"]');
   await waitForStatus(page, "no tiene mensurandos");
 
   step("docente: agrega g y publica");
   await openAddForm(page, "#new-result-form");
-  await fillAndSubmit(page, "#new-result-form", { symbol: "g", name: "Gravedad", unit: "m/s2", formula: "4*pi^2*L/T^2" });
+  await fillAndSubmit(
+    page,
+    "#new-result-form",
+    { symbol: "g", name: "Gravedad", unit: "m/s2", formula: "4*pi^2*L/T^2" },
+    { is_final: true },
+  );
   await waitForStatus(page, "Mensurando agregado");
+  await page
+    .locator('#practice-workspace tr:has(code:text-is("g")) [data-section-select="results"]')
+    .selectOption({ label: "Parte B — Seccion R" });
+  await page.waitForLoadState("networkidle");
   await page.click('[data-practice-status="publicada"]');
   await page.waitForSelector("#practice-workspace .practice-state--publicada");
 
@@ -78,10 +106,24 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await sPage.waitForSelector("#measurement-fields .measurement-row");
   await sPage.selectOption("#table-select", "1");
   await sPage.waitForLoadState("networkidle");
+  const tabs = sPage.locator("#practice-part-tabs .part-tab");
+  assert((await tabs.count()) === 2, "la práctica debía mostrar las dos pestañas");
   const given = sPage.locator(".measurement-row--given").first();
+  const measured = sPage.locator("#measurement-fields .measurement-row:not(.measurement-row--given)").first();
+  await tabs.nth(0).click();
+  assert((await given.isVisible()) && !(await measured.isVisible()), "la parte A debía mostrar L y ocultar T");
   await given.locator(".measure-given-value").fill("1");
   await given.locator(".measure-given-u").fill("0.002");
-  await sPage.locator("#measurement-fields .measurement-row:not(.measurement-row--given) .measure-value").first().fill("2.006");
+  await tabs.nth(1).click();
+  assert(!(await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y ocultar L");
+  await measured.locator(".measure-value").first().fill("2.006");
+  const finalG = sPage.locator('[data-final-result="1"][data-symbol="g"]');
+  assert(await finalG.isVisible(), "el resultado final g debía verse en la parte B");
+  const finalSection = sPage.locator('.measurement-section:has([data-final-result="1"][data-symbol="g"]) .measurement-section-title');
+  assert((await finalSection.textContent()) === "Seccion R", "g debía estar en su sección, con su título");
+  await tabs.nth(0).click();
+  assert(!(await finalG.isVisible()), "el resultado final g no debía verse en la parte A");
+  await tabs.nth(1).click();
   await sPage.click("#submit-button");
   await sPage.waitForSelector('#submit-status:has-text("Entrega guardada")', { timeout: 15_000 });
 
@@ -140,4 +182,57 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     statuses.archivedDefinition === 200 && statuses.archivedPreview === 404,
     `de una archivada el estudiante lee la definición pero no la vista previa (${JSON.stringify(statuses)})`,
   );
+
+  step("serie sin datos compartidos: la tabla va solo en la pestaña de su parte");
+  await page.evaluate(async () => {
+    const me = await (await fetch("/api/auth/me")).json();
+    const post = async (url, body) => {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-csrf-token": me.csrf_token },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(`${url}: ${await r.text()}`);
+      return r.json();
+    };
+    const practice = await post("/api/practices", { name: "Curva por partes", analysis_kind: "curva" });
+    const base = `/api/practices/${practice.id}`;
+    const qty = (symbol) => post(`${base}/quantities`, { symbol, name: symbol, unit: "", repeated: false, quantity: null });
+    const r = await qty("R");
+    const i = await qty("I");
+    await post(`${base}/curves`, { x_formula: "R", y_formula: "I", x_log: false });
+    const partA = await post(`${base}/parts`, { title: "Datos" });
+    const partB = await post(`${base}/parts`, { title: "Serie" });
+    const summary = await post(`${base}/sections`, { title: "Resumen", part_id: partA.id });
+    const rmax = await post(`${base}/results`, { symbol: "Rm", name: "R maxima", unit: "", formula: "R_max", is_final: true });
+    await post(`${base}/results/${rmax.id}/section`, { section_id: summary.id });
+    const v = await post(`${base}/quantities`, { symbol: "V", name: "V", unit: "", repeated: false, quantity: null, per_point: false });
+    const source = await post(`${base}/sections`, { title: "Fuente", part_id: partA.id });
+    const vm = await post(`${base}/results`, { symbol: "Vm", name: "V fuente", unit: "", formula: "V", is_final: true });
+    await post(`${base}/quantities/${v.id}/section`, { section_id: source.id });
+    await post(`${base}/results/${vm.id}/section`, { section_id: source.id });
+    const section = await post(`${base}/sections`, { title: "Barrido", part_id: partB.id });
+    await post(`${base}/quantities/${r.id}/section`, { section_id: section.id });
+    await post(`${base}/quantities/${i.id}/section`, { section_id: section.id });
+    await post(`${base}/status`, { status: "publicada" });
+    const { courses } = await (await fetch("/api/academic/context")).json();
+    await post(`/api/academic/courses/${courses[0].id}/practices`, { practice_id: practice.id });
+  });
+  await sPage.reload();
+  await sPage.waitForSelector("#app-shell:not(.hidden)");
+  await sPage.click('#practice-nav-children .nav-child:has-text("Curva por partes")');
+  await sPage.waitForSelector("#measurement-fields .series-table", { state: "attached" });
+  await sPage.waitForLoadState("networkidle");
+  const seriesTabs = sPage.locator("#practice-part-tabs .part-tab");
+  const table = sPage.locator("#measurement-fields .series-table");
+  await seriesTabs.nth(0).click();
+  assert(!(await table.isVisible()), "la serie no debía verse en la pestaña Datos");
+  const rmTitle = sPage.locator('.measurement-section:has([data-final-result="1"][data-symbol="Rm"]) .measurement-section-title');
+  assert((await rmTitle.textContent()) === "Resumen", "Rm debía verse bajo su sección Resumen");
+  const vmTitle = sPage.locator('.measurement-section:has([data-final-result="1"][data-symbol="Vm"]) h4');
+  assert((await vmTitle.textContent()) === "Fuente", "Vm debía verse bajo su sección Fuente, junto a V");
+  await seriesTabs.nth(1).click();
+  assert(await table.isVisible(), "la serie debía verse en la pestaña Serie");
+  const visibleFinals = await sPage.locator("#measurement-fields .final-results-section:visible").count();
+  assert(visibleFinals === 0, "la pestaña Serie no debía mostrar un bloque de resultado final vacío");
 });

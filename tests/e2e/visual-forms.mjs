@@ -46,17 +46,17 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   assert((await partTabs.count()) === 3, "p2-cc debe tener 3 tabs de partes");
   await partTabs.nth(0).click();
   assert(
-    await page.locator('#measurement-fields [data-section="serie"]').first().isVisible(),
+    await page.locator('#measurement-fields [data-section="p2-cc-serie"]').first().isVisible(),
     "la sección serie debe verse en su tab",
   );
   await page.screenshot({ path: join(ARTIFACTS, "visual-cc-serie.png"), fullPage: true });
   await partTabs.nth(1).click();
   assert(
-    await page.locator('#measurement-fields [data-section="paralelo"]').first().isVisible(),
+    await page.locator('#measurement-fields [data-section="p2-cc-paralelo"]').first().isVisible(),
     "la sección paralelo debe verse en su tab",
   );
   assert(
-    await page.locator('#measurement-fields [data-section="serie"]').first().isHidden(),
+    await page.locator('#measurement-fields [data-section="p2-cc-serie"]').first().isHidden(),
     "la sección serie debe ocultarse fuera de su tab",
   );
   await page.screenshot({ path: join(ARTIFACTS, "visual-cc-paralelo.png"), fullPage: true });
