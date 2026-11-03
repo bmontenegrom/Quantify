@@ -131,20 +131,29 @@ async fn seed_practice(
     quantities: &[QuantityInput],
     results: &[ResultInput],
 ) -> anyhow::Result<bool> {
+    let mut conn = pool.acquire().await?;
+    seed_practice_in(&mut conn, practice_id, quantities, results).await
+}
+
+async fn seed_practice_in(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+    quantities: &[QuantityInput],
+    results: &[ResultInput],
+) -> anyhow::Result<bool> {
     let count: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1")
             .bind(practice_id)
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await?;
     if count.0 > 0 {
         return Ok(false);
     }
-    let mut conn = pool.acquire().await?;
     for (pos, q) in quantities.iter().enumerate() {
-        insert_quantity(&mut conn, practice_id, pos as i64 + 1, q).await?;
+        insert_quantity(conn, practice_id, pos as i64 + 1, q).await?;
     }
     for (pos, r) in results.iter().enumerate() {
-        insert_result(&mut conn, practice_id, pos as i64 + 1, r).await?;
+        insert_result(conn, practice_id, pos as i64 + 1, r).await?;
     }
     Ok(true)
 }
@@ -369,8 +378,9 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
-    let fresh = seed_practice(
-        pool,
+    let mut tx = pool.begin().await?;
+    let fresh = seed_practice_in(
+        &mut tx,
         "p3-relajacion",
         &[
             qty_shared("R", "Resistencia", "ohm", "resistencia"),
@@ -417,8 +427,9 @@ async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
     if fresh {
-        super::layout::apply_p3_layout(pool).await?;
+        super::layout::apply_p3_layout(&mut tx).await?;
     }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -1368,17 +1379,62 @@ pub(super) async fn unify_p3(pool: &SqlitePool) -> anyhow::Result<()> {
         return Ok(());
     }
     let mut tx = pool.begin().await?;
-    let (legacy,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM practices WHERE id = 'p3-relajacion-desfasaje'")
-            .fetch_one(&mut *tx)
-            .await?;
-    if legacy > 0 {
+    let (legacy,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM practices WHERE id = 'p3-relajacion-desfasaje') \
+         OR (EXISTS (SELECT 1 FROM practice_quantities WHERE practice_id = 'p3-relajacion') \
+             AND NOT EXISTS (SELECT 1 FROM practice_quantities \
+                             WHERE practice_id = 'p3-relajacion' AND symbol = 'f'))",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let mut csv_paths: Vec<String> = Vec::new();
+    if legacy {
+        csv_paths = sqlx::query_scalar(
+            "SELECT csv_path FROM submissions \
+             WHERE practice_id IN ('p3-relajacion', 'p3-relajacion-desfasaje')",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
         sqlx::query(
             "DELETE FROM submissions \
              WHERE practice_id IN ('p3-relajacion', 'p3-relajacion-desfasaje')",
         )
         .execute(&mut *tx)
         .await?;
+        sqlx::query(
+            "UPDATE course_practices SET enabled = MAX(enabled, \
+             (SELECT d.enabled FROM course_practices d \
+              WHERE d.course_id = course_practices.course_id \
+              AND d.practice_id = 'p3-relajacion-desfasaje')) \
+             WHERE practice_id = 'p3-relajacion' AND course_id IN \
+             (SELECT course_id FROM course_practices WHERE practice_id = 'p3-relajacion-desfasaje')",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO practice_subgroup_members (subgroup_id, user_id, created_at) \
+             SELECT p.id, m.user_id, m.created_at FROM practice_subgroup_members m \
+             JOIN practice_subgroups d ON d.id = m.subgroup_id \
+             JOIN practice_subgroups p ON p.practice_id = 'p3-relajacion' \
+              AND p.course_id = d.course_id AND p.group_id = d.group_id AND p.name = d.name \
+             WHERE d.practice_id = 'p3-relajacion-desfasaje'",
+        )
+        .execute(&mut *tx)
+        .await?;
+        let (table_conflicts,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM practice_table_assignments d \
+             JOIN practice_table_assignments p ON p.practice_id = 'p3-relajacion' \
+              AND p.group_id = d.group_id AND p.user_id = d.user_id \
+             WHERE d.practice_id = 'p3-relajacion-desfasaje' AND p.table_number != d.table_number",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        tracing::warn!(
+            submissions = csv_paths.len(),
+            table_conflicts,
+            "P3 se unifico en una practica de dos partes: se borraron sus entregas y, \
+             si un estudiante tenia mesas distintas, quedo la de la parte 1"
+        );
         for table in [
             "course_practices",
             "practice_subgroups",
@@ -1417,6 +1473,9 @@ pub(super) async fn unify_p3(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    for path in csv_paths {
+        let _ = tokio::fs::remove_file(path).await;
+    }
     Ok(())
 }
 

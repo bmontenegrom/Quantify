@@ -1768,7 +1768,7 @@ async fn reset_legacy_hidrostatica_is_a_noop_on_a_new_database() {
     reset_legacy_hidrostatica(&pool).await.unwrap();
     seed_hidrostatica(&pool).await.unwrap();
     let applied: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM applied_migrations WHERE name != '2026-11-p3-unificada'",
+        "SELECT COUNT(*) FROM applied_migrations WHERE name = '2026-11-hidrostatica-ranuras'",
     )
     .fetch_one(&pool)
     .await
@@ -2437,6 +2437,21 @@ async fn the_two_old_p3_practices_become_one() {
          VALUES ('otro', 'Otro curso', '2026', 1, '2026-01-01')",
         "INSERT INTO course_practices (course_id, practice_id, created_at) \
          VALUES ('otro', 'p3-relajacion-desfasaje', '2026-01-01')",
+        "INSERT INTO courses (id, name, term, active, created_at) \
+         VALUES ('solo-p2', 'Solo parte 2', '2026', 1, '2026-01-01')",
+        "INSERT INTO course_practices (course_id, practice_id, created_at, enabled) \
+         VALUES ('solo-p2', 'p3-relajacion', '2026-01-01', 0), \
+                ('solo-p2', 'p3-relajacion-desfasaje', '2026-01-01', 1)",
+        "INSERT INTO lab_groups (id, course_id, name, created_at) \
+         VALUES ('g', 'solo-p2', 'G', '2026-01-01')",
+        "INSERT INTO users (id, username, display_name, role, password_hash, created_at, email) \
+         VALUES ('u1', 'u1', 'U1', 'estudiante', 'x', '2026-01-01', 'u1@x'), \
+                ('u2', 'u2', 'U2', 'estudiante', 'x', '2026-01-01', 'u2@x')",
+        "INSERT INTO practice_subgroups (id, course_id, practice_id, group_id, name, created_at) \
+         VALUES ('sa1', 'solo-p2', 'p3-relajacion', 'g', 'A', '2026-01-01'), \
+                ('sa2', 'solo-p2', 'p3-relajacion-desfasaje', 'g', 'A', '2026-01-01')",
+        "INSERT INTO practice_subgroup_members (subgroup_id, user_id, created_at) \
+         VALUES ('sa1', 'u1', '2026-01-01'), ('sa2', 'u2', '2026-01-01')",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
     }
@@ -2459,4 +2474,59 @@ async fn the_two_old_p3_practices_become_one() {
         enabled, 1,
         "el curso que tenia el desfasaje sigue teniendo P3"
     );
+    let (enabled,): (bool,) = sqlx::query_as(
+        "SELECT enabled FROM course_practices \
+         WHERE course_id = 'solo-p2' AND practice_id = 'p3-relajacion'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        enabled,
+        "el curso que solo habilitaba la parte 2 sigue con P3"
+    );
+    let members: Vec<(String,)> = sqlx::query_as(
+        "SELECT user_id FROM practice_subgroup_members WHERE subgroup_id = 'sa1' ORDER BY user_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(members, vec![("u1".into(),), ("u2".into(),)]);
+}
+
+#[tokio::test]
+async fn an_old_p3_without_desfasaje_is_unified_too() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for sql in [
+        "DELETE FROM applied_migrations WHERE name = '2026-11-p3-unificada'",
+        "DELETE FROM practice_quantities WHERE practice_id = 'p3-relajacion' \
+         AND symbol IN ('f', 'a', 'b')",
+        "UPDATE practices SET analysis_kind = 'estadistico' WHERE id = 'p3-relajacion'",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    seed_definitions(&pool).await.unwrap();
+    let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+    assert_eq!(p3.analysis_kind.as_deref(), Some("regresion_lineal"));
+    assert_eq!(p3.quantities.len(), 8);
+    assert_eq!(p3.parts.len(), 2);
+}
+
+#[tokio::test]
+async fn reseeding_p3_with_its_parts_still_there_does_not_fail() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for table in ["practice_results", "practice_quantities"] {
+        sqlx::query(&format!(
+            "DELETE FROM {table} WHERE practice_id = 'p3-relajacion'"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    seed_definitions(&pool).await.unwrap();
+    let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+    assert_eq!(p3.parts.len(), 2);
+    assert_eq!(p3.quantities.len(), 8);
 }

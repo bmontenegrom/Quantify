@@ -419,7 +419,25 @@ async fn apply_layout(
     Ok(())
 }
 
-pub(super) async fn apply_p3_layout(pool: &SqlitePool) -> anyhow::Result<()> {
+async fn apply_layout_if_empty(
+    conn: &mut sqlx::SqliteConnection,
+    layout: &LegacyLayout,
+) -> anyhow::Result<()> {
+    let empty: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM practices p WHERE p.id = ?1 \
+         AND NOT EXISTS (SELECT 1 FROM practice_parts WHERE practice_id = ?1) \
+         AND NOT EXISTS (SELECT 1 FROM practice_sections WHERE practice_id = ?1)",
+    )
+    .bind(layout.practice_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if empty.is_some() {
+        apply_layout(conn, layout).await?;
+    }
+    Ok(())
+}
+
+pub(super) async fn apply_p3_layout(conn: &mut sqlx::SqliteConnection) -> anyhow::Result<()> {
     let layout = LegacyLayout {
         practice_id: "p3-relajacion",
         parts: vec![
@@ -441,10 +459,7 @@ pub(super) async fn apply_p3_layout(pool: &SqlitePool) -> anyhow::Result<()> {
             ),
         ],
     };
-    let mut tx = pool.begin().await?;
-    apply_layout(&mut tx, &layout).await?;
-    tx.commit().await?;
-    Ok(())
+    apply_layout_if_empty(conn, &layout).await
 }
 
 pub(super) async fn migrate_legacy_layout(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -457,17 +472,7 @@ pub(super) async fn migrate_legacy_layout(pool: &SqlitePool) -> anyhow::Result<(
     }
     let mut tx = pool.begin().await?;
     for layout in legacy_layouts() {
-        let exists: Option<(i64,)> = sqlx::query_as(
-            "SELECT 1 FROM practices p WHERE p.id = ?1 \
-             AND NOT EXISTS (SELECT 1 FROM practice_parts WHERE practice_id = ?1) \
-             AND NOT EXISTS (SELECT 1 FROM practice_sections WHERE practice_id = ?1)",
-        )
-        .bind(layout.practice_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if exists.is_some() {
-            apply_layout(&mut tx, &layout).await?;
-        }
+        apply_layout_if_empty(&mut tx, &layout).await?;
     }
     sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
         .bind(LEGACY_LAYOUT)
