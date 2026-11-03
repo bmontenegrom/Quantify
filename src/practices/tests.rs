@@ -931,7 +931,7 @@ async fn seed_definitions_populates_p3_relajacion() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
     let def = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
-    assert_eq!(def.quantities.len(), 5);
+    assert_eq!(def.quantities.len(), 8);
     for symbol in ["R", "Rint", "C", "T_oc", "tmedio"] {
         assert!(
             def.quantities.iter().any(|q| q.symbol == symbol),
@@ -991,36 +991,42 @@ async fn seeded_p3_formulas_compute() {
 }
 
 #[tokio::test]
-async fn seed_definitions_populates_p3_desfasaje() {
+async fn seed_definitions_populates_p3_as_two_parts() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
-    let def = definition(&pool, "p3-relajacion-desfasaje")
-        .await
-        .unwrap()
-        .unwrap();
+    let def = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
     assert_eq!(def.analysis_kind.as_deref(), Some("regresion_lineal"));
     assert_eq!(def.x_formula.as_deref(), Some("2*pi*f"));
     assert_eq!(def.y_formula.as_deref(), Some("b / math::sqrt(a*a - b*b)"));
-    assert_eq!(def.quantities.len(), 3);
-    for symbol in ["f", "a", "b"] {
-        assert!(
-            def.quantities.iter().any(|q| q.symbol == symbol),
-            "falta la magnitud {symbol}"
-        );
+    let parts: Vec<(&str, &str)> = def
+        .parts
+        .iter()
+        .map(|p| (p.id.as_str(), def.part_kind(p)))
+        .collect();
+    assert_eq!(
+        parts,
+        [
+            ("p3-relajacion-directa", "estadistico"),
+            ("p3-relajacion-desfasaje", "regresion_lineal")
+        ]
+    );
+    for symbol in ["R", "Rint", "C", "T_oc", "tmedio"] {
+        assert_eq!(def.quantity_part(symbol), Some("p3-relajacion-directa"));
+        let q = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
+        assert!(!q.per_point || q.is_given, "{symbol} no es una serie");
     }
-    assert_eq!(def.results.len(), 1);
-    assert_eq!(def.results[0].symbol, "tau");
-    assert_eq!(def.results[0].formula, "slope");
+    for symbol in ["f", "a", "b"] {
+        assert_eq!(def.quantity_part(symbol), Some("p3-relajacion-desfasaje"));
+    }
+    assert_eq!(def.result_part("tau"), Some("p3-relajacion-desfasaje"));
+    assert_eq!(def.result_part("tau_exp"), Some("p3-relajacion-directa"));
 }
 
 #[tokio::test]
 async fn seeded_p3_desfasaje_fits_known_tau() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
-    let def = definition(&pool, "p3-relajacion-desfasaje")
-        .await
-        .unwrap()
-        .unwrap();
+    let def = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
 
     let tau = 1e-3_f64;
     let freqs = [10.0_f64, 20.0, 30.0, 40.0, 50.0];
@@ -1068,19 +1074,16 @@ async fn seeded_p3_desfasaje_fits_known_tau() {
             operator_replicas: None,
         },
     ];
-    let analysis = crate::computation::compute_regresion(
-        &def.quantities,
-        &def.intermediates,
-        &def.results,
-        &def.point_results,
-        &def.aggregates,
-        &Default::default(),
-        def.x_formula.as_deref().unwrap(),
-        def.y_formula.as_deref().unwrap(),
-        &measurements,
-    )
-    .unwrap();
-    let reg = analysis.regression.unwrap();
+    let full = crate::computation::analyze(&pool, "p3-relajacion", &measurements)
+        .await
+        .unwrap();
+    let analysis = &full
+        .parts
+        .iter()
+        .find(|p| p.part_id == "p3-relajacion-desfasaje")
+        .unwrap()
+        .analysis;
+    let reg = analysis.regression.as_ref().unwrap();
     assert!(
         (reg.slope - tau).abs() < 1e-9,
         "slope {} != tau {tau}",
@@ -1764,10 +1767,12 @@ async fn reset_legacy_hidrostatica_is_a_noop_on_a_new_database() {
     let (pool, _dir) = setup().await;
     reset_legacy_hidrostatica(&pool).await.unwrap();
     seed_hidrostatica(&pool).await.unwrap();
-    let applied: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let applied: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM applied_migrations WHERE name = '2026-11-hidrostatica-ranuras'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(applied.0, 1);
     reset_legacy_hidrostatica(&pool).await.unwrap();
     let qty: (i64,) = sqlx::query_as(
@@ -2416,4 +2421,112 @@ async fn a_result_used_by_series_artifacts_goes_to_the_series_part() {
     assert_eq!(def.result_part("k"), None);
     def.point_results[0].formula = format!("{} * k", def.point_results[0].formula);
     assert_eq!(def.result_part("k"), Some(series.as_str()));
+}
+
+#[tokio::test]
+async fn the_two_old_p3_practices_become_one() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for sql in [
+        "DELETE FROM applied_migrations WHERE name = '2026-11-p3-unificada'",
+        "UPDATE practices SET analysis_kind = 'estadistico', x_formula = NULL, y_formula = NULL \
+         WHERE id = 'p3-relajacion'",
+        "INSERT INTO practices (id, name, description, analysis_kind) \
+         VALUES ('p3-relajacion-desfasaje', 'Desfasaje', '', 'regresion_lineal')",
+        "INSERT INTO courses (id, name, term, active, created_at) \
+         VALUES ('otro', 'Otro curso', '2026', 1, '2026-01-01')",
+        "INSERT INTO course_practices (course_id, practice_id, created_at) \
+         VALUES ('otro', 'p3-relajacion-desfasaje', '2026-01-01')",
+        "INSERT INTO courses (id, name, term, active, created_at) \
+         VALUES ('solo-p2', 'Solo parte 2', '2026', 1, '2026-01-01')",
+        "INSERT INTO course_practices (course_id, practice_id, created_at, enabled) \
+         VALUES ('solo-p2', 'p3-relajacion', '2026-01-01', 0), \
+                ('solo-p2', 'p3-relajacion-desfasaje', '2026-01-01', 1)",
+        "INSERT INTO lab_groups (id, course_id, name, created_at) \
+         VALUES ('g', 'solo-p2', 'G', '2026-01-01')",
+        "INSERT INTO users (id, username, display_name, role, password_hash, created_at, email) \
+         VALUES ('u1', 'u1', 'U1', 'estudiante', 'x', '2026-01-01', 'u1@x'), \
+                ('u2', 'u2', 'U2', 'estudiante', 'x', '2026-01-01', 'u2@x')",
+        "INSERT INTO practice_subgroups (id, course_id, practice_id, group_id, name, created_at) \
+         VALUES ('sa1', 'solo-p2', 'p3-relajacion', 'g', 'A', '2026-01-01'), \
+                ('sa2', 'solo-p2', 'p3-relajacion-desfasaje', 'g', 'A', '2026-01-01')",
+        "INSERT INTO practice_subgroup_members (subgroup_id, user_id, created_at) \
+         VALUES ('sa1', 'u1', '2026-01-01'), ('sa2', 'u2', '2026-01-01')",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    seed_definitions(&pool).await.unwrap();
+    assert!(definition(&pool, "p3-relajacion-desfasaje")
+        .await
+        .unwrap()
+        .is_none());
+    let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+    assert_eq!(p3.analysis_kind.as_deref(), Some("regresion_lineal"));
+    assert_eq!(p3.parts.len(), 2);
+    assert_eq!(p3.quantities.len(), 8);
+    let (enabled,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM course_practices WHERE course_id = 'otro' AND practice_id = 'p3-relajacion'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        enabled, 1,
+        "el curso que tenia el desfasaje sigue teniendo P3"
+    );
+    let (enabled,): (bool,) = sqlx::query_as(
+        "SELECT enabled FROM course_practices \
+         WHERE course_id = 'solo-p2' AND practice_id = 'p3-relajacion'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        enabled,
+        "el curso que solo habilitaba la parte 2 sigue con P3"
+    );
+    let members: Vec<(String,)> = sqlx::query_as(
+        "SELECT user_id FROM practice_subgroup_members WHERE subgroup_id = 'sa1' ORDER BY user_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(members, vec![("u1".into(),), ("u2".into(),)]);
+}
+
+#[tokio::test]
+async fn an_old_p3_without_desfasaje_is_unified_too() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for sql in [
+        "DELETE FROM applied_migrations WHERE name = '2026-11-p3-unificada'",
+        "DELETE FROM practice_quantities WHERE practice_id = 'p3-relajacion' \
+         AND symbol IN ('f', 'a', 'b')",
+        "UPDATE practices SET analysis_kind = 'estadistico' WHERE id = 'p3-relajacion'",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    seed_definitions(&pool).await.unwrap();
+    let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+    assert_eq!(p3.analysis_kind.as_deref(), Some("regresion_lineal"));
+    assert_eq!(p3.quantities.len(), 8);
+    assert_eq!(p3.parts.len(), 2);
+}
+
+#[tokio::test]
+async fn reseeding_p3_with_its_parts_still_there_does_not_fail() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for table in ["practice_results", "practice_quantities"] {
+        sqlx::query(&format!(
+            "DELETE FROM {table} WHERE practice_id = 'p3-relajacion'"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    seed_definitions(&pool).await.unwrap();
+    let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+    assert_eq!(p3.parts.len(), 2);
+    assert_eq!(p3.quantities.len(), 8);
 }
