@@ -1164,6 +1164,24 @@ fn with_new_result(
     after
 }
 
+fn with_updated_result(
+    def: &practices::PracticeDefinition,
+    result_id: &str,
+    input: &ResultInput,
+) -> Option<practices::PracticeDefinition> {
+    let mut after = def.clone();
+    let item = after.results.iter_mut().find(|x| x.id == result_id)?;
+    let old_symbol = std::mem::replace(&mut item.symbol, input.symbol.trim().to_string());
+    item.formula = input.formula.trim().to_string();
+    let new_symbol = item.symbol.clone();
+    for symbol in after.sections.iter_mut().flat_map(|s| s.results.iter_mut()) {
+        if *symbol == old_symbol {
+            symbol.clone_from(&new_symbol);
+        }
+    }
+    Some(after)
+}
+
 pub(super) async fn create_result(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -1224,14 +1242,8 @@ pub(super) async fn update_result(
         None,
     )
     .await?;
-    let mut after = def.clone();
-    let item = after
-        .results
-        .iter_mut()
-        .find(|x| x.id == rid)
+    let after = with_updated_result(&def, &rid, &input)
         .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
-    item.symbol = input.symbol.trim().to_string();
-    item.formula = input.formula.trim().to_string();
     guard_change(&def, &after, "guardar el mensurando")?;
     let updated = practices::update_result(&state.pool, &rid, input)
         .await?
@@ -2161,6 +2173,29 @@ mod tests {
         let placed = with_new_result(&cc, &body.result, Some(&serie.id));
         assert_eq!(placed.result_part("X"), Some("p2-cc-serie"));
         assert!(guard_change(&cc, &placed, "guardar el mensurando").is_ok());
+    }
+
+    #[tokio::test]
+    async fn renaming_a_result_keeps_it_in_its_part() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let i_s = cc.results.iter().find(|r| r.symbol == "I_s").unwrap();
+        let input = ResultInput {
+            symbol: "I_serie".into(),
+            name: i_s.name.clone(),
+            unit: i_s.unit.clone(),
+            formula: i_s.formula.clone(),
+            tolerance: None,
+            is_final: i_s.is_final,
+            has_uncertainty: i_s.has_uncertainty,
+        };
+        let after = with_updated_result(&cc, &i_s.id, &input).unwrap();
+        assert_eq!(after.result_part("I_serie"), Some("p2-cc-serie"));
+        assert!(guard_change(&cc, &after, "guardar el mensurando").is_ok());
+        assert!(with_updated_result(&cc, "no-existe", &input).is_none());
     }
 
     #[tokio::test]
