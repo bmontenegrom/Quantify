@@ -182,4 +182,43 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     statuses.archivedDefinition === 200 && statuses.archivedPreview === 404,
     `de una archivada el estudiante lee la definición pero no la vista previa (${JSON.stringify(statuses)})`,
   );
+
+  step("serie sin datos compartidos: la tabla va solo en la pestaña de su parte");
+  await page.evaluate(async () => {
+    const me = await (await fetch("/api/auth/me")).json();
+    const post = async (url, body) => {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-csrf-token": me.csrf_token },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(`${url}: ${await r.text()}`);
+      return r.json();
+    };
+    const practice = await post("/api/practices", { name: "Curva por partes", analysis_kind: "curva" });
+    const base = `/api/practices/${practice.id}`;
+    const qty = (symbol) => post(`${base}/quantities`, { symbol, name: symbol, unit: "", repeated: false, quantity: null });
+    const r = await qty("R");
+    const i = await qty("I");
+    await post(`${base}/curves`, { x_formula: "R", y_formula: "I", x_log: false });
+    await post(`${base}/parts`, { title: "Datos" });
+    const partB = await post(`${base}/parts`, { title: "Serie" });
+    const section = await post(`${base}/sections`, { title: "Barrido", part_id: partB.id });
+    await post(`${base}/quantities/${r.id}/section`, { section_id: section.id });
+    await post(`${base}/quantities/${i.id}/section`, { section_id: section.id });
+    await post(`${base}/status`, { status: "publicada" });
+    const { courses } = await (await fetch("/api/academic/context")).json();
+    await post(`/api/academic/courses/${courses[0].id}/practices`, { practice_id: practice.id });
+  });
+  await sPage.reload();
+  await sPage.waitForSelector("#app-shell:not(.hidden)");
+  await sPage.click('#practice-nav-children .nav-child:has-text("Curva por partes")');
+  await sPage.waitForSelector("#measurement-fields .series-table", { state: "attached" });
+  await sPage.waitForLoadState("networkidle");
+  const seriesTabs = sPage.locator("#practice-part-tabs .part-tab");
+  const table = sPage.locator("#measurement-fields .series-table");
+  await seriesTabs.nth(0).click();
+  assert(!(await table.isVisible()), "la serie no debía verse en la pestaña Datos");
+  await seriesTabs.nth(1).click();
+  assert(await table.isVisible(), "la serie debía verse en la pestaña Serie");
 });

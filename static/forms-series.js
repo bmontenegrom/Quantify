@@ -23,10 +23,9 @@ export function renderSeriesTable(definition) {
   const body = Array.from({ length: SERIES_INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
   const sections = definitionSections(definition);
   let sharedSection = "";
-  let seriesSectionAttr = "";
+  const seriesPart = sections?.find((sec) => sec.series)?.id;
+  const seriesSectionAttr = seriesPart ? ` data-section="${escapeHtml(seriesPart)}"` : "";
   if (sections && shared.length) {
-    const seriesSec = sections.find((sec) => sec.series);
-    if (seriesSec?.id) seriesSectionAttr = ` data-section="${escapeHtml(seriesSec.id)}"`;
     const { grouped, rest } = groupBySections(
       shared,
       sections.filter((sec) => !sec.series),
