@@ -73,6 +73,7 @@ pub async fn create_part(
         x_formula: None,
         y_formula: None,
         operator_count: None,
+        inherited: false,
     })
 }
 

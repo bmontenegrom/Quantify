@@ -2237,3 +2237,59 @@ async fn parts_without_a_saved_kind_take_the_practice_one() {
         .iter()
         .all(|q| ["R1", "R2", "R3"].contains(&q.symbol.as_str())));
 }
+
+#[tokio::test]
+async fn shared_results_keep_the_operator_shape_of_the_form() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    set_operator_count(&pool, "p1-estadistica", 2)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE practice_sections SET part_id = NULL WHERE part_id = 'p1-estadistica-op1'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    assert_eq!(def.result_part("g1"), None);
+    let id = |sym: &str| {
+        def.quantities
+            .iter()
+            .find(|q| q.symbol == sym)
+            .unwrap()
+            .id
+            .clone()
+    };
+    let m = |sym: &str, values: Vec<f64>, given_u: Option<f64>, ops: Option<Vec<Vec<f64>>>| {
+        crate::computation::MeasurementInput {
+            quantity_id: id(sym),
+            instrument_id: None,
+            scale_id: None,
+            values,
+            given_u,
+            point_replicas: None,
+            operator_replicas: ops,
+        }
+    };
+    let measurements = vec![
+        m("L", vec![1.0], Some(0.002), None),
+        m("t_med", vec![2.0], Some(0.0), None),
+        m(
+            "T1",
+            vec![],
+            None,
+            Some(vec![vec![2.0, 2.02, 1.98], vec![2.01, 1.99, 2.0]]),
+        ),
+    ];
+    let analysis = crate::computation::analyze(&pool, "p1-estadistica", &measurements)
+        .await
+        .unwrap();
+    assert_eq!(analysis.operators.len(), 2);
+    for op in &analysis.operators {
+        let g1 = op.derived.iter().find(|d| d.symbol == "g1").unwrap();
+        assert!(
+            g1.value.is_finite() && (g1.value - 9.87).abs() < 0.1,
+            "{}",
+            g1.value
+        );
+    }
+}

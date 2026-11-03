@@ -35,7 +35,6 @@ impl PracticeDefinition {
             analysis_kind: Some("estadistico".into()),
             x_formula: None,
             y_formula: None,
-            operator_count: None,
             quantities: self
                 .quantities
                 .iter()
@@ -146,6 +145,7 @@ impl PracticeDefinition {
             if part.analysis_kind.is_some() {
                 continue;
             }
+            part.inherited = true;
             if series.as_deref() == Some(part.id.as_str()) {
                 part.analysis_kind = self.analysis_kind.clone();
                 part.x_formula = self.x_formula.clone();
@@ -155,6 +155,19 @@ impl PracticeDefinition {
                 part.operator_count = self.operator_count;
             }
         }
+    }
+
+    pub fn reresolved(&self) -> PracticeDefinition {
+        let mut definition = self.clone();
+        for part in definition.parts.iter_mut().filter(|p| p.inherited) {
+            part.analysis_kind = None;
+            part.x_formula = None;
+            part.y_formula = None;
+            part.operator_count = None;
+            part.inherited = false;
+        }
+        definition.resolve_part_kinds();
+        definition
     }
 
     fn has_point_part(&self) -> bool {

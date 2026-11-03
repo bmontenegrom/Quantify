@@ -1011,6 +1011,7 @@ fn guard_change(
     after: &practices::PracticeDefinition,
     what: &str,
 ) -> Result<(), AppError> {
+    let after = &after.reresolved();
     guard_series_part(before, after, what)?;
     if after.status == "publicada" {
         let before_missing = structure_problems(before);
@@ -2003,6 +2004,20 @@ mod tests {
         assert!(structure_problems(&two_series)
             .iter()
             .any(|p| p.contains("mas de una parte")));
+    }
+
+    #[tokio::test]
+    async fn changing_the_practice_kind_revalidates_the_parts_that_inherit_it() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let hidro = practices::definition(&pool, "hidrostatica")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(hidro.status, "publicada");
+        let mut after = hidro.clone();
+        after.analysis_kind = Some("regresion_lineal".into());
+        let err = guard_change(&hidro, &after, "x").unwrap_err();
+        assert!(format!("{err:?}").contains("ejes"), "{err:?}");
     }
 
     #[tokio::test]

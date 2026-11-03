@@ -16,6 +16,29 @@ async function fillAndSubmit(page, formSelector, fields, checks = {}) {
   await form.locator('button[type="submit"]').click();
 }
 
+async function assignSection(page, list, symbol, label) {
+  const select = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="${list}"]`);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await select.selectOption({ label });
+    await page.waitForLoadState("networkidle");
+    const ok = await page
+      .waitForFunction(
+        ([list, symbol, label]) => {
+          const row = [...document.querySelectorAll("#practice-workspace tr")].find(
+            (tr) => tr.querySelector("code")?.textContent === symbol,
+          );
+          const sel = row?.querySelector(`[data-section-select="${list}"]`);
+          return sel?.selectedOptions[0]?.textContent === label;
+        },
+        [list, symbol, label],
+        { timeout: 3_000 },
+      )
+      .then(() => true, () => false);
+    if (ok) return;
+  }
+  throw new Error(`no se pudo asignar ${symbol} a ${label}`);
+}
+
 async function waitForStatus(page, text) {
   await page.waitForFunction(
     (t) => (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes(t),
@@ -54,11 +77,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     await page.locator('#new-section-form button[type="submit"]').click();
     await page.waitForSelector(`#practice-workspace input[aria-label="Título de la sección"][value="${title}"]`);
   }
-  for (const [symbol, section] of [["T", "Parte B — Seccion B"]]) {
-    const row = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}"))`).first();
-    await row.locator('[data-section-select="quantities"]').selectOption({ label: section });
-    await page.waitForLoadState("networkidle");
-  }
+  await assignSection(page, "quantities", "T", "Parte B — Seccion B");
 
   step("docente: publicar sin mensurandos se rechaza");
   await page.click('[data-practice-status="publicada"]');
@@ -76,12 +95,8 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     await waitForStatus(page, "Mensurando agregado");
     await page.waitForSelector(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="results"]`);
   }
-  for (const [symbol, section] of [["g", "Parte B — Seccion R"], ["Lr", "Parte A — Seccion A"]]) {
-    await page
-      .locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="results"]`)
-      .selectOption({ label: section });
-    await page.waitForLoadState("networkidle");
-  }
+  await assignSection(page, "results", "g", "Parte B — Seccion R");
+  await assignSection(page, "results", "Lr", "Parte A — Seccion A");
   await page.click('[data-practice-status="publicada"]');
   await page.waitForSelector("#practice-workspace .practice-state--publicada");
 
