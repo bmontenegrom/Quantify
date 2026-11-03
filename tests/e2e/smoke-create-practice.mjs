@@ -84,8 +84,12 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await waitForStatus(page, "no tiene mensurandos");
 
   step("docente: agrega g y Lr, los ubica en sus partes y publica");
-  for (const [symbol, name, formula] of [["g", "Gravedad", "4*pi^2*L/T^2"], ["Lr", "Largo informado", "L"]]) {
+  for (const [symbol, name, formula, section] of [
+    ["g", "Gravedad", "4*pi^2*L/T^2", "Parte B — Seccion R"],
+    ["Lr", "Largo informado", "L", "Parte A — Seccion A"],
+  ]) {
     await openAddForm(page, "#new-result-form");
+    await page.locator('#new-result-form [name="section_id"]').selectOption({ label: section });
     await fillAndSubmit(
       page,
       "#new-result-form",
@@ -95,8 +99,6 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     await waitForStatus(page, "Mensurando agregado");
     await page.waitForSelector(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="results"]`);
   }
-  await assignSection(page, "results", "g", "Parte B — Seccion R");
-  await assignSection(page, "results", "Lr", "Parte A — Seccion A");
   await page.click('[data-practice-status="publicada"]');
   await page.waitForSelector("#practice-workspace .practice-state--publicada");
 
@@ -224,17 +226,15 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     await post(`${base}/curves`, { x_formula: "R", y_formula: "I", x_log: false });
     const partA = await post(`${base}/parts`, { title: "Datos" });
     const partB = await post(`${base}/parts`, { title: "Serie" });
-    const summary = await post(`${base}/sections`, { title: "Resumen", part_id: partB.id });
-    const rmax = await post(`${base}/results`, { symbol: "Rm", name: "R maxima", unit: "", formula: "R_max", is_final: true });
-    await post(`${base}/results/${rmax.id}/section`, { section_id: summary.id });
-    const v = await post(`${base}/quantities`, { symbol: "V", name: "V", unit: "", repeated: false, quantity: null, per_point: false });
-    const source = await post(`${base}/sections`, { title: "Fuente", part_id: partA.id });
-    const vm = await post(`${base}/results`, { symbol: "Vm", name: "V fuente", unit: "", formula: "V", is_final: true });
-    await post(`${base}/results/${vm.id}/section`, { section_id: source.id });
-    await post(`${base}/quantities/${v.id}/section`, { section_id: source.id });
     const section = await post(`${base}/sections`, { title: "Barrido", part_id: partB.id });
     await post(`${base}/quantities/${r.id}/section`, { section_id: section.id });
     await post(`${base}/quantities/${i.id}/section`, { section_id: section.id });
+    const summary = await post(`${base}/sections`, { title: "Resumen", part_id: partB.id });
+    await post(`${base}/results`, { symbol: "Rm", name: "R maxima", unit: "", formula: "R_max", is_final: true, section_id: summary.id });
+    const v = await post(`${base}/quantities`, { symbol: "V", name: "V", unit: "", repeated: false, quantity: null, per_point: false });
+    const source = await post(`${base}/sections`, { title: "Fuente", part_id: partA.id });
+    await post(`${base}/results`, { symbol: "Vm", name: "V fuente", unit: "", formula: "V", is_final: true, section_id: source.id });
+    await post(`${base}/quantities/${v.id}/section`, { section_id: source.id });
     await post(`${base}/status`, { status: "publicada" });
     const { courses } = await (await fetch("/api/academic/context")).json();
     await post(`/api/academic/courses/${courses[0].id}/practices`, { practice_id: practice.id });

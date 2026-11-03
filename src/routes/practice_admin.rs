@@ -1127,15 +1127,67 @@ pub(super) async fn delete_curve(
     Ok(Json(Health { status: "ok" }))
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct NewResultBody {
+    #[serde(flatten)]
+    result: ResultInput,
+    #[serde(default)]
+    section_id: Option<String>,
+}
+
+fn with_new_result(
+    def: &practices::PracticeDefinition,
+    input: &ResultInput,
+    section_id: Option<&str>,
+) -> practices::PracticeDefinition {
+    let mut after = def.clone();
+    let symbol = input.symbol.trim().to_string();
+    after.results.push(db::PracticeResult {
+        id: String::new(),
+        practice_id: def.practice_id.clone(),
+        symbol: symbol.clone(),
+        name: input.name.trim().to_string(),
+        unit: input.unit.trim().to_string(),
+        formula: input.formula.trim().to_string(),
+        position: i64::MAX,
+        tolerance: input.tolerance.flatten(),
+        is_final: input.is_final,
+        has_uncertainty: input.has_uncertainty,
+    });
+    if let Some(section) = after
+        .sections
+        .iter_mut()
+        .find(|s| Some(s.id.as_str()) == section_id)
+    {
+        section.results.push(symbol);
+    }
+    after
+}
+
 pub(super) async fn create_result(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Json(input): Json<ResultInput>,
+    Json(body): Json<NewResultBody>,
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
+    let NewResultBody {
+        result: input,
+        section_id,
+    } = body;
+    let section_id = section_id.filter(|s| !s.is_empty());
     let def = load_definition(&state, &id).await?;
     validate_result(&def, &input)?;
+    if let Some(section) = &section_id {
+        if !def.sections.iter().any(|s| &s.id == section) {
+            return Err(AppError::bad_request("La seccion no es de esta practica."));
+        }
+    }
+    guard_change(
+        &def,
+        &with_new_result(&def, &input, section_id.as_deref()),
+        "guardar el mensurando",
+    )?;
     guard_symbol(
         &state.pool,
         &id,
@@ -1148,7 +1200,7 @@ pub(super) async fn create_result(
     )
     .await?;
     Ok(Json(
-        practices::create_result(&state.pool, &id, input).await?,
+        practices::create_result_in_section(&state.pool, &id, input, section_id.as_deref()).await?,
     ))
 }
 
@@ -2082,6 +2134,33 @@ mod tests {
         assert!(!formula_problems(&broken).is_empty());
         assert!(guard_change(&broken, &cc, "asignar la sección").is_ok());
         assert!(guard_change(&cc, &broken, "eliminar la sección").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_new_result_is_validated_where_it_will_live() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let body: NewResultBody = serde_json::from_str(
+            r#"{"symbol":"X","name":"X","unit":"","formula":"Vg_s * 2","tolerance":null}"#,
+        )
+        .unwrap();
+        assert_eq!(body.result.tolerance, Some(None));
+        assert_eq!(body.section_id, None);
+        assert!(validate_result(&cc, &body.result).is_ok());
+        let shared = with_new_result(&cc, &body.result, None);
+        assert!(guard_change(&cc, &shared, "guardar el mensurando").is_err());
+
+        let serie = cc
+            .sections
+            .iter()
+            .find(|s| s.quantities.contains(&"Vg_s".to_string()))
+            .unwrap();
+        let placed = with_new_result(&cc, &body.result, Some(&serie.id));
+        assert_eq!(placed.result_part("X"), Some("p2-cc-serie"));
+        assert!(guard_change(&cc, &placed, "guardar el mensurando").is_ok());
     }
 
     #[tokio::test]
