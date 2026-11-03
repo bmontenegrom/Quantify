@@ -37,22 +37,25 @@ pub async fn definition(
     let aggregates = aggregates_for(pool, practice_id).await?;
     let parts = super::parts_for(pool, practice_id).await?;
     let sections = super::sections_for(pool, practice_id).await?;
-    Ok(Some(PracticeDefinition {
-        practice_id: practice_id.to_string(),
-        status: row.status,
-        analysis_kind: row.analysis_kind,
-        x_formula: row.x_formula,
-        y_formula: row.y_formula,
-        quantities,
-        results,
-        curves,
-        operator_count: row.operator_count,
-        intermediates,
-        point_results,
-        aggregates,
-        parts,
-        sections,
-    }))
+    Ok(Some(
+        PracticeDefinition {
+            practice_id: practice_id.to_string(),
+            status: row.status,
+            analysis_kind: row.analysis_kind,
+            x_formula: row.x_formula,
+            y_formula: row.y_formula,
+            quantities,
+            results,
+            curves,
+            operator_count: row.operator_count,
+            intermediates,
+            point_results,
+            aggregates,
+            parts,
+            sections,
+        }
+        .with_effective_kinds(),
+    ))
 }
 
 trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin {

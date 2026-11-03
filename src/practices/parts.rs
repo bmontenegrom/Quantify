@@ -78,11 +78,30 @@ impl PracticeDefinition {
         if !is_point_based(self.analysis_kind.as_deref()) {
             return None;
         }
+        if let Some(chosen) = self
+            .parts
+            .iter()
+            .find(|p| is_point_based(p.analysis_kind.as_deref()))
+        {
+            return Some(chosen);
+        }
         let holding = self.series_parts();
         self.parts
             .iter()
             .find(|p| holding.contains(&p.id))
             .or_else(|| self.parts.first())
+    }
+
+    pub fn with_effective_kinds(mut self) -> PracticeDefinition {
+        let kinds: Vec<String> = self
+            .parts
+            .iter()
+            .map(|p| self.part_kind(p).to_string())
+            .collect();
+        for (part, kind) in self.parts.iter_mut().zip(kinds) {
+            part.effective_kind = kind;
+        }
+        self
     }
 
     pub fn part_kind(&self, part: &PracticePart) -> &str {

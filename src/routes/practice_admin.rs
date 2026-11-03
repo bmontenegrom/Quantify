@@ -132,6 +132,14 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
     {
         problems.push("no tiene mensurandos".to_string());
     }
+    if let Some(series) = def.series_part() {
+        if def.series_parts().iter().any(|p| *p != series.id) {
+            problems.push(format!(
+                "tiene magnitudes por punto fuera de la parte \"{}\", que es la de la serie",
+                series.title
+            ));
+        }
+    }
     for part in def
         .parts
         .iter()
@@ -271,6 +279,11 @@ pub(super) async fn set_practice_analysis_kind(
         ));
     }
     let before = load_definition(&state, &id).await?;
+    if !before.parts.is_empty() {
+        return Err(AppError::bad_request(
+            "La práctica tiene partes: el tipo de análisis se elige en cada parte, en \"Partes y secciones\".",
+        ));
+    }
     let mut after = before.clone();
     after.analysis_kind = Some(kind.to_string());
     guard_change(&before, &after, "cambiar el tipo de analisis")?;
@@ -1441,8 +1454,58 @@ fn with_new_part(def: &practices::PracticeDefinition) -> practices::PracticeDefi
         practice_id: def.practice_id.clone(),
         title: String::new(),
         position: i64::MAX,
+        analysis_kind: None,
+        effective_kind: String::new(),
     });
     after
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PartKindBody {
+    analysis_kind: String,
+}
+
+fn with_part_kind(
+    def: &practices::PracticeDefinition,
+    part_id: &str,
+    kind: &str,
+) -> Option<practices::PracticeDefinition> {
+    def.parts.iter().find(|p| p.id == part_id)?;
+    let was_series = def.series_part().is_some_and(|p| p.id == part_id);
+    let mut after = def.clone();
+    if practices::is_point_based(Some(kind)) {
+        for part in &mut after.parts {
+            part.analysis_kind = (part.id == part_id).then(|| kind.to_string());
+        }
+        after.analysis_kind = Some(kind.to_string());
+    } else if was_series {
+        for part in &mut after.parts {
+            part.analysis_kind = None;
+        }
+        after.analysis_kind = Some("estadistico".into());
+    }
+    Some(after)
+}
+
+pub(super) async fn set_part_kind(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(body): Json<PartKindBody>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let kind = body.analysis_kind.trim();
+    if !ANALYSIS_KINDS.contains(&kind) {
+        return Err(AppError::bad_request(
+            "analysis_kind debe ser estadistico, regresion_lineal o curva",
+        ));
+    }
+    let before = load_definition(&state, &id).await?;
+    let after = with_part_kind(&before, &pid, kind)
+        .ok_or_else(|| AppError::not_found("parte no encontrada"))?;
+    guard_change(&before, &after, "cambiar el tipo de la parte")?;
+    practices::save_part_kinds(&state.pool, &after).await?;
+    Ok(Json(Health { status: "ok" }))
 }
 
 fn with_part_moved(
@@ -2466,6 +2529,71 @@ mod tests {
             "{:?}",
             structure_problems(&data_only)
         );
+    }
+
+    #[tokio::test]
+    async fn each_part_chooses_its_kind() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        for title in ["Datos", "Barrido"] {
+            practices::create_part(
+                &pool,
+                "fluidos-1",
+                &practices::PartInput {
+                    title: title.into(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let fluidos = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        let (datos, barrido) = (fluidos.parts[0].id.clone(), fluidos.parts[1].id.clone());
+        assert_eq!(fluidos.series_part().unwrap().id, datos);
+        assert_eq!(fluidos.parts[0].effective_kind, "regresion_lineal");
+
+        let after = with_part_kind(&fluidos, &barrido, "regresion_lineal").unwrap();
+        assert_eq!(after.series_part().unwrap().id, barrido);
+        assert!(guard_change(&fluidos, &after, "x").is_ok());
+        practices::save_part_kinds(&pool, &after).await.unwrap();
+        let saved = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        let kinds: Vec<&str> = saved
+            .parts
+            .iter()
+            .map(|p| p.effective_kind.as_str())
+            .collect();
+        assert_eq!(kinds, ["estadistico", "regresion_lineal"]);
+        assert!(with_part_kind(&saved, "no-existe", "curva").is_none());
+
+        let hidro = practices::definition(&pool, "hidrostatica")
+            .await
+            .unwrap()
+            .unwrap();
+        let to_regression = with_part_kind(&hidro, &hidro.parts[0].id, "regresion_lineal").unwrap();
+        assert_eq!(
+            to_regression.analysis_kind.as_deref(),
+            Some("regresion_lineal")
+        );
+        assert!(guard_change(&hidro, &to_regression, "x").is_err());
+
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let serie_as_curve = with_part_kind(&cc, "p2-cc-serie", "curva").unwrap();
+        assert!(structure_problems(&serie_as_curve)
+            .iter()
+            .any(|p| p.contains("fuera de la parte")));
+        let potencia_as_stat = with_part_kind(&cc, "p2-cc-potencia", "estadistico").unwrap();
+        assert_eq!(
+            potencia_as_stat.analysis_kind.as_deref(),
+            Some("estadistico")
+        );
+        assert!(guard_change(&cc, &potencia_as_stat, "x").is_err());
     }
 
     #[tokio::test]

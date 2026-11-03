@@ -6,7 +6,7 @@ const LEGACY_LAYOUT: &str = "2026-11-partes-y-secciones";
 
 pub async fn parts_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticePart>> {
     Ok(sqlx::query_as::<_, PracticePart>(
-        "SELECT id, practice_id, title, position FROM practice_parts \
+        "SELECT id, practice_id, title, position, analysis_kind FROM practice_parts \
          WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
@@ -68,7 +68,33 @@ pub async fn create_part(
         practice_id: practice_id.to_string(),
         title: input.title.trim().to_string(),
         position,
+        analysis_kind: None,
+        effective_kind: "estadistico".into(),
     })
+}
+
+pub async fn save_part_kinds(
+    pool: &SqlitePool,
+    definition: &super::PracticeDefinition,
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    for part in &definition.parts {
+        sqlx::query(
+            "UPDATE practice_parts SET analysis_kind = ?1 WHERE id = ?2 AND practice_id = ?3",
+        )
+        .bind(&part.analysis_kind)
+        .bind(&part.id)
+        .bind(&definition.practice_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query("UPDATE practices SET analysis_kind = ?1 WHERE id = ?2")
+        .bind(&definition.analysis_kind)
+        .bind(&definition.practice_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 pub async fn update_part(
