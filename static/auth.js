@@ -32,7 +32,6 @@ function renderDefaultGroupSelect() {
   const tableEl = accountDefaultTable();
   if (!groupEl || !tableEl) return;
 
-  // Grupos del alumno en todos sus cursos
   const groups = (state.academic?.courses ?? []).flatMap((c) =>
     c.groups
       .filter((g) => g.members?.some((m) => m.id === state.user.id))

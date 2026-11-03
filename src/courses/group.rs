@@ -47,8 +47,6 @@ pub struct EnrollCourseMember {
     pub user_id: String,
 }
 
-/// Crea un grupo de laboratorio en un curso. `table_count` se acota a 1..=24 y
-/// `group_type` se normaliza a `regular`/`recuperacion`.
 pub async fn create_group(
     pool: &SqlitePool,
     course_id: &str,
@@ -80,7 +78,6 @@ pub async fn create_group(
     .await?)
 }
 
-/// Normaliza el tipo de grupo a uno de los valores válidos: `recuperacion` o `regular` (por defecto).
 fn normalize_group_type(value: Option<&str>) -> &'static str {
     match value.unwrap_or("regular").trim() {
         "recuperacion" => "recuperacion",
@@ -88,7 +85,6 @@ fn normalize_group_type(value: Option<&str>) -> &'static str {
     }
 }
 
-/// Actualiza nombre, cantidad de mesas y tipo de un grupo. Devuelve `None` si no existe.
 pub async fn update_group(
     pool: &SqlitePool,
     group_id: &str,
@@ -135,8 +131,6 @@ pub async fn update_group(
     ))
 }
 
-/// Inscribe a un usuario en un curso (si no lo estaba) y lo agrega al grupo `General`
-/// del curso, creándolo si hace falta. Idempotente.
 pub async fn enroll_course_member(
     pool: &SqlitePool,
     course_id: &str,
@@ -180,7 +174,6 @@ pub async fn enroll_course_member(
     Ok(())
 }
 
-/// Devuelve el id del grupo `General` del curso, creándolo si todavía no existe.
 async fn ensure_default_group(pool: &SqlitePool, course_id: &str) -> anyhow::Result<String> {
     let existing = sqlx::query_as::<_, LabGroup>(
         r#"
@@ -211,7 +204,6 @@ async fn ensure_default_group(pool: &SqlitePool, course_id: &str) -> anyhow::Res
     Ok(created.id)
 }
 
-/// Agrega un estudiante a un grupo. Devuelve `None` si el usuario no existe o no es estudiante.
 pub async fn add_group_member(
     pool: &SqlitePool,
     group_id: &str,
@@ -244,7 +236,6 @@ pub async fn add_group_member(
     Ok(Some(()))
 }
 
-/// Quita a un estudiante de un grupo. Devuelve `true` si había una membresía y se eliminó.
 pub async fn remove_group_member(
     pool: &SqlitePool,
     group_id: &str,
@@ -264,7 +255,6 @@ pub async fn remove_group_member(
     Ok(result.rows_affected() > 0)
 }
 
-/// Lista los grupos de un curso, cada uno con sus estudiantes miembros.
 pub async fn groups_for_course(
     pool: &SqlitePool,
     course_id: &str,

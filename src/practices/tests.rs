@@ -5,7 +5,6 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use tempfile::TempDir;
 
-/// Pool temporal migrado con las tres prácticas sembradas.
 async fn setup() -> (SqlitePool, TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let url = format!("sqlite:{}", dir.path().join("t.db").to_string_lossy());
@@ -103,7 +102,6 @@ async fn update_and_delete_quantity() {
     assert_eq!(updated.symbol, "a");
     assert!(!updated.repeated);
 
-    // `default_value`: un número lo fija, ausente lo conserva y `null` lo borra.
     let with_default = |default_value: Option<Option<f64>>| QuantityInput {
         symbol: "a".into(),
         name: "Ancho".into(),
@@ -147,7 +145,6 @@ async fn create_and_delete_result() {
     assert!(!delete_result(&pool, &r.id).await.unwrap());
 }
 
-/// `is_final` se persiste al crear y se puede togglear al actualizar (checkbox docente en UI).
 #[tokio::test]
 async fn create_and_update_result_toggles_is_final() {
     let (pool, _dir) = setup().await;
@@ -183,7 +180,6 @@ async fn duplicate_symbol_is_rejected() {
     create_quantity(&pool, "p1-estadistica", sample_quantity())
         .await
         .unwrap();
-    // Mismo símbolo en la misma práctica debe fallar (UNIQUE constraint).
     let err = create_quantity(&pool, "p1-estadistica", sample_quantity()).await;
     assert!(err.is_err());
 }
@@ -191,18 +187,15 @@ async fn duplicate_symbol_is_rejected() {
 #[tokio::test]
 async fn symbol_taken_detects_cross_table_collision() {
     let (pool, _dir) = setup().await;
-    // Crea una magnitud con símbolo "l".
     let q = create_quantity(&pool, "p1-estadistica", sample_quantity())
         .await
         .unwrap();
 
-    // symbol_taken_in_practice lo detecta buscando en quantities.
     assert!(
         symbol_taken_in_practice(&pool, "p1-estadistica", "l", None, None, None, None, None)
             .await
             .unwrap()
     );
-    // Excluir la misma magnitud (al renombrar) no debe reportar colisión.
     assert!(!symbol_taken_in_practice(
         &pool,
         "p1-estadistica",
@@ -216,12 +209,10 @@ async fn symbol_taken_detects_cross_table_collision() {
     .await
     .unwrap());
 
-    // Crea un mensurando con símbolo "Q".
     let r = create_result(&pool, "p1-estadistica", sample_result())
         .await
         .unwrap();
 
-    // Un mensurando nuevo con símbolo "l" (ya en quantities) es colisión cruzada.
     assert!(symbol_taken_in_practice(
         &pool,
         "p1-estadistica",
@@ -234,7 +225,6 @@ async fn symbol_taken_detects_cross_table_collision() {
     )
     .await
     .unwrap());
-    // Una magnitud nueva con símbolo "Q" (ya en results) es colisión cruzada.
     assert!(symbol_taken_in_practice(
         &pool,
         "p1-estadistica",
@@ -248,7 +238,6 @@ async fn symbol_taken_detects_cross_table_collision() {
     .await
     .unwrap());
 
-    // Una magnitud intermedia con símbolo "Iv": magnitudes/mensurandos nuevos deben colisionar.
     create_intermediate(
         &pool,
         "p1-estadistica",
@@ -267,7 +256,6 @@ async fn symbol_taken_detects_cross_table_collision() {
             .unwrap()
     );
 
-    // Una magnitud derivada por punto con símbolo "Re": el resto debe colisionar con ella.
     create_point_result(
         &pool,
         "p1-estadistica",
@@ -286,7 +274,6 @@ async fn symbol_taken_detects_cross_table_collision() {
             .unwrap()
     );
 
-    // Un mensurando agregado (Motor F) con símbolo "Ma": el resto debe colisionar con él.
     create_aggregate(
         &pool,
         "p1-estadistica",
@@ -306,7 +293,6 @@ async fn symbol_taken_detects_cross_table_collision() {
             .unwrap()
     );
 
-    // Símbolo inexistente no colisiona.
     assert!(!symbol_taken_in_practice(
         &pool,
         "p1-estadistica",
@@ -321,8 +307,6 @@ async fn symbol_taken_detects_cross_table_collision() {
     .unwrap());
 }
 
-/// CRUD de mensurandos agregados (Motor F): alta asigna posición, lectura ordena, edición cambia
-/// campos, baja elimina y devuelve `true`/`false` según existiera.
 #[tokio::test]
 async fn aggregate_crud_roundtrip() {
     let (pool, _dir) = setup().await;
@@ -393,7 +377,6 @@ async fn set_regression_formulas_updates_and_normalizes_empty() {
     assert_eq!(def.x_formula.as_deref(), Some("2*pi*f"));
     assert_eq!(def.y_formula.as_deref(), Some("b / math::sqrt(a*a - b*b)"));
 
-    // Una cadena vacía (o solo espacios) guarda NULL.
     assert!(set_regression_formulas(&pool, "p1-estadistica", "   ", "")
         .await
         .unwrap());
@@ -401,7 +384,6 @@ async fn set_regression_formulas_updates_and_normalizes_empty() {
     assert_eq!(def.x_formula, None);
     assert_eq!(def.y_formula, None);
 
-    // Práctica inexistente devuelve false.
     assert!(!set_regression_formulas(&pool, "no-existe", "f", "f")
         .await
         .unwrap());
@@ -410,12 +392,11 @@ async fn set_regression_formulas_updates_and_normalizes_empty() {
 #[tokio::test]
 async fn curve_crud_roundtrip_and_ordering() {
     let (pool, _dir) = setup().await;
-    // Alta de dos curvas: quedan ordenadas por posición creciente, con x_log por curva.
     let c1 = create_curve(
         &pool,
         "p1-estadistica",
         CurveInput {
-            x_formula: " logw ".into(), // se recorta
+            x_formula: " logw ".into(),
             y_formula: "VR / Vg".into(),
             x_log: true,
         },
@@ -443,7 +424,6 @@ async fn curve_crud_roundtrip_and_ordering() {
     assert_eq!(def.curves[1].position, 2);
     assert_eq!(def.curves[1].y_formula, "phi");
 
-    // Edición de una curva (acotada por práctica).
     let updated = update_curve(
         &pool,
         "p1-estadistica",
@@ -460,8 +440,6 @@ async fn curve_crud_roundtrip_and_ordering() {
     assert_eq!(updated.y_formula, "Vg / VR");
     assert!(!updated.x_log);
 
-    // Editar/borrar con la práctica equivocada no afecta la curva (el id no pertenece a esa
-    // práctica): update → None, delete → false.
     assert!(update_curve(
         &pool,
         "p2-cc",
@@ -477,7 +455,6 @@ async fn curve_crud_roundtrip_and_ordering() {
     .is_none());
     assert!(!delete_curve(&pool, "p2-cc", &c1.id).await.unwrap());
 
-    // Baja correcta: queda una sola curva.
     assert!(delete_curve(&pool, "p1-estadistica", &c1.id).await.unwrap());
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     assert_eq!(def.curves.len(), 1);
@@ -510,11 +487,9 @@ async fn move_item_swaps_a_curve_with_its_neighbor() {
                 .unwrap()
         }
     };
-    // 'a' no puede subir (ya es la primera); 'c' no puede bajar (ya es la última).
     assert_eq!(mv(a.id.clone(), true).await, Some(false));
     assert_eq!(mv(c.id.clone(), false).await, Some(false));
 
-    // Bajar 'a' la intercambia con 'b' → orden b, a, c.
     assert_eq!(mv(a.id.clone(), false).await, Some(true));
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     assert_eq!(
@@ -525,18 +500,15 @@ async fn move_item_swaps_a_curve_with_its_neighbor() {
         vec!["b", "a", "c"]
     );
 
-    // Curva inexistente (o de otra práctica): None, el handler responde 404.
     assert_eq!(mv("no-existe".into(), true).await, None);
 }
 
 #[tokio::test]
 async fn move_item_reorders_quantities_and_results_even_with_tied_positions() {
-    // Con la definición sembrada de P1 (5 magnitudes, 5 mensurandos).
     let (pool, _dir) = crate::computation::tests::setup().await;
     let symbols = |def: &PracticeDefinition| -> Vec<String> {
         def.quantities.iter().map(|q| q.symbol.clone()).collect()
     };
-    // Posiciones repetidas (como en siembras viejas): el orden sale de (position, symbol).
     sqlx::query("UPDATE practice_quantities SET position = 0 WHERE practice_id = 'p1-estadistica'")
         .execute(&pool)
         .await
@@ -561,7 +533,6 @@ async fn move_item_reorders_quantities_and_results_even_with_tied_positions() {
     expected.swap(0, 1);
     assert_eq!(after, expected);
 
-    // Mensurandos: bajar el primero lo intercambia con el segundo.
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     let (first, second) = (def.results[0].symbol.clone(), def.results[1].symbol.clone());
     assert_eq!(
@@ -599,7 +570,6 @@ async fn deleting_practice_cascades_to_curves() {
     .unwrap();
     assert_eq!(curves_for(&pool, "p1-estadistica").await.unwrap().len(), 1);
 
-    // Con foreign_keys activo, borrar la práctica arrastra sus curvas (ON DELETE CASCADE).
     sqlx::query("DELETE FROM practices WHERE id = ?1")
         .bind("p1-estadistica")
         .execute(&pool)
@@ -631,7 +601,7 @@ async fn intermediate_crud_roundtrip() {
         &pool,
         "p1-estadistica",
         IntermediateInput {
-            symbol: " Q ".into(), // se recorta
+            symbol: " Q ".into(),
             name: "Caudal".into(),
             unit: "m3/s".into(),
             formula: "V/t".into(),
@@ -644,7 +614,6 @@ async fn intermediate_crud_roundtrip() {
     assert_eq!(def.intermediates.len(), 1);
     assert_eq!(def.intermediates[0].formula, "V/t");
 
-    // Editar acotado por práctica; práctica equivocada → None.
     assert!(update_intermediate(
         &pool,
         "p2-cc",
@@ -675,7 +644,6 @@ async fn intermediate_crud_roundtrip() {
     .unwrap();
     assert_eq!(updated.formula, "V*t");
 
-    // Símbolo/fórmula vacíos → error.
     assert!(create_intermediate(
         &pool,
         "p1-estadistica",
@@ -706,8 +674,6 @@ async fn seed_definitions_populates_p1_and_is_idempotent() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-    // P1 péndulo, 3 operadores independientes: L (is_given) + t_med (dato sin incertidumbre,
-    // "t_1/2") + T1 (obligatorio) + T2/T3 (opcionales), todos repeated.
     assert_eq!(def.quantities.len(), 5);
     let l = def.quantities.iter().find(|q| q.symbol == "L").unwrap();
     assert!(l.is_given);
@@ -733,13 +699,10 @@ async fn seed_definitions_populates_p1_and_is_idempotent() {
             "falta el resultado {symbol}"
         );
     }
-    // gamma, Q, g1/g2/g3 son los resultados centrales que el alumno debe entregar.
     for symbol in ["gamma", "Q", "g1", "g2", "g3"] {
         let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
         assert!(r.is_final, "{symbol} deberia ser final");
     }
-    // gamma y Q van sin ±U (t_med tampoco, pero es magnitud, no resultado); g1/g2/g3 sí
-    // muestran su incertidumbre (propagada de T1/T2/T3 y L).
     for symbol in ["gamma", "Q"] {
         let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
         assert!(
@@ -751,12 +714,10 @@ async fn seed_definitions_populates_p1_and_is_idempotent() {
         let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
         assert!(r.has_uncertainty, "{symbol} deberia mostrar incertidumbre");
     }
-    // Q usa el periodo del operador 1 (aclarado en el nombre para el docente).
     let q = def.results.iter().find(|r| r.symbol == "Q").unwrap();
     assert!(q.formula.contains("T1"));
     assert!(q.name.contains("Operador 1"));
 
-    // Segunda pasada: no debe duplicar.
     seed_definitions(&pool).await.unwrap();
     let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     assert_eq!(def2.quantities.len(), 5);
@@ -770,11 +731,8 @@ async fn seed_definitions_populates_hidrostatica_and_is_idempotent() {
     let def = definition(&pool, "hidrostatica").await.unwrap().unwrap();
     assert_eq!(def.analysis_kind.as_deref(), Some("estadistico"));
 
-    // Parte 1: m_goma + rho_f + g_ac + b_E + 9 brazos + 3x9 masas = 40.
-    // Parte 2: l + d + 3x(mw, dw) = 8. Total 48.
     assert_eq!(def.quantities.len(), 48);
 
-    // Los brazos vienen precargados con su valor (1 cm .. 9 cm) y el fijo con 10 cm.
     let by_symbol = |s: &str| def.quantities.iter().find(|q| q.symbol == s).unwrap();
     assert_eq!(by_symbol("b_E").default_value, Some(10.0));
     for i in 1..=9 {
@@ -782,7 +740,6 @@ async fn seed_definitions_populates_hidrostatica_and_is_idempotent() {
         assert!(b.is_given, "b{i} deberia ser dato de catedra");
         assert_eq!(b.default_value, Some(i as f64));
     }
-    // Las masas de las ranuras arrancan en 0: la ranura no usada no aporta al torque.
     for k in 1..=3 {
         for i in 1..=9 {
             let m = by_symbol(&format!("m{k}_{i}"));
@@ -790,16 +747,13 @@ async fn seed_definitions_populates_hidrostatica_and_is_idempotent() {
             assert_eq!(m.default_value, Some(0.0));
         }
     }
-    // g_ac es un dato sin incertidumbre propia.
     assert!(!by_symbol("g_ac").has_uncertainty);
 
-    // 3 empujes + 3 densidades + 3 gammas + los 3 promedios.
     assert_eq!(def.results.len(), 12);
     let res_by = |s: &str| def.results.iter().find(|r| r.symbol == s).unwrap();
     for symbol in ["E_medio", "rho_medio", "gamma_medio"] {
         assert!(res_by(symbol).is_final, "{symbol} deberia ser final");
     }
-    // La tecnica indica que la tension superficial no se informa con incertidumbre.
     for symbol in ["gamma1", "gamma2", "gamma3", "gamma_medio"] {
         assert!(
             !res_by(symbol).has_uncertainty,
@@ -812,24 +766,18 @@ async fn seed_definitions_populates_hidrostatica_and_is_idempotent() {
             "{symbol} deberia mostrar incertidumbre"
         );
     }
-    // El torque suma las 9 ranuras de la medida correspondiente, no de otra.
     let e1 = &res_by("E1").formula;
     for i in 1..=9 {
         assert!(e1.contains(&format!("m1_{i}*b{i}")), "E1 sin la ranura {i}");
     }
     assert!(!e1.contains("m2_"), "E1 no deberia usar la medida 2");
 
-    // Segunda pasada: no duplica.
     seed_definitions(&pool).await.unwrap();
     let def2 = definition(&pool, "hidrostatica").await.unwrap().unwrap();
     assert_eq!(def2.quantities.len(), 48);
     assert_eq!(def2.results.len(), 12);
 }
 
-/// Extremo a extremo sobre la práctica real (no un fixture sintético): Operador 1 con datos,
-/// Operador 2/3 sin cargar (opcionales, no deben bloquear ni romper el análisis). Verifica que
-/// g1 se computa, g2/g3 quedan como advertencia (no pánico), t_med/gamma/Q dan U = 0 pese a
-/// que T1 sí tiene incertidumbre real, y Q usa T1 (confirmado en el valor, no solo la fórmula).
 #[tokio::test]
 async fn analyze_p1_estadistica_con_operadores_opcionales() {
     let (pool, _dir) = setup().await;
@@ -859,11 +807,8 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
     let t1_mean = t1_vals.iter().sum::<f64>() / t1_vals.len() as f64;
     let measurements = vec![
         mk("L", vec![l], Some(0.002)),
-        // t_med no tiene campo U en el form: aunque llegara un given_u (p. ej. de una entrega
-        // vieja), has_uncertainty=false debe ignorarlo y dejar u=0.
         mk("t_med", vec![t_med], Some(99.0)),
         mk("T1", t1_vals, None),
-        // T2/T3 sin cargar: opcionales, no deben bloquear el análisis.
     ];
 
     let analysis = crate::computation::analyze(&pool, "p1-estadistica", &measurements)
@@ -903,8 +848,6 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
         g1.value
     );
 
-    // g2/g3 dependen de T2/T3, que no se cargaron: no deben tirar la práctica abajo, solo
-    // avisar y quedar no-finitos.
     assert!(!derived("g2").value.is_finite());
     assert!(!derived("g3").value.is_finite());
     assert!(
@@ -915,8 +858,6 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
         "debe haber una advertencia por T2/g2 sin datos"
     );
 
-    // gamma y Q se muestran sin ±U (has_uncertainty=false), aunque Q propague de fondo la
-    // incertidumbre real de T1.
     let gamma = derived("gamma");
     assert!(!gamma.has_uncertainty);
     let expected_gamma = 2.0 * std::f64::consts::LN_2 / t_med;
@@ -932,8 +873,6 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
     );
 }
 
-/// gamma/Q pasaron a ser resultado final despues del alta inicial; una base ya sembrada con
-/// el esquema viejo (is_final=0) debe actualizarse via backfill, no requiere resembrar.
 #[tokio::test]
 async fn seed_definitions_backfills_gamma_and_q_as_final() {
     let (pool, _dir) = setup().await;
@@ -964,7 +903,6 @@ async fn deleting_practice_cascades_to_definition() {
     create_result(&pool, "p1-estadistica", sample_result())
         .await
         .unwrap();
-    // Con foreign_keys activo, borrar la práctica debe arrastrar magnitudes y mensurandos.
     sqlx::query("DELETE FROM practices WHERE id = 'p1-estadistica'")
         .execute(&pool)
         .await
@@ -1006,14 +944,11 @@ async fn seed_definitions_populates_p3_relajacion() {
     assert!(def.results.iter().any(|r| r.symbol == "tau_exp"));
 }
 
-// Verifica que las fórmulas sembradas de P3 son evaluables por el motor (sin NaN/errores).
-// Las de P2 (p2-cc) las cubre `analyze_p2_cc_derives_results_and_aliases`.
 #[tokio::test]
 async fn seeded_p3_formulas_compute() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
 
-    // P3: R=10000, Rint=100, C=1e-8, tmedio=7e-5 -> tau_teorico=(10100)*1e-8=1.01e-4
     let def3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
     let m3: Vec<crate::computation::MeasurementInput> = def3
         .quantities
@@ -1060,7 +995,6 @@ async fn seed_definitions_populates_p3_desfasaje() {
         .await
         .unwrap()
         .unwrap();
-    // Es una práctica de regresión con las fórmulas de eje ya sembradas.
     assert_eq!(def.analysis_kind.as_deref(), Some("regresion_lineal"));
     assert_eq!(def.x_formula.as_deref(), Some("2*pi*f"));
     assert_eq!(def.y_formula.as_deref(), Some("b / math::sqrt(a*a - b*b)"));
@@ -1076,9 +1010,6 @@ async fn seed_definitions_populates_p3_desfasaje() {
     assert_eq!(def.results[0].formula, "slope");
 }
 
-// Ajuste de extremo a extremo sobre la definición sembrada de P3-parte2, con un caso
-// construido: si tg(phi) = tau*omega, con a=1 y b=sin(phi)=t/sqrt(1+t^2), entonces
-// y = b/sqrt(a^2-b^2) = tg(phi) = tau*omega, así que el ajuste recupera slope = tau.
 #[tokio::test]
 async fn seeded_p3_desfasaje_fits_known_tau() {
     let (pool, _dir) = setup().await;
@@ -1157,17 +1088,12 @@ async fn seeded_p3_desfasaje_fits_known_tau() {
     assert!((tau_d.value - tau).abs() < 1e-9);
 }
 
-/// La definición sembrada de Fluidos II se puebla (magnitudes + M_medio + 4 agregados) y
-/// computa de extremo a extremo. Caso construido: t = slope*(sqrt(h_max)-sqrt(h)) con slope=100
-/// e intercepto 0, así el ajuste recupera la pendiente y M_medio / los agregados dan los valores
-/// calculados a mano (Re_max=55000, Re_min=25000, Re_medio=40000, M_teorico=0.86).
 #[tokio::test]
 async fn seeded_fluidos2_populates_and_computes() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
     let def = definition(&pool, "fluidos-2").await.unwrap().unwrap();
 
-    // Definición: 11 magnitudes, 1 mensurando (M_medio), 4 agregados en orden.
     assert_eq!(def.quantities.len(), 11);
     assert_eq!(def.results.len(), 1);
     assert_eq!(def.results[0].symbol, "M_medio");
@@ -1196,7 +1122,6 @@ async fn seeded_fluidos2_populates_and_computes() {
             .id
             .clone()
     };
-    // x = sqrt(0.36) - sqrt(h) = [0, .1, .2, .3, .4]; con slope=100 -> t = [0,10,20,30,40].
     let h_vals = vec![0.36_f64, 0.25, 0.16, 0.09, 0.04];
     let t_vals = vec![0.0_f64, 10.0, 20.0, 30.0, 40.0];
     let per_point = |sym: &str, values: Vec<f64>| crate::computation::MeasurementInput {
@@ -1240,7 +1165,6 @@ async fn seeded_fluidos2_populates_and_computes() {
     assert!((reg.slope - 100.0).abs() < 1e-6, "slope {}", reg.slope);
     assert!(reg.intercept.abs() < 1e-6, "intercept {}", reg.intercept);
 
-    // M_medio = 2*g*(slope*R_cap^2/(2*R_recip^2))^2 - 2.
     let m = analysis
         .derived
         .iter()
@@ -1276,7 +1200,6 @@ async fn seeded_fluidos2_populates_and_computes() {
         "M_teorico {}",
         agg("M_teorico")
     );
-    // No debe haber avisos de desalineamiento ni de valores no finitos.
     assert!(
         analysis.warnings.is_empty(),
         "warnings: {:?}",
@@ -1284,9 +1207,6 @@ async fn seeded_fluidos2_populates_and_computes() {
     );
 }
 
-/// La definición sembrada de Filtros tiene 11 magnitudes (R/C1/C2/fpasaje_exp/fbloqueo_exp
-/// medidos, L dado), 2 mensurandos finales (fpasaje/fbloqueo teoricos), 3 intermedias
-/// y 2 curvas con x_log.
 #[tokio::test]
 async fn seeded_filtros_populates_and_computes() {
     let (pool, _dir) = setup().await;
@@ -1331,7 +1251,6 @@ async fn seeded_filtros_populates_and_computes() {
     );
     assert_eq!(def.curves[1].y_formula, "phi");
 
-    // Computo end-to-end: 3 puntos, omega=2*pi*f, razon=VRpp/Vgpp, phi=asin(b/a).
     let id = |sym: &str| {
         def.quantities
             .iter()
@@ -1349,7 +1268,6 @@ async fn seeded_filtros_populates_and_computes() {
         point_replicas: None,
         operator_replicas: None,
     };
-    // b/a = 0.5 → phi = asin(0.5) ≈ 0.5236 rad; VRpp/Vgpp = 0.8.
     let measurements = vec![
         pt("f", vec![100.0, 1000.0, 10000.0]),
         pt("VRpp", vec![0.8, 0.8, 0.8]),
@@ -1380,19 +1298,14 @@ async fn seeded_filtros_populates_and_computes() {
     )
     .unwrap();
     assert_eq!(analysis.scatters.len(), 2);
-    // Curva 1 (amplitud): x = omega = 2*pi*f; y = razon = 0.8.
     let amp = &analysis.scatters[0];
     assert!((amp.points[0].0 - 2.0 * std::f64::consts::PI * 100.0).abs() < 1e-6);
     assert!((amp.points[0].1 - 0.8).abs() < 1e-9);
-    // Curva 2 (desfasaje): y = phi = asin(0.5) ≈ 0.5236.
     let ph = &analysis.scatters[1];
     assert!((ph.points[0].1 - (0.5_f64).asin()).abs() < 1e-9);
     assert!(ph.x_log);
 }
 
-/// La definición sembrada de P2-cc (corriente continua unificada) tiene 17 magnitudes
-/// (15 escalares + R e I por punto), 13 mensurandos (12 finales; Req no lo es),
-/// la intermedia P = I^2*R y la curva P vs R.
 #[tokio::test]
 async fn seeded_p2_cc_populates_definition() {
     let (pool, _dir) = setup().await;
@@ -1409,8 +1322,6 @@ async fn seeded_p2_cc_populates_definition() {
             "falta la magnitud {symbol}"
         );
     }
-    // Solo R e I son por punto; el resto son escalares compartidos. RA (por parte) es dato
-    // de catedra (tabla segun la escala del amperimetro); el resto se mide.
     let given = ["RA_s", "RA_p", "RA_c"];
     for q in &def.quantities {
         let per_point = q.symbol == "R" || q.symbol == "I";
@@ -1436,13 +1347,6 @@ async fn seeded_p2_cc_populates_definition() {
     assert_eq!(def.curves[0].y_formula, "P");
 }
 
-/// Integración: `analyze()` para p2-cc deriva los mensurandos de las tres partes y los
-/// alias de extremos de la tabla de potencia.
-///
-/// Serie: I_s = Vg_s/(R1+R2+R3+RA_s) y VRi_s_t. Paralelo: Req, I_p y VRi_p_t.
-/// Potencia: RP_max_t = Rth, P_max_t = Vg_c²/(4·Rth), y los experimentales
-/// P_max_e = max(P) e RP_max_e = R en ese punto, ambos con U = 0. Además el análisis
-/// expone las magnitudes escalares medidas (`quantities`), que antes se descartaban.
 #[tokio::test]
 async fn analyze_p2_cc_derives_results_and_aliases() {
     let (pool, _dir) = setup().await;
@@ -1471,8 +1375,8 @@ async fn analyze_p2_cc_derives_results_and_aliases() {
     let (vg_s, ra_s) = (8.0_f64, 10.0_f64);
     let (vg_p, ra_p) = (8.0_f64, 10.0_f64);
     let (vg_c, ra_c) = (10.0_f64, 100.0_f64);
-    let rpar = r2 * r3 / (r2 + r3); // = 100.0
-    let rth = ra_c + rpar; // = 200.0
+    let rpar = r2 * r3 / (r2 + r3);
+    let rth = ra_c + rpar;
     let rs = vec![100.0_f64, 200.0, 400.0];
     let is: Vec<f64> = rs.iter().map(|r| vg_c / (rth + r)).collect();
     let measurements = vec![
@@ -1499,7 +1403,6 @@ async fn analyze_p2_cc_derives_results_and_aliases() {
         .await
         .unwrap();
 
-    // Las magnitudes escalares medidas se exponen (antes el camino curva las descartaba).
     assert_eq!(analysis.quantities.len(), 15);
     assert!(analysis.quantities.iter().any(|q| q.symbol == "VR1_s"));
 
@@ -1511,23 +1414,19 @@ async fn analyze_p2_cc_derives_results_and_aliases() {
             .unwrap_or_else(|| panic!("{sym} debe estar en derived"))
     };
 
-    // Serie: Rtot = 510.
     let rtot = r1 + r2 + r3 + ra_s;
     assert!((derived("I_s").value - vg_s / rtot).abs() < 1e-9);
     assert!((derived("VR1_s_t").value - vg_s * r1 / rtot).abs() < 1e-9);
     assert!((derived("VR3_s_t").value - vg_s * r3 / rtot).abs() < 1e-9);
 
-    // Paralelo: Req = 210.
     let req = r1 + ra_p + rpar;
     assert!((derived("Req").value - req).abs() < 1e-9);
     assert!((derived("I_p").value - vg_p / req).abs() < 1e-9);
     assert!((derived("VR2_p_t").value - vg_p * rpar / req).abs() < 1e-9);
 
-    // Potencia teorica: Rth = 200, P_max = 0.125 W.
     assert!((derived("RP_max_t").value - rth).abs() < 1e-9);
     assert!((derived("P_max_t").value - vg_c * vg_c / (4.0 * rth)).abs() < 1e-9);
 
-    // Experimentales por alias: el punto R = 200 = Rth maximiza P en la tabla.
     let p_max_table = (vg_c / (rth + rth)).powi(2) * rth;
     let pme = derived("P_max_e");
     assert!(
@@ -1541,11 +1440,6 @@ async fn analyze_p2_cc_derives_results_and_aliases() {
     assert_eq!(rpe.u_expanded, 0.0, "RP_max_e va sin incertidumbre");
 }
 
-/// Integración: `analyze()` para filtros deriva fpasaje y fbloqueo correctamente.
-///
-/// Topología: C2||L en serie con C1 y R. Fórmulas teóricas:
-///   fpasaje  = 1/(2π√(L(C1+C2)))   (resonancia serie)
-///   fbloqueo = 1/(2π√(LC2))         (resonancia paralelo del tanque)
 #[tokio::test]
 async fn analyze_filtros_derives_fpasaje_fbloqueo() {
     let (pool, _dir) = setup().await;
@@ -1570,7 +1464,6 @@ async fn analyze_filtros_derives_fpasaje_fbloqueo() {
         operator_replicas: None,
     };
 
-    // Valores de componentes: R=1kΩ, C1=C2=10nF, L=10mH.
     let r = 1000.0_f64;
     let c1 = 10e-9_f64;
     let c2 = 10e-9_f64;
@@ -1578,7 +1471,6 @@ async fn analyze_filtros_derives_fpasaje_fbloqueo() {
     let fp_expected = 1.0 / (2.0 * std::f64::consts::PI * (l * (c1 + c2)).sqrt());
     let fb_expected = 1.0 / (2.0 * std::f64::consts::PI * (l * c2).sqrt());
 
-    // 3 puntos de barrido (valores arbitrarios; los escalares no dependen de ellos).
     let measurements = vec![
         pt("f", vec![1000.0, 5000.0, 10000.0]),
         pt("VRpp", vec![0.5, 1.0, 0.5]),
@@ -1621,7 +1513,6 @@ async fn analyze_filtros_derives_fpasaje_fbloqueo() {
         "fbloqueo esperado {fb_expected:.2} Hz, obtenido {:.2}",
         fb.value
     );
-    // fbloqueo > fpasaje (C1+C2 > C2 ⟹ √(L(C1+C2)) > √(LC2)).
     assert!(
         fb.value > fp.value,
         "fbloqueo ({}) debe ser mayor que fpasaje ({})",
@@ -1630,23 +1521,18 @@ async fn analyze_filtros_derives_fpasaje_fbloqueo() {
     );
 }
 
-/// Verifica que `double_option` distingue las tres variantes de `tolerance` en JSON:
-/// campo ausente (no modificar), `null` explícito (borrar) y valor numérico (fijar).
 #[test]
 fn result_input_tolerance_serde_variants() {
-    // Sin campo -> None (no modificar).
     let a: ResultInput =
         serde_json::from_str(r#"{"symbol":"Q","name":"N","unit":"m","formula":"x"}"#).unwrap();
     assert!(a.tolerance.is_none(), "campo ausente debe ser None");
 
-    // `null` explícito -> Some(None) (borrar).
     let b: ResultInput = serde_json::from_str(
         r#"{"symbol":"Q","name":"N","unit":"m","formula":"x","tolerance":null}"#,
     )
     .unwrap();
     assert_eq!(b.tolerance, Some(None), "null debe ser Some(None)");
 
-    // Valor numérico -> Some(Some(v)) (fijar).
     let c: ResultInput = serde_json::from_str(
         r#"{"symbol":"Q","name":"N","unit":"m","formula":"x","tolerance":5.0}"#,
     )
@@ -1658,14 +1544,11 @@ fn result_input_tolerance_serde_variants() {
     );
 }
 
-/// `fix_ca_rlc_labels` corrige filas dejadas por una siembra vieja (`quantity = 'tension'`,
-/// `unit = 'rad'`) sin pisar filas que ya están en el estado nuevo o que el docente editó.
 #[tokio::test]
 async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
     let (pool, _dir) = setup().await;
     seed_ca_rlc(&pool).await.unwrap();
 
-    // Simula una base sembrada antes del cambio: Vg en "tension" (nombre viejo) y phiR_teo en rad.
     sqlx::query(
         "UPDATE practice_quantities SET name = 'Tension del generador', quantity = 'tension' \
          WHERE practice_id = 'ca-rlc' AND symbol = 'Vg'",
@@ -1680,7 +1563,6 @@ async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
     .execute(&pool)
     .await
     .unwrap();
-    // Una edición del docente sobre un campo ya migrado: no debe tocarse.
     sqlx::query(
         "UPDATE practice_quantities SET name = 'Voltaje de la fuente (editado)' \
          WHERE practice_id = 'ca-rlc' AND symbol = 'VRpp'",
@@ -1688,8 +1570,6 @@ async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
     .execute(&pool)
     .await
     .unwrap();
-    // Simula una siembra vieja: I_exp existia (se elimino, la corriente no se mide) y
-    // f_res_exp no existia todavia (magnitud nueva, se mide con el osciloscopio).
     sqlx::query(
         "INSERT INTO practice_results (id, practice_id, symbol, name, unit, formula, position) \
          VALUES ('r-i-exp', 'ca-rlc', 'I_exp', 'Corriente experimental', 'A', 'VRpp/(2*R)', 99)",
@@ -1725,7 +1605,6 @@ async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
     .unwrap();
     assert_eq!(f_res_exp_name.0, "Frecuencia de resonancia experimental");
 
-    // f_res_exp debe insertarse arriba de f_trabajo (su posicion vieja), no al final.
     let f_res_exp_pos: (i64,) = sqlx::query_as(
         "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
     )
@@ -1740,7 +1619,6 @@ async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
     .unwrap();
     assert!(f_res_exp_pos.0 < f_trabajo_pos.0);
 
-    // Idempotente: correrla de nuevo no debe fallar ni duplicar f_res_exp.
     fix_ca_rlc_labels(&pool).await.unwrap();
     let f_res_exp_count: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
@@ -1776,14 +1654,11 @@ async fn fix_ca_rlc_labels_migrates_stale_rows_without_clobbering_new_ones() {
     assert_eq!(vrpp_name.0, "Voltaje de la fuente (editado)");
 }
 
-/// Una version anterior de `fix_ca_rlc_labels` insertaba `f_res_exp` al final en vez de arriba
-/// de `f_trabajo`; una corrida posterior debe reordenarla sin duplicarla ni romper las demás.
 #[tokio::test]
 async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     let (pool, _dir) = setup().await;
     seed_ca_rlc(&pool).await.unwrap();
 
-    // Simula una base con el bug viejo: f_res_exp al final (posicion mas alta de la practica).
     let max_pos: (i64,) = sqlx::query_as(
         "SELECT MAX(position) FROM practice_quantities WHERE practice_id = 'ca-rlc'",
     )
@@ -1815,8 +1690,6 @@ async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     .unwrap();
     assert!(f_res_exp_pos.0 < f_trabajo_pos.0);
 
-    // Corre una sola vez: si despues el docente la baja a proposito, el proximo arranque no la
-    // vuelve a subir.
     sqlx::query(
         "UPDATE practice_quantities SET position = ?1 WHERE practice_id = 'ca-rlc' AND symbol = 'f_res_exp'",
     )
@@ -1833,7 +1706,6 @@ async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     .unwrap();
     assert_eq!(kept.0, max_pos.0 + 1);
 
-    // Ninguna otra magnitud se duplico ni se perdio en el reordenamiento.
     let count: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'ca-rlc'")
             .fetch_one(&pool)
@@ -1842,8 +1714,6 @@ async fn fix_ca_rlc_labels_reorders_a_stray_f_res_exp() {
     assert_eq!(count.0, 15);
 }
 
-/// En una base nueva (Hidrostatica todavia sin sembrar) el reset no borra nada: solo queda
-/// registrado, y la siembra normal la deja con la forma actual.
 #[tokio::test]
 async fn reset_legacy_hidrostatica_is_a_noop_on_a_new_database() {
     let (pool, _dir) = setup().await;
@@ -1854,7 +1724,6 @@ async fn reset_legacy_hidrostatica_is_a_noop_on_a_new_database() {
         .await
         .unwrap();
     assert_eq!(applied.0, 1);
-    // Corre de nuevo (proximo arranque): ya registrada, no borra lo recien sembrado.
     reset_legacy_hidrostatica(&pool).await.unwrap();
     let qty: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = 'hidrostatica'",
@@ -1865,9 +1734,6 @@ async fn reset_legacy_hidrostatica_is_a_noop_on_a_new_database() {
     assert!(qty.0 > 0);
 }
 
-/// `reset_legacy_hidrostatica` borra Hidrostatica (definicion y entregas de prueba) en una base
-/// donde ya estaba sembrada (la forma vieja) para que `seed_hidrostatica` la siembre de cero, y
-/// una vez registrada no vuelve a borrar nada.
 #[tokio::test]
 async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
     let (pool, _dir) = setup().await;
@@ -1885,8 +1751,6 @@ async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
     let fresh = snapshot(pool.clone()).await;
     assert!(!fresh.is_empty());
 
-    // Forma vieja, con `dw1` ademas renombrado por el docente (no hay marca que buscar: alcanza
-    // con que este sembrada), densidad en g/cm3 y una entrega de prueba con su lectura.
     sqlx::query(
         "UPDATE practice_quantities SET slot_count = NULL, symbol = 'dw_regla' \
          WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
@@ -1936,8 +1800,6 @@ async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
             .unwrap();
     assert_eq!(left.0, 0);
 
-    // Ya corrio: aunque el docente recree `dw1` desde el admin (sin slot_count), una entrega
-    // nueva sobrevive al proximo arranque.
     sqlx::query(
         "UPDATE practice_quantities SET slot_count = NULL \
          WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
@@ -1961,8 +1823,6 @@ async fn reset_legacy_hidrostatica_reseeds_the_old_shape() {
     assert_eq!(kept.0, 1);
 }
 
-/// `submissions_off_slots` cuenta las entregas con alguna lectura que no es una ranura de 1 a n
-/// (no entera o fuera de rango), para no poner `slot_count` sobre datos que el motor rechaza.
 #[tokio::test]
 async fn submissions_off_slots_counts_non_slot_readings() {
     let (pool, _dir) = setup().await;
@@ -1994,7 +1854,6 @@ async fn submissions_off_slots_counts_non_slot_readings() {
         .await
         .unwrap();
     }
-    // 4.3 (no entera) y 12 (fuera de 1..=9); con 12 ranuras solo queda 4.3.
     assert_eq!(submissions_off_slots(&pool, &qid, 9).await.unwrap(), 2);
     assert_eq!(submissions_off_slots(&pool, &qid, 12).await.unwrap(), 1);
 }
@@ -2018,7 +1877,6 @@ async fn practice_lifecycle_create_duplicate_status_and_delete() {
         analysis_kind: "estadistico".into(),
     };
 
-    // Alta en borrador con id del nombre; un nombre repetido recibe sufijo.
     let a = create_practice(&pool, &new("Péndulo de prueba"), "u1")
         .await
         .unwrap();
@@ -2031,7 +1889,6 @@ async fn practice_lifecycle_create_duplicate_status_and_delete() {
         .unwrap();
     assert_eq!(b.id, "pendulo-de-prueba-2");
 
-    // Duplicar copia la definición entera con ids nuevos, en borrador, sin tocar el original.
     let original = definition(&pool, "fluidos-2").await.unwrap().unwrap();
     let copy = duplicate_practice(&pool, "fluidos-2", "Copia de Fluidos II", "u1")
         .await
@@ -2064,7 +1921,6 @@ async fn practice_lifecycle_create_duplicate_status_and_delete() {
         .unwrap()
         .is_none());
 
-    // Transiciones: borrador -> publicada -> archivada -> publicada; nunca de vuelta a borrador.
     assert_eq!(
         set_practice_status(&pool, &a.id, "archivada")
             .await
@@ -2094,7 +1950,6 @@ async fn practice_lifecycle_create_duplicate_status_and_delete() {
         StatusChange::NotAllowed("publicada".into())
     );
 
-    // Solo se borra un borrador; la copia se va con su definición.
     assert_eq!(
         delete_practice(&pool, &a.id).await.unwrap(),
         DeletePractice::NotDraft
@@ -2135,7 +1990,6 @@ async fn only_published_practices_reach_courses_and_students() {
     let enable = |id: &str| db::SetCoursePractice {
         practice_id: id.into(),
     };
-    // Un borrador no se habilita; publicado sí.
     assert!(
         !db::enable_course_practice(&pool, course, enable(&draft.id))
             .await
@@ -2155,8 +2009,6 @@ async fn only_published_practices_reach_courses_and_students() {
             .any(|p| p.id == "borrador")
     };
     assert!(listed(pool.clone()).await);
-    // Archivada: el docente la sigue viendo en el curso (para deshabilitarla), marcada como tal,
-    // pero no admite entregas y el estudiante deja de verla.
     set_practice_status(&pool, &draft.id, "archivada")
         .await
         .unwrap();

@@ -47,9 +47,6 @@ pub struct SetPracticeTable {
     pub table_number: i64,
 }
 
-/// Crea un subgrupo de práctica (combinación curso/práctica/grupo + nombre) y lo devuelve.
-/// `None` si la práctica no está publicada y habilitada en el curso: los subgrupos llegan a los
-/// estudiantes en el contexto académico, y un borrador no se les muestra.
 pub async fn create_subgroup(
     pool: &SqlitePool,
     course_id: &str,
@@ -101,9 +98,6 @@ pub async fn create_subgroup(
     ))
 }
 
-/// Asigna (o reasigna) la mesa de trabajo de un estudiante para una práctica en un grupo.
-/// Valida que la mesa esté en rango y que el estudiante pertenezca al grupo y la práctica
-/// esté habilitada en el curso; devuelve `None` si algo no aplica.
 pub async fn set_practice_table_assignment(
     pool: &SqlitePool,
     group_id: &str,
@@ -181,7 +175,6 @@ pub async fn set_practice_table_assignment(
     ))
 }
 
-/// Lista los subgrupos de práctica de un curso, resolviendo práctica, grupo y miembros de cada uno.
 pub(super) async fn subgroups_for_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -261,7 +254,6 @@ pub(super) async fn subgroups_for_course(
     Ok(summaries)
 }
 
-/// Lista las asignaciones de mesa por práctica/grupo/estudiante de un curso.
 pub(super) async fn table_assignments_for_course(
     pool: &SqlitePool,
     course_id: &str,

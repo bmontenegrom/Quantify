@@ -1,6 +1,3 @@
-//! Motores de cálculo (estadístico, regresión, curva) y [`analyze`], que lee la definición de la
-//! práctica y delega en el motor correspondiente.
-
 use super::formula::{compile_formula, eval_compiled, CONSTANTS};
 use super::{
     AggregateComputation, CurveSpec, DerivedComputation, FormAnalysis, MeasurementInput,
@@ -15,9 +12,6 @@ use evalexpr::Node;
 use std::collections::HashMap;
 
 /// Convierte una escala del catálogo ([`InstrumentScale`]) en la especificación que entiende
-/// el motor ([`ScaleSpec`]). Error si el `b_model` guardado no es uno de los modelos conocidos.
-///
-/// # Ejemplos
 ///
 /// ```
 /// use quantify::db::InstrumentScale;
@@ -65,9 +59,6 @@ pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
     })
 }
 
-/// Calcula la incertidumbre de un subconjunto de magnitudes y acumula sus medias/incertidumbres
-/// en `means`/`us` (para propagar los mensurandos). `operator` selecciona la serie a usar para las
-/// magnitudes repetidas: `Some(i)` toma `operator_replicas[i]` (Motor D); `None` usa `values`.
 fn compute_quantities(
     quantities: &[&PracticeQuantity],
     by_quantity: &HashMap<&str, &MeasurementInput>,
@@ -80,7 +71,6 @@ fn compute_quantities(
     let mut computed = Vec::with_capacity(quantities.len());
     for &quantity in quantities {
         let measurement = by_quantity.get(quantity.id.as_str());
-        // Serie a usar: del operador `i` para magnitudes repetidas con operadores; si no, `values`.
         let values: Vec<f64> = match operator {
             Some(i) => measurement
                 .and_then(|m| m.operator_replicas.as_ref())
@@ -92,9 +82,6 @@ fn compute_quantities(
 
         let result = if quantity.is_given {
             let value = values.first().copied().unwrap_or(f64::NAN);
-            // `has_uncertainty = false`: el form no tiene campo U para esta magnitud (solo
-            // "Valor"), así que cualquier `given_u` cargado (de una entrega vieja, por ejemplo) se
-            // ignora y queda en 0.
             let u_exp = if quantity.has_uncertainty {
                 measurement.and_then(|m| m.given_u).unwrap_or(0.0)
             } else {
@@ -140,13 +127,37 @@ fn compute_quantities(
     Ok(computed)
 }
 
-/// Calcula el [`FormAnalysis`] de una entrega estadística (función pura, sin base de datos).
-/// `scales` mapea `scale_id` → escala ya resuelta; `measurements` son las lecturas por magnitud.
+/// Análisis estadístico: media e incertidumbre de cada magnitud y propagación a los mensurandos.
 ///
-/// `operator_count` (Motor D): con `≥ 2`, las magnitudes **repetidas** se computan por operador
-/// (cada uno con su serie) y los mensurandos derivados se calculan por operador en
-/// [`FormAnalysis::operators`]; las magnitudes **compartidas** (dadas/medida única) se calculan una
-/// sola vez en `quantities`. Con `None`/`≤ 1` es el comportamiento por defecto (una sola serie).
+/// ```
+/// # use std::collections::HashMap;
+/// # use quantify::computation::{compute, MeasurementInput};
+/// # use quantify::db::{PracticeQuantity, PracticeResult};
+/// # let q = |symbol: &str, is_given: bool| PracticeQuantity {
+/// #     id: symbol.into(), practice_id: "p".into(), symbol: symbol.into(), name: symbol.into(),
+/// #     unit: String::new(), repeated: !is_given, quantity: None, position: 0, is_given,
+/// #     replicas_per_point: None, per_point: false, has_uncertainty: true, optional: false,
+/// #     default_value: None, slot_count: None,
+/// # };
+/// # let m = |id: &str, values: Vec<f64>, given_u: Option<f64>| MeasurementInput {
+/// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u,
+/// #     point_replicas: None, operator_replicas: None,
+/// # };
+/// let g = PracticeResult {
+///     id: "g".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
+///     unit: "m/s2".into(), formula: "4*pi^2*L/T^2".into(), position: 0, tolerance: None,
+///     is_final: false, has_uncertainty: true,
+/// };
+/// let analysis = compute(
+///     &[q("L", true), q("T", false)],
+///     &[g],
+///     &HashMap::new(),
+///     &[m("L", vec![1.0], Some(0.002)), m("T", vec![2.0, 2.0], None)],
+///     None,
+/// )
+/// .unwrap();
+/// assert!((analysis.derived[0].value - std::f64::consts::PI.powi(2)).abs() < 1e-9);
+/// ```
 pub fn compute(
     quantities: &[PracticeQuantity],
     results: &[PracticeResult],
@@ -159,11 +170,9 @@ pub fn compute(
         .iter()
         .map(|m| (m.quantity_id.as_str(), m))
         .collect();
-    // Todos los símbolos quedan disponibles al compilar las fórmulas de los mensurandos.
     let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
     let operator_count = operator_count.unwrap_or(0);
 
-    // Comportamiento por defecto (sin operadores): una sola serie por magnitud.
     if operator_count <= 1 {
         let all: Vec<&PracticeQuantity> = quantities.iter().collect();
         let mut means = HashMap::new();
@@ -190,8 +199,6 @@ pub fn compute(
         });
     }
 
-    // Con operadores: las repetidas (tipo A) se cargan por operador; las dadas o de medida única se
-    // comparten. Cada operador deriva sus mensurandos con su serie + las compartidas, sin promediar.
     let shared: Vec<&PracticeQuantity> = quantities
         .iter()
         .filter(|q| q.is_given || !q.repeated)
@@ -246,20 +253,10 @@ pub fn compute(
     })
 }
 
-/// Serie de puntos `(x, y)` evaluados desde las fórmulas de eje.
 type PointSeries = Vec<(f64, f64)>;
 
-/// Empareja las mediciones por punto y evalúa las fórmulas de eje `x_formula`/`y_formula`,
-/// devolviendo la serie de puntos `(x, y)`, las advertencias, y el **contexto por punto** (valor de
-/// cada magnitud e intermedia en cada punto). Compartido por `regresion_lineal` y `curva`. Las
-/// magnitudes con `per_point = false` o `is_given` son escalares compartidos: se difunden a todos los
-/// puntos y **no** condicionan la cantidad de puntos. Falla si hay menos de 2 puntos o si un
-/// punto produce un valor no finito; el mensaje de "menos de 2 puntos" lo aporta `too_few_msg`.
 pub type PointContext = HashMap<String, f64>;
 
-/// Símbolos de las magnitudes medidas por punto (van en la serie, no son escalares compartidos):
-/// `per_point == true` y no `is_given`. Usado tanto para condicionar la cantidad de puntos
-/// (`build_points`) como para los alias de extremos por punto (`compute_curva`).
 fn per_point_quantity_symbols(quantities: &[PracticeQuantity]) -> impl Iterator<Item = &str> {
     quantities
         .iter()
@@ -278,11 +275,6 @@ pub(crate) fn build_points(
     let mut warnings = Vec::new();
     let magnitude_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
 
-    // Magnitudes que son **escalares compartidos** (no por punto): se colapsan a un único valor
-    // representativo —el mismo que usa `compute_quantities` para los mensurandos: el valor dado
-    // para datos de cátedra, la media de las lecturas si es medida única— y se difunde a todos los
-    // puntos. Así nunca varían entre puntos aunque lleguen varias lecturas (vía API o entregas
-    // viejas reconvertidas de por-punto a compartida).
     let given_ids: std::collections::HashSet<&str> = quantities
         .iter()
         .filter(|q| q.is_given)
@@ -306,8 +298,6 @@ pub(crate) fn build_points(
         }
     };
 
-    // Valor por punto (media de réplicas) y matriz punto×réplica (para las intermedias) por magnitud.
-    // Los escalares compartidos se reducen a una sola fila/valor (su representativo).
     let point_values: HashMap<&str, Vec<f64>> = measurements
         .iter()
         .map(|m| {
@@ -330,9 +320,6 @@ pub(crate) fn build_points(
             (m.quantity_id.as_str(), mat)
         })
         .collect();
-    // Magnitudes de un solo valor por punto (sin `point_replicas`) y los escalares compartidos: se
-    // difunden a todas las réplicas al evaluar una intermedia. Las replicadas NO se difunden (un
-    // conteo distinto entre ellas es dato incompleto → produce un punto no finito que se rechaza).
     let broadcastable: std::collections::HashSet<&str> = measurements
         .iter()
         .filter(|m| m.point_replicas.is_none() || shared_ids.contains(m.quantity_id.as_str()))
@@ -342,14 +329,9 @@ pub(crate) fn build_points(
         .iter()
         .map(|q| (q.symbol.as_str(), q.id.as_str()))
         .collect();
-    // Magnitudes que se miden por punto (van en la serie): solo estas condicionan la cantidad de
-    // puntos. Las `per_point = false` o `is_given` son escalares compartidos que se difunden.
     let per_point_syms: std::collections::HashSet<&str> =
         per_point_quantity_symbols(quantities).collect();
 
-    // Las intermedias (Motor C) se compilan **en orden**: cada una puede usar las magnitudes y las
-    // intermedias **anteriores** (a estas las ve como su valor por punto, ya promediado). Sus
-    // símbolos quedan disponibles para los ejes.
     let mut allowed = magnitude_symbols.clone();
     let mut compiled_intermediates: Vec<(&PracticeIntermediate, Node)> = Vec::new();
     for it in intermediates {
@@ -357,7 +339,7 @@ pub(crate) fn build_points(
         allowed.push(it.symbol.clone());
         compiled_intermediates.push((it, tree));
     }
-    let axis_symbols = allowed; // magnitudes + todas las intermedias
+    let axis_symbols = allowed;
     let x_tree = compile_formula(x_formula, &axis_symbols)?;
     let y_tree = compile_formula(y_formula, &axis_symbols)?;
     let intermediate_symbols: std::collections::HashSet<&str> = compiled_intermediates
@@ -365,8 +347,6 @@ pub(crate) fn build_points(
         .map(|(it, _)| it.symbol.as_str())
         .collect();
 
-    // Intermedias necesarias = las que usan los ejes, más (cierre) las que esas referencian. Como
-    // una intermedia solo referencia anteriores, un recorrido inverso basta.
     let axis_refs: std::collections::HashSet<&str> = x_tree
         .iter_variable_identifiers()
         .chain(y_tree.iter_variable_identifiers())
@@ -386,8 +366,6 @@ pub(crate) fn build_points(
         }
     }
 
-    // Cantidad de puntos: solo las magnitudes **medidas por punto** referenciadas por los ejes —o
-    // por las intermedias necesarias— condicionan (los escalares compartidos se difunden).
     let mut conditioning: std::collections::HashSet<&str> = axis_refs
         .iter()
         .copied()
@@ -419,7 +397,6 @@ pub(crate) fn build_points(
         anyhow::bail!("{too_few_msg}");
     }
 
-    // Valor por punto de una magnitud: el del punto `i`; los escalares (un solo valor) se difunden.
     let magnitude_at = |id: &str, i: usize| -> f64 {
         point_values
             .get(id)
@@ -431,8 +408,6 @@ pub(crate) fn build_points(
     let mut points = Vec::with_capacity(n_points);
     let mut contexts = Vec::with_capacity(n_points);
     for i in 0..n_points {
-        // Contexto del punto: todas las magnitudes (difundiendo escalares) + todas las intermedias
-        // (en orden; cada una puede usar las anteriores). Sirve a los ejes y a las derivadas por punto.
         let mut context: PointContext = quantities
             .iter()
             .map(|q| (q.symbol.clone(), magnitude_at(q.id.as_str(), i)))
@@ -465,13 +440,6 @@ pub(crate) fn build_points(
     Ok((points, warnings, contexts))
 }
 
-/// Valor de una magnitud intermedia en el punto `i`: evalúa su fórmula para cada réplica del punto
-/// y promedia. Las magnitudes de **un solo valor por punto** (`broadcastable`) —y las intermedias
-/// anteriores (`earlier`, ya promediadas por punto)— se difunden a todas las réplicas. Las
-/// magnitudes **replicadas** NO se difunden: si una tiene menos réplicas que el punto (dato
-/// incompleto/desparejo), la réplica faltante produce `NaN` y el punto se rechaza aguas arriba. Una
-/// fórmula sin magnitudes replicadas (solo magnitudes de un valor, intermedias o constantes) se
-/// evalúa una vez.
 fn point_intermediate(
     tree: &Node,
     point_matrix: &HashMap<&str, Vec<Vec<f64>>>,
@@ -481,8 +449,6 @@ fn point_intermediate(
     i: usize,
 ) -> f64 {
     let id_of = |sym: &str| symbol_to_id.get(sym).copied();
-    // Réplicas de la magnitud en el punto `i`. Un escalar compartido tiene una sola fila: se
-    // difunde a todos los puntos cayendo a la última fila (su único valor) para `i` fuera de rango.
     let reps_at = |sym: &str| -> &[f64] {
         id_of(sym)
             .and_then(|id| point_matrix.get(id))
@@ -490,7 +456,6 @@ fn point_intermediate(
             .map_or(&[][..], |v| v.as_slice())
     };
     let is_broadcastable = |sym: &str| id_of(sym).is_some_and(|id| broadcastable.contains(id));
-    // Réplicas del punto: el máximo entre las magnitudes **replicadas** de la fórmula; al menos 1.
     let n_reps = tree
         .iter_variable_identifiers()
         .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
@@ -502,22 +467,17 @@ fn point_intermediate(
     for r in 0..n_reps {
         let bound: HashMap<&str, f64> = tree
             .iter_variable_identifiers()
-            // Las constantes (`pi`, `e`) las precarga `eval_compiled`: no bindear acá (si no, las
-            // pisaríamos con NaN al tratarlas como intermedia anterior).
             .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
             .map(|v| {
                 if symbol_to_id.contains_key(v) {
                     let reps = reps_at(v);
                     let value = if is_broadcastable(v) {
-                        // Magnitud de un solo valor por punto: se difunde a todas las réplicas.
                         reps.first().copied().unwrap_or(f64::NAN)
                     } else {
-                        // Magnitud replicada: réplica r exacta (sin difundir → NaN si falta).
                         reps.get(r).copied().unwrap_or(f64::NAN)
                     };
                     (v, value)
                 } else {
-                    // Intermedia anterior: escalar por punto, difundido a todas las réplicas.
                     (v, earlier.get(v).copied().unwrap_or(f64::NAN))
                 }
             })
@@ -527,21 +487,29 @@ fn point_intermediate(
     sum / n_reps as f64
 }
 
-/// Calcula el [`FormAnalysis`] de una práctica `regresion_lineal`: empareja las mediciones por
-/// punto, evalúa las fórmulas de eje en cada punto, ajusta una recta y deriva los mensurandos.
+/// Regresión lineal sobre los puntos que dan las fórmulas de eje, con mensurandos y agregados.
 ///
-/// Los mensurandos (`results`) se derivan de `slope`/`intercept` **y de los escalares compartidos**
-/// (magnitudes con `per_point = false` o `is_given`), con propagación de incertidumbre — p. ej.
-/// μ = slope·(π·ρ·g·R⁴)/(8·L). Las magnitudes derivadas **por punto** (`point_results`, Motor E) se
-/// evalúan tras el ajuste con el contexto de cada punto + slope/intercept + los mensurandos
-/// (p. ej. el número de Reynolds por corrida).
-///
-/// Los mensurandos **agregados** (`aggregates`, Motor F) se evalúan una vez tras el ajuste, en orden
-/// (encadenables), con acceso a los escalares compartidos, slope/intercept, los mensurandos, los
-/// agregados anteriores y los **extremos** de cada magnitud/intermedia por punto: `{sym}_first`,
-/// `{sym}_first2`, `{sym}_last`, `{sym}_last2` (p. ej. Reynolds máx/mín con el primer/último par).
-/// Para las magnitudes por punto el extremo se toma de su **serie medida completa** (no del último
-/// punto ajustado); si esa serie tiene distinta cantidad de puntos que el ajuste, se agrega un aviso.
+/// ```
+/// # use std::collections::HashMap;
+/// # use quantify::computation::{compute_regresion, MeasurementInput};
+/// # use quantify::db::PracticeQuantity;
+/// # let q = |symbol: &str| PracticeQuantity {
+/// #     id: symbol.into(), practice_id: "p".into(), symbol: symbol.into(), name: symbol.into(),
+/// #     unit: String::new(), repeated: false, quantity: None, position: 0, is_given: false,
+/// #     replicas_per_point: None, per_point: true, has_uncertainty: true, optional: false,
+/// #     default_value: None, slot_count: None,
+/// # };
+/// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
+/// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,
+/// #     point_replicas: None, operator_replicas: None,
+/// # };
+/// let analysis = compute_regresion(
+///     &[q("x"), q("y")], &[], &[], &[], &[], &HashMap::new(), "x", "y",
+///     &[m("x", vec![1.0, 2.0, 3.0]), m("y", vec![2.0, 4.0, 6.0])],
+/// )
+/// .unwrap();
+/// assert!((analysis.regression.unwrap().slope - 2.0).abs() < 1e-12);
+/// ```
 #[allow(clippy::too_many_arguments)]
 pub fn compute_regresion(
     quantities: &[PracticeQuantity],
@@ -566,7 +534,6 @@ pub fn compute_regresion(
     let fit = analysis::linear_regression("x", "y", &points)
         .ok_or_else(|| anyhow::anyhow!("no se pudo ajustar la recta (¿todos los x iguales?)"))?;
 
-    // Escalares compartidos (valor ± u) disponibles para los mensurandos, junto a slope/intercept.
     let by_quantity: HashMap<&str, &MeasurementInput> = measurements
         .iter()
         .map(|m| (m.quantity_id.as_str(), m))
@@ -595,7 +562,6 @@ pub fn compute_regresion(
     allowed.push("intercept".into());
     let derived = derive_results(results, &allowed, &means, &us, &mut warnings)?;
 
-    // Derivadas por punto (post-ajuste): contexto del punto + slope/intercept + mensurandos.
     let mut extras: HashMap<&str, f64> = HashMap::new();
     extras.insert("slope", fit.slope);
     extras.insert("intercept", fit.intercept);
@@ -627,22 +593,14 @@ pub fn compute_regresion(
         });
     }
 
-    // Mensurandos agregados (Motor F): un valor escalar post-ajuste. Símbolos disponibles: escalares
-    // compartidos (en `means`) + slope/intercept + los mensurandos derivados + los extremos de cada
-    // magnitud/intermedia por punto + los agregados anteriores (encadenable).
     let mut agg_values: HashMap<String, f64> = means.clone();
     for d in &derived {
         agg_values.insert(d.symbol.clone(), d.value);
     }
-    let n_points = contexts.len(); // >= 2: build_points garantiza al menos 2 puntos.
+    let n_points = contexts.len();
     let last = n_points - 1;
     const ENDPOINT_SUFFIXES: [&str; 4] = ["_first", "_first2", "_last", "_last2"];
 
-    // Alias de extremos para magnitudes por punto: se leen desde la serie cruda de cada
-    // magnitud (no desde `contexts`, que puede repetir el último valor o truncar si la
-    // magnitud no está en el conjunto de condicionamiento de los ejes). Guardamos el largo de
-    // cada serie para avisar después si un extremo referenciado proviene de una serie
-    // desalineada con el ajuste.
     let mut series_len: HashMap<&str, usize> = HashMap::new();
     for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
         let sym = &q.symbol;
@@ -664,8 +622,6 @@ pub fn compute_regresion(
             if n < 2 { f64::NAN } else { series[n - 2] },
         );
     }
-    // Intermedias: no tienen serie independiente; se usan los contextos de la regresión (siempre
-    // alineados con el ajuste, así que no condicionan el aviso de desalineamiento).
     for it in intermediates {
         let sym = &it.symbol;
         let at = |i: usize| contexts[i].get(sym).copied().unwrap_or(f64::NAN);
@@ -676,8 +632,6 @@ pub fn compute_regresion(
     }
     let mut agg_allowed: Vec<String> = agg_values.keys().cloned().collect();
     let mut aggregates_out = Vec::with_capacity(aggregates.len());
-    // Alias de extremo realmente usados por alguna fórmula de agregado: solo sobre estos avisamos
-    // un eventual desalineamiento de puntos (así no metemos ruido por magnitudes no referenciadas).
     let mut referenced_endpoints: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     for agg in aggregates {
@@ -702,11 +656,6 @@ pub fn compute_regresion(
             value,
         });
     }
-    // Aviso: un agregado usa un extremo (`X_first`/`X_last`/...) de una magnitud por punto cuya
-    // serie tiene distinta cantidad de puntos que el ajuste. El extremo se toma de la serie
-    // completa de esa magnitud (no del último punto ajustado), así que conviene revisar la carga.
-    // Cubre el caso que `build_points` no avisa: una magnitud por punto que no entra a los ejes.
-    // Se recorre `quantities` en orden (no el `HashMap`) para que los avisos salgan determinísticos.
     for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
         let sym = q.symbol.as_str();
         let n = series_len.get(sym).copied().unwrap_or(0);
@@ -744,12 +693,29 @@ pub fn compute_regresion(
     })
 }
 
-/// Calcula el [`FormAnalysis`] de una práctica `curva`: para cada curva empareja las mediciones
-/// por punto y evalúa su par de fórmulas de eje, produciendo una serie de puntos **sin ajuste**
-/// (scatter + tabla) en `scatters`. No deriva mensurandos. Todas las curvas comparten el mismo
-/// barrido de mediciones; una `x_log` marca eje x logarítmico en esa curva. Devuelve además los
-/// contextos por punto del barrido (los de la primera curva: todas comparten las mediciones), que
-/// el llamador usa para los alias de extremos (`{S}_max` / `{T}_at_{S}_max`).
+/// Curvas sin ajuste: un gráfico de puntos por cada curva, sobre el mismo barrido.
+///
+/// ```
+/// # use quantify::computation::{compute_curva, CurveSpec, MeasurementInput};
+/// # use quantify::db::PracticeQuantity;
+/// # let q = |symbol: &str| PracticeQuantity {
+/// #     id: symbol.into(), practice_id: "p".into(), symbol: symbol.into(), name: symbol.into(),
+/// #     unit: String::new(), repeated: false, quantity: None, position: 0, is_given: false,
+/// #     replicas_per_point: None, per_point: true, has_uncertainty: true, optional: false,
+/// #     default_value: None, slot_count: None,
+/// # };
+/// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
+/// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,
+/// #     point_replicas: None, operator_replicas: None,
+/// # };
+/// let curve = CurveSpec { x_formula: "R", y_formula: "I*I*R", x_log: false };
+/// let (analysis, _) = compute_curva(
+///     &[q("R"), q("I")], &[], &[curve],
+///     &[m("R", vec![1.0, 2.0]), m("I", vec![1.0, 0.5])],
+/// )
+/// .unwrap();
+/// assert_eq!(analysis.scatters[0].points, vec![(1.0, 1.0), (2.0, 0.5)]);
+/// ```
 pub fn compute_curva(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
@@ -782,8 +748,6 @@ pub fn compute_curva(
             y_label: curve.y_formula.to_string(),
             x_log: curve.x_log,
         });
-        // Varias curvas comparten el mismo barrido: evita repetir el mismo aviso (p. ej. el mismo
-        // punto no finito) una vez por curva.
         for w in curve_warnings.drain(..) {
             if !warnings.contains(&w) {
                 warnings.push(w);
@@ -804,10 +768,6 @@ pub fn compute_curva(
     Ok((analysis, contexts))
 }
 
-/// Calcula los mensurandos derivados por propagación de varianzas: cada fórmula se evalúa y
-/// propaga usando los valores/incertidumbres de los símbolos disponibles (`means_by_symbol` /
-/// `u_by_symbol`). Sirve tanto para el camino estadístico (símbolos = magnitudes) como para el
-/// de regresión (símbolos = `slope`/`intercept`). Acumula advertencias por valores no finitos.
 fn derive_results(
     results: &[PracticeResult],
     allowed: &[String],
@@ -818,7 +778,6 @@ fn derive_results(
     let mut derived = Vec::with_capacity(results.len());
     for result in results {
         let tree = compile_formula(&result.formula, allowed)?;
-        // Variables que la fórmula realmente usa (sin constantes), en orden estable.
         let vars: Vec<String> = tree
             .iter_variable_identifiers()
             .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
@@ -866,8 +825,6 @@ fn derive_results(
     Ok(derived)
 }
 
-/// Lee la definición de la práctica y las escalas referidas por las mediciones, y calcula el
-/// [`FormAnalysis`]. Reúne los datos de la base y delega en [`compute`].
 pub async fn analyze(
     pool: &sqlx::SqlitePool,
     practice_id: &str,
@@ -877,8 +834,6 @@ pub async fn analyze(
         .await?
         .ok_or_else(|| anyhow::anyhow!("la practica no existe"))?;
 
-    // Toda medición debe corresponder a una magnitud de esta práctica (evita insertar filas
-    // colgadas y da un error claro en vez de una violación de clave foránea).
     let by_id: HashMap<&str, &PracticeQuantity> = definition
         .quantities
         .iter()
@@ -888,8 +843,6 @@ pub async fn analyze(
         let Some(quantity) = by_id.get(measurement.quantity_id.as_str()) else {
             anyhow::bail!("una de las mediciones no corresponde a una magnitud de esta practica");
         };
-        // Una ranura de un instrumento solo puede ser una de las que existen: 4.5 o 10 en una
-        // balanza de 9 ranuras calcularía en silencio con una posición imposible.
         if let Some(n) = quantity.slot_count {
             let nested = [&measurement.point_replicas, &measurement.operator_replicas];
             let all = measurement
@@ -910,7 +863,6 @@ pub async fn analyze(
 
     let scales = load_scales(pool, measurements).await?;
 
-    // Si se eligió instrumento y escala, la escala debe pertenecer a ese instrumento.
     for measurement in measurements {
         if let (Some(instrument_id), Some(scale_id)) =
             (&measurement.instrument_id, &measurement.scale_id)
@@ -923,7 +875,6 @@ pub async fn analyze(
         }
     }
 
-    // Camino de regresión lineal: requiere las fórmulas de eje definidas.
     if definition.analysis_kind.as_deref() == Some("regresion_lineal") {
         let (Some(x_formula), Some(y_formula)) = (
             definition.x_formula.as_deref(),
@@ -946,9 +897,6 @@ pub async fn analyze(
         );
     }
 
-    // Camino de curva (scatter sin ajuste): una o varias curvas sobre el mismo barrido (Motor B).
-    // Los mensurandos derivados escalares (de magnitudes no-por-punto) se calculan igual que en el
-    // camino estadístico: reduce las escalares, propaga incertidumbres, agrega a `derived`.
     if definition.analysis_kind.as_deref() == Some("curva") {
         if definition.curves.is_empty() {
             anyhow::bail!("la practica es de curva pero no tiene curvas definidas");
@@ -968,8 +916,6 @@ pub async fn analyze(
             &curves,
             measurements,
         )?;
-        // Magnitudes escalares (no-por-punto o dadas): siempre se computan y exponen, con su
-        // incertidumbre de instrumento, para que el frontend pueda mostrarlas y compararlas.
         let scalar_qtys: Vec<&PracticeQuantity> = definition
             .quantities
             .iter()
@@ -991,11 +937,6 @@ pub async fn analyze(
             &mut us,
             &mut analysis.warnings,
         )?;
-        // Alias de extremos por punto (análogos a `_first`/`_last` de la regresión): para cada
-        // símbolo por punto `S` (magnitudes medidas por punto + intermedias), `{S}_max` es su
-        // máximo sobre los puntos y `{T}_at_{S}_max` el valor de `T` en ese mismo punto. Van con
-        // u = 0 (son lecturas de la tabla, no medidas con incertidumbre propia), de modo que un
-        // mensurando como `P_max_e = P_max` resulta con U = 0 y el frontend lo muestra sin ±U.
         let per_point_syms: Vec<String> = per_point_quantity_symbols(&definition.quantities)
             .map(String::from)
             .chain(definition.intermediates.iter().map(|it| it.symbol.clone()))
@@ -1029,8 +970,6 @@ pub async fn analyze(
             }
         }
         if !definition.results.is_empty() {
-            // Filtra result por result: los que no compilan con los símbolos escalares y alias
-            // disponibles emiten un warning individual en lugar de silenciar todo el bloque.
             let scalar_results: Vec<PracticeResult> = definition
                 .results
                 .iter()
@@ -1069,7 +1008,6 @@ pub async fn analyze(
     )
 }
 
-/// Carga, por id, las escalas referidas por las mediciones (las que traen `scale_id`).
 async fn load_scales(
     pool: &sqlx::SqlitePool,
     measurements: &[MeasurementInput],

@@ -1,8 +1,3 @@
-//! Catálogo de instrumentos por curso: operaciones de lectura/escritura y export/import.
-//!
-//! Los tipos de fila ([`Instrument`], [`InstrumentScale`]) y el esquema viven en [`crate::db`];
-//! este módulo concentra las operaciones CRUD y la portabilidad del catálogo entre cursos.
-
 use crate::db::{next_position, Instrument, InstrumentScale};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -15,7 +10,6 @@ mod seed;
 pub use import_export::{export_course, import_course};
 pub use seed::seed_instruments;
 
-/// Datos para crear un instrumento en un curso.
 #[derive(Debug, Deserialize)]
 pub struct CreateInstrument {
     pub course_id: String,
@@ -25,7 +19,6 @@ pub struct CreateInstrument {
     pub unit: String,
 }
 
-/// Datos para actualizar un instrumento existente (no cambia el curso).
 #[derive(Debug, Deserialize)]
 pub struct UpdateInstrument {
     pub name: String,
@@ -34,8 +27,6 @@ pub struct UpdateInstrument {
     pub unit: String,
 }
 
-/// Datos para crear o actualizar una escala de instrumento. La `position` se asigna
-/// automáticamente al crear y se conserva al actualizar.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ScaleInput {
     pub label: String,
@@ -48,16 +39,13 @@ pub struct ScaleInput {
     pub spec_pct_reading: Option<f64>,
     pub spec_step_coeff: Option<f64>,
     pub spec_fixed: Option<f64>,
-    /// Calibración sumada en cuadratura sobre el modelo base: porcentaje del valor leído.
     #[serde(default)]
     pub u_cal_pct: Option<f64>,
-    /// Calibración sumada en cuadratura sobre el modelo base: término fijo en unidad base.
     #[serde(default)]
     pub u_cal_fixed: Option<f64>,
     pub unit: String,
 }
 
-/// Instrumento junto con sus escalas, para listar el catálogo.
 #[derive(Debug, Serialize)]
 pub struct InstrumentWithScales {
     #[serde(flatten)]
@@ -65,7 +53,6 @@ pub struct InstrumentWithScales {
     pub scales: Vec<InstrumentScale>,
 }
 
-/// Instrumento serializable para export/import (sin ids internos ni curso).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InstrumentExport {
     pub name: String,
@@ -75,21 +62,17 @@ pub struct InstrumentExport {
     pub scales: Vec<ScaleInput>,
 }
 
-/// Catálogo exportable de un curso: lista autocontenida de instrumentos con sus escalas.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CatalogExport {
     pub instruments: Vec<InstrumentExport>,
 }
 
-/// Columnas de un instrumento usadas en los `SELECT` (sin `created_at`).
 const INSTRUMENT_COLS: &str = "id, course_id, name, kind, quantity, unit";
 
-/// Columnas de una escala usadas en los `SELECT` (sin `created_at`).
 const SCALE_COLS: &str = "id, instrument_id, label, full_scale, step, appreciation, internal_res, \
     internal_res_u, b_model, spec_pct_reading, spec_step_coeff, spec_fixed, u_cal_pct, \
     u_cal_fixed, unit, position";
 
-/// Lista los instrumentos de un curso (ordenados por nombre) con sus escalas.
 pub async fn list_instruments(
     pool: &SqlitePool,
     course_id: &str,
@@ -109,7 +92,6 @@ pub async fn list_instruments(
     Ok(result)
 }
 
-/// Lee las escalas de un instrumento ordenadas por posición.
 async fn scales_for_instrument(
     pool: &SqlitePool,
     instrument_id: &str,
@@ -122,7 +104,6 @@ async fn scales_for_instrument(
     .await?)
 }
 
-/// Recupera un instrumento por id.
 async fn fetch_instrument(pool: &SqlitePool, id: &str) -> anyhow::Result<Instrument> {
     Ok(sqlx::query_as::<_, Instrument>(&format!(
         "SELECT {INSTRUMENT_COLS} FROM instruments WHERE id = ?1"
@@ -132,8 +113,6 @@ async fn fetch_instrument(pool: &SqlitePool, id: &str) -> anyhow::Result<Instrum
     .await?)
 }
 
-/// Busca una escala por id (`None` si no existe). Única consulta de escala por id: el cálculo
-/// también la usa, para que una columna nueva (como la calibración) no quede afuera.
 pub(crate) async fn find_scale(
     pool: &SqlitePool,
     id: &str,
@@ -146,15 +125,12 @@ pub(crate) async fn find_scale(
     .await?)
 }
 
-/// Recupera una escala por id que tiene que existir.
 async fn fetch_scale(pool: &SqlitePool, id: &str) -> anyhow::Result<InstrumentScale> {
     find_scale(pool, id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("escala {id} no encontrada"))
 }
 
-/// Inserta un instrumento con el ejecutor dado y devuelve el id generado. Permite reutilizar
-/// la misma lógica sobre el pool o dentro de una transacción (export/import).
 pub(super) async fn insert_instrument(
     conn: &mut SqliteConnection,
     input: &CreateInstrument,
@@ -176,7 +152,6 @@ pub(super) async fn insert_instrument(
     Ok(id)
 }
 
-/// Inserta una escala en la posición dada usando el ejecutor, y devuelve el id generado.
 pub(super) async fn insert_scale(
     conn: &mut SqliteConnection,
     instrument_id: &str,
@@ -212,12 +187,10 @@ pub(super) async fn insert_scale(
     Ok(id)
 }
 
-/// Crea un instrumento en un curso y lo devuelve.
 pub async fn create_instrument(
     pool: &SqlitePool,
     input: CreateInstrument,
 ) -> anyhow::Result<Instrument> {
-    // La conexión se libera al cerrar el bloque, antes del fetch (evita bloquear pools chicos).
     let id = {
         let mut conn = pool.acquire().await?;
         insert_instrument(&mut conn, &input).await?
@@ -225,7 +198,6 @@ pub async fn create_instrument(
     fetch_instrument(pool, &id).await
 }
 
-/// Actualiza un instrumento por id. Devuelve `None` si no existe.
 pub async fn update_instrument(
     pool: &SqlitePool,
     id: &str,
@@ -247,8 +219,6 @@ pub async fn update_instrument(
     Ok(Some(fetch_instrument(pool, id).await?))
 }
 
-/// Elimina un instrumento y sus escalas. Devuelve `true` si existía.
-/// Borra las escalas explícitamente (no dependemos de `PRAGMA foreign_keys`).
 pub async fn delete_instrument(pool: &SqlitePool, id: &str) -> anyhow::Result<bool> {
     sqlx::query("DELETE FROM instrument_scales WHERE instrument_id = ?1")
         .bind(id)
@@ -261,7 +231,6 @@ pub async fn delete_instrument(pool: &SqlitePool, id: &str) -> anyhow::Result<bo
     Ok(result.rows_affected() > 0)
 }
 
-/// Agrega una escala a un instrumento, asignándole la siguiente posición disponible.
 pub async fn create_scale(
     pool: &SqlitePool,
     instrument_id: &str,
@@ -275,7 +244,6 @@ pub async fn create_scale(
     fetch_scale(pool, &id).await
 }
 
-/// Actualiza una escala por id (conserva su posición). Devuelve `None` si no existe.
 pub async fn update_scale(
     pool: &SqlitePool,
     scale_id: &str,
@@ -309,7 +277,6 @@ pub async fn update_scale(
     Ok(Some(fetch_scale(pool, scale_id).await?))
 }
 
-/// Elimina una escala por id. Devuelve `true` si existía.
 pub async fn delete_scale(pool: &SqlitePool, scale_id: &str) -> anyhow::Result<bool> {
     let result = sqlx::query("DELETE FROM instrument_scales WHERE id = ?1")
         .bind(scale_id)
@@ -326,7 +293,6 @@ mod tests {
     use std::str::FromStr;
     use tempfile::TempDir;
 
-    /// Pool temporal migrado, con un curso creado; devuelve `(pool, dir, course_id)`.
     async fn setup() -> (SqlitePool, TempDir, String) {
         let dir = tempfile::tempdir().unwrap();
         let url = format!("sqlite:{}", dir.path().join("t.db").to_string_lossy());
@@ -363,7 +329,6 @@ mod tests {
     }
 
     fn sample_scale() -> ScaleInput {
-        // Escala tipo fabricante: ±(1% + 5 dgt).
         ScaleInput {
             label: "200 uA".into(),
             full_scale: Some(200e-6),
@@ -478,7 +443,7 @@ mod tests {
         .unwrap();
         assert_eq!(updated.label, "200 uA mod");
         assert_eq!(updated.spec_pct_reading, Some(2.0));
-        assert_eq!(updated.position, 1); // posición conservada
+        assert_eq!(updated.position, 1);
 
         let listed = list_instruments(&pool, &course_id).await.unwrap();
         assert_eq!(listed[0].scales.len(), 2);
@@ -498,7 +463,6 @@ mod tests {
         let scale = create_scale(&pool, &inst.id, sample_scale()).await.unwrap();
 
         assert!(delete_instrument(&pool, &inst.id).await.unwrap());
-        // La escala ya no debe existir.
         assert!(!delete_scale(&pool, &scale.id).await.unwrap());
     }
 
@@ -514,7 +478,6 @@ mod tests {
         assert_eq!(exported.instruments.len(), 1);
         assert_eq!(exported.instruments[0].scales.len(), 1);
 
-        // Importar a un curso destino distinto.
         let dest = db::create_course(
             &pool,
             db::CreateCourse {
@@ -539,7 +502,6 @@ mod tests {
     #[tokio::test]
     async fn import_rolls_back_on_error() {
         let (pool, _dir, course_id) = setup().await;
-        // El segundo instrumento trae una escala con b_model invalido (viola el CHECK).
         let mut bad_scale = sample_scale();
         bad_scale.b_model = "invalido".into();
         let payload = CatalogExport {
@@ -563,7 +525,6 @@ mod tests {
 
         let result = import_course(&pool, &course_id, payload).await;
         assert!(result.is_err());
-        // Rollback total: no debe quedar ni siquiera el primer instrumento.
         assert!(list_instruments(&pool, &course_id)
             .await
             .unwrap()
@@ -577,12 +538,10 @@ mod tests {
         let first = list_instruments(&pool, &course_id).await.unwrap();
         assert!(first.len() >= 5);
 
-        // Volver a sembrar no duplica.
         seed_instruments(&pool, &course_id).await.unwrap();
         let second = list_instruments(&pool, &course_id).await.unwrap();
         assert_eq!(first.len(), second.len());
 
-        // El tester A830L tiene escalas de fabricante con resistencia interna.
         let a830 = first
             .iter()
             .find(|i| i.instrument.name.contains("A830L"))
@@ -592,7 +551,6 @@ mod tests {
             .iter()
             .any(|s| s.b_model == "fabricante" && s.internal_res.is_some()));
 
-        // El osciloscopio mide tiempo con incertidumbre tipo fabricante (1% de la medida).
         let osc_t = first
             .iter()
             .find(|i| {
@@ -602,7 +560,6 @@ mod tests {
         assert_eq!(osc_t.scales[0].spec_pct_reading, Some(1.0));
         assert_eq!(osc_t.scales[0].spec_step_coeff, Some(0.0));
 
-        // El tester UA78A tiene 4 escalas de capacitancia.
         let ua78a = first
             .iter()
             .find(|i| i.instrument.name.contains("UA78A"))
@@ -612,13 +569,9 @@ mod tests {
         assert!(ua78a.scales.iter().all(|s| s.b_model == "fabricante"));
     }
 
-    /// Una base sembrada por una version anterior ya tiene el instrumento pero no sus escalas
-    /// nuevas: el seed debe agregarselas (antes salteaba el instrumento entero y la escala
-    /// calibrada de Hidrostatica nunca llegaba a los cursos existentes).
     #[tokio::test]
     async fn seed_instruments_agrega_escalas_nuevas_a_instrumentos_existentes() {
         let (pool, _dir, course_id) = setup().await;
-        // Simula la base vieja: la balanza existe con una sola escala (la de 0.01 g).
         let balanza = create_instrument(
             &pool,
             CreateInstrument {
@@ -668,7 +621,6 @@ mod tests {
             .expect("falta la escala calibrada de Hidrostatica");
         assert_eq!(calibrada.step, 0.1);
         assert_eq!(calibrada.u_cal_pct, 3.0);
-        // La escala vieja sigue ahi, sin duplicarse.
         assert_eq!(
             balanzas[0]
                 .scales
@@ -678,8 +630,6 @@ mod tests {
             1
         );
 
-        // Si el docente renombra o borra una escala del catalogo original, el proximo arranque no
-        // la recrea (el backfill se limita a las escalas nuevas, BACKFILL_SCALES).
         let vieja = balanzas[0]
             .scales
             .iter()

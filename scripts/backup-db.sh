@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Copia la base SQLite a data/backups/ con timestamp. Respeta DATABASE_URL si esta definida
-# (mismo default que el server). Pensado para correr a mano o desde cron en un deploy LAN.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

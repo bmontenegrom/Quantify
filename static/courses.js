@@ -184,7 +184,6 @@ function renderCourseGroupForm(course) {
 
 function renderCoursePracticesPanel(course) {
   const enabled = new Set(course.practices.map((practice) => practice.id));
-  // Solo las publicadas: un borrador o una archivada no se ofrecen a los estudiantes.
   const available = state.practices.filter((practice) => practice.status === "publicada" && !enabled.has(practice.id));
   const rows = course.practices.map(
     (practice) => `
@@ -266,7 +265,6 @@ function renderCourseGroupsTable(course) {
 
 function renderCourseSubgroupsPanel(course) {
   const subgroups = course.subgroups ?? [];
-  // Los subgrupos solo se crean para prácticas publicadas (una archivada no admite entregas).
   const published = course.practices.filter((practice) => practice.status === "publicada");
   const canCreate = course.groups.length > 0 && published.length > 0;
   const rows = subgroups.map(

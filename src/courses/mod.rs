@@ -55,7 +55,6 @@ pub struct CreateCourse {
 pub struct UpdateCourse {
     pub name: String,
     pub term: String,
-    /// Horas de edición de entregas (opcional; si viene, se acota a 0..=72).
     #[serde(default)]
     pub submission_edit_hours: Option<f64>,
 }
@@ -65,8 +64,6 @@ pub struct SetCoursePractice {
     pub practice_id: String,
 }
 
-/// Arma el contexto académico que ve un usuario: docentes/admin ven todos los cursos,
-/// estudiantes solo los suyos. Incluye prácticas y, para docentes, listas de estudiantes y usuarios.
 pub async fn academic_context(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -93,7 +90,6 @@ pub async fn academic_context(
     })
 }
 
-/// Crea un curso activo (nombre + período) y lo devuelve.
 pub async fn create_course(pool: &SqlitePool, input: CreateCourse) -> anyhow::Result<Course> {
     let id = Uuid::new_v4().to_string();
     sqlx::query(
@@ -117,7 +113,6 @@ pub async fn create_course(pool: &SqlitePool, input: CreateCourse) -> anyhow::Re
     .await?)
 }
 
-/// Actualiza nombre y período de un curso. Devuelve `None` si el curso no existe.
 pub async fn update_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -154,8 +149,6 @@ pub async fn update_course(
     ))
 }
 
-/// Inscribe a un estudiante en un curso (vía `enroll_course_member`).
-/// Devuelve `None` si el usuario no existe o no es estudiante.
 pub async fn add_course_member(
     pool: &SqlitePool,
     course_id: &str,
@@ -176,9 +169,6 @@ pub async fn add_course_member(
     Ok(Some(()))
 }
 
-/// Habilita una práctica **publicada** en un curso (o la re-habilita si estaba deshabilitada).
-/// Idempotente. Devuelve `false` si la práctica no existe o no está publicada (un borrador o una
-/// archivada no se ofrecen a los estudiantes).
 pub async fn enable_course_practice(
     pool: &SqlitePool,
     course_id: &str,
@@ -207,10 +197,6 @@ pub async fn enable_course_practice(
     Ok(true)
 }
 
-/// Deshabilita una práctica en un curso: los estudiantes ya no pueden entregarla. Las entregas
-/// existentes, los subgrupos y las mesas se conservan para cuando se re-habilite. La fila queda
-/// con `enabled = FALSE` (no se borra) para que la siembra no la vuelva a habilitar al arrancar.
-/// Devuelve `true` si estaba habilitada.
 pub async fn disable_course_practice(
     pool: &SqlitePool,
     course_id: &str,
@@ -227,8 +213,6 @@ pub async fn disable_course_practice(
     Ok(result.rows_affected() > 0)
 }
 
-/// Indica si un usuario puede entregar en (curso, grupo, práctica). Docentes/admin siempre
-/// pueden; un estudiante puede solo si está inscripto, pertenece al grupo y la práctica está habilitada.
 pub async fn user_can_submit(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -266,7 +250,6 @@ pub async fn user_can_submit(
     Ok(allowed.is_some())
 }
 
-/// Resúmenes de todos los cursos (vista docente/admin), ordenados por período y nombre.
 async fn all_course_summaries(pool: &SqlitePool) -> anyhow::Result<Vec<CourseSummary>> {
     let courses = sqlx::query_as::<_, Course>(
         "SELECT id, name, term, active, submission_edit_hours, acceptance_window_hours FROM courses ORDER BY term DESC, name",
@@ -276,7 +259,6 @@ async fn all_course_summaries(pool: &SqlitePool) -> anyhow::Result<Vec<CourseSum
     course_summaries(pool, courses).await
 }
 
-/// Resúmenes de los cursos activos en los que está inscripto un estudiante.
 async fn student_course_summaries(
     pool: &SqlitePool,
     user_id: &str,
@@ -298,8 +280,6 @@ async fn student_course_summaries(
     Ok(summaries)
 }
 
-/// Vista del estudiante de un curso: sin prácticas archivadas ni sus subgrupos. El docente sí las
-/// ve (marcadas como archivadas), para poder deshabilitarlas o restaurarlas.
 pub(crate) fn hide_unpublished(summary: &mut CourseSummary) {
     summary.practices.retain(|p| p.status == "publicada");
     summary
@@ -307,7 +287,6 @@ pub(crate) fn hide_unpublished(summary: &mut CourseSummary) {
         .retain(|s| s.practice.status == "publicada");
 }
 
-/// Enriquece una lista de cursos con sus miembros, grupos, prácticas, subgrupos y mesas.
 async fn course_summaries(
     pool: &SqlitePool,
     courses: Vec<Course>,
@@ -336,7 +315,6 @@ async fn course_summaries(
     Ok(summaries)
 }
 
-/// Lista los estudiantes miembros de un curso (para el resumen de curso).
 async fn course_members_for_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -355,9 +333,6 @@ async fn course_members_for_course(
     .await?)
 }
 
-/// Lista las prácticas habilitadas de un curso, ordenadas por nombre: las publicadas y las
-/// archivadas (que el docente ve para poder deshabilitarlas; [`hide_unpublished`] las saca de la
-/// vista del estudiante). Una archivada no admite entregas (`user_can_submit`).
 pub async fn practices_for_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -497,7 +472,6 @@ mod tests {
         )
         .await
         .unwrap();
-        // table_count fuera de rango se acota a 24; tipo inválido -> regular.
         let group = create_group(
             &pool,
             &course.id,
@@ -577,7 +551,6 @@ mod tests {
         assert_eq!(subgroup.name, "Sub A");
         assert_eq!(subgroup.practice_id, "p1-estadistica");
 
-        // Un borrador no admite subgrupos (llegarían a los estudiantes en el contexto académico).
         sqlx::query(
             "INSERT INTO practices (id, name, description, status) \
              VALUES ('borrador-x', 'Borrador', '', 'borrador')",
@@ -606,8 +579,6 @@ mod tests {
         .unwrap();
         assert!(draft.is_none());
 
-        // Si su práctica se archiva, el docente lo sigue viendo (marcado por el estado de la
-        // práctica) y el estudiante no.
         sqlx::query("UPDATE practices SET status = 'archivada' WHERE id = 'p1-estadistica'")
             .execute(&pool)
             .await
@@ -649,7 +620,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Debe existir el grupo "General" creado por ensure_default_group.
         let groups = groups_for_course(&pool, COURSE).await.unwrap();
         assert!(groups.iter().any(|g| g.name == "General"));
     }
@@ -660,7 +630,6 @@ mod tests {
         let teacher = find_user(&pool, TEACHER).await;
         let student = find_user(&pool, STUDENT).await;
 
-        // Un docente no es estudiante: add_group_member devuelve None.
         assert!(add_group_member(
             &pool,
             GROUP,
@@ -672,7 +641,6 @@ mod tests {
         .unwrap()
         .is_none());
 
-        // El estudiante ya es miembro; agregarlo de nuevo es idempotente y devuelve Some.
         assert!(add_group_member(
             &pool,
             GROUP,
@@ -711,7 +679,6 @@ mod tests {
         .unwrap();
         assert_eq!(ok.table_number, 2);
 
-        // Mesa fuera de rango (table_count = 4).
         assert!(set_practice_table_assignment(
             &pool,
             GROUP,
@@ -810,19 +777,16 @@ mod tests {
         let teacher = find_user(&pool, TEACHER).await;
         let student = find_user(&pool, STUDENT).await;
 
-        // Docente siempre puede.
         assert!(
             user_can_submit(&pool, &teacher, COURSE, GROUP, "p1-estadistica")
                 .await
                 .unwrap()
         );
-        // Estudiante con curso/grupo/práctica válidos.
         assert!(
             user_can_submit(&pool, &student, COURSE, GROUP, "p1-estadistica")
                 .await
                 .unwrap()
         );
-        // Práctica no habilitada / inexistente -> false.
         assert!(
             !user_can_submit(&pool, &student, COURSE, GROUP, "p9-inexistente")
                 .await

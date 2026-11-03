@@ -1,6 +1,5 @@
 import { escapeHtml, symbolHtml, unitHtml, measureText, format, num, pct, compareResults, compareMeasuredVsTheoretical } from "./lib.js";
 
-/** Tabla "Medido vs teórico": magnitudes medidas (`X`) contra su derivado automático (`X_t`). */
 export function measuredVsTheoreticalMarkup(quantities, derived) {
   const rows = compareMeasuredVsTheoretical(quantities, derived);
   if (!rows.length) return "";

@@ -7,9 +7,7 @@ pub struct ColumnStats {
     pub name: String,
     pub count: usize,
     pub mean: f64,
-    /// Desviacion estandar poblacional (divide por n). Se conserva por compatibilidad.
     pub std_dev: f64,
-    /// Desviacion estandar muestral (divide por n-1). Base de la incertidumbre tipo A.
     #[serde(default)]
     pub std_dev_sample: f64,
     pub min: f64,
@@ -23,10 +21,8 @@ pub struct LinearRegression {
     pub slope: f64,
     pub intercept: f64,
     pub r_squared: f64,
-    /// Incertidumbre estandar de la pendiente (0 si n < 3).
     #[serde(default)]
     pub u_slope: f64,
-    /// Incertidumbre estandar del intercepto (0 si n < 3).
     #[serde(default)]
     pub u_intercept: f64,
 }
@@ -40,10 +36,6 @@ pub struct AnalysisResult {
 }
 
 /// Analiza un CSV con encabezados: calcula estadísticos por columna numérica, intenta una
-/// regresión lineal entre las dos primeras columnas numéricas y acumula advertencias por
-/// celdas vacías o no numéricas. Devuelve error si el CSV no tiene columnas o filas de datos.
-///
-/// # Ejemplos
 ///
 /// ```
 /// let analisis = quantify::analysis::analyze_csv("x,y\n1,2\n2,4\n3,6\n").unwrap();
@@ -95,8 +87,6 @@ pub fn analyze_csv(input: &str) -> anyhow::Result<AnalysisResult> {
     })
 }
 
-/// Parsea una fila del CSV acumulando los valores numéricos por columna y registrando
-/// advertencias para celdas vacías o no numéricas (acepta coma decimal).
 fn parse_record(
     headers: &StringRecord,
     record: &StringRecord,
@@ -120,8 +110,6 @@ fn parse_record(
     }
 }
 
-/// Calcula los estadísticos de una columna (conteo, media, desvíos poblacional y muestral,
-/// mínimo y máximo). Devuelve `None` si no hay valores numéricos.
 fn stats_for_column(name: &str, values: &[f64]) -> Option<ColumnStats> {
     if values.is_empty() {
         return None;
@@ -156,8 +144,6 @@ fn stats_for_column(name: &str, values: &[f64]) -> Option<ColumnStats> {
     })
 }
 
-/// Selecciona las dos primeras columnas con al menos dos valores numéricos y calcula la
-/// regresión lineal entre ellas. Devuelve `None` si no hay suficientes columnas/puntos.
 fn first_regression(headers: &StringRecord, columns: &[Vec<f64>]) -> Option<LinearRegression> {
     let numeric_indices: Vec<_> = columns
         .iter()
@@ -182,10 +168,6 @@ fn first_regression(headers: &StringRecord, columns: &[Vec<f64>]) -> Option<Line
 }
 
 /// Ajuste de mínimos cuadrados de `y = slope*x + intercept` sobre los puntos dados.
-/// Calcula R² y los errores estándar de pendiente e intercepto (estos últimos solo con n ≥ 3).
-/// Devuelve `None` si hay menos de 2 puntos o la varianza en x es nula.
-///
-/// # Ejemplos
 ///
 /// ```
 /// let puntos = [(0.0, 1.0), (1.0, 3.0), (2.0, 5.0)];
@@ -245,9 +227,8 @@ pub fn linear_regression(
         1.0 - ss_res / ss_tot
     };
 
-    // Errores estandar del ajuste por minimos cuadrados (requieren al menos 3 puntos).
     let (u_slope, u_intercept) = if n >= 3 {
-        let s2 = ss_res / (n_f - 2.0); // varianza residual
+        let s2 = ss_res / (n_f - 2.0);
         let sum_x2 = points.iter().map(|(x, _)| x * x).sum::<f64>();
         ((s2 / ss_xx).sqrt(), (s2 * sum_x2 / (n_f * ss_xx)).sqrt())
     } else {
@@ -266,11 +247,6 @@ pub fn linear_regression(
 }
 
 /// Ajuste de relajacion exponencial V(t) = V0 * exp(-t / tau).
-/// Linealiza tomando ln(V) y ajusta una recta ln(V) = ln(V0) - t/tau,
-/// de donde tau = -1/pendiente. Propaga la incertidumbre de la pendiente a tau
-/// (u_tau = u_slope / slope^2). Devuelve (tau, u_tau).
-///
-/// # Ejemplos
 ///
 /// ```
 /// // V(t) = 10 * exp(-t / 2) -> tau = 2.
@@ -307,18 +283,15 @@ mod tests {
         assert_eq!(analysis.row_count, 3);
         assert_eq!(analysis.numeric_columns.len(), 2);
         let column = &analysis.numeric_columns[0];
-        // [1,2,3]: poblacional sqrt(2/3), muestral = 1.0
         assert!((column.std_dev_sample - 1.0).abs() < 1e-12);
         let regression = analysis.regression.unwrap();
         assert!((regression.slope - 2.0).abs() < 1e-9);
         assert!(regression.r_squared > 0.999);
-        // Ajuste perfecto: incertidumbre de pendiente practicamente nula.
         assert!(regression.u_slope < 1e-9);
     }
 
     #[test]
     fn recovers_tau_from_exponential_decay() {
-        // V(t) = 10 * exp(-t / 2), tau = 2
         let tau_real = 2.0;
         let points: Vec<(f64, f64)> = (0..6)
             .map(|i| {
@@ -328,6 +301,6 @@ mod tests {
             .collect();
         let (tau, u_tau) = relaxation_tau(&points).unwrap();
         assert!((tau - tau_real).abs() < 1e-9);
-        assert!(u_tau < 1e-6); // datos sin ruido
+        assert!(u_tau < 1e-6);
     }
 }

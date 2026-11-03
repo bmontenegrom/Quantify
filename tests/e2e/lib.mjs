@@ -1,10 +1,3 @@
-// Harness compartido por los smokes E2E (Playwright): build/arranque del server sobre una DB
-// temporal, login, step/assert, y el try/finally de limpieza + screenshot-on-fail. Cada script
-// en tests/e2e/*.mjs llama a `withE2E({port, dbName}, flow)` y se queda solo con sus pasos.
-//
-// Variables de entorno (las mismas para todos los scripts):
-//   E2E_SKIP_BUILD  "1" para no correr `cargo build` (CI ya compiló)
-//   E2E_HEADED      "1" para ver el navegador
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -31,8 +24,6 @@ export function assert(condition, message) {
   if (!condition) throw new Error(`Falló la verificación: ${message}`);
 }
 
-/** Abre (como un usuario, clickeando el `summary`) el `<details>` plegado que contiene un form de
- *  alta del admin de prácticas, si no está ya abierto. */
 export async function openAddForm(page, formSelector) {
   await page.waitForSelector(formSelector, { state: "attached" });
   const details = page.locator(`details:has(${formSelector})`);
@@ -40,9 +31,6 @@ export async function openAddForm(page, formSelector) {
   await page.waitForSelector(formSelector);
 }
 
-/** Espera a que el borrador local (guardado con debounce) tenga lo último que se tipeó, antes de
- *  recargar: `{ quantityId, count }` = esa magnitud con `count` valores (puntos de una serie), o
- *  `{ result, value }` = ese resultado final (p. ej. `Re#0`) con ese valor. */
 export async function waitForDraft(page, expected) {
   await page.waitForFunction(
     ({ quantityId, count, result, value }) =>
@@ -58,7 +46,6 @@ export async function waitForDraft(page, expected) {
   );
 }
 
-/** Texto plano con el que un símbolo queda en `textContent` (sin las etiquetas de subíndice). */
 export function symbolText(symbol) {
   return symbolHtml(symbol).replace(/<[^>]+>/g, "");
 }
@@ -97,14 +84,12 @@ async function waitForServer(base, timeoutMs = 30_000) {
       const response = await fetch(base);
       if (response.ok) return;
     } catch {
-      // todavía no levantó
     }
     await new Promise((resolveSleep) => setTimeout(resolveSleep, 250));
   }
   throw new Error(`El server no respondió en ${base} tras ${timeoutMs} ms`);
 }
 
-/** Crea un contexto nuevo (cookies limpias), registra errores JS/consola y hace login. */
 async function login(browser, base, session, { email, password }, who = email) {
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -123,12 +108,6 @@ async function login(browser, base, session, { email, password }, who = email) {
   return { context, page };
 }
 
-/**
- * Arma el server con una DB temporal en `dataDir`, corre `flow({ browser, base, login, session })`
- * y limpia todo (server + DB + screenshot en fallo) al final. `login(creds, who?)` abre una
- * sesión nueva y registra su página para el screenshot-on-fail; `session.pageErrors` acumula
- * errores JS/consola de todas las sesiones abiertas.
- */
 export async function withE2E({ port, dbName }, flow) {
   buildServer();
   mkdirSync(ARTIFACTS, { recursive: true });
@@ -164,7 +143,6 @@ export async function withE2E({ port, dbName }, flow) {
   } finally {
     await browser?.close();
     server.kill();
-    // En Windows el proceso puede tardar en soltar el archivo de la DB.
     await new Promise((resolveSleep) => setTimeout(resolveSleep, 500));
     rmSync(dataDir, { recursive: true, force: true, maxRetries: 5 });
   }

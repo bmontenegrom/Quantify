@@ -1,6 +1,3 @@
-// Ciclo de vida de una práctica creada desde la UI (F1): el docente la crea en borrador, la
-// completa, la publica (antes de estar completa se rechaza), duplica y borra una copia, y la
-// habilita en el curso; el estudiante la entrega; el docente la archiva y deja de verse.
 
 import { STUDENT, TEACHER, assert, openAddForm, step, withE2E } from "./lib.mjs";
 
@@ -80,8 +77,6 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await sPage.click(`#practice-nav-children .nav-child:has-text("${NAME}")`);
   await sPage.waitForSelector("#measurement-fields .measurement-row");
   await sPage.selectOption("#table-select", "1");
-  // El formulario se redibuja al llegar la definición y los instrumentos: se espera a que termine
-  // antes de escribir (si no, lo tipeado se pierde en el redibujado).
   await sPage.waitForLoadState("networkidle");
   const given = sPage.locator(".measurement-row--given").first();
   await given.locator(".measure-given-value").fill("1");
