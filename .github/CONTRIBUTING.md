@@ -65,7 +65,8 @@ CHANGELOG.
 
 El scope es el área que toca: `cursos`, `practicas`, `hidrostatica`, `ui`, `e2e`, `plan`, etc.
 Un cambio que rompe compatibilidad lleva `!` (`feat(api)!: ...`) o un footer `BREAKING CHANGE:`.
-Mientras la versión sea 0.x, release-please lo cuenta como minor.
+Un breaking change sube la major aunque la versión sea 0.x: de 0.4.2 pasa a 1.0.0. Usalo solo para
+un cambio que de verdad rompa algo para quien usa la app.
 
 ## Pull requests
 
