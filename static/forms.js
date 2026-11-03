@@ -13,7 +13,7 @@ import {
   draftMeasurementsByQuantity, hasUncertainty,
 } from "./lib.js";
 import {
-  PRACTICE_GROUPS, SERIES_LIVE_COLUMNS,
+  SERIES_LIVE_COLUMNS,
   SYMBOL_FIRST_QUANTITIES, PRACTICES_WITHOUT_CHRONO_HELPER,
 } from "./constants.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
@@ -235,34 +235,8 @@ export function renderPartTabs(practiceId) {
     return;
   }
 
-  const group = PRACTICE_GROUPS[practiceId]?.group;
-  const enabled = selectedCourse()?.practices ?? [];
-  const parts = enabled
-    .filter((p) => PRACTICE_GROUPS[p.id]?.group === group && group)
-    .sort((a, b) => PRACTICE_GROUPS[a.id].order - PRACTICE_GROUPS[b.id].order);
-
-  if (parts.length < 2) {
-    practicePartTabs.classList.add("hidden");
-    practicePartTabs.innerHTML = "";
-    return;
-  }
-
-  practicePartTabs.classList.remove("hidden");
-  practicePartTabs.innerHTML = parts
-    .map(
-      (p) =>
-        `<button type="button" class="part-tab ${p.id === practiceId ? "active" : ""}" data-practice-id="${escapeHtml(p.id)}">${escapeHtml(PRACTICE_GROUPS[p.id].label)}</button>`
-    )
-    .join("");
-
-  practicePartTabs.querySelectorAll(".part-tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      if (tab.dataset.practiceId === practiceSelect.value) return;
-      exitEditMode();
-      practiceSelect.value = tab.dataset.practiceId;
-      practiceSelect.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-  });
+  practicePartTabs.classList.add("hidden");
+  practicePartTabs.innerHTML = "";
 }
 
 function applyPartVisibility() {

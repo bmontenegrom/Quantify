@@ -1,8 +1,3 @@
-export const PRACTICE_GROUPS = {
-  "p3-relajacion": { group: "p3", label: "Parte 1: Relajacion directa", order: 1 },
-  "p3-relajacion-desfasaje": { group: "p3", label: "Parte 2: Desfasaje", order: 2 },
-};
-
 export const SERIES_LIVE_COLUMNS = {
   "p2-cc": [{ symbol: "P", unit: "W", inputs: ["R", "I"] }],
   "fluidos-1": [

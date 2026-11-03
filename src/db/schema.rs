@@ -620,7 +620,7 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     for (practice_id, symbol) in [
         ("p1-estadistica", "g"),
         ("p3-relajacion", "tau_exp"),
-        ("p3-relajacion-desfasaje", "tau"),
+        ("p3-relajacion", "tau"),
         ("fluidos-1", "mu"),
         ("viscosidad", "mu"),
         ("fluidos-2", "M_medio"),

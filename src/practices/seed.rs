@@ -369,25 +369,34 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
-    seed_practice(
+    let fresh = seed_practice(
         pool,
         "p3-relajacion",
         &[
-            qty("R", "Resistencia", "ohm", false, "resistencia"),
+            qty_shared("R", "Resistencia", "ohm", "resistencia"),
             qty_given(
                 "Rint",
                 "Resistencia interna de la fuente",
                 "ohm",
                 "resistencia",
             ),
-            qty("C", "Capacitancia", "F", false, "capacitancia"),
-            qty("T_oc", "Periodo de la onda cuadrada", "s", false, "tiempo"),
+            qty_shared("C", "Capacitancia", "F", "capacitancia"),
+            qty_shared("T_oc", "Periodo de la onda cuadrada", "s", "tiempo"),
+            qty_shared("tmedio", "Tiempo de semidescarga (t1/2)", "s", "tiempo"),
+            qty("f", "Frecuencia", "Hz", true, "frecuencia"),
             qty(
-                "tmedio",
-                "Tiempo de semidescarga (t1/2)",
-                "s",
-                false,
-                "tiempo",
+                "a",
+                "Amplitud de la senal en el eje y de la elipse",
+                "div",
+                true,
+                "longitud",
+            ),
+            qty(
+                "b",
+                "Interseccion de la elipse con el eje y",
+                "div",
+                true,
+                "longitud",
             ),
         ],
         &[
@@ -403,9 +412,13 @@ async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
                 "s",
                 "tmedio / math::ln(2)",
             ),
+            res_final("tau", "Constante de tiempo RC (desfasaje)", "s", "slope"),
         ],
     )
     .await?;
+    if fresh {
+        super::layout::apply_p3_layout(pool).await?;
+    }
     Ok(())
 }
 
@@ -565,33 +578,6 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         .await?;
     }
-    Ok(())
-}
-
-async fn seed_p3_relajacion_desfasaje(pool: &SqlitePool) -> anyhow::Result<()> {
-    seed_practice(
-        pool,
-        "p3-relajacion-desfasaje",
-        &[
-            qty("f", "Frecuencia", "Hz", true, "frecuencia"),
-            qty(
-                "a",
-                "Amplitud de la senal en el eje y de la elipse",
-                "div",
-                true,
-                "longitud",
-            ),
-            qty(
-                "b",
-                "Interseccion de la elipse con el eje y",
-                "div",
-                true,
-                "longitud",
-            ),
-        ],
-        &[res_final("tau", "Constante de tiempo RC", "s", "slope")],
-    )
-    .await?;
     Ok(())
 }
 
@@ -1375,7 +1361,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_p1_estadistica(pool).await?;
     seed_p3_relajacion(pool).await?;
     seed_p2_cc(pool).await?;
-    seed_p3_relajacion_desfasaje(pool).await?;
     seed_fluidos1(pool).await?;
     seed_viscosidad(pool).await?;
     seed_fluidos2(pool).await?;

@@ -371,6 +371,82 @@ fn legacy_layouts() -> Vec<LegacyLayout> {
     ]
 }
 
+async fn apply_layout(
+    conn: &mut sqlx::SqliteConnection,
+    layout: &LegacyLayout,
+) -> anyhow::Result<()> {
+    let practice_id = layout.practice_id;
+    for (position, (key, title)) in layout.parts.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO practice_parts (id, practice_id, title, position) VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(format!("{practice_id}-{key}"))
+        .bind(practice_id)
+        .bind(title)
+        .bind(position as i64)
+        .execute(&mut *conn)
+        .await?;
+    }
+    for (position, sec) in layout.sections.iter().enumerate() {
+        let section_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO practice_sections (id, practice_id, part_id, title, position) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(&section_id)
+        .bind(practice_id)
+        .bind(sec.part.map(|key| format!("{practice_id}-{key}")))
+        .bind(&sec.title)
+        .bind(position as i64)
+        .execute(&mut *conn)
+        .await?;
+        for (table, symbols) in [
+            ("practice_quantities", &sec.quantities),
+            ("practice_results", &sec.results),
+        ] {
+            for symbol in symbols {
+                sqlx::query(&format!(
+                    "UPDATE {table} SET section_id = ?1 WHERE practice_id = ?2 AND symbol = ?3"
+                ))
+                .bind(&section_id)
+                .bind(practice_id)
+                .bind(symbol)
+                .execute(&mut *conn)
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) async fn apply_p3_layout(pool: &SqlitePool) -> anyhow::Result<()> {
+    let layout = LegacyLayout {
+        practice_id: "p3-relajacion",
+        parts: vec![
+            ("directa", "Parte 1: Relajación directa"),
+            ("desfasaje", "Parte 2: Desfasaje"),
+        ],
+        sections: vec![
+            section(
+                Some("directa"),
+                "Circuito RC y semidescarga",
+                &["R", "Rint", "C", "T_oc", "tmedio"],
+                &["tau_teorico", "tau_exp"],
+            ),
+            section(
+                Some("desfasaje"),
+                "Elipse por frecuencia",
+                &["f", "a", "b"],
+                &["tau"],
+            ),
+        ],
+    };
+    let mut tx = pool.begin().await?;
+    apply_layout(&mut tx, &layout).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub(super) async fn migrate_legacy_layout(pool: &SqlitePool) -> anyhow::Result<()> {
     let (done,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
         .bind(LEGACY_LAYOUT)
@@ -380,62 +456,17 @@ pub(super) async fn migrate_legacy_layout(pool: &SqlitePool) -> anyhow::Result<(
         return Ok(());
     }
     let mut tx = pool.begin().await?;
-    for LegacyLayout {
-        practice_id,
-        parts,
-        sections,
-    } in legacy_layouts()
-    {
+    for layout in legacy_layouts() {
         let exists: Option<(i64,)> = sqlx::query_as(
             "SELECT 1 FROM practices p WHERE p.id = ?1 \
              AND NOT EXISTS (SELECT 1 FROM practice_parts WHERE practice_id = ?1) \
              AND NOT EXISTS (SELECT 1 FROM practice_sections WHERE practice_id = ?1)",
         )
-        .bind(practice_id)
+        .bind(layout.practice_id)
         .fetch_optional(&mut *tx)
         .await?;
-        if exists.is_none() {
-            continue;
-        }
-        for (position, (key, title)) in parts.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO practice_parts (id, practice_id, title, position) VALUES (?1, ?2, ?3, ?4)",
-            )
-            .bind(format!("{practice_id}-{key}"))
-            .bind(practice_id)
-            .bind(title)
-            .bind(position as i64)
-            .execute(&mut *tx)
-            .await?;
-        }
-        for (position, sec) in sections.iter().enumerate() {
-            let section_id = Uuid::new_v4().to_string();
-            sqlx::query(
-                "INSERT INTO practice_sections (id, practice_id, part_id, title, position) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-            )
-            .bind(&section_id)
-            .bind(practice_id)
-            .bind(sec.part.map(|key| format!("{practice_id}-{key}")))
-            .bind(&sec.title)
-            .bind(position as i64)
-            .execute(&mut *tx)
-            .await?;
-            for (table, symbols) in [
-                ("practice_quantities", &sec.quantities),
-                ("practice_results", &sec.results),
-            ] {
-                for symbol in symbols {
-                    sqlx::query(&format!(
-                        "UPDATE {table} SET section_id = ?1 WHERE practice_id = ?2 AND symbol = ?3"
-                    ))
-                    .bind(&section_id)
-                    .bind(practice_id)
-                    .bind(symbol)
-                    .execute(&mut *tx)
-                    .await?;
-                }
-            }
+        if exists.is_some() {
+            apply_layout(&mut tx, &layout).await?;
         }
     }
     sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
