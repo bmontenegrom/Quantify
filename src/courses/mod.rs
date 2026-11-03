@@ -79,7 +79,7 @@ pub async fn academic_context(
 
     Ok(AcademicContext {
         courses,
-        practices: crate::db::practices(pool).await?,
+        practices: crate::db::practices_for_role(pool, &user.role).await?,
         students: if matches!(user.role.as_str(), "docente" | "admin") {
             crate::users::students(pool).await?
         } else {
@@ -176,12 +176,22 @@ pub async fn add_course_member(
     Ok(Some(()))
 }
 
-/// Habilita una práctica en un curso (o la re-habilita si estaba deshabilitada). Idempotente.
+/// Habilita una práctica **publicada** en un curso (o la re-habilita si estaba deshabilitada).
+/// Idempotente. Devuelve `false` si la práctica no existe o no está publicada (un borrador o una
+/// archivada no se ofrecen a los estudiantes).
 pub async fn enable_course_practice(
     pool: &SqlitePool,
     course_id: &str,
     input: SetCoursePractice,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
+    let published: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM practices WHERE id = ?1 AND status = 'publicada'")
+            .bind(&input.practice_id)
+            .fetch_optional(pool)
+            .await?;
+    if published.is_none() {
+        return Ok(false);
+    }
     sqlx::query(
         r#"
         INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -194,7 +204,7 @@ pub async fn enable_course_practice(
     .bind(Utc::now())
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(true)
 }
 
 /// Deshabilita una práctica en un curso: los estudiantes ya no pueden entregarla. Las entregas
@@ -236,6 +246,7 @@ pub async fn user_can_submit(
         FROM course_members cm
         JOIN lab_groups g ON g.course_id = cm.course_id
         JOIN course_practices cp ON cp.course_id = g.course_id
+        JOIN practices p ON p.id = cp.practice_id AND p.status = 'publicada'
         JOIN group_members gm ON gm.group_id = g.id
         WHERE cm.user_id = ?1
           AND g.id = ?2
@@ -282,7 +293,18 @@ async fn student_course_summaries(
     .bind(user_id)
     .fetch_all(pool)
     .await?;
-    course_summaries(pool, courses).await
+    let mut summaries = course_summaries(pool, courses).await?;
+    summaries.iter_mut().for_each(hide_unpublished);
+    Ok(summaries)
+}
+
+/// Vista del estudiante de un curso: sin prácticas archivadas ni sus subgrupos. El docente sí las
+/// ve (marcadas como archivadas), para poder deshabilitarlas o restaurarlas.
+pub(crate) fn hide_unpublished(summary: &mut CourseSummary) {
+    summary.practices.retain(|p| p.status == "publicada");
+    summary
+        .subgroups
+        .retain(|s| s.practice.status == "publicada");
 }
 
 /// Enriquece una lista de cursos con sus miembros, grupos, prácticas, subgrupos y mesas.
@@ -333,17 +355,19 @@ async fn course_members_for_course(
     .await?)
 }
 
-/// Lista las prácticas habilitadas en un curso, ordenadas por nombre.
+/// Lista las prácticas habilitadas de un curso, ordenadas por nombre: las publicadas y las
+/// archivadas (que el docente ve para poder deshabilitarlas; [`hide_unpublished`] las saca de la
+/// vista del estudiante). Una archivada no admite entregas (`user_can_submit`).
 pub async fn practices_for_course(
     pool: &SqlitePool,
     course_id: &str,
 ) -> anyhow::Result<Vec<Practice>> {
     Ok(sqlx::query_as::<_, Practice>(
         r#"
-        SELECT p.id, p.name, p.description, p.analysis_kind
+        SELECT p.id, p.name, p.description, p.analysis_kind, p.status
         FROM course_practices cp
         JOIN practices p ON p.id = cp.practice_id
-        WHERE cp.course_id = ?1 AND cp.enabled = TRUE
+        WHERE cp.course_id = ?1 AND cp.enabled = TRUE AND p.status <> 'borrador'
         ORDER BY p.name
         "#,
     )
@@ -548,9 +572,60 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("p1 está publicada y habilitada en el curso");
         assert_eq!(subgroup.name, "Sub A");
         assert_eq!(subgroup.practice_id, "p1-estadistica");
+
+        // Un borrador no admite subgrupos (llegarían a los estudiantes en el contexto académico).
+        sqlx::query(
+            "INSERT INTO practices (id, name, description, status) \
+             VALUES ('borrador-x', 'Borrador', '', 'borrador')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO course_practices (course_id, practice_id, created_at) \
+             VALUES (?1, 'borrador-x', '2026-01-01')",
+        )
+        .bind(COURSE)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let draft = create_subgroup(
+            &pool,
+            COURSE,
+            CreateSubgroup {
+                practice_id: "borrador-x".into(),
+                group_id: GROUP.into(),
+                name: "Sub B".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(draft.is_none());
+
+        // Si su práctica se archiva, el docente lo sigue viendo (marcado por el estado de la
+        // práctica) y el estudiante no.
+        sqlx::query("UPDATE practices SET status = 'archivada' WHERE id = 'p1-estadistica'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let teacher = all_course_summaries(&pool).await.unwrap();
+        let course = teacher.iter().find(|c| c.id == COURSE).unwrap();
+        assert!(course
+            .subgroups
+            .iter()
+            .any(|s| s.practice.id == "p1-estadistica" && s.practice.status == "archivada"));
+        let student = find_user(&pool, STUDENT).await;
+        let student_view = student_course_summaries(&pool, &student.id).await.unwrap();
+        let course = student_view.iter().find(|c| c.id == COURSE).unwrap();
+        assert!(course
+            .subgroups
+            .iter()
+            .all(|s| s.practice.id != "p1-estadistica"));
+        assert!(course.practices.iter().all(|p| p.id != "p1-estadistica"));
     }
 
     #[tokio::test]

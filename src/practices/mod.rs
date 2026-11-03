@@ -93,6 +93,8 @@ pub struct ResultInput {
 #[derive(Debug, Clone, Serialize)]
 pub struct PracticeDefinition {
     pub practice_id: String,
+    /// `borrador`, `publicada` o `archivada`: una publicada no puede quedar incompleta al editarla.
+    pub status: String,
     pub analysis_kind: Option<String>,
     /// Solo `regresion_lineal`: expresiones por punto de los ejes `x` e `y` del ajuste.
     pub x_formula: Option<String>,
@@ -211,10 +213,29 @@ pub struct AggregateInput {
     pub is_final: bool,
 }
 
+/// Alta de una práctica desde la UI (queda en borrador).
+#[derive(Debug, Deserialize)]
+pub struct NewPracticeInput {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub analysis_kind: String,
+}
+
+/// Nombre y descripción de una práctica (lo editable fuera de la definición).
+#[derive(Debug, Deserialize)]
+pub struct PracticeInfoInput {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 mod crud;
+mod lifecycle;
 mod seed;
 #[cfg(test)]
 mod tests;
 
 pub use crud::*;
+pub use lifecycle::*;
 pub use seed::seed_definitions;

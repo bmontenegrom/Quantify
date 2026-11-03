@@ -159,7 +159,13 @@ pub fn api_router(state: SharedState) -> Router {
             "/academic/groups/{group_id}/members/{user_id}/remove",
             post(remove_group_member_path),
         )
-        .route("/practices", get(list_practices))
+        .route("/practices", get(list_practices).post(create_practice))
+        .route(
+            "/practices/{id}",
+            post(update_practice).delete(delete_practice),
+        )
+        .route("/practices/{id}/duplicate", post(duplicate_practice))
+        .route("/practices/{id}/status", post(set_practice_status))
         .route("/practices/{id}/definition", get(practice_definition))
         .route("/practices/{id}/analyze-preview", post(analyze_preview))
         .route(
@@ -273,8 +279,8 @@ async fn list_practices(
     State(state): State<SharedState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<db::Practice>>, AppError> {
-    current_user(&state, &headers).await?;
-    Ok(Json(db::practices(&state.pool).await?))
+    let user = current_user(&state, &headers).await?;
+    Ok(Json(db::practices_for_role(&state.pool, &user.role).await?))
 }
 
 /// Lee un campo de texto de un formulario multipart, devolviendo error si no es texto válido.
