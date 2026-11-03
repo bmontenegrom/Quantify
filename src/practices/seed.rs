@@ -7,7 +7,6 @@ use super::{
 };
 use sqlx::{SqliteConnection, SqlitePool};
 
-/// Construye un `QuantityInput` (magnitud de entrada) para el seed de definiciones.
 fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> QuantityInput {
     QuantityInput {
         symbol: symbol.into(),
@@ -25,7 +24,6 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
     }
 }
 
-/// Construye un `QuantityInput` para un dato dado por la cátedra (valor ± U, sin réplicas).
 fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
     QuantityInput {
         symbol: symbol.into(),
@@ -43,34 +41,26 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
     }
 }
 
-/// Igual que [`qty_given`], pero sin campo de incertidumbre: el formulario pide solo "Valor" (sin
-/// instrumento ni U), y se computa con U = 0. Para datos de tabla que no tienen incertidumbre
-/// propia (p. ej. un tiempo leído de una tabla de referencia).
 fn no_u(mut q: QuantityInput) -> QuantityInput {
     q.has_uncertainty = false;
     q
 }
 
-/// Valor inicial del campo en el formulario (Hidrostática: ranuras vacías de la balanza de Mohr
-/// con masa 0, para que el alumno solo cargue las que usó).
 fn with_default(mut q: QuantityInput, value: f64) -> QuantityInput {
     q.default_value = Some(Some(value));
     q
 }
 
-/// Restringe el valor a una de las `n` ranuras de un instrumento (entero 1..=n).
 fn slots(mut q: QuantityInput, n: i64) -> QuantityInput {
     q.slot_count = Some(n);
     q
 }
 
-/// Marca una magnitud como opcional: puede quedar sin lecturas sin bloquear el envío.
 fn opt(mut q: QuantityInput) -> QuantityInput {
     q.optional = true;
     q
 }
 
-/// Magnitud medida **por punto con réplicas** (regresión/curva): grilla de `replicas` por punto.
 fn qty_replicas(
     symbol: &str,
     name: &str,
@@ -94,8 +84,6 @@ fn qty_replicas(
     }
 }
 
-/// Escalar **compartido** medido una sola vez (no por punto, no dato de cátedra): p. ej. la
-/// densidad medida con densímetro al final de la práctica.
 fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
     QuantityInput {
         symbol: symbol.into(),
@@ -113,7 +101,6 @@ fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityI
     }
 }
 
-/// Construye un `ResultInput` (mensurando derivado) para el seed de definiciones.
 fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
         symbol: symbol.into(),
@@ -126,7 +113,6 @@ fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     }
 }
 
-/// Igual que [`res`], pero marcado como resultado central que el alumno debe entregar.
 fn res_final(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
         is_final: true,
@@ -134,17 +120,11 @@ fn res_final(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput
     }
 }
 
-/// Igual que [`res`]/[`res_final`], pero oculta la ±U en toda la UI (reemplaza el hack
-/// `RESULTS_WITHOUT_U` del frontend). El valor propagado de fondo no cambia, solo su display.
 fn res_no_u(mut r: ResultInput) -> ResultInput {
     r.has_uncertainty = false;
     r
 }
 
-/// Siembra la definición de una práctica (magnitudes + mensurandos). Idempotente: no hace nada si
-/// la práctica ya tiene magnitudes. Devuelve `true` si la sembró ahora (`false` si ya existía),
-/// para que el llamador siembre los extras (intermedias/derivadas) solo en el alta fresca y no los
-/// re-cree si el docente los borró luego.
 async fn seed_practice(
     pool: &SqlitePool,
     practice_id: &str,
@@ -169,11 +149,6 @@ async fn seed_practice(
     Ok(true)
 }
 
-/// Borra la definición entera de una práctica (magnitudes y todo lo que cuelga de ellas, más las
-/// lecturas que las referencian) para que su `seed_*` la vuelva a sembrar de cero. Para las
-/// limpiezas de forma vieja; va dentro de la transacción del llamador, así no queda a medias
-/// (p. ej. `practice_quantities` vacía con `practice_results` viejos, que chocarían con
-/// `UNIQUE(practice_id, symbol)` al resembrar). No toca entregas ni la asignación a cursos.
 async fn wipe_practice_definition(
     conn: &mut SqliteConnection,
     practice_id: &str,
@@ -201,9 +176,6 @@ async fn wipe_practice_definition(
     Ok(())
 }
 
-/// `true` si la práctica no tiene una magnitud con ese símbolo. Para migraciones puntuales que
-/// agregan símbolos nuevos a una práctica ya sembrada (`seed_practice` es idempotente y no
-/// re-siembra), evitando duplicar el `INSERT` en una base que ya los tiene.
 async fn quantity_missing(
     pool: &SqlitePool,
     practice_id: &str,
@@ -219,7 +191,6 @@ async fn quantity_missing(
     Ok(count.0 == 0)
 }
 
-/// Igual que [`quantity_missing`], para mensurandos derivados.
 async fn result_missing(
     pool: &SqlitePool,
     practice_id: &str,
@@ -235,16 +206,7 @@ async fn result_missing(
     Ok(count.0 == 0)
 }
 
-/// Siembra P1 (ver [`seed_definitions`]).
 async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
-    // P1 — Tratamiento estadístico de datos (péndulo simple), con 3 operadores independientes:
-    // cada uno mide su propia serie de períodos (T1/T2/T3, cronómetro, sin cruzar datos entre
-    // operadores) y tiene su propio g1/g2/g3 = 4*pi^2*L/T{n}^2. Operador 1 obligatorio; 2 y 3
-    // opcionales (el alumno puede no cargarlos). L (cátedra), t_med y los mensurandos gamma/Q son
-    // únicos para toda la práctica (no por operador). t_med ("t_1/2") es un dato de tabla sin
-    // incertidumbre propia: solo pide el campo "Valor" (`no_u`, sin instrumento ni U). gamma y Q
-    // se muestran sin ±U (`res_no_u`) aunque Q sí propaga, de fondo, la incertidumbre real del
-    // período (usa el del operador 1 — ver el nombre del mensurando).
     seed_practice(
         pool,
         "p1-estadistica",
@@ -294,24 +256,8 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
         ],
     )
     .await?;
-    // Migración de forma: la definición original tenía un único T/g compartidos; ahora son T1/T2/T3
-    // y g1/g2/g3 por operador, más el flag `has_uncertainty` en t_med/gamma/Q. `seed_practice` es
-    // idempotente y no re-siembra sobre una base ya sembrada, así que las instalaciones existentes
-    // necesitan este backfill puntual (no-op en instalaciones nuevas, que ya siembran la forma final
-    // arriba). Cada bloque corre una única vez, guardado por el símbolo nuevo que da de alta: una
-    // vez que T1/g1 existen, no se vuelve a tocar (así no se pisan ediciones del admin sobre
-    // has_uncertainty/optional/formula hechas después de la migración).
     if quantity_missing(pool, "p1-estadistica", "T1").await? {
-        // Una sola transacción: si el proceso muere a mitad de camino (p. ej. despues de borrar
-        // `T` pero antes de insertar T2/T3), `quantity_missing(pool, "T1")` ya daria `false` en
-        // el siguiente boot (T1 si se llego a insertar) y el bloque no se volveria a correr,
-        // dejando la migracion incompleta para siempre.
         let mut tx = pool.begin().await?;
-        // Borra primero las mediciones que referencian la magnitud vieja: `submission_measurements
-        // .quantity_id` tiene FK a `practice_quantities(id)` sin `ON DELETE CASCADE`, así que
-        // borrar la magnitud con mediciones reales cargadas violaría la constraint (con
-        // `foreign_keys` activo) y tiraría el boot abajo. Si hubiera entregas reales sobre `T`,
-        // se descartan sus mediciones en vez de eso.
         sqlx::query(
             "DELETE FROM submission_measurements WHERE quantity_id IN \
              (SELECT id FROM practice_quantities WHERE practice_id = 'p1-estadistica' AND symbol = 'T')",
@@ -339,7 +285,6 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
         {
             insert_quantity(&mut tx, "p1-estadistica", base_pos.0 + i as i64 + 1, q).await?;
         }
-        // t_med sin instrumento/U, T2/T3 opcionales: forma vieja de la base no tenía estos flags.
         sqlx::query(
             "UPDATE practice_quantities SET has_uncertainty = 0 \
              WHERE practice_id = 'p1-estadistica' AND symbol = 't_med'",
@@ -355,8 +300,6 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
         tx.commit().await?;
     }
     if result_missing(pool, "p1-estadistica", "g1").await? {
-        // Misma razón que la migración de arriba: todo o nada, para no quedar con g1 insertado
-        // pero g2/g3 faltantes si el proceso muere a mitad de camino.
         let mut tx = pool.begin().await?;
         sqlx::query(
             "DELETE FROM practice_results WHERE practice_id = 'p1-estadistica' \
@@ -395,8 +338,6 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
         {
             insert_result(&mut tx, "p1-estadistica", base_pos.0 + i as i64 + 1, r).await?;
         }
-        // gamma/Q sin ±U, y Q pasa a referenciar T1 (antes T): forma vieja de la base no tenía
-        // `has_uncertainty` ni el operador explícito en la fórmula/nombre.
         sqlx::query(
             "UPDATE practice_results SET has_uncertainty = 0 \
              WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q')",
@@ -412,21 +353,12 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
         tx.commit().await?;
     }
-    // gamma/Q pasaron a ser resultado final después del alta inicial de la práctica: invariante que
-    // se re-aplica en cada boot (no solo en la migración de forma de arriba) para autocurar bases
-    // donde haya quedado en `is_final = 0` por cualquier motivo.
     sqlx::query(
         "UPDATE practice_results SET is_final = 1 \
          WHERE practice_id = 'p1-estadistica' AND symbol IN ('gamma', 'Q') AND is_final = 0",
     )
     .execute(pool)
     .await?;
-    // `operator_count` (Motor D) es de una epoca anterior a T1/T2/T3: dividia UNA magnitud
-    // repetida ("T") en N series, una por operador. Ahora cada operador ya es un simbolo propio
-    // (T1/T2/T3, con su propio tab y su propio g_i), asi que Motor D queda incompatible: si
-    // quedo seteado (p. ej. desde el admin, antes de este rediseño) vuelve a tratar T1/T2/T3 como
-    // si fueran 3 series del mismo operador, mostrando 3 cronometros por tab en vez de 1 y
-    // triplicando los mensurandos derivados. Se autocura en cada boot.
     sqlx::query(
         "UPDATE practices SET operator_count = NULL \
          WHERE id = 'p1-estadistica' AND operator_count IS NOT NULL",
@@ -436,18 +368,12 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra P3 parte 1 (ver [`seed_definitions`]).
 async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
-    // P3 — Relajación exponencial (parte 1, determinación directa de tau en un RC serie).
-    // tau_teorico = (R + Rint)*C ; tau_exp = t_medio/ln2 (porque t_1/2 = tau*ln2).
-    // Unidades SI (ohm, F, s) para que tau salga en segundos. Tipo A despreciable -> medida unica.
-    // (La parte 2 por desfasaje es regresion_lineal y se agregara cuando este implementada.)
     seed_practice(
         pool,
         "p3-relajacion",
         &[
             qty("R", "Resistencia", "ohm", false, "resistencia"),
-            // Rint es un dato entregado por la cátedra (valor ± U), no lo mide el alumno.
             qty_given(
                 "Rint",
                 "Resistencia interna de la fuente",
@@ -455,8 +381,6 @@ async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
                 "resistencia",
             ),
             qty("C", "Capacitancia", "F", false, "capacitancia"),
-            // Periodo de la onda cuadrada de trabajo (se registra; debe permitir ver ~5*tau
-            // en el semiperiodo de descarga). No entra en las formulas, queda como dato medido.
             qty("T_oc", "Periodo de la onda cuadrada", "s", false, "tiempo"),
             qty(
                 "tmedio",
@@ -485,26 +409,7 @@ async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra P2-CC (ver [`seed_definitions`]).
 async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
-    // P2 — Corriente continua unificada: una sola entrega con tres partes tematicas.
-    // Escalares compartidos: R1, R2 y R3 se miden UNA vez (ohmetro) y valen para toda la
-    // practica; Vg y RA pueden cambiar entre partes, asi que se miden por parte (sufijos
-    // _s = serie, _p = paralelo, _c = curva de potencia). Los voltajes VRi_s / VRi_p se miden
-    // con multimetro y se comparan con las teoricas VRi_s_t / VRi_p_t (resultados finales que
-    // el alumno calcula a mano con propagacion). Por punto: R (carga variable) e I; intermedia
-    // P = I^2*R y curva P vs R. Los finales experimentales de potencia (P_max_e / RP_max_e)
-    // usan los alias de extremos del camino curva (`P_max`, `R_at_P_max`) con U = 0; el admin
-    // los acepta al validar la formula (`result_scope` en routes/practice_admin.rs).
-    // Migración de forma: mientras se desarrollaba la unificación (#43) algunas bases quedaron
-    // sembradas con una forma intermedia de p2-cc (símbolos con sufijo _serie/_paralelo/_potencia,
-    // p. ej. `Vg_serie`/`RA_serie`, en vez de los `_s`/`_p`/`_c` actuales). `seed_practice` es
-    // idempotente y no resiembra sobre una base que ya tiene filas, así que esas bases quedan
-    // desincronizadas de PRACTICE_SECTIONS (constants.js) para siempre: el front no encuentra los
-    // símbolos esperados, no arma `data-section` y las tabs Serie/Paralelo/Potencia dejan de
-    // separar sus campos. No hay mediciones reales bajo esa forma intermedia (era de desarrollo),
-    // así que en vez de renombrar símbolo a símbolo se limpia todo p2-cc y se deja que el seed de
-    // abajo lo siembre de cero con la forma final.
     if !quantity_missing(pool, "p2-cc", "R").await?
         && quantity_missing(pool, "p2-cc", "Vg_s").await?
     {
@@ -520,8 +425,6 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("R2", "Resistencia R2 (compartida)", "ohm", "resistencia"),
             qty_shared("R3", "Resistencia R3 (compartida)", "ohm", "resistencia"),
             qty_shared("Vg_s", "Voltaje de la fuente", "V", "voltaje"),
-            // RA es un dato de tabla segun la escala del amperimetro, no se mide: va como dato
-            // dado por catedra (valor +/- U), igual en las tres partes.
             qty_given(
                 "RA_s",
                 "Resistencia interna del amperimetro",
@@ -665,12 +568,7 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra P3 parte 2 (ver [`seed_definitions`]).
 async fn seed_p3_relajacion_desfasaje(pool: &SqlitePool) -> anyhow::Result<()> {
-    // P3 — parte 2 (desfasaje por figura de Lissajous). El alumno carga una serie de puntos
-    // con f, a y b; las fórmulas de eje (en `practices.x_formula`/`y_formula`) derivan
-    // x = 2*pi*f (= omega) y y = b/sqrt(a^2 - b^2) (= tg phi). La pendiente del ajuste es
-    // RC = tau, que se referencia con el símbolo especial `slope`.
     seed_practice(
         pool,
         "p3-relajacion-desfasaje",
@@ -697,13 +595,7 @@ async fn seed_p3_relajacion_desfasaje(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra Fluidos I (ver [`seed_definitions`]).
 async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
-    // Fluidos I — viscosidad por Hagen-Poiseuille. Por altura (punto) se miden V y t con 2
-    // réplicas; Q = V/t (intermedia, promedio por punto). Ejes: 1/Q vs h/Q^2 (set en seed_practices).
-    // Escalares compartidos: R, L, g (cátedra) y rho (medida única). `Temp` se registra solo como
-    // referencia (para buscar la viscosidad de tablas a esa temperatura): no entra en ninguna
-    // fórmula y va sin incertidumbre. Mensurando mu desde la pendiente; Reynolds por corrida.
     let fresh = seed_practice(
         pool,
         "fluidos-1",
@@ -730,9 +622,6 @@ async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
         )],
     )
     .await?;
-    // Intermedia Q (Motor C) y derivada por corrida Reynolds (Motor E): solo en el alta fresca,
-    // para no re-crearlas si el docente las edita/borra luego (`analysis_kind`/fórmulas se preservan
-    // en `seed_practices`).
     if fresh {
         create_intermediate(
             pool,
@@ -760,12 +649,7 @@ async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra Viscosidad (ver [`seed_definitions`]).
 async fn seed_viscosidad(pool: &SqlitePool) -> anyhow::Result<()> {
-    // Viscosidad (Stokes) — ajuste v_lim vs R^2 (ejes en seed_practices: x=R^2, y=dx/t). Por esfera
-    // (punto): R (un valor) y t (5 réplicas → Motor A promedia → t medio, así y = dx/t = v_lim).
-    // Escalares compartidos: dx, rho_e, rho_f (medida única), g (cátedra); Temp de referencia.
-    // Mensurando mu = (rho_e - rho_f)*2*g/(9*slope); Reynolds por corrida. Sin intermedia.
     let fresh_visc = seed_practice(
         pool,
         "viscosidad",
@@ -804,8 +688,6 @@ async fn seed_viscosidad(pool: &SqlitePool) -> anyhow::Result<()> {
         )
         .await?;
     }
-    // Auto-curación: rho_e (densidad del acero) es un dato dado con incertidumbre, no una medida
-    // con instrumento. Re-aplica en cada boot para bases sembradas antes del cambio.
     sqlx::query(
         "UPDATE practice_quantities SET is_given = 1 \
          WHERE practice_id = 'viscosidad' AND symbol = 'rho_e' AND is_given = 0",
@@ -815,16 +697,7 @@ async fn seed_viscosidad(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra Fluidos II (ver [`seed_definitions`]).
 async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
-    // Fluidos II — descarga de un recipiente por un capilar. Por punto: h (altura) y t (tiempo, con
-    // t=0 en la altura maxima). Ejes (en seed_practices): x = sqrt(h_max) - sqrt(h), y = t. La
-    // pendiente da M_medio = 2*g*(slope*R_cap^2/(2*R_recip^2))^2 - 2 (coef. medio de perdidas).
-    // Escalares compartidos: R_cap, L_cap, R_recip (medidos con regla, con incertidumbre), g
-    // (catedra), rho (densimetro al final), mu_agua (viscosidad del agua de tabla segun T), kp
-    // (factor geometrico K, def. 0.78, editable) y h_max (altura inicial). Temp es referencia.
-    // Mensurandos agregados (Motor F): Reynolds max/min usan el primer/ultimo par de puntos,
-    // Reynolds medio los promedia y M_teorico cierra con la formula de la cuaderneta.
     let fresh_f2 = seed_practice(
         pool,
         "fluidos-2",
@@ -864,10 +737,6 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
         )],
     )
     .await?;
-    // Mensurandos agregados (Motor F): se crean en orden porque se encadenan (Re_medio usa
-    // Re_max/Re_min; M_teorico usa Re_medio). Solo en el alta fresca, para no re-crearlos si el
-    // docente los edita/borra luego. Reynolds max/min referencian el primer/ultimo par de puntos
-    // (h_first/h_first2/t_first/t_first2 y h_last/h_last2/t_last/t_last2, alias del Motor F).
     if fresh_f2 {
         for input in [
             AggregateInput {
@@ -906,7 +775,6 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
             create_aggregate(pool, "fluidos-2", input).await?;
         }
     }
-    // Auto-curación: re-aplica en cada boot para bases que hayan quedado a medio migrar.
     sqlx::query(
         "UPDATE practice_quantities SET has_uncertainty = 0, is_given = 1 \
          WHERE practice_id = 'fluidos-2' AND symbol IN ('mu_agua', 'kp') \
@@ -924,23 +792,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra Filtros (ver [`seed_definitions`]).
 async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
-    // Filtros — barrido en frecuencia de un circuito RLC. Por punto: f (frecuencia fijada por el
-    // alumno), VRpp y Vgpp (tensiones pico a pico medidas), a y b (semiejes de la figura de
-    // Lissajous). R, C1 y C2 se miden una vez con instrumento (no son dados); fpasaje_exp y
-    // fbloqueo_exp tambien se miden una vez, con el osciloscopio (frecuencia de pasaje/bloqueo
-    // observada). El unico dato dado por la catedra es L. Intermedias: omega=2*pi*f (rad/s),
-    // razon=VRpp/Vgpp (adimensional), phi=asin(b/a) (rad). Dos curvas (Motor B): razon vs omega
-    // (amplitud) y phi vs omega (desfasaje), ambas con eje x logaritmico. Mensurandos teoricos,
-    // comparables contra la frecuencia experimental medida (is_final): fpasaje=1/(2*pi*sqrt(L*
-    // (C1+C2))) y fbloqueo=1/(2*pi*sqrt(L*C2)). Topologia confirmada: C2||L en serie con C1 y R.
-    //
-    // Migración de forma: la práctica quedó sembrada originalmente con R/C1/C2 como `qty_given`
-    // (valor ± U cargado a mano) cuando en realidad son medidos por el alumno con instrumento, y
-    // sin fpasaje_exp/fbloqueo_exp. `seed_practice` no resiembra sobre una base ya presente, así
-    // que se limpia y se resiembra con la forma final (no hay mediciones reales bajo la forma
-    // vieja, la práctica es reciente).
     if !quantity_missing(pool, "filtros", "L").await? {
         let given_r: (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM practice_quantities \
@@ -988,9 +840,6 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_given("L", "Inductor", "H", "inductancia"),
         ],
         &[
-            // Topología: C2||L en serie con C1 y R.
-            // Resonancia serie (pasaje): f = 1/(2π√(L(C1+C2)))
-            // Resonancia paralelo del tanque (bloqueo): f = 1/(2π√(LC2))
             res_final(
                 "fpasaje",
                 "Frecuencia de pasaje teorica",
@@ -1037,9 +886,6 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
             .await?;
         }
     }
-    // Auto-curación: re-aplica el flag correcto en cada boot para bases que hayan quedado a
-    // medio migrar (p. ej. la migración de forma de arriba ya corrió una vez, pero R/C1/C2 o
-    // fpasaje/fbloqueo quedaron con el flag viejo por algún otro motivo).
     sqlx::query(
         "UPDATE practice_quantities SET is_given = 0 \
          WHERE practice_id = 'filtros' AND symbol IN ('R', 'C1', 'C2') AND is_given = 1",
@@ -1052,8 +898,6 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
-    // Nombres corregidos después del alta (subíndice de los capacitores, sin sufijo de
-    // instrumento en las frecuencias experimentales): se resincronizan en cada boot.
     for (sym, name) in [
         ("C1", "Capacitor C_1"),
         ("C2", "Capacitor C_2"),
@@ -1073,18 +917,7 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra CA/RLC (ver [`seed_definitions`]).
 pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
-    // CA (RLC) — circuito serie con generador Vg y componentes R, C, L (R, C y Vg medidos con
-    // instrumento; L dato de catedra). Por canal (R, C, L) se mide el voltaje pico a pico
-    // (VRpp/VCpp/VLpp) y los semiejes de Lissajous (a_X/b_X, con el osciloscopio) para el
-    // desfasaje experimental
-    // phiX_exp = asin(b_X/a_X). El motor `estadistico` no encadena mensurandos entre si (cada
-    // `ResultInput` se evalua solo contra las magnitudes), asi que cada formula de abajo va
-    // expandida completa en terminos de R/C/L/Vg/f_trabajo — no hay `omega`/`Z` intermedios
-    // reutilizables. Topologia RLC serie estandar; tensiones pico a pico y signos de fase
-    // confirmados con el docente (no hay hoja real de esta practica, a diferencia de las otras
-    // 6 de Fase 15, pero se validaron directamente).
     let omega = "(2*pi*f_trabajo)";
     let xl = format!("({omega}*L)");
     let xc = format!("(1/({omega}*C))");
@@ -1099,8 +932,6 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("C", "Capacitor", "F", "capacitancia"),
             qty_given("L", "Inductor", "H", "inductancia"),
             qty_shared("Vg", "Voltaje en el generador", "V", "voltaje"),
-            // Frecuencia de resonancia experimental: se mide con el osciloscopio (barriendo
-            // f_trabajo hasta la condicion de resonancia), no se deriva de otras magnitudes.
             qty_shared(
                 "f_res_exp",
                 "Frecuencia de resonancia experimental",
@@ -1111,9 +942,6 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
             qty_shared("VRpp", "Voltaje en la resistencia", "V", "voltaje"),
             qty_shared("VCpp", "Voltaje en el capacitor", "V", "voltaje"),
             qty_shared("VLpp", "Voltaje en el inductor", "V", "voltaje"),
-            // a/b: semiejes de Lissajous medidos con el osciloscopio; phi_exp = asin(b/a). El
-            // símbolo (a_R/b_R...) ya se muestra antes del nombre en el formulario
-            // (SYMBOL_FIRST_QUANTITIES en constants.js), así que el nombre no repite la letra.
             qty_shared("a_R", "Semieje mayor de Lissajous - R", "V", "voltaje"),
             qty_shared("b_R", "Semieje menor de Lissajous - R", "V", "voltaje"),
             qty_shared("a_C", "Semieje mayor de Lissajous - C", "V", "voltaje"),
@@ -1210,44 +1038,11 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Cantidad de ranuras calibradas del brazo de la balanza de Mohr (1 cm .. 9 cm). La decima
-/// posicion es el brazo fijo del que pende la goma (`b_E` = 10 cm), no una ranura.
 const MOHR_RANURAS: usize = 9;
 
-/// Cantidad de determinaciones independientes de cada parte (la tecnica pide 3 y promediar).
 const HIDRO_MEDIDAS: usize = 3;
 
-/// Siembra Hidrostatica y Tension Superficial (ver [`seed_definitions`]).
 pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
-    // Hidrostatica y Tension Superficial — dos partes en una sola entrega, ambas estadisticas.
-    //
-    // Parte 1 (Arquimedes con balanza de Mohr): se pesa la goma en la balanza digital (m_goma) y se
-    // mide la densidad del fluido con densimetro (rho_f). Con la goma sumergida se reequilibra la
-    // balanza colocando pesas en las ranuras calibradas; el balance de torques da
-    //     E * b_E = sum(m_i * g * b_i)  =>  E = sum(m_i * b_i) * g / b_E
-    // y dividiendo el empuje por el peso de la goma:
-    //     rho_goma = rho_f * m_goma * b_E / sum(m_i * b_i)
-    // Se repite 3 veces con pesas y posiciones distintas y se promedia (la U del promedio sale por
-    // propagacion desde las 3 determinaciones, como pide la tecnica).
-    //
-    // Las 9 ranuras se cargan siempre: la que no se uso queda en masa 0 (`with_default`, el
-    // formulario ya la trae en 0) y sin instrumento, asi que no aporta ni valor ni incertidumbre.
-    //
-    // Parte 2 (tension superficial por el metodo de Wilhelmy), sobre la misma balanza de Mohr: el
-    // marco de base l cuelga del brazo fijo d (10 cm, dato dado como b_E) y el torque de la
-    // pelicula se sustituye por el de una pesa mw en una de las 9 ranuras, dw = 1..9 cm (dato
-    // dado, `slot_count` = 9, no una distancia medida con regla):
-    //     2*gamma*l*d = mw*g*dw  =>  gamma = mw*g*dw/(2*l*d)
-    // La tecnica indica explicitamente que esta parte **no informa incertidumbre**, de ahi los
-    // `res_no_u` y que d/dw_k no tengan campo U (`no_u`).
-    //
-    // Unidades: masas en g y brazos/distancias en cm (como se leen), asi que las formulas de E y
-    // gamma llevan los factores de conversion a kg/m explicitos para dar N y N/m. En rho_goma las
-    // unidades se cancelan (es un cociente) y quedaria en las de rho_f (g/cm3, como lo lee el
-    // densimetro); se multiplica por 1000 para informarla en kg/m3.
-    //
-    // El motor `estadistico` no encadena mensurandos entre si (cada formula se evalua solo contra
-    // las magnitudes), asi que las sumas y los promedios van expandidos, como en `seed_ca_rlc`.
     let mut quantities = vec![
         qty_shared("m_goma", "Masa de la goma", "g", "masa"),
         qty_shared("rho_f", "Densidad del fluido", "g/cm3", "densidad"),
@@ -1262,8 +1057,6 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
             10.0,
         ),
     ];
-    // Brazos de las ranuras: dados por la balanza (1 cm .. 9 cm), con su incertidumbre de
-    // calibracion (u = 0.5 mm => U = 0.1 cm), precargados para que el alumno no los tipee.
     for i in 1..=MOHR_RANURAS {
         quantities.push(with_default(
             qty_given(
@@ -1275,7 +1068,6 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
             i as f64,
         ));
     }
-    // Masas colocadas en cada ranura, por determinacion. Las no usadas quedan en 0.
     for k in 1..=HIDRO_MEDIDAS {
         for i in 1..=MOHR_RANURAS {
             quantities.push(with_default(
@@ -1289,10 +1081,6 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
             ));
         }
     }
-    // Parte 2 (Wilhelmy): sobre la misma balanza de Mohr, asi que las distancias son las ranuras
-    // calibradas, no medidas con regla. El marco cuelga del brazo fijo (10 cm, como la goma) y la
-    // pesa va en una de las 9 ranuras: el alumno anota en cual (1..9 cm). Sin campo U: todos los
-    // mensurandos de la parte 2 son `res_no_u`, asi que una U de la ranura no se mostraria nunca.
     quantities.push(qty_shared("l", "Base del marco", "cm", "longitud"));
     quantities.push(with_default(
         no_u(qty_given("d", "Brazo fijo del marco", "cm", "longitud")),
@@ -1316,19 +1104,14 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
         ));
     }
 
-    // sum(m_i * b_i) de la determinacion k, en g*cm.
     let torque = |k: usize| {
         (1..=MOHR_RANURAS)
             .map(|i| format!("m{k}_{i}*b{i}"))
             .collect::<Vec<_>>()
             .join(" + ")
     };
-    // E = sum(m_i*b_i)/b_E * g, con las masas en g -> /1000 para dar N.
     let empuje = |k: usize| format!("(({})/b_E)*g_ac/1000", torque(k));
-    // rho_goma = rho_f * m_goma * b_E / sum(m_i*b_i); las unidades se cancelan y queda en las de
-    // rho_f (g/cm3, como lo lee el densimetro), *1000 para darla en kg/m3.
     let densidad = |k: usize| format!("rho_f*m_goma*b_E*1000/({})", torque(k));
-    // gamma = mw*g*dw/(2*l*d), con mw en g (/1000) y l en cm (*100) -> N/m.
     let gamma = |k: usize| format!("mw{k}*g_ac*dw{k}*100/(2*l*d*1000)");
     let promedio = |partes: [String; HIDRO_MEDIDAS]| {
         format!("(({}) + ({}) + ({}))/3", partes[0], partes[1], partes[2])
@@ -1380,22 +1163,10 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Nombre con el que [`reset_legacy_hidrostatica`] queda registrada en `applied_migrations`.
 const HIDRO_RESET: &str = "2026-11-hidrostatica-ranuras";
 
-/// Nombre con que [`fix_ca_rlc_labels`] queda registrada en `applied_migrations`.
 const CA_RLC_FIX: &str = "2026-11-ca-rlc-correcciones";
 
-/// Bases sembradas antes de que la parte 2 usara las ranuras de la balanza (densidad en g/cm³,
-/// `d`/`dw_k` medidos con regla): `seed_hidrostatica` es idempotente y no re-siembra, así que se
-/// borra Hidrostática entera (definición y entregas) para que la siembre de cero con la forma
-/// actual. Las entregas de esa forma eran de prueba (decisión de la cátedra): no se conservan.
-///
-/// Corre **una sola vez** por base (queda en `applied_migrations`) y sin mirar marcas de forma:
-/// si Hidrostática ya está sembrada cuando corre, es de antes de este cambio (en una base nueva
-/// corre antes de `seed_hidrostatica`, con la práctica vacía, y no borra nada). Así no importa si
-/// el docente renombró o recreó magnitudes, ni puede dispararlo de nuevo después. Todo en una
-/// transacción. No toca la asignación de la práctica a cursos ni a mesas.
 pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     let done: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
         .bind(HIDRO_RESET)
@@ -1441,18 +1212,6 @@ pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Resu
     Ok(())
 }
 
-/// Corrige en bases ya sembradas (antes del 2026-08-07) los nombres/fórmulas de CA/RLC que
-/// cambiaron de "Tension" a "Voltaje" y de radianes a grados en los desfasajes (`seed_ca_rlc` es
-/// idempotente y no re-siembra una práctica que ya tiene magnitudes). Solo toca filas que todavía
-/// están en el estado viejo (`quantity = 'tension'`, `unit = 'rad'`), así que no pisa ediciones
-/// del docente sobre estos mismos campos. También borra `I_exp`: la corriente no se mide en el
-/// circuito, solo se deriva (`I_teo`); no tiene FK entrante (no aparece en mediciones ni en
-/// `submission_student_results`, que referencian por símbolo texto, no por id).
-///
-/// Corre **una sola vez** por base (`applied_migrations`): desde que el docente puede renombrar,
-/// borrar y reordenar magnitudes y mensurandos, repetirla en cada arranque desharía sus cambios
-/// (y fallaba si `f_trabajo` ya no existía). Si falla a mitad de camino no queda marcada y vuelve
-/// a correr: cada paso es idempotente.
 pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
     let already: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
         .bind(CA_RLC_FIX)
@@ -1469,8 +1228,6 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
-    // f_res_exp: magnitud nueva (se mide con el osciloscopio), no existia en la siembra original.
-    // Va arriba de f_trabajo: se corre +1 la posicion de f_trabajo en adelante y se inserta ahi.
     let f_trabajo: Option<(i64,)> = sqlx::query_as(
         "SELECT position FROM practice_quantities WHERE practice_id = 'ca-rlc' AND symbol = 'f_trabajo'",
     )
@@ -1480,8 +1237,6 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         quantity_missing(pool, "ca-rlc", "f_res_exp").await?,
         f_trabajo,
     ) {
-        // Corrimiento e inserción juntos: si se cortara entre los dos, el próximo arranque
-        // volvería a correr las posiciones.
         let mut tx = pool.begin().await?;
         sqlx::query(
             "UPDATE practice_quantities SET position = position + 1 \
@@ -1505,8 +1260,6 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         tx.commit().await?;
     }
 
-    // Reordena f_res_exp arriba de f_trabajo si quedo mal ubicada: una version anterior de esta
-    // migracion la insertaba al final en vez de antes de f_trabajo.
     let mut tx = pool.begin().await?;
     {
         let stray_position: Option<(i64, i64)> = sqlx::query_as(concat!(
@@ -1537,8 +1290,6 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
     }
     tx.commit().await?;
 
-    // Quita el "(a)"/"(b)" que una version anterior de esta migracion agrego al nombre: quedo
-    // redundante en cuanto el símbolo se empezó a mostrar antes del nombre en el formulario.
     for symbol in ["a_R", "b_R", "a_C", "b_C", "a_L", "b_L"] {
         sqlx::query(
             "UPDATE practice_quantities SET name = REPLACE(REPLACE(name, ' (a)', ''), ' (b)', '') \
@@ -1590,8 +1341,6 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
-    // Desfasajes: rad -> grados, misma formula que en seed_ca_rlc (ver alli el detalle de
-    // omega/xl/xc/phi_teo). Se gatea en `unit = 'rad'` (marca de que todavia no se migro).
     let omega = "(2*pi*f_trabajo)";
     let xl = format!("({omega}*L)");
     let xc = format!("(1/({omega}*C))");
@@ -1622,10 +1371,6 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Siembra las definiciones iniciales de las prácticas (idempotente por práctica, ver
-/// [`seed_practice`]). Las magnitudes/fórmulas salen de las técnicas de trabajo de Física 103.
-/// Cada práctica es independiente (no comparten estado entre sí); una función por práctica
-/// mantiene cada una navegable por separado en vez de un único bloque de ~700 líneas.
 pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_p1_estadistica(pool).await?;
     seed_p3_relajacion(pool).await?;

@@ -1,6 +1,3 @@
-//! Handlers de `/api/users`, `/api/grades*` y `/api/academic/*`: usuarios, calificaciones,
-//! cursos, grupos y subgrupos.
-
 use super::{
     current_user, is_valid_email, not_blank, require_teacher, validate_password, Health,
     SharedState,
@@ -12,7 +9,6 @@ use axum::{
     Json,
 };
 
-/// `GET /api/users`: lista de usuarios (solo docente/admin).
 pub(super) async fn users(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -21,7 +17,6 @@ pub(super) async fn users(
     Ok(Json(db::users(&state.pool).await?))
 }
 
-/// `POST /api/users`: crea un usuario (solo docente/admin) validando email, rol y contraseña.
 pub(super) async fn create_user(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -38,7 +33,6 @@ pub(super) async fn create_user(
     Ok(Json(db::create_user(&state.pool, input).await?))
 }
 
-/// `POST /api/users/{id}/password`: restablece la contraseña de un usuario (solo docente/admin).
 pub(super) async fn reset_password(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -53,7 +47,6 @@ pub(super) async fn reset_password(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/users/{id}`: actualiza email, nombre y rol de un usuario (solo docente/admin).
 pub(super) async fn update_user(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -73,7 +66,6 @@ pub(super) async fn update_user(
     Ok(Json(updated))
 }
 
-/// `GET /api/grades`: libreta de calificaciones según el rol del usuario autenticado.
 pub(super) async fn grades(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -82,7 +74,6 @@ pub(super) async fn grades(
     Ok(Json(db::gradebook_for_user(&state.pool, &user).await?))
 }
 
-/// `POST /api/grades/components`: crea un componente evaluable (solo docente/admin), validando tipo y puntajes.
 pub(super) async fn create_grade_component(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -99,7 +90,6 @@ pub(super) async fn create_grade_component(
     Ok(Json(db::create_grade_component(&state.pool, input).await?))
 }
 
-/// `POST /api/grades/scores`: carga o actualiza el puntaje de un estudiante (solo docente/admin).
 pub(super) async fn upsert_grade_score(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -115,7 +105,6 @@ pub(super) async fn upsert_grade_score(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `GET /api/academic/context`: contexto académico (cursos/grupos/prácticas) según el rol.
 pub(super) async fn academic_context(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -124,7 +113,6 @@ pub(super) async fn academic_context(
     Ok(Json(db::academic_context(&state.pool, &user).await?))
 }
 
-/// `POST /api/academic/courses`: crea un curso (solo docente/admin).
 pub(super) async fn create_course(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -136,7 +124,6 @@ pub(super) async fn create_course(
     Ok(Json(db::create_course(&state.pool, input).await?))
 }
 
-/// `POST /api/academic/courses/{id}`: actualiza un curso (solo docente/admin).
 pub(super) async fn update_course(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -152,7 +139,6 @@ pub(super) async fn update_course(
     Ok(Json(updated))
 }
 
-/// `POST /api/academic/courses/{id}/groups`: crea un grupo en el curso (solo docente/admin).
 pub(super) async fn create_group(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -169,7 +155,6 @@ pub(super) async fn create_group(
     ))
 }
 
-/// `POST /api/academic/groups/{id}`: actualiza un grupo (solo docente/admin).
 pub(super) async fn update_group(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -187,12 +172,10 @@ pub(super) async fn update_group(
     Ok(Json(updated))
 }
 
-/// Valida que la cantidad de mesas esté en el rango permitido (1..=24).
 fn valid_group_table_count(value: i64) -> bool {
     (1..=24).contains(&value)
 }
 
-/// `POST /api/academic/courses/{id}/subgroups`: crea un subgrupo de práctica (solo docente/admin).
 pub(super) async fn create_subgroup(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -203,12 +186,16 @@ pub(super) async fn create_subgroup(
     not_blank(&input.name, "nombre de subgrupo es requerido")?;
     not_blank(&input.practice_id, "practica es requerida")?;
     not_blank(&input.group_id, "grupo es requerido")?;
-    Ok(Json(
-        db::create_subgroup(&state.pool, &course_id, input).await?,
-    ))
+    db::create_subgroup(&state.pool, &course_id, input)
+        .await?
+        .map(Json)
+        .ok_or_else(|| {
+            AppError::bad_request(
+                "Solo se crean subgrupos de una practica publicada y habilitada en el curso.",
+            )
+        })
 }
 
-/// `POST /api/academic/groups/{id}/members`: agrega un estudiante a un grupo (solo docente/admin).
 pub(super) async fn add_group_member(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -222,7 +209,6 @@ pub(super) async fn add_group_member(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/academic/courses/{id}/members`: inscribe un estudiante en un curso (solo docente/admin).
 pub(super) async fn add_course_member(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -236,7 +222,6 @@ pub(super) async fn add_course_member(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/academic/groups/{id}/members/remove`: quita un estudiante de un grupo (body con `user_id`).
 pub(super) async fn remove_group_member(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -251,7 +236,6 @@ pub(super) async fn remove_group_member(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/academic/groups/{group_id}/members/{user_id}/remove`: variante que toma ambos ids en la ruta.
 pub(super) async fn remove_group_member_path(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -265,7 +249,6 @@ pub(super) async fn remove_group_member_path(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/academic/groups/{id}/practice-table`: el usuario elige su mesa para una práctica del grupo.
 pub(super) async fn set_practice_table(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -282,7 +265,6 @@ pub(super) async fn set_practice_table(
     Ok(Json(assignment))
 }
 
-/// `POST /api/academic/courses/{id}/practices`: habilita una práctica en el curso (solo docente/admin).
 pub(super) async fn enable_course_practice(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -290,12 +272,14 @@ pub(super) async fn enable_course_practice(
     Json(input): Json<db::SetCoursePractice>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    db::enable_course_practice(&state.pool, &course_id, input).await?;
+    if !db::enable_course_practice(&state.pool, &course_id, input).await? {
+        return Err(AppError::bad_request(
+            "Solo se puede habilitar una practica publicada (no un borrador ni una archivada).",
+        ));
+    }
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/academic/courses/{id}/practices/remove`: deshabilita una práctica del curso (solo
-/// docente/admin). Las entregas ya hechas se conservan.
 pub(super) async fn disable_course_practice(
     State(state): State<SharedState>,
     headers: HeaderMap,

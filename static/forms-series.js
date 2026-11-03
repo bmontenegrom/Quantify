@@ -7,12 +7,9 @@ import { givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaIn
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireRemoveReplica, collectMeasurements } from "./forms.js";
 
-/** Filas con las que arranca la tabla de la serie (también el mínimo al restaurar un borrador). */
 export const SERIES_INITIAL_ROWS = 3;
 
 export function renderSeriesTable(definition) {
-  // Motor E: separa las magnitudes que se miden por punto (van en la serie) de los escalares
-  // compartidos (datos de cátedra / medida única), que se cargan una sola vez.
   const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
   const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
   const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
@@ -24,13 +21,10 @@ export function renderSeriesTable(definition) {
     .map((p) => `<th>${symbolHtml(p.symbol)}${p.unit ? ` <span class="submission-meta">(${unitHtml(p.unit)})</span>` : ""}</th>`)
     .join("");
   const body = Array.from({ length: SERIES_INITIAL_ROWS }, () => seriesRowHtml(cols)).join("");
-  // Secciones temáticas (PRACTICE_SECTIONS): agrupa los escalares por sección, con `data-section`
-  // para que las tabs de partes las muestren/oculten. Sin secciones, un solo bloque como siempre.
   const sections = PRACTICE_SECTIONS[practiceSelect.value];
   let sharedSection = "";
   let seriesSectionAttr = "";
   if (sections && shared.length) {
-    // La sección `series: true` no agrupa magnitudes: solo marca dónde va la tabla por punto.
     const seriesSec = sections.find((sec) => sec.series);
     if (seriesSec?.id) seriesSectionAttr = ` data-section="${escapeHtml(seriesSec.id)}"`;
     const { grouped, rest } = groupBySections(
@@ -53,9 +47,6 @@ export function renderSeriesTable(definition) {
   const partsNote = PRACTICE_PARTS[practiceSelect.value]
     ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
     : "";
-  // Si alguna columna es una serie de tiempos con réplicas (p. ej. tiempo de caída en
-  // viscosidad), ofrecemos un cronómetro de apoyo justo arriba de la tabla de puntos, donde
-  // se va a usar (no arriba de todo el formulario, lejos de las filas que carga).
   const hasReplicatedTime = [...cols, ...shared].some((q) => q.repeated && q.quantity === "tiempo");
   const chronoHelper = hasReplicatedTime ? chronoHelperSectionHtml() : "";
   measurementFields.innerHTML = `
@@ -78,7 +69,6 @@ export function renderSeriesTable(definition) {
       <section class="series-preview panel" aria-live="polite"></section>
     </div>
   `;
-  // Wiring de las filas compartidas de medida única: instrumento → escalas compatibles.
   measurementFields.querySelectorAll(".shared-quantities .measurement-row").forEach((row) => {
     if (row.dataset.isGiven === "1") return;
     const inst = row.querySelector(".measure-instrument");
@@ -86,7 +76,6 @@ export function renderSeriesTable(definition) {
       inst.addEventListener("change", () => populateScaleOptions(row));
       populateScaleOptions(row);
     }
-    // Oculta el botón ✕ de la única réplica (medida única: no se quitan ni agregan réplicas).
     wireRemoveReplica(row);
   });
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
@@ -118,9 +107,6 @@ export function renderSeriesTable(definition) {
     updateSeriesLive();
     schedulePreview();
   });
-  // Los escalares compartidos también entran en las fórmulas de eje: refrescá la vista previa al
-  // editarlos (sus filas viven fuera de la tabla de la serie; puede haber varios bloques).
-  // Además, algunas columnas en vivo dependen de una compartida (viscosidad: v_medio = dx/t̄).
   measurementFields.querySelectorAll(".shared-quantities").forEach((sharedEl) => {
     const refresh = () => {
       schedulePreview();
@@ -134,8 +120,6 @@ export function renderSeriesTable(definition) {
   wireChronoHelpers();
 }
 
-/** Recalcula todo lo que depende de la serie ya cargada: medias, columnas en vivo y la vista
- *  previa del ajuste. Para cuando los valores se cargan por código (restaurar un borrador). */
 export function refreshSeries() {
   updateSeriesMeans();
   updateSeriesLive();
@@ -176,8 +160,6 @@ async function updateRegressionPreview() {
         })
         .join("");
       const title = scatters.length > 1 ? "Vista previa de las curvas" : "Vista previa de la curva";
-      // Solo docentes ven los mensurandos derivados en la vista previa; los alumnos los
-      // descubren tras la entrega, cuando el docente habilita results_visible_to_student.
       const derivedHtml = canReview(state.user) ? derivedBlockMarkup(analysis.derived ?? []) : "";
       container.innerHTML = `<h4>${title}</h4>${blocks}${derivedHtml}`;
     } else {
@@ -199,26 +181,19 @@ export function seriesRowHtml(cols) {
       return `<td class="series-cell"><div class="series-input-wrap">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" /></div></td>`;
     })
     .join("");
-  // Columnas calculadas en vivo: solo lectura y sin clase `series-cell`, para que
-  // collectMeasurements no las cuente como parte del punto.
   const liveCells = (SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [])
     .map((c) => `<td class="series-live" data-live-symbol="${escapeHtml(c.symbol)}"><span class="series-live-value submission-meta">—</span></td>`)
     .join("");
-  // Resultado por corrida cargado a mano por el alumno (Motor E): editable, sin clase `series-cell`
-  // para que collectMeasurements no lo cuente como medición. Se recolecta como `Re#k` al entregar.
   const pointResultCells = seriesPointResultCols()
     .map((p) => `<td class="series-point-result-cell"><input class="series-point-result" data-symbol="${escapeHtml(p.symbol)}" type="number" step="any" placeholder="${escapeHtml(p.symbol)}" /></td>`)
     .join("");
   return `<tr class="series-row">${cells}${liveCells}${pointResultCells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
 }
 
-/** Resultados derivados por punto (Motor E) de la práctica actual; el alumno carga uno por corrida. */
 function seriesPointResultCols() {
   return state.practiceForm?.definition?.point_results ?? [];
 }
 
-/** ¿La fila de la serie tiene todas sus celdas de medición completas? Mismo criterio que
- *  collectMeasurements (fila incompleta = punto ignorado), para alinear el índice de corrida. */
 export function seriesRowComplete(row) {
   return [...row.querySelectorAll(".series-cell")].every((cell) => {
     if (cell.querySelector(".series-replica")) {
@@ -230,8 +205,6 @@ export function seriesRowComplete(row) {
   });
 }
 
-/** Re por corrida cargado en la tabla: `Re#k`, con k = índice entre las filas completas (mismo
- *  orden que las mediciones, para que la comparación empareje con el valor automático). */
 export function collectSeriesPointResults() {
   const out = [];
   let k = -1;
@@ -248,8 +221,6 @@ export function collectSeriesPointResults() {
   return out;
 }
 
-/// HTML de una fila de escalar compartido (Motor E): dato de cátedra (valor ± U) o medida única
-/// (instrumento/escala + un valor). Se cargan una sola vez, fuera de la tabla de la serie.
 function sharedRowHtml(q) {
   if (q.is_given) {
     const uField = !hasUncertainty(q)
@@ -289,7 +260,6 @@ function sharedRowHtml(q) {
     </fieldset>`;
 }
 
-/** Valor numérico (con prefijo SI aplicado) del input de una magnitud dentro de una fila. */
 function seriesCellValue(row, quantityId) {
   const input = row.querySelector(`.series-value[data-quantity-id="${CSS.escape(quantityId)}"]`);
   if (!input) return NaN;
@@ -299,7 +269,6 @@ function seriesCellValue(row, quantityId) {
   return Number(raw) * factor;
 }
 
-/** Valor numérico (con prefijo SI aplicado) de la réplica `k` (0-based) de una magnitud repetida. */
 function replicaValueAt(row, quantityId, k) {
   const cell = row.querySelector(`.series-replica[data-quantity-id="${CSS.escape(quantityId)}"]`)?.closest(".series-cell--replicas");
   const input = cell?.querySelectorAll(".series-replica")[k];
@@ -309,7 +278,6 @@ function replicaValueAt(row, quantityId, k) {
   return Number(raw) * prefixFactor(cell.querySelector(".prefix-select").value);
 }
 
-/** fluidos-1: Q_1=V1/t1, Q_2=V2/t2, Q_medio=media(Q_1,Q_2) (V y t tienen 2 réplicas cada una). */
 function fluidosCaudalLiveValue(symbol, row, idBySymbol) {
   const q1 = flowRate(replicaValueAt(row, idBySymbol.get("V") ?? "", 0), replicaValueAt(row, idBySymbol.get("t") ?? "", 0));
   const q2 = flowRate(replicaValueAt(row, idBySymbol.get("V") ?? "", 1), replicaValueAt(row, idBySymbol.get("t") ?? "", 1));
@@ -319,7 +287,6 @@ function fluidosCaudalLiveValue(symbol, row, idBySymbol) {
   return NaN;
 }
 
-/** Valor (con prefijo) de una magnitud compartida de medida única (fuera de la tabla de series). */
 function sharedSingleValue(quantityId) {
   const replica = measurementFields
     .querySelector(`.measurement-row[data-quantity-id="${CSS.escape(quantityId)}"]`)
@@ -329,7 +296,6 @@ function sharedSingleValue(quantityId) {
   return Number(raw) * prefixFactor(replica.querySelector(".prefix-select").value);
 }
 
-/** Media de las réplicas de una magnitud repetida dentro de una fila de la serie. */
 function rowReplicaMean(row, quantityId) {
   const cell = row
     .querySelector(`.series-replica[data-quantity-id="${CSS.escape(quantityId)}"]`)
@@ -338,14 +304,12 @@ function rowReplicaMean(row, quantityId) {
   return reps.length ? reps.reduce((a, b) => a + b, 0) / reps.length : NaN;
 }
 
-/** viscosidad: v_medio = dx (compartida) / t̄ (media de réplicas de t del punto). */
 function viscosidadVelocityLiveValue(row, idBySymbol) {
   const dx = sharedSingleValue(idBySymbol.get("dx") ?? "");
   const tMean = rowReplicaMean(row, idBySymbol.get("t") ?? "");
   return Number.isFinite(dx) && Number.isFinite(tMean) && tMean !== 0 ? dx / tMean : NaN;
 }
 
-/** Recalcula las columnas en vivo (p. ej. P = I²·R, Q = V/t) de cada fila de la tabla de series. */
 export function updateSeriesLive() {
   const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
   if (!liveCols.length) return;
@@ -371,7 +335,6 @@ export function updateSeriesLive() {
   });
 }
 
-/** Actualiza el promedio (x̄) mostrado en cada celda de réplicas de la tabla de series. */
 export function updateSeriesMeans() {
   measurementFields.querySelectorAll(".series-cell--replicas").forEach((cell) => {
     const meanEl = cell.querySelector(".series-mean");

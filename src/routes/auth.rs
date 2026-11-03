@@ -1,5 +1,3 @@
-//! Handlers de `/api/auth/*`: login, logout, sesión actual y perfil.
-
 use super::{
     compute_csrf, current_user, is_valid_email, session_cookie, session_token, validate_password,
     Health, SharedState,
@@ -13,8 +11,6 @@ use axum::{
 };
 use chrono::Utc;
 
-/// `POST /api/auth/login`: valida credenciales y, si son correctas, setea la cookie de sesión.
-/// Aplica rate-limiting: bloquea 15 minutos tras 5 intentos fallidos consecutivos por email.
 pub(super) async fn login(
     State(state): State<SharedState>,
     Json(request): Json<db::LoginRequest>,
@@ -29,7 +25,6 @@ pub(super) async fn login(
 
     let now = Utc::now();
 
-    // Verificar rate-limit antes de consultar la BD.
     {
         let mut attempts = state
             .login_attempts
@@ -47,7 +42,6 @@ pub(super) async fn login(
 
     let result = db::login(&state.pool, request).await?;
 
-    // Actualizar contadores según el resultado.
     {
         let mut attempts = state
             .login_attempts
@@ -64,7 +58,6 @@ pub(super) async fn login(
                     .register_failure(now);
             }
         }
-        // Acota el crecimiento del mapa ante enumeración de emails.
         db::purge_expired_attempts(&mut attempts, now);
     }
 
@@ -84,7 +77,6 @@ pub(super) async fn login(
     Ok((headers, Json(db::LoginResponse { user, csrf_token })))
 }
 
-/// `POST /api/auth/logout`: elimina la sesión actual y limpia la cookie.
 pub(super) async fn logout(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -101,15 +93,11 @@ pub(super) async fn logout(
     Ok((response_headers, Json(Health { status: "ok" })))
 }
 
-/// `GET /api/auth/me`: devuelve el usuario autenticado con sus defaults de perfil.
-/// Incluye `csrf_token` para que el frontend pueda reconstituirlo tras un reload sin re-login.
 pub(super) async fn me(
     State(state): State<SharedState>,
     headers: HeaderMap,
 ) -> Result<Json<db::LoginResponse>, AppError> {
     let auth_user = current_user(&state, &headers).await?;
-    // `current_user` ya validó que la cookie de sesión existe, así que el token siempre está
-    // presente; el `unwrap_or_default` es solo defensivo y nunca debería usarse en la práctica.
     let token = session_token(&headers).unwrap_or_default();
     let user = db::me_user(&state.pool, &auth_user.id)
         .await?
@@ -118,7 +106,6 @@ pub(super) async fn me(
     Ok(Json(db::LoginResponse { user, csrf_token }))
 }
 
-/// `POST /api/auth/password`: cambia la contraseña del usuario actual validando la actual.
 pub(super) async fn change_password(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -133,7 +120,6 @@ pub(super) async fn change_password(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/auth/profile`: actualiza nombre, email y opcionalmente grupo/mesa por defecto.
 pub(super) async fn update_profile(
     State(state): State<SharedState>,
     headers: HeaderMap,

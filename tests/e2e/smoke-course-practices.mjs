@@ -1,4 +1,3 @@
-// Docente deshabilita una práctica del curso desde Cursos y la vuelve a habilitar.
 
 import { TEACHER, assert, step, withE2E } from "./lib.mjs";
 

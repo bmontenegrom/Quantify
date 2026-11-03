@@ -1,7 +1,3 @@
-// Corre todos los smokes E2E (tests/e2e/*.mjs, salvo lib.mjs) en secuencia, cada uno en su
-// propio proceso (mismo aislamiento que antes: server + DB temporal por script). Cada script ya
-// usa su propio puerto fijo, así que correr en secuencia (no en paralelo) evita pisarse sin
-// necesidad de coordinar puertos dinámicos.
 
 import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";

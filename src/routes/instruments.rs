@@ -1,5 +1,3 @@
-//! Handlers de `/api/instruments*`: catálogo de instrumentos y escalas por curso.
-
 use super::{current_user, require_teacher, Health, SharedState};
 use crate::db;
 use crate::error::AppError;
@@ -11,23 +9,17 @@ use axum::{
 };
 use serde::Deserialize;
 
-/// Parámetro de query `?course_id=...` para las operaciones de catálogo por curso.
 #[derive(Debug, Deserialize)]
 pub(super) struct CourseQuery {
     pub(super) course_id: String,
 }
 
-/// Cuerpo para importar un catálogo a un curso destino.
 #[derive(Debug, Deserialize)]
 pub(super) struct ImportRequest {
     course_id: String,
     instruments: Vec<instruments::InstrumentExport>,
 }
 
-/// `GET /api/instruments?course_id=...`: lista los instrumentos de un curso con sus escalas.
-/// Solo lectura del catálogo (material del curso): accesible a cualquier usuario autenticado,
-/// para que el estudiante pueda elegir instrumento/escala al cargar una entrega por formulario.
-/// La gestión (alta/edición/baja) sigue siendo solo docente/admin.
 pub(super) async fn list_instruments(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -39,7 +31,6 @@ pub(super) async fn list_instruments(
     ))
 }
 
-/// `POST /api/instruments`: crea un instrumento (docente/admin), validando tipo y campos.
 pub(super) async fn create_instrument(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -55,7 +46,6 @@ pub(super) async fn create_instrument(
     ))
 }
 
-/// `POST /api/instruments/{id}`: actualiza un instrumento (docente/admin).
 pub(super) async fn update_instrument(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -70,7 +60,6 @@ pub(super) async fn update_instrument(
     Ok(Json(updated))
 }
 
-/// `DELETE /api/instruments/{id}`: elimina un instrumento y sus escalas (docente/admin).
 pub(super) async fn delete_instrument(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -83,7 +72,6 @@ pub(super) async fn delete_instrument(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `POST /api/instruments/{id}/scales`: agrega una escala (docente/admin), validando modelo y paso.
 pub(super) async fn create_scale(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -97,7 +85,6 @@ pub(super) async fn create_scale(
     ))
 }
 
-/// `POST /api/instruments/{id}/scales/{scale_id}`: actualiza una escala (docente/admin).
 pub(super) async fn update_scale(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -112,7 +99,6 @@ pub(super) async fn update_scale(
     Ok(Json(updated))
 }
 
-/// `DELETE /api/instruments/{id}/scales/{scale_id}`: elimina una escala (docente/admin).
 pub(super) async fn delete_scale(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -125,7 +111,6 @@ pub(super) async fn delete_scale(
     Ok(Json(Health { status: "ok" }))
 }
 
-/// `GET /api/instruments/export?course_id=...`: exporta el catálogo del curso (docente/admin).
 pub(super) async fn export_instruments(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -137,7 +122,6 @@ pub(super) async fn export_instruments(
     ))
 }
 
-/// `POST /api/instruments/import`: importa un catálogo a un curso destino (docente/admin).
 pub(super) async fn import_instruments(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -168,7 +152,6 @@ fn validate_instrument(kind: &str, name: &str, quantity: &str, unit: &str) -> Re
     Ok(())
 }
 
-/// Valida una escala: modelo de incertidumbre válido, paso positivo y campos no vacíos.
 fn validate_scale(input: &ScaleInput) -> Result<(), AppError> {
     if !matches!(
         input.b_model.trim(),
@@ -176,11 +159,9 @@ fn validate_scale(input: &ScaleInput) -> Result<(), AppError> {
     ) {
         return Err(AppError::bad_request("b_model invalido"));
     }
-    // Rechaza step no positivo y NaN (equivalente a un `> 0.0` negado, pero explícito).
     if input.step <= 0.0 || input.step.is_nan() {
         return Err(AppError::bad_request("step debe ser positivo"));
     }
-    // Una escala de fabricante sin ningun termino positivo daria u_B = 0 silenciosamente.
     if input.b_model.trim() == "fabricante"
         && ![
             input.spec_pct_reading,
@@ -204,7 +185,6 @@ fn validate_scale(input: &ScaleInput) -> Result<(), AppError> {
 mod tests {
     use super::*;
 
-    /// Construye una escala mínima para los tests de validación.
     fn scale(b_model: &str, step: f64) -> ScaleInput {
         ScaleInput {
             label: "L".into(),
@@ -241,9 +221,7 @@ mod tests {
 
     #[test]
     fn validate_scale_fabricante_requires_spec() {
-        // Sin ningún término de spec -> error (evita u_B = 0 silencioso).
         assert!(validate_scale(&scale("fabricante", 1.0)).is_err());
-        // Con al menos un término positivo -> ok.
         let mut s = scale("fabricante", 1.0);
         s.spec_pct_reading = Some(1.0);
         assert!(validate_scale(&s).is_ok());

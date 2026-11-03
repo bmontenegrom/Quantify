@@ -65,7 +65,8 @@ CHANGELOG.
 
 El scope es el área que toca: `cursos`, `practicas`, `hidrostatica`, `ui`, `e2e`, `plan`, etc.
 Un cambio que rompe compatibilidad lleva `!` (`feat(api)!: ...`) o un footer `BREAKING CHANGE:`.
-Mientras la versión sea 0.x, release-please lo cuenta como minor.
+Un breaking change sube la major aunque la versión sea 0.x: de 0.4.2 pasa a 1.0.0. Usalo solo para
+un cambio que de verdad rompa algo para quien usa la app.
 
 ## Pull requests
 
@@ -78,7 +79,7 @@ Mientras la versión sea 0.x, release-please lo cuenta como minor.
   siembra, se dicen explícitamente.
 - Un cambio por PR. Si una PR crece mucho, partila.
 - Sumá tests para lo que agregues o arregles.
-- Antes de pushear corré lo mismo que corre CI:
+- Antes de pushear corré lo mismo que corre CI, más el chequeo de comentarios:
 
   ```bash
   cargo fmt --check
@@ -86,7 +87,34 @@ Mientras la versión sea 0.x, release-please lo cuenta como minor.
   cargo test --locked
   npm test
   npm run test:e2e
+  python scripts/comments.py --check
   ```
+
+## Comentarios
+
+El código no lleva comentarios: ni `//`, `/* */` ni `///` en Rust, ni `//`, `/* */` en JS y CSS,
+ni `<!-- -->` en HTML, ni `#` en YAML y scripts. Lo que explica un cambio va en la descripción de
+la PR.
+
+La única excepción son los **doctests** de Rust
+([guía de rustdoc](https://doc.rust-lang.org/rustdoc/write-documentation/documentation-tests.html)):
+toda función `pub` pura (sin base de datos ni red, alcanzable desde la API pública del crate)
+lleva uno, con **una sola línea** que dice qué hace y debajo el ejemplo ejecutable. Las funciones
+async de base, las privadas y las `pub(crate)` no llevan.
+
+```rust
+/// Id legible de una práctica a partir de su nombre: minúsculas, sin tildes, solo `[a-z0-9-]`.
+///
+/// ```
+/// use quantify::practices::slugify;
+/// assert_eq!(slugify("Péndulo de prueba (2026)"), "pendulo-de-prueba-2026");
+/// ```
+pub fn slugify(name: &str) -> String {
+```
+
+`cargo test` corre los doctests. `python scripts/comments.py --check` lista los archivos con
+comentarios que no son doctests, y `--fix` los borra (y deja cada doctest con su primera línea y
+el ejemplo); después corré `cargo fmt`. El chequeo no está en la CI: corrélo a mano.
 
 ## Para mergear
 

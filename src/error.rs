@@ -5,28 +5,29 @@ use axum::{
 };
 use serde::Serialize;
 
-/// Error de la aplicación: combina un código HTTP con un mensaje legible para el cliente.
 #[derive(Debug)]
 pub struct AppError {
     status: StatusCode,
     message: String,
 }
 
-/// Cuerpo JSON de error que se serializa en la respuesta (`{"error": "..."}`).
 #[derive(Serialize)]
 struct ErrorBody<'a> {
     error: &'a str,
 }
 
 impl AppError {
-    /// Mensaje que ve el usuario (para anteponerle contexto al reutilizar un error).
+    /// Mensaje que ve el usuario.
+    ///
+    /// ```
+    /// let err = quantify::error::AppError::bad_request("dato invalido");
+    /// assert_eq!(err.message(), "dato invalido");
+    /// ```
     pub fn message(&self) -> &str {
         &self.message
     }
 
     /// Crea un error 400 Bad Request con el mensaje dado.
-    ///
-    /// # Ejemplos
     ///
     /// ```
     /// use axum::response::IntoResponse;
@@ -42,8 +43,6 @@ impl AppError {
 
     /// Crea un error 404 Not Found con el mensaje dado.
     ///
-    /// # Ejemplos
-    ///
     /// ```
     /// use axum::response::IntoResponse;
     /// let resp = quantify::error::AppError::not_found("no existe").into_response();
@@ -57,8 +56,6 @@ impl AppError {
     }
 
     /// Crea un error 401 Unauthorized con el mensaje dado.
-    ///
-    /// # Ejemplos
     ///
     /// ```
     /// use axum::response::IntoResponse;
@@ -74,8 +71,6 @@ impl AppError {
 
     /// Crea un error 403 Forbidden con el mensaje dado.
     ///
-    /// # Ejemplos
-    ///
     /// ```
     /// use axum::response::IntoResponse;
     /// let resp = quantify::error::AppError::forbidden("sin permiso").into_response();
@@ -90,8 +85,6 @@ impl AppError {
 
     /// Crea un error 429 Too Many Requests con el mensaje dado (rate-limiting).
     ///
-    /// # Ejemplos
-    ///
     /// ```
     /// use axum::response::IntoResponse;
     /// let resp = quantify::error::AppError::too_many_requests("frená un poco").into_response();
@@ -104,9 +97,16 @@ impl AppError {
         }
     }
 
-    /// Mapea un error de dominio (`anyhow`) a la respuesta HTTP adecuada: los de base de datos van
-    /// a un 500 genérico (sin filtrar detalle); el resto son errores de dominio (práctica/escala
-    /// inexistente, fórmula inválida, etc.) y llevan su mensaje amigable como 400.
+    /// Un error de dominio pasa como 400 con su mensaje; uno de base de datos, como 500 genérico.
+    ///
+    /// ```
+    /// use axum::response::IntoResponse;
+    /// use quantify::error::AppError;
+    /// let domain = AppError::from_domain_or_db(anyhow::anyhow!("la practica no existe"));
+    /// assert_eq!(domain.message(), "la practica no existe");
+    /// let db = AppError::from_domain_or_db(sqlx::Error::RowNotFound.into());
+    /// assert_eq!(db.into_response().status().as_u16(), 500);
+    /// ```
     pub fn from_domain_or_db(err: anyhow::Error) -> Self {
         if err.downcast_ref::<sqlx::Error>().is_some() {
             AppError::from(err)
@@ -117,7 +117,6 @@ impl AppError {
 }
 
 impl IntoResponse for AppError {
-    /// Convierte el error en una respuesta HTTP con su código y cuerpo JSON.
     fn into_response(self) -> Response {
         (
             self.status,
@@ -129,12 +128,9 @@ impl IntoResponse for AppError {
     }
 }
 
-/// Mensaje genérico para errores internos: claro para el usuario, sin filtrar detalle técnico
-/// (el detalle real queda en el log del servidor).
 const INTERNAL_MESSAGE: &str = "Ocurrio un error interno. Volve a intentar en un momento.";
 
 impl From<sqlx::Error> for AppError {
-    /// Mapea errores de base de datos a un 500 genérico, registrando el detalle real en el log.
     fn from(err: sqlx::Error) -> Self {
         tracing::error!(error = ?err, "database error");
         Self {
@@ -145,7 +141,6 @@ impl From<sqlx::Error> for AppError {
 }
 
 impl From<anyhow::Error> for AppError {
-    /// Mapea errores de aplicación (`anyhow`) a un 500 genérico, registrando el detalle en el log.
     fn from(err: anyhow::Error) -> Self {
         tracing::error!(error = ?err, "application error");
         Self {

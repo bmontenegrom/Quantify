@@ -1,6 +1,3 @@
-//! Alta y edición de entregas por formulario: valida, calcula el análisis (vía [`super::engines::analyze`])
-//! y persiste la entrega + sus mediciones.
-
 use super::engines::analyze;
 use super::MeasurementInput;
 use crate::db::{self, AuthUser};
@@ -8,43 +5,22 @@ use chrono::Utc;
 use serde::Deserialize;
 use uuid::Uuid;
 
-/// Cuerpo para crear una entrega por formulario.
 #[derive(Debug, Deserialize)]
 pub struct FormSubmissionInput {
     pub course_id: String,
     pub group_id: String,
     pub practice_id: String,
     pub measurements: Vec<MeasurementInput>,
-    /// Metadatos de depuración por magnitud (bins del histograma + valores descartados).
-    /// Se persiste tal cual para que el docente lo vea; opcional.
     #[serde(default)]
     pub meta: Option<serde_json::Value>,
-    /// Mesa del informe compartido. Si no se envía, se resuelve desde las asignaciones
-    /// del alumno. Para docentes/admin es opcional (puede entregar sin mesa asignada).
     #[serde(default)]
     pub table_number: Option<i64>,
-    /// Resultado(s) final(es) que el alumno entrega junto con la medición (opcional, p. ej. `g`).
-    /// Se valida y persiste igual que `POST /submissions/{id}/student-results`.
     #[serde(default)]
     pub student_results: Vec<crate::db::StudentResultInput>,
-    /// Observaciones/comentarios libres del alumno sobre su entrega (opcional, cualquier práctica).
     #[serde(default)]
     pub student_comment: Option<String>,
 }
 
-/// Persiste las mediciones de una entrega en `submission_measurements`. Cubre los tres modos
-/// (según `point_based`, que indica si la entrega es por puntos — regresión/curva):
-/// - **estadístico** (`point_based = false`): réplicas de una magnitud → `point_index = 0`,
-///   `replicate_index = réplica`.
-/// - **estadístico con operadores** (`operator_replicas`): `operator_index = operador`,
-///   `replicate_index = réplica` (point_index = 0).
-/// - **por puntos sin réplicas** (`point_based = true`, `values`): un valor por punto →
-///   `point_index = punto`, `replicate_index = 0`.
-/// - **por puntos con réplicas** (`point_replicas`): `point_index = punto`, `replicate_index = réplica`.
-///
-/// Los índices explícitos (`operator_index`/`point_index`, en vez de meter todo en
-/// `replicate_index`) permiten reconstruir la serie al editar agrupando por operador/punto. Los
-/// datos de cátedra (`given_u`) guardan su único valor con la U en `value_u`.
 async fn insert_measurements(
     conn: &mut sqlx::SqliteConnection,
     submission_id: &str,
@@ -52,7 +28,6 @@ async fn insert_measurements(
     point_based: bool,
 ) -> anyhow::Result<()> {
     for measurement in measurements {
-        // Filas (operator_index, point_index, replicate_index, value, value_u) según el modo.
         let rows: Vec<(i64, i64, i64, f64, Option<f64>)> =
             if let Some(operators) = &measurement.operator_replicas {
                 operators
@@ -81,7 +56,6 @@ async fn insert_measurements(
                     .map(|&v| vec![(0i64, 0i64, 0i64, v, measurement.given_u)])
                     .unwrap_or_default()
             } else if point_based {
-                // Un valor por punto: el índice va en point_index (replicate_index = 0).
                 measurement
                     .values
                     .iter()
@@ -89,7 +63,6 @@ async fn insert_measurements(
                     .map(|(i, &v)| (0i64, i as i64, 0i64, v, None))
                     .collect()
             } else {
-                // Réplicas estadísticas: un solo punto (0), el índice va en replicate_index.
                 measurement
                     .values
                     .iter()
@@ -121,12 +94,6 @@ async fn insert_measurements(
     Ok(())
 }
 
-/// `true` si la práctica analiza **por puntos** (regresión o curva). Determina el layout de
-/// persistencia (el índice del punto va en `point_index`, no en `replicate_index`). Se deriva del
-/// `analysis_kind` declarado en la práctica —**no** del resultado del cálculo— para que el formato
-/// almacenado no dependa de que el ajuste haya producido salida con los datos cargados (p.ej. un
-/// punto único o valores no finitos dejarían `regression`/`scatter` en `None` sin dejar de ser una
-/// entrega por puntos).
 async fn is_point_based_practice(
     pool: &sqlx::SqlitePool,
     practice_id: &str,
@@ -142,8 +109,6 @@ async fn is_point_based_practice(
     ))
 }
 
-/// Crea una entrega por formulario: calcula el análisis, inserta la entrega y sus mediciones
-/// en una transacción, y devuelve el detalle. El usuario ya fue validado por el handler.
 pub async fn create_form_submission(
     pool: &sqlx::SqlitePool,
     user: &AuthUser,
@@ -151,8 +116,6 @@ pub async fn create_form_submission(
 ) -> anyhow::Result<db::SubmissionDetail> {
     let is_teacher = matches!(user.role.as_str(), "docente" | "admin");
 
-    // Resolver mesa: prioridad input > practice_table_assignments > user_default_tables.
-    // Para docentes/admin la mesa es opcional (pueden entregar sin mesa asignada).
     let table_number = if let Some(t) = input.table_number {
         Some(t)
     } else if !is_teacher {
@@ -161,7 +124,6 @@ pub async fn create_form_submission(
         None
     };
 
-    // Para alumnos: la mesa es obligatoria.
     if !is_teacher && table_number.is_none() {
         anyhow::bail!(
             "No tenés una mesa asignada para esta práctica. \
@@ -169,9 +131,7 @@ pub async fn create_form_submission(
         );
     }
 
-    // Si hay mesa asignada, verificar que no exista ya un informe para (práctica, grupo, mesa).
     if let Some(t) = table_number {
-        // Validar rango de la mesa.
         let table_count: Option<(i64,)> =
             sqlx::query_as("SELECT table_count FROM lab_groups WHERE id = ?1")
                 .bind(&input.group_id)
@@ -213,7 +173,6 @@ pub async fn create_form_submission(
     let now = Utc::now();
 
     let mut tx = pool.begin().await?;
-    // Inserta la entrega resolviendo nombres denormalizados (igual que la variante CSV).
     let inserted = sqlx::query(
         r#"
         INSERT INTO submissions (
@@ -256,7 +215,6 @@ pub async fn create_form_submission(
     .execute(&mut *tx)
     .await
     .map_err(|e| {
-        // Captura la violación del índice único (carrera entre dos alumnos de la misma mesa).
         if e.to_string().contains("UNIQUE constraint failed") {
             anyhow::anyhow!(
                 "Otro integrante ya creó el informe de esta mesa. \
@@ -267,12 +225,10 @@ pub async fn create_form_submission(
         }
     })?;
 
-    // El INSERT...SELECT no inserta nada si el curso/grupo (o usuario) no existe.
     if inserted.rows_affected() == 0 {
         anyhow::bail!("el curso o el grupo indicados no existen");
     }
 
-    // Insertar al creador como owner del informe.
     sqlx::query(
         r#"
         INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at)
@@ -292,7 +248,6 @@ pub async fn create_form_submission(
         db::save_student_results(pool, &id, &input.student_results).await?;
     }
 
-    // Invitar a los demás alumnos de la mesa (fuera de la tx para no bloquear).
     if let Some(t) = table_number {
         let _ = db::invite_table_members(
             pool,
@@ -311,8 +266,6 @@ pub async fn create_form_submission(
         .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
 }
 
-/// Valida que cada símbolo entregado por el alumno corresponda a un mensurando de la práctica.
-/// Usada tanto al crear/editar una entrega por formulario como en `POST .../student-results`.
 pub async fn validate_student_results(
     pool: &sqlx::SqlitePool,
     practice_id: &str,
@@ -327,10 +280,26 @@ pub async fn validate_student_results(
     check_student_result_symbols(&definition, results).map_err(|e| anyhow::anyhow!(e))
 }
 
-/// Verifica que cada símbolo de `results` sea un mensurando comparable de la práctica: resultado
-/// final, agregado `is_final`, o resultado por corrida `Re#k` (Motor E). Función **pura** (sin IO):
-/// devuelve el mensaje amigable en `Err` para que cada caller elija el código HTTP (400 símbolo
-/// inválido vs. 500/404 al resolver la definición).
+/// Acepta solo resultados del alumno que sean mensurandos o agregados finales, o `Re#k` por punto.
+///
+/// ```
+/// use quantify::computation::check_student_result_symbols;
+/// use quantify::db::{PracticeResult, StudentResultInput};
+/// use quantify::practices::PracticeDefinition;
+/// let g = PracticeResult {
+///     id: "r".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
+///     unit: "m/s2".into(), formula: "L".into(), position: 0, tolerance: None,
+///     is_final: true, has_uncertainty: true,
+/// };
+/// let def = PracticeDefinition {
+///     practice_id: "p".into(), status: "publicada".into(), analysis_kind: None,
+///     x_formula: None, y_formula: None, quantities: vec![], results: vec![g], curves: vec![],
+///     operator_count: None, intermediates: vec![], point_results: vec![], aggregates: vec![],
+/// };
+/// let result = |symbol: &str| StudentResultInput { symbol: symbol.into(), value: 9.8, u_expanded: None };
+/// assert!(check_student_result_symbols(&def, &[result("g")]).is_ok());
+/// assert!(check_student_result_symbols(&def, &[result("h")]).is_err());
+/// ```
 pub fn check_student_result_symbols(
     definition: &crate::practices::PracticeDefinition,
     results: &[db::StudentResultInput],
@@ -347,8 +316,6 @@ pub fn check_student_result_symbols(
                 .map(|a| a.symbol.as_str()),
         )
         .collect();
-    // Resultados por corrida (Motor E): el alumno carga su Reynolds de cada punto con el símbolo
-    // compuesto "<base>#<indice>" (p. ej. "Re#0"). Se comparan por corrida contra el automático.
     let point_symbols: std::collections::HashSet<&str> = definition
         .point_results
         .iter()
@@ -370,11 +337,6 @@ pub fn check_student_result_symbols(
     Ok(())
 }
 
-/// Reemplaza las lecturas y recalcula el análisis de una entrega por formulario existente
-/// (edición dentro de la ventana permitida). No cambia `submitted_at` ni la práctica: la
-/// validación de propiedad/ventana ocurre en la capa de rutas. Transaccional.
-/// `student_results`: `None` = no tocar los cálculos del alumno ya guardados; `Some(vec)`
-/// (incluso vacío) reemplaza por completo, igual que `POST .../student-results`.
 pub async fn update_form_submission(
     pool: &sqlx::SqlitePool,
     submission_id: &str,

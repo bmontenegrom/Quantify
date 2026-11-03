@@ -156,7 +156,6 @@ export async function saveGradeInput(input) {
     });
     await loadGrades();
     renderGradebookAdmin();
-    // Importar lazily para evitar ciclo de inicialización
     const { renderStudentsPage } = await import("./students.js");
     if (state.activeStudentId) renderStudentsPage();
     gradeStatus.textContent = "Nota guardada";

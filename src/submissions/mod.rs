@@ -11,19 +11,15 @@ use crate::users::AuthUser;
 mod gradebook;
 pub use gradebook::*;
 
-/// Miembro de un informe compartido por mesa (owner o miembro aceptado/pendiente).
 #[derive(Debug, Serialize)]
 pub struct ReportMember {
     pub user_id: String,
     pub display_name: String,
-    /// `owner` o `member`.
     pub role: String,
-    /// `pending`, `accepted` o `expired`.
     pub status: String,
     pub accepted_at: Option<DateTime<Utc>>,
 }
 
-/// Invitación pendiente de aceptar para un alumno (informe creado por otro de la misma mesa).
 #[derive(Debug, Serialize)]
 pub struct PendingInvitation {
     pub submission_id: String,
@@ -36,7 +32,6 @@ pub struct PendingInvitation {
     pub expires_at: DateTime<Utc>,
 }
 
-/// Resultado de intentar aceptar una invitación.
 #[derive(Debug)]
 pub enum AcceptOutcome {
     Accepted,
@@ -95,51 +90,30 @@ pub struct SubmissionDetail {
     pub student_name: String,
     pub group_name: String,
     pub course: String,
-    /// Ids de curso/grupo (a diferencia de `course`/`group_name`, que son solo texto). Los usa
-    /// el frontend para reabrir el formulario de carga tras cancelar una entrega.
     pub course_id: Option<String>,
     pub group_id: Option<String>,
     pub practice_id: String,
     pub practice_name: String,
     pub file_name: String,
-    /// Modo de carga: `"csv"` (legacy) o `"form"` (lecturas crudas con cálculo de incertidumbres).
     pub entry_mode: String,
-    /// Si el docente habilitó que el estudiante vea el cálculo automático de esta entrega.
     pub results_visible_to_student: bool,
-    /// Resultado calculado, crudo como JSON: para `csv` es un `AnalysisResult`; para `form`
-    /// es un `computation::FormAnalysis`. El cliente decide cómo renderizarlo según `entry_mode`.
-    /// Se devuelve `null` a un estudiante mientras `results_visible_to_student` sea `false`.
     pub analysis: serde_json::Value,
-    /// Mensurandos finales calculados por el estudiante (a mano), para comparar con el cálculo
-    /// automático. No se gatea: el estudiante ve los suyos siempre y el docente también.
     pub student_results: Vec<StudentResult>,
     pub status: String,
     pub teacher_comment: Option<String>,
     pub score: Option<f64>,
     pub submitted_at: DateTime<Utc>,
     pub reviewed_at: Option<DateTime<Utc>>,
-    /// Metadatos de depuración por magnitud (bins + valores descartados), si la entrega los trae.
     pub measurement_meta: Option<serde_json::Value>,
-    /// Instante hasta el que el alumno puede editar (submitted_at + horas del curso).
     pub editable_until: Option<DateTime<Utc>>,
-    /// True si la ventana sigue abierta y la entrega es editable (estado pendiente, no visible).
-    /// El endpoint de edición igual valida la propiedad del alumno.
     pub can_edit: bool,
-    /// Lecturas crudas (sólo entregas por formulario), para prefillear el form al editar.
     pub measurements: Vec<SubmissionMeasurement>,
-    /// Número de mesa del informe compartido (NULL en entregas legacy/CSV sin mesa asignada).
     pub table_number: Option<i64>,
-    /// Miembros del informe (owner + miembros aceptados/pendientes).
     pub members: Vec<ReportMember>,
-    /// Tolerancias porcentuales por símbolo de mensurando (solo los que tienen tolerancia fijada).
-    /// Usado por el frontend para mostrar el veredicto ✓/✗ en la tabla de comparación.
     pub result_tolerances: HashMap<String, f64>,
-    /// Observaciones/comentarios libres del alumno sobre su entrega. No se gatea: se ve siempre,
-    /// igual que `student_results`.
     pub student_comment: Option<String>,
 }
 
-/// Un mensurando final calculado por el estudiante (valor ± U), por símbolo.
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct StudentResult {
     pub symbol: String,
@@ -147,22 +121,18 @@ pub struct StudentResult {
     pub u_expanded: Option<f64>,
 }
 
-/// Una lectura cruda persistida de una entrega por formulario (para prefill al editar).
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct SubmissionMeasurement {
     pub quantity_id: String,
     pub instrument_id: Option<String>,
     pub scale_id: Option<String>,
-    /// Índice de operador en el estadístico con operadores (0 si no hay operadores).
     pub operator_index: i64,
-    /// Índice de punto en análisis por puntos (0 en estadístico/CSV).
     pub point_index: i64,
     pub replicate_index: i64,
     pub value: f64,
     pub value_u: Option<f64>,
 }
 
-/// Una fila del cuerpo para guardar los cálculos del estudiante.
 #[derive(Debug, Deserialize)]
 pub struct StudentResultInput {
     pub symbol: String,
@@ -186,12 +156,9 @@ pub struct ReviewSubmission {
     pub status: String,
     pub teacher_comment: Option<String>,
     pub score: Option<f64>,
-    /// Si se incluye, actualiza la visibilidad del cálculo para el estudiante.
     pub results_visible: Option<bool>,
 }
 
-/// Persiste una entrega: escribe el CSV en `upload_dir`, serializa el análisis y guarda
-/// la fila resolviendo nombres denormalizados (estudiante, grupo, curso). Devuelve el detalle creado.
 pub async fn create_submission(
     pool: &SqlitePool,
     upload_dir: &Path,
@@ -246,12 +213,10 @@ pub async fn create_submission(
         .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
 }
 
-/// Lista entregas: docentes/admin ven todas; un estudiante ve solo los informes donde es miembro aceptado.
 pub async fn submission_list_for_user(
     pool: &SqlitePool,
     user: &AuthUser,
 ) -> anyhow::Result<Vec<SubmissionListItem>> {
-    // Subquery que cuenta miembros aceptados por informe.
     let member_count_sq = "(SELECT COUNT(*) FROM report_members rm \
                             WHERE rm.submission_id = s.id AND rm.status = 'accepted')";
 
@@ -306,7 +271,6 @@ pub async fn submission_list_for_user(
     Ok(rows)
 }
 
-/// Devuelve el id del usuario que realizó una entrega (para control de acceso), o `None`.
 pub async fn submission_owner_id(pool: &SqlitePool, id: &str) -> anyhow::Result<Option<String>> {
     let owner: Option<(Option<String>,)> =
         sqlx::query_as("SELECT submitted_by_user_id FROM submissions WHERE id = ?1")
@@ -316,8 +280,6 @@ pub async fn submission_owner_id(pool: &SqlitePool, id: &str) -> anyhow::Result<
     Ok(owner.and_then(|(user_id,)| user_id))
 }
 
-/// Devuelve `true` si el usuario es miembro aceptado (o owner) del informe dado.
-/// Docentes/admin siempre acceden desde la capa de rutas; esta fn es para alumnos.
 pub async fn is_accepted_member(
     pool: &SqlitePool,
     submission_id: &str,
@@ -333,8 +295,6 @@ pub async fn is_accepted_member(
     Ok(row.is_some())
 }
 
-/// Resuelve la mesa del alumno para una práctica y grupo: prioridad `practice_table_assignments`
-/// → `user_default_tables`. Devuelve `None` si no tiene mesa asignada en ninguna fuente.
 pub async fn resolve_user_table(
     pool: &SqlitePool,
     user_id: &str,
@@ -362,7 +322,6 @@ pub async fn resolve_user_table(
     Ok(row.and_then(|(t,)| t))
 }
 
-/// Busca un informe existente para (práctica, grupo, mesa). Devuelve el `submission_id` o `None`.
 pub async fn find_existing_report(
     pool: &SqlitePool,
     practice_id: &str,
@@ -380,7 +339,6 @@ pub async fn find_existing_report(
     Ok(row.map(|(id,)| id))
 }
 
-/// Lista los miembros de un informe ordenados por role (owner primero) y nombre.
 pub async fn report_members_for(
     pool: &SqlitePool,
     submission_id: &str,
@@ -417,9 +375,6 @@ pub async fn report_members_for(
         .collect())
 }
 
-/// Inserta entradas `pending` en `report_members` para los alumnos del mismo grupo
-/// que tienen la misma mesa resuelta para la práctica (excluyendo al owner).
-/// No falla si algún alumno ya tiene entrada (idempotente por `INSERT OR IGNORE`).
 pub async fn invite_table_members(
     pool: &SqlitePool,
     submission_id: &str,
@@ -429,7 +384,6 @@ pub async fn invite_table_members(
     owner_user_id: &str,
     invited_at: DateTime<Utc>,
 ) -> anyhow::Result<()> {
-    // Alumnos del mismo grupo con la misma mesa resuelta (pta primero, udt como fallback).
     let candidates: Vec<(String,)> = sqlx::query_as(
         r#"
         SELECT gm.user_id
@@ -469,7 +423,6 @@ pub async fn invite_table_members(
     Ok(())
 }
 
-/// Devuelve las invitaciones vigentes (pendientes y aún dentro de la ventana) de un alumno.
 pub async fn pending_invitations_for(
     pool: &SqlitePool,
     user_id: &str,
@@ -535,13 +488,11 @@ pub async fn pending_invitations_for(
         .collect())
 }
 
-/// Acepta una invitación pendiente dentro de la ventana del curso. Devuelve el resultado.
 pub async fn accept_report_invitation(
     pool: &SqlitePool,
     submission_id: &str,
     user_id: &str,
 ) -> anyhow::Result<AcceptOutcome> {
-    // Leer la entrada del alumno y la ventana de aceptación.
     #[derive(sqlx::FromRow)]
     struct Row {
         status: String,
@@ -594,15 +545,12 @@ pub async fn accept_report_invitation(
     Ok(AcceptOutcome::Accepted)
 }
 
-/// Agrega un miembro a un informe (uso docente). Si `force_accept` es `true`, el miembro
-/// entra directamente como `accepted` sin pasar por la ventana de invitación.
 pub async fn add_report_member(
     pool: &SqlitePool,
     submission_id: &str,
     user_id: &str,
     force_accept: bool,
 ) -> anyhow::Result<bool> {
-    // Verificar que el usuario existe y es estudiante.
     let exists: Option<(i64,)> =
         sqlx::query_as("SELECT 1 FROM users WHERE id = ?1 AND role = 'estudiante'")
             .bind(user_id)
@@ -636,8 +584,6 @@ pub async fn add_report_member(
     Ok(true)
 }
 
-/// Quita un miembro de un informe (uso docente). Si se quita al owner, el primer miembro
-/// aceptado restante pasa a ser el nuevo owner. Devuelve `false` si el usuario no era miembro.
 pub async fn remove_report_member(
     pool: &SqlitePool,
     submission_id: &str,
@@ -654,7 +600,6 @@ pub async fn remove_report_member(
         return Ok(false);
     }
 
-    // Si ya no queda ningún owner, promover al primer miembro aceptado.
     let has_owner: Option<(i64,)> =
         sqlx::query_as("SELECT 1 FROM report_members WHERE submission_id = ?1 AND role = 'owner'")
             .bind(submission_id)
@@ -662,7 +607,6 @@ pub async fn remove_report_member(
             .await?;
 
     if has_owner.is_none() {
-        // Promover al primero aceptado (orden por accepted_at).
         sqlx::query(
             r#"
             UPDATE report_members
@@ -683,8 +627,6 @@ pub async fn remove_report_member(
     Ok(true)
 }
 
-/// Actualiza el grupo y/o mesa de un informe (uso docente). Valida que la nueva combinación
-/// no colisione con otro informe existente. Devuelve `None` si la entrega no existe.
 pub async fn update_report_meta(
     pool: &SqlitePool,
     submission_id: &str,
@@ -704,7 +646,6 @@ pub async fn update_report_meta(
     let new_group = group_id.unwrap_or(current_group.as_deref().unwrap_or(""));
     let new_table = table_number.or(current_table);
 
-    // Verificar que no colisione con otro informe existente en el nuevo (práctica, grupo, mesa).
     if let Some(t) = new_table {
         let collision: Option<(String,)> = sqlx::query_as(
             "SELECT id FROM submissions WHERE practice_id = ?1 AND group_id = ?2 AND table_number = ?3 AND id != ?4",
@@ -738,8 +679,6 @@ pub async fn update_report_meta(
     submission_detail(pool, submission_id).await
 }
 
-/// Recupera el detalle completo de una entrega (incluye el análisis deserializado).
-/// Devuelve `None` si no existe.
 pub async fn submission_detail(
     pool: &SqlitePool,
     id: &str,
@@ -799,8 +738,6 @@ pub async fn submission_detail(
     .await?
     .into_iter()
     .collect();
-    // Ventana de edición: submitted_at + horas del curso. Editable si sigue abierta, la entrega
-    // está pendiente y el cálculo aún no es visible (la propiedad la valida el endpoint).
     let editable_until = row.submitted_at
         + chrono::Duration::milliseconds((row.submission_edit_hours * 3_600_000.0) as i64);
     let can_edit = row.entry_mode == "form"
@@ -837,7 +774,6 @@ pub async fn submission_detail(
     }))
 }
 
-/// Lecturas crudas persistidas de una entrega (ordenadas por magnitud y réplica), para prefill.
 pub async fn measurements_for(
     pool: &SqlitePool,
     submission_id: &str,
@@ -853,7 +789,6 @@ pub async fn measurements_for(
     .await?)
 }
 
-/// Devuelve los mensurandos calculados por el estudiante para una entrega (ordenados por símbolo).
 pub async fn student_results_for(
     pool: &SqlitePool,
     submission_id: &str,
@@ -867,8 +802,6 @@ pub async fn student_results_for(
     .await?)
 }
 
-/// Reemplaza por completo los cálculos del estudiante de una entrega (borra los previos e
-/// inserta los nuevos), en una transacción. Ignora filas con valor no finito.
 pub async fn save_student_results(
     pool: &SqlitePool,
     submission_id: &str,
@@ -884,8 +817,6 @@ pub async fn save_student_results(
             continue;
         }
         let u = input.u_expanded.filter(|u| u.is_finite());
-        // `ON CONFLICT` hace que, si el payload trae el mismo símbolo repetido, gane el último
-        // (en vez de violar el UNIQUE y abortar la transacción).
         sqlx::query(
             "INSERT INTO submission_student_results \
              (id, submission_id, symbol, value, u_expanded, created_at) \
@@ -906,11 +837,6 @@ pub async fn save_student_results(
     Ok(())
 }
 
-/// Borra una entrega y todo lo que depende de ella (lecturas, resultados del alumno,
-/// integrantes del informe). Borra explícito en orden, en una transacción (no depende de
-/// `PRAGMA foreign_keys`, mismo criterio que `instruments::delete_instrument`). Al borrar la
-/// fila de `submissions` la mesa queda libre para una nueva entrega (el índice único
-/// `idx_submissions_report_unique` solo mira esa tabla). Devuelve `true` si existía.
 pub async fn delete_submission(pool: &SqlitePool, id: &str) -> anyhow::Result<bool> {
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM submission_measurements WHERE submission_id = ?1")
@@ -933,8 +859,6 @@ pub async fn delete_submission(pool: &SqlitePool, id: &str) -> anyhow::Result<bo
     Ok(result.rows_affected() > 0)
 }
 
-/// Registra la revisión docente de una entrega (estado, comentario, nota y fecha) y
-/// devuelve el detalle actualizado.
 pub async fn update_review(
     pool: &SqlitePool,
     id: &str,
@@ -1011,7 +935,6 @@ mod tests {
         .unwrap()
     }
 
-    /// Crea una entrega de prueba (vía CSV) del estudiante dado y devuelve su id.
     async fn make_submission(pool: &SqlitePool, dir: &std::path::Path, student_id: &str) -> String {
         let analysis = crate::analysis::analyze_csv("x,y\n1,2\n2,4\n3,6\n").unwrap();
         create_submission(
@@ -1092,7 +1015,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Supera el máximo -> error.
         assert!(upsert_grade_score(
             &pool,
             UpsertGradeScore {
@@ -1105,7 +1027,6 @@ mod tests {
         .await
         .is_err());
 
-        // Componente inexistente -> error.
         assert!(upsert_grade_score(
             &pool,
             UpsertGradeScore {
@@ -1126,7 +1047,6 @@ mod tests {
             .into_iter()
             .find(|s| s.student.id == student.id)
             .unwrap();
-        // 8/10 * 5 = 4.0 normalizado.
         assert!((summary.total_points - 4.0).abs() < 1e-9);
     }
 
@@ -1153,7 +1073,6 @@ mod tests {
         .unwrap();
         assert_eq!(created.status, "pendiente");
 
-        // El docente ve la entrega; el estudiante también la suya.
         let teacher = find_user(&pool, TEACHER).await;
         assert_eq!(
             submission_list_for_user(&pool, &teacher)
@@ -1181,7 +1100,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        // Por defecto el calculo no es visible para el estudiante.
         assert!(!detail.results_visible_to_student);
 
         let reviewed = update_review(
@@ -1199,10 +1117,8 @@ mod tests {
         .unwrap();
         assert_eq!(reviewed.status, "aprobada");
         assert_eq!(reviewed.score, Some(10.0));
-        // El docente habilitó la visibilidad.
         assert!(reviewed.results_visible_to_student);
 
-        // Una revisión sin `results_visible` (None) no cambia la visibilidad ya habilitada.
         let again = update_review(
             &pool,
             &created.id,
@@ -1225,10 +1141,8 @@ mod tests {
         let student = find_user(&pool, STUDENT).await;
         let id = make_submission(&pool, dir.path(), &student.id).await;
 
-        // Sin cálculos al inicio.
         assert!(student_results_for(&pool, &id).await.unwrap().is_empty());
 
-        // Guarda dos mensurandos (uno con U, otro sin); la fila con valor NaN se ignora.
         save_student_results(
             &pool,
             &id,
@@ -1254,18 +1168,16 @@ mod tests {
         .unwrap();
 
         let saved = student_results_for(&pool, &id).await.unwrap();
-        assert_eq!(saved.len(), 2); // NaN ignorado
-        assert_eq!(saved[0].symbol, "Q"); // ordenado por símbolo
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].symbol, "Q");
         assert!((saved[0].value - 11.0).abs() < 1e-12);
         assert_eq!(saved[0].u_expanded, Some(0.5));
         assert_eq!(saved[1].symbol, "R");
         assert_eq!(saved[1].u_expanded, None);
 
-        // Aparecen en el detalle de la entrega.
         let detail = submission_detail(&pool, &id).await.unwrap().unwrap();
         assert_eq!(detail.student_results.len(), 2);
 
-        // Replace-all: un nuevo set reemplaza por completo al anterior.
         save_student_results(
             &pool,
             &id,
@@ -1282,7 +1194,6 @@ mod tests {
         assert_eq!(replaced[0].symbol, "Q");
         assert!((replaced[0].value - 12.0).abs() < 1e-12);
 
-        // Símbolo repetido en el mismo payload: gana el último (sin violar el UNIQUE).
         save_student_results(
             &pool,
             &id,
@@ -1310,7 +1221,6 @@ mod tests {
     #[tokio::test]
     async fn student_results_cascade_on_submission_delete() {
         let (pool, dir) = seeded().await;
-        // El pool de test no fuerza FKs por defecto; las activamos para ver el ON DELETE CASCADE.
         sqlx::query("PRAGMA foreign_keys = ON")
             .execute(&pool)
             .await

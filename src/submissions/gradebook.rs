@@ -77,8 +77,6 @@ pub struct UpsertGradeScore {
     pub comment: Option<String>,
 }
 
-/// Crea un componente evaluable (pregunta/informe/parcial) en un curso, asignándole la
-/// siguiente posición disponible, y lo devuelve.
 pub async fn create_grade_component(
     pool: &SqlitePool,
     input: CreateGradeComponent,
@@ -117,8 +115,6 @@ pub async fn create_grade_component(
     .await?)
 }
 
-/// Inserta o actualiza el puntaje crudo de un estudiante en un componente.
-/// Devuelve error si el componente no existe o si el puntaje supera el máximo del componente.
 pub async fn upsert_grade_score(pool: &SqlitePool, input: UpsertGradeScore) -> anyhow::Result<()> {
     let component: Option<(f64,)> =
         sqlx::query_as("SELECT max_points FROM grade_components WHERE id = ?1")
@@ -155,8 +151,6 @@ pub async fn upsert_grade_score(pool: &SqlitePool, input: UpsertGradeScore) -> a
     Ok(())
 }
 
-/// Construye la libreta de calificaciones por curso. Docentes/admin ven todos los cursos y
-/// todos los estudiantes; un estudiante ve solo sus cursos activos y su propio resumen.
 pub async fn gradebook_for_user(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -207,7 +201,6 @@ pub async fn gradebook_for_user(
     Ok(gradebooks)
 }
 
-/// Lista los componentes evaluables de un curso, ordenados por posición y nombre.
 async fn grade_components(
     pool: &SqlitePool,
     course_id: &str,
@@ -225,7 +218,6 @@ async fn grade_components(
     .await?)
 }
 
-/// Lista los estudiantes inscriptos (vía `course_members`) en un curso, sin duplicados.
 async fn students_for_course(pool: &SqlitePool, course_id: &str) -> anyhow::Result<Vec<AuthUser>> {
     Ok(sqlx::query_as::<_, AuthUser>(
         r#"
@@ -241,8 +233,6 @@ async fn students_for_course(pool: &SqlitePool, course_id: &str) -> anyhow::Resu
     .await?)
 }
 
-/// Calcula el resumen de notas de un estudiante: normaliza cada puntaje
-/// (`crudo/sobre*valor`), agrega subtotales por tipo y el total normalizado.
 async fn student_grade_summary(
     pool: &SqlitePool,
     student: AuthUser,

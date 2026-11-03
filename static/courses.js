@@ -184,11 +184,14 @@ function renderCourseGroupForm(course) {
 
 function renderCoursePracticesPanel(course) {
   const enabled = new Set(course.practices.map((practice) => practice.id));
-  const available = state.practices.filter((practice) => !enabled.has(practice.id));
+  const available = state.practices.filter((practice) => practice.status === "publicada" && !enabled.has(practice.id));
   const rows = course.practices.map(
     (practice) => `
       <tr>
-        <td class="directory-primary"><strong>${escapeHtml(practice.name)}</strong></td>
+        <td class="directory-primary">
+          <strong>${escapeHtml(practice.name)}</strong>
+          ${practice.status === "archivada" ? '<span class="practice-state practice-state--archivada" title="No admite entregas ni la ven los estudiantes; se restaura desde Prácticas">Archivada</span>' : ""}
+        </td>
         <td class="directory-actions">
           <button type="button" class="btn-danger" data-disable-practice data-practice-id="${escapeHtml(practice.id)}">Deshabilitar</button>
         </td>
@@ -262,7 +265,8 @@ function renderCourseGroupsTable(course) {
 
 function renderCourseSubgroupsPanel(course) {
   const subgroups = course.subgroups ?? [];
-  const canCreate = course.groups.length > 0 && course.practices.length > 0;
+  const published = course.practices.filter((practice) => practice.status === "publicada");
+  const canCreate = course.groups.length > 0 && published.length > 0;
   const rows = subgroups.map(
     (subgroup) => `
       <tr>
@@ -287,7 +291,7 @@ function renderCourseSubgroupsPanel(course) {
       <label>
         Practica
         <select name="practice_id" ${canCreate ? "" : "disabled"}>
-          ${course.practices.map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`).join("") || `<option value="">Sin practicas</option>`}
+          ${published.map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`).join("") || `<option value="">Sin practicas</option>`}
         </select>
       </label>
       <label>

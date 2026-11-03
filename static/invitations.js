@@ -4,7 +4,6 @@ import { escapeHtml } from "./lib.js";
 import { invitationBanner } from "./dom.js";
 import { loadSubmissions } from "./submissions.js";
 
-/** Carga las invitaciones vigentes del alumno autenticado y las renderiza. */
 export async function loadInvitations() {
   if (!invitationBanner) return;
   if (state.user?.role !== "estudiante") {
@@ -15,11 +14,9 @@ export async function loadInvitations() {
     state.invitations = await fetchJson("/api/submissions/invitations");
     renderInvitations();
   } catch {
-    // no bloquear si falla
   }
 }
 
-/** Renderiza el banner con una tarjeta por invitación vigente. */
 export function renderInvitations() {
   if (!invitationBanner) return;
   const inv = state.invitations ?? [];
@@ -66,7 +63,6 @@ function cardHtml(inv) {
   `;
 }
 
-/** Acepta la invitación al informe `submissionId` y recarga lista e invitaciones. */
 export async function acceptInvitation(submissionId) {
   try {
     await postJson(`/api/submissions/${encodeURIComponent(submissionId)}/accept`, {});
@@ -80,7 +76,6 @@ export async function acceptInvitation(submissionId) {
   }
 }
 
-/** Declina la invitación al informe `submissionId` y recarga las invitaciones. */
 async function declineInvitation(submissionId) {
   try {
     await postJson(`/api/submissions/${encodeURIComponent(submissionId)}/decline`, {});

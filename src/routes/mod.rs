@@ -29,13 +29,7 @@ use instruments::*;
 use practice_admin::*;
 use submissions::*;
 
-// ── CSRF ──────────────────────────────────────────────────────────────────────
-
 /// Deriva el token CSRF de un token de sesión usando HMAC-SHA256 con `secret_key`.
-/// Stateless: no requiere consulta a la base de datos. HMAC evita ataques de
-/// extensión de longitud que afectarían a un `SHA-256(secret || token)` plano.
-///
-/// # Ejemplos
 ///
 /// ```
 /// let token = quantify::routes::compute_csrf("mi-sesion", "clave-secreta");
@@ -54,12 +48,6 @@ pub fn compute_csrf(session_token: &str, secret_key: &str) -> String {
     format!("{:x}", mac.finalize().into_bytes())
 }
 
-/// Middleware que valida el token CSRF en todas las solicitudes mutantes (POST/PUT/PATCH/DELETE)
-/// excepto `POST /auth/login` (que no tiene sesión aún) y `POST /auth/logout`
-/// (que no necesita protección: el daño de un logout forzado es mínimo y reversible).
-///
-/// Nota: el middleware vive dentro del router montado en `/api`, por lo que Axum
-/// le entrega la ruta ya sin ese prefijo (`/auth/login`, no `/api/auth/login`).
 pub async fn csrf_middleware(
     State(state): State<SharedState>,
     request: Request,
@@ -97,7 +85,6 @@ pub async fn csrf_middleware(
     let valid = match (session_tok, csrf_header) {
         (Some(tok), Some(csrf)) => {
             let expected = compute_csrf(&tok, &state.secret_key);
-            // Comparación en tiempo constante para no filtrar el token por timing.
             expected.as_bytes().ct_eq(csrf.as_bytes()).into()
         }
         _ => false,
@@ -114,9 +101,6 @@ pub async fn csrf_middleware(
     }
 }
 
-// ── Router ────────────────────────────────────────────────────────────────────
-
-/// Construye el router de la API bajo `/api`, registrando todas las rutas y el estado compartido.
 pub fn api_router(state: SharedState) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -159,7 +143,13 @@ pub fn api_router(state: SharedState) -> Router {
             "/academic/groups/{group_id}/members/{user_id}/remove",
             post(remove_group_member_path),
         )
-        .route("/practices", get(list_practices))
+        .route("/practices", get(list_practices).post(create_practice))
+        .route(
+            "/practices/{id}",
+            post(update_practice).delete(delete_practice),
+        )
+        .route("/practices/{id}/duplicate", post(duplicate_practice))
+        .route("/practices/{id}/status", post(set_practice_status))
         .route("/practices/{id}/definition", get(practice_definition))
         .route("/practices/{id}/analyze-preview", post(analyze_preview))
         .route(
@@ -263,21 +253,18 @@ struct Health {
     status: &'static str,
 }
 
-/// `GET /api/health`: chequeo de vida del servicio; siempre responde `{"status":"ok"}`.
 async fn health() -> Json<Health> {
     Json(Health { status: "ok" })
 }
 
-/// `GET /api/practices`: catálogo completo de prácticas (requiere sesión válida).
 async fn list_practices(
     State(state): State<SharedState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<db::Practice>>, AppError> {
-    current_user(&state, &headers).await?;
-    Ok(Json(db::practices(&state.pool).await?))
+    let user = current_user(&state, &headers).await?;
+    Ok(Json(db::practices_for_role(&state.pool, &user.role).await?))
 }
 
-/// Lee un campo de texto de un formulario multipart, devolviendo error si no es texto válido.
 async fn read_text(field: axum::extract::multipart::Field<'_>) -> Result<String, AppError> {
     field
         .text()
@@ -285,7 +272,6 @@ async fn read_text(field: axum::extract::multipart::Field<'_>) -> Result<String,
         .map_err(|_| AppError::bad_request("campo de texto invalido"))
 }
 
-/// Exige que un campo opcional esté presente y no vacío; si falta, devuelve 400 con su nombre.
 fn required(value: Option<String>, name: &str) -> Result<String, AppError> {
     let value = value.ok_or_else(|| AppError::bad_request(format!("falta el campo {name}")))?;
     if value.trim().is_empty() {
@@ -294,7 +280,6 @@ fn required(value: Option<String>, name: &str) -> Result<String, AppError> {
     Ok(value)
 }
 
-/// Exige que un campo `String` no sea vacío o solo espacios.
 fn not_blank(value: &str, msg: &str) -> Result<(), AppError> {
     if value.trim().is_empty() {
         Err(AppError::bad_request(msg))
@@ -303,7 +288,6 @@ fn not_blank(value: &str, msg: &str) -> Result<(), AppError> {
     }
 }
 
-/// Valida la longitud mínima de una contraseña (8 caracteres); devuelve 400 si no cumple.
 fn validate_password(password: &str) -> Result<(), AppError> {
     if password.len() < 8 {
         return Err(AppError::bad_request(
@@ -313,7 +297,6 @@ fn validate_password(password: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Validación mínima de email: tiene `@`, parte local no vacía y dominio con punto interno.
 fn is_valid_email(email: &str) -> bool {
     let email = email.trim();
     let Some((local, domain)) = email.split_once('@') else {
@@ -322,7 +305,6 @@ fn is_valid_email(email: &str) -> bool {
     !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
 }
 
-/// Resuelve el usuario autenticado a partir de la cookie de sesión; error 401 si no hay sesión válida.
 async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::AuthUser, AppError> {
     let token = session_token(headers).ok_or_else(|| AppError::unauthorized("login requerido"))?;
     db::user_by_session(&state.pool, &token)
@@ -330,7 +312,6 @@ async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::Au
         .ok_or_else(|| AppError::unauthorized("sesion invalida o vencida"))
 }
 
-/// Igual que `current_user` pero exige rol docente o admin; error 403 en caso contrario.
 async fn require_teacher(
     state: &SharedState,
     headers: &HeaderMap,
@@ -343,7 +324,6 @@ async fn require_teacher(
     }
 }
 
-/// Extrae el token de la cookie `quantify_session` de los headers, si está presente.
 fn session_token(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     cookie_header
@@ -352,8 +332,6 @@ fn session_token(headers: &HeaderMap) -> Option<String> {
         .find_map(|(name, value)| (name == "quantify_session").then(|| value.to_string()))
 }
 
-/// Construye el header `Set-Cookie` de sesión (HttpOnly, SameSite=Lax) con el token y su vigencia.
-/// El flag `Secure` se agrega solo cuando `secure` es `true` (deploy con TLS).
 fn session_cookie(token: &str, max_age_seconds: i64, secure: bool) -> HeaderValue {
     let secure_flag = if secure { "; Secure" } else { "" };
     let value = format!(
@@ -412,7 +390,6 @@ mod tests {
     fn compute_csrf_output_is_valid_hex() {
         let token = compute_csrf("cualquier-sesion", "clave-secreta");
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
-        // SHA-256 produce 32 bytes = 64 caracteres hexadecimales.
         assert_eq!(token.len(), 64);
     }
 }
