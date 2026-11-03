@@ -1357,7 +1357,71 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+const P3_UNIFIED: &str = "2026-11-p3-unificada";
+
+pub(super) async fn unify_p3(pool: &SqlitePool) -> anyhow::Result<()> {
+    let (done,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+        .bind(P3_UNIFIED)
+        .fetch_one(pool)
+        .await?;
+    if done > 0 {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
+    let (legacy,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM practices WHERE id = 'p3-relajacion-desfasaje'")
+            .fetch_one(&mut *tx)
+            .await?;
+    if legacy > 0 {
+        sqlx::query(
+            "DELETE FROM submissions \
+             WHERE practice_id IN ('p3-relajacion', 'p3-relajacion-desfasaje')",
+        )
+        .execute(&mut *tx)
+        .await?;
+        for table in [
+            "course_practices",
+            "practice_subgroups",
+            "practice_table_assignments",
+        ] {
+            sqlx::query(&format!(
+                "UPDATE OR IGNORE {table} SET practice_id = 'p3-relajacion' \
+                 WHERE practice_id = 'p3-relajacion-desfasaje'"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query("DELETE FROM practices WHERE id = 'p3-relajacion-desfasaje'")
+            .execute(&mut *tx)
+            .await?;
+        wipe_practice_definition(&mut tx, "p3-relajacion").await?;
+        for table in ["practice_sections", "practice_parts"] {
+            sqlx::query(&format!(
+                "DELETE FROM {table} WHERE practice_id = 'p3-relajacion'"
+            ))
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(
+            "UPDATE practices SET analysis_kind = 'regresion_lineal', x_formula = '2*pi*f', \
+             y_formula = 'b / math::sqrt(a*a - b*b)', description = ?1 \
+             WHERE id = 'p3-relajacion'",
+        )
+        .bind(crate::db::P3_DESCRIPTION)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(P3_UNIFIED)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
+    unify_p3(pool).await?;
     seed_p1_estadistica(pool).await?;
     seed_p3_relajacion(pool).await?;
     seed_p2_cc(pool).await?;

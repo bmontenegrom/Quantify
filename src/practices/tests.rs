@@ -2427,24 +2427,36 @@ async fn a_result_used_by_series_artifacts_goes_to_the_series_part() {
 async fn the_two_old_p3_practices_become_one() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
-    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-p3-unificada'")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query(
+    for sql in [
+        "DELETE FROM applied_migrations WHERE name = '2026-11-p3-unificada'",
+        "UPDATE practices SET analysis_kind = 'estadistico', x_formula = NULL, y_formula = NULL \
+         WHERE id = 'p3-relajacion'",
         "INSERT INTO practices (id, name, description, analysis_kind) \
          VALUES ('p3-relajacion-desfasaje', 'Desfasaje', '', 'regresion_lineal')",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    crate::db::seed_practices(&pool).await.unwrap();
+        "INSERT INTO courses (id, name, term, active, created_at) \
+         VALUES ('otro', 'Otro curso', '2026', 1, '2026-01-01')",
+        "INSERT INTO course_practices (course_id, practice_id, created_at) \
+         VALUES ('otro', 'p3-relajacion-desfasaje', '2026-01-01')",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
     seed_definitions(&pool).await.unwrap();
     assert!(definition(&pool, "p3-relajacion-desfasaje")
         .await
         .unwrap()
         .is_none());
     let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+    assert_eq!(p3.analysis_kind.as_deref(), Some("regresion_lineal"));
     assert_eq!(p3.parts.len(), 2);
     assert_eq!(p3.quantities.len(), 8);
+    let (enabled,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM course_practices WHERE course_id = 'otro' AND practice_id = 'p3-relajacion'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        enabled, 1,
+        "el curso que tenia el desfasaje sigue teniendo P3"
+    );
 }

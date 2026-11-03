@@ -265,44 +265,9 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-const P3_UNIFIED: &str = "2026-11-p3-unificada";
-
-async fn unify_p3(pool: &SqlitePool) -> anyhow::Result<()> {
-    let (done,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
-        .bind(P3_UNIFIED)
-        .fetch_one(pool)
-        .await?;
-    if done > 0 {
-        return Ok(());
-    }
-    let mut tx = pool.begin().await?;
-    let (legacy,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM practices WHERE id = 'p3-relajacion-desfasaje'")
-            .fetch_one(&mut *tx)
-            .await?;
-    if legacy > 0 {
-        for id in ["p3-relajacion", "p3-relajacion-desfasaje"] {
-            sqlx::query("DELETE FROM submissions WHERE practice_id = ?1")
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query("DELETE FROM practices WHERE id = ?1")
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
-        }
-    }
-    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
-        .bind(P3_UNIFIED)
-        .bind(Utc::now())
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(())
-}
+pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f.";
 
 pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
-    unify_p3(pool).await?;
     let practices = [
         (
             "p1-estadistica",
@@ -323,7 +288,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         (
             "p3-relajacion",
             "Relajacion Exponencial",
-            "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f.",
+            P3_DESCRIPTION,
             "regresion_lineal",
             Some("2*pi*f"),
             Some("b / math::sqrt(a*a - b*b)"),
