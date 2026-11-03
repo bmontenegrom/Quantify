@@ -206,6 +206,11 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     const summary = await post(`${base}/sections`, { title: "Resumen", part_id: partA.id });
     const rmax = await post(`${base}/results`, { symbol: "Rm", name: "R maxima", unit: "", formula: "R_max", is_final: true });
     await post(`${base}/results/${rmax.id}/section`, { section_id: summary.id });
+    const v = await post(`${base}/quantities`, { symbol: "V", name: "V", unit: "", repeated: false, quantity: null, per_point: false });
+    const source = await post(`${base}/sections`, { title: "Fuente", part_id: partA.id });
+    const vm = await post(`${base}/results`, { symbol: "Vm", name: "V fuente", unit: "", formula: "V", is_final: true });
+    await post(`${base}/quantities/${v.id}/section`, { section_id: source.id });
+    await post(`${base}/results/${vm.id}/section`, { section_id: source.id });
     const section = await post(`${base}/sections`, { title: "Barrido", part_id: partB.id });
     await post(`${base}/quantities/${r.id}/section`, { section_id: section.id });
     await post(`${base}/quantities/${i.id}/section`, { section_id: section.id });
@@ -224,6 +229,8 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   assert(!(await table.isVisible()), "la serie no debía verse en la pestaña Datos");
   const rmTitle = sPage.locator('.measurement-section:has([data-final-result="1"][data-symbol="Rm"]) .measurement-section-title');
   assert((await rmTitle.textContent()) === "Resumen", "Rm debía verse bajo su sección Resumen");
+  const vmTitle = sPage.locator('.measurement-section:has([data-final-result="1"][data-symbol="Vm"]) h4');
+  assert((await vmTitle.textContent()) === "Fuente", "Vm debía verse bajo su sección Fuente, junto a V");
   await seriesTabs.nth(1).click();
   assert(await table.isVisible(), "la serie debía verse en la pestaña Serie");
   const visibleFinals = await sPage.locator("#measurement-fields .final-results-section:visible").count();

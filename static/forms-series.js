@@ -5,7 +5,7 @@ import { escapeHtml, symbolHtml, unitHtml, format, prefixFactor, pointPower, flo
 import { SERIES_LIVE_COLUMNS } from "./constants.js";
 import { definitionParts, definitionSections, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
-import { quantityNameHtml, wireRemoveReplica, collectMeasurements } from "./forms.js";
+import { quantityNameHtml, wireRemoveReplica, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
 export const SERIES_INITIAL_ROWS = 3;
 
@@ -30,11 +30,17 @@ export function renderSeriesTable(definition) {
       shared,
       sections.filter((sec) => !sec.series),
     );
+    const finals = (definition.results ?? []).filter((r) => r.is_final);
     const blocks = grouped
       .filter(({ rows }) => rows.length)
       .map(({ sec, rows }) => {
         const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
-        return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}</div>`;
+        const secFinals = finals.filter((r) => (sec.results ?? []).includes(r.symbol));
+        const finalsHtml = secFinals.length
+          ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
+             ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
+          : "";
+        return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}${finalsHtml}</div>`;
       });
     if (rest.length) {
       blocks.push(`<div class="shared-quantities"><h4>Medidas</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
@@ -68,7 +74,7 @@ export function renderSeriesTable(definition) {
       <section class="series-preview panel" aria-live="polite"></section>
     </div>
   `;
-  measurementFields.querySelectorAll(".shared-quantities .measurement-row").forEach((row) => {
+  measurementFields.querySelectorAll(".shared-quantities .measurement-row:not([data-final-result])").forEach((row) => {
     if (row.dataset.isGiven === "1") return;
     const inst = row.querySelector(".measure-instrument");
     if (inst) {

@@ -453,7 +453,7 @@ function partForResult(symbol) {
   return sections.find((sec) => sec.id && (sec.results ?? []).includes(symbol))?.id ?? null;
 }
 
-function finalResultRowHtml(r, sectionId) {
+export function finalResultRowHtml(r, sectionId) {
   const part = sectionId !== undefined ? sectionId : partForResult(r.symbol);
   const uField = !hasUncertainty(r)
     ? ""
@@ -483,11 +483,15 @@ function finalResultRowHtml(r, sectionId) {
 function seriesFinalResultsHtml(definition) {
   const finals = (definition.results ?? []).filter((r) => r.is_final);
   const sections = (definitionSections(definition) ?? []).filter((sec) => !sec.series);
+  const shared = new Set(definition.quantities.filter((q) => !q.per_point || q.is_given).map((q) => q.symbol));
+  const withRows = sections.filter((sec) => (sec.symbols ?? []).some((sym) => shared.has(sym)));
   const titled = sections
-    .filter((sec) => !(sec.symbols ?? []).length)
+    .filter((sec) => !withRows.includes(sec))
     .map((sec) => ({ sec, rows: finals.filter((r) => (sec.results ?? []).includes(r.symbol)) }))
     .filter(({ rows }) => rows.length);
-  const embedded = new Set(titled.flatMap(({ rows }) => rows.map((r) => r.symbol)));
+  const embedded = new Set(
+    [...withRows, ...titled.map(({ sec }) => sec)].flatMap((sec) => sec.results ?? []),
+  );
   const titledHtml = titled.map(({ sec, rows }) => {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
     return `<div class="measurement-section"${secAttr}>
