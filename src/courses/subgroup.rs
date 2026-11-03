@@ -192,7 +192,7 @@ pub(super) async fn subgroups_for_course(
         FROM practice_subgroups s
         JOIN course_practices cp ON cp.course_id = s.course_id AND cp.practice_id = s.practice_id
         JOIN practices p ON p.id = s.practice_id
-        WHERE s.course_id = ?1 AND cp.enabled = TRUE AND p.status = 'publicada'
+        WHERE s.course_id = ?1 AND cp.enabled = TRUE AND p.status <> 'borrador'
         ORDER BY s.practice_id, s.name
         "#,
     )

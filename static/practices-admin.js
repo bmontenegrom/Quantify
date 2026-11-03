@@ -473,9 +473,11 @@ function renderPracticeDirectory() {
   });
 }
 
-/** Recarga el catálogo (nombre, estado) después de una acción sobre la práctica. */
+/** Recarga el catálogo y el contexto académico después de una acción sobre la práctica: los
+ *  cursos traen el nombre y el estado de sus prácticas (p. ej. "Archivada" en Cursos). */
 async function refreshPractices() {
-  state.practices = await fetchJson("/api/practices");
+  const { loadAcademic } = await import("./academic.js");
+  await loadAcademic();
 }
 
 async function createPractice(event) {

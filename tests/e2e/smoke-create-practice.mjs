@@ -101,6 +101,14 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   const visible = await sPage.locator(`#practice-nav-children .nav-child:has-text("${NAME}")`).count();
   assert(visible === 0, "una práctica archivada no debía seguir en el menú del estudiante");
 
+  step("docente: la archivada sigue en su curso, marcada, y la puede deshabilitar");
+  await page.click('.tab.teacher-only[data-view="courses"]');
+  await page.click("[data-course-open]");
+  const archivedRow = page.locator(`tr:has([data-disable-practice][data-practice-id="${ID}"])`);
+  await archivedRow.locator(".practice-state--archivada").waitFor();
+  await archivedRow.locator("[data-disable-practice]").click();
+  await page.waitForSelector(`[data-disable-practice][data-practice-id="${ID}"]`, { state: "detached" });
+
   step("estudiante: no puede leer un borrador por id; de una archivada, solo la definición");
   const draft = await page.evaluate(async (id) => {
     const me = await (await fetch("/api/auth/me")).json();

@@ -293,7 +293,18 @@ async fn student_course_summaries(
     .bind(user_id)
     .fetch_all(pool)
     .await?;
-    course_summaries(pool, courses).await
+    let mut summaries = course_summaries(pool, courses).await?;
+    summaries.iter_mut().for_each(hide_unpublished);
+    Ok(summaries)
+}
+
+/// Vista del estudiante de un curso: sin prácticas archivadas ni sus subgrupos. El docente sí las
+/// ve (marcadas como archivadas), para poder deshabilitarlas o restaurarlas.
+pub(crate) fn hide_unpublished(summary: &mut CourseSummary) {
+    summary.practices.retain(|p| p.status == "publicada");
+    summary
+        .subgroups
+        .retain(|s| s.practice.status == "publicada");
 }
 
 /// Enriquece una lista de cursos con sus miembros, grupos, prácticas, subgrupos y mesas.
@@ -344,8 +355,9 @@ async fn course_members_for_course(
     .await?)
 }
 
-/// Lista las prácticas habilitadas y publicadas de un curso, ordenadas por nombre. Una archivada
-/// deja de listarse (y de admitir entregas) aunque siga habilitada; sus entregas se conservan.
+/// Lista las prácticas habilitadas de un curso, ordenadas por nombre: las publicadas y las
+/// archivadas (que el docente ve para poder deshabilitarlas; [`hide_unpublished`] las saca de la
+/// vista del estudiante). Una archivada no admite entregas (`user_can_submit`).
 pub async fn practices_for_course(
     pool: &SqlitePool,
     course_id: &str,
@@ -355,7 +367,7 @@ pub async fn practices_for_course(
         SELECT p.id, p.name, p.description, p.analysis_kind, p.status
         FROM course_practices cp
         JOIN practices p ON p.id = cp.practice_id
-        WHERE cp.course_id = ?1 AND cp.enabled = TRUE AND p.status = 'publicada'
+        WHERE cp.course_id = ?1 AND cp.enabled = TRUE AND p.status <> 'borrador'
         ORDER BY p.name
         "#,
     )
@@ -594,16 +606,26 @@ mod tests {
         .unwrap();
         assert!(draft.is_none());
 
-        // Uno ya creado deja de listarse cuando su práctica se archiva.
+        // Si su práctica se archiva, el docente lo sigue viendo (marcado por el estado de la
+        // práctica) y el estudiante no.
         sqlx::query("UPDATE practices SET status = 'archivada' WHERE id = 'p1-estadistica'")
             .execute(&pool)
             .await
             .unwrap();
-        assert!(subgroups_for_course(&pool, COURSE)
-            .await
-            .unwrap()
+        let teacher = all_course_summaries(&pool).await.unwrap();
+        let course = teacher.iter().find(|c| c.id == COURSE).unwrap();
+        assert!(course
+            .subgroups
+            .iter()
+            .any(|s| s.practice.id == "p1-estadistica" && s.practice.status == "archivada"));
+        let student = find_user(&pool, STUDENT).await;
+        let student_view = student_course_summaries(&pool, &student.id).await.unwrap();
+        let course = student_view.iter().find(|c| c.id == COURSE).unwrap();
+        assert!(course
+            .subgroups
             .iter()
             .all(|s| s.practice.id != "p1-estadistica"));
+        assert!(course.practices.iter().all(|p| p.id != "p1-estadistica"));
     }
 
     #[tokio::test]

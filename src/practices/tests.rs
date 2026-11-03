@@ -2155,11 +2155,27 @@ async fn only_published_practices_reach_courses_and_students() {
             .any(|p| p.id == "borrador")
     };
     assert!(listed(pool.clone()).await);
-    // Archivada: sale del curso aunque siga habilitada, y el estudiante deja de verla.
+    // Archivada: el docente la sigue viendo en el curso (para deshabilitarla), marcada como tal,
+    // pero no admite entregas y el estudiante deja de verla.
     set_practice_status(&pool, &draft.id, "archivada")
         .await
         .unwrap();
-    assert!(!listed(pool.clone()).await);
+    assert!(listed(pool.clone()).await);
+    let mut summary = db::CourseSummary {
+        id: course.into(),
+        name: String::new(),
+        term: String::new(),
+        active: true,
+        submission_edit_hours: 0.0,
+        acceptance_window_hours: 0.0,
+        members: vec![],
+        groups: vec![],
+        practices: db::practices_for_course(&pool, course).await.unwrap(),
+        subgroups: vec![],
+        table_assignments: vec![],
+    };
+    crate::courses::hide_unpublished(&mut summary);
+    assert!(summary.practices.iter().all(|p| p.id != "borrador"));
     let student_catalog = db::practices_for_role(&pool, "estudiante").await.unwrap();
     assert!(student_catalog.iter().all(|p| p.id != "borrador"));
     let teacher_catalog = db::practices_for_role(&pool, "docente").await.unwrap();
