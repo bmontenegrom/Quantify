@@ -4,6 +4,8 @@ import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
 import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel } from "./lib.js";
 import { selectView } from "./navigation.js";
 
+const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
+
 function adminSymbolHtml(symbol) {
   return `<strong>${symbolHtml(symbol)}</strong> <code title="Así se escribe en las fórmulas">${escapeHtml(symbol)}</code>`;
 }
@@ -253,7 +255,9 @@ export function renderPracticesPage() {
 
     <section class="panel workspace-panel">
       <h3 class="admin-section-title">Configuración del análisis</h3>
-      ${renderAnalysisKindForm(practice, def)}
+      ${def?.parts?.length
+        ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes y secciones».</p>`
+        : renderAnalysisKindForm(practice, def)}
       ${kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
       ${kind == null || kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
     </section>
@@ -340,6 +344,9 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("[data-layout-delete]").forEach((btn) => {
     btn.addEventListener("click", () => deleteLayoutItem(btn.dataset.layoutDelete, btn.dataset.id, practice.id));
   });
+  practiceWorkspace.querySelectorAll("[data-part-kind]").forEach((select) => {
+    select.addEventListener("change", () => setPartKind(select.dataset.id, select.value, practice.id));
+  });
   practiceWorkspace.querySelectorAll("[data-section-select]").forEach((select) => {
     select.addEventListener("change", () => setItemSection(select.dataset.sectionSelect, select.dataset.id, select.value, practice.id));
   });
@@ -394,13 +401,12 @@ function practiceStatusChip(status) {
 }
 
 function renderNewPracticeForm() {
-  const kinds = ["estadistico", "regresion_lineal", "curva"];
   return `
     <form id="new-practice-form" class="detail-form detail-form-grid">
       <label>Nombre <input name="name" required placeholder="Péndulo simple" /></label>
       <label>Tipo de análisis
         <select name="analysis_kind">
-          ${kinds.map((k) => `<option value="${k}">${escapeHtml(analysisKindLabel(k))}</option>`).join("")}
+          ${ANALYSIS_KINDS.map((k) => `<option value="${k}">${escapeHtml(analysisKindLabel(k))}</option>`).join("")}
         </select>
       </label>
       <label>Descripción <input name="description" placeholder="Qué se mide y qué se determina" /></label>
@@ -552,7 +558,7 @@ function renderAnalysisKindForm(practice, def) {
       <label>Tipo de análisis
         <select name="analysis_kind" required>
           ${placeholder}
-          ${["estadistico", "regresion_lineal", "curva"].map((k) =>
+          ${ANALYSIS_KINDS.map((k) =>
             `<option value="${k}" ${k === current ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
           ).join("")}
         </select>
@@ -1085,6 +1091,13 @@ function renderLayoutSection(practice, def) {
           <button type="submit">Guardar</button>
         </form>
       </td>
+      <td>
+        <select data-part-kind data-id="${escapeHtml(p.id)}" aria-label="Análisis de la parte">
+          ${ANALYSIS_KINDS.map((k) =>
+            `<option value="${k}" ${k === p.effective_kind ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
+          ).join("")}
+        </select>
+      </td>
       <td class="directory-actions">
         ${moveButtonsHtml("parts", p.id, i, parts.length)}
         <button type="button" class="btn-danger" data-layout-delete="parts" data-id="${escapeHtml(p.id)}">Eliminar</button>
@@ -1110,7 +1123,8 @@ function renderLayoutSection(practice, def) {
       <h3 class="admin-section-title">Partes y secciones <span class="count-badge">${parts.length}</span></h3>
       <p class="submission-meta">Cada parte es una pestaña del formulario del alumno. Una sección agrupa magnitudes y resultados bajo un título; sin parte, se ve en todas las pestañas (datos compartidos). La sección de cada magnitud y mensurando se elige en sus tablas.</p>
       <h4>Partes</h4>
-      ${layoutTable("<th>Título</th><th>Acciones</th>", partRows, "Sin partes: el formulario va en una sola pestaña.")}
+      <p class="submission-meta">Cada parte elige su análisis. Solo una puede ser de regresión o curva: es la que lleva la serie de datos (sus magnitudes por punto, intermedias, curvas y ajuste).</p>
+      ${layoutTable("<th>Título</th><th>Análisis</th><th>Acciones</th>", partRows, "Sin partes: el formulario va en una sola pestaña.")}
       <details class="add-panel" data-add-panel="part">
         <summary>Nueva parte</summary>
         <form id="new-part-form" class="detail-form detail-form-grid" data-layout-form="parts">
@@ -1151,8 +1165,21 @@ async function deleteLayoutItem(list, id, practiceId) {
   if (!window.confirm(what)) return;
   await runPracticeAction(async () => {
     await deleteJson(`/api/practices/${practiceId}/${list}/${id}`);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    [state.practiceDefinition, state.practices] = await Promise.all([
+      fetchJson(`/api/practices/${practiceId}/definition`),
+      list === "parts" ? fetchJson("/api/practices") : state.practices,
+    ]);
   }, list === "parts" ? "Parte eliminada" : "Sección eliminada");
+}
+
+async function setPartKind(partId, kind, practiceId) {
+  await runPracticeAction(async () => {
+    await postJson(`/api/practices/${practiceId}/parts/${partId}/analysis-kind`, { analysis_kind: kind });
+    [state.practiceDefinition, state.practices] = await Promise.all([
+      fetchJson(`/api/practices/${practiceId}/definition`),
+      fetchJson("/api/practices"),
+    ]);
+  }, "Análisis de la parte guardado");
 }
 
 async function setItemSection(list, id, sectionId, practiceId) {

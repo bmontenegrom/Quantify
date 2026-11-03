@@ -155,6 +155,10 @@ pub fn api_router(state: SharedState) -> Router {
             post(update_part).delete(delete_part),
         )
         .route("/practices/{id}/parts/{pid}/move", post(move_part))
+        .route(
+            "/practices/{id}/parts/{pid}/analysis-kind",
+            post(set_part_kind),
+        )
         .route("/practices/{id}/sections", post(create_section))
         .route(
             "/practices/{id}/sections/{sid}",

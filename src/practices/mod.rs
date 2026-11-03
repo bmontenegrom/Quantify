@@ -74,6 +74,9 @@ pub struct PracticePart {
     pub practice_id: String,
     pub title: String,
     pub position: i64,
+    pub analysis_kind: Option<String>,
+    #[sqlx(skip)]
+    pub effective_kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
