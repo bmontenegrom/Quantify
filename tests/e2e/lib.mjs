@@ -31,6 +31,22 @@ export async function openAddForm(page, formSelector) {
   await page.waitForSelector(formSelector);
 }
 
+export async function apiPost(page, url, body) {
+  return page.evaluate(
+    async ({ url, body }) => {
+      const me = await (await fetch("/api/auth/me")).json();
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-csrf-token": me.csrf_token },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(`${url}: ${await r.text()}`);
+      return r.json();
+    },
+    { url, body },
+  );
+}
+
 export async function waitForDraft(page, expected) {
   await page.waitForFunction(
     ({ quantityId, count, result, value }) =>

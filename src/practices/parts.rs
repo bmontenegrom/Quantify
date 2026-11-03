@@ -78,6 +78,16 @@ impl PracticeDefinition {
         if !is_point_based(self.analysis_kind.as_deref()) {
             return None;
         }
+        if let Some(chosen) = self
+            .parts
+            .iter()
+            .find(|p| is_point_based(p.analysis_kind.as_deref()))
+        {
+            return Some(chosen);
+        }
+        if self.parts.iter().any(|p| p.analysis_kind.is_some()) {
+            return None;
+        }
         let holding = self.series_parts();
         self.parts
             .iter()
@@ -85,12 +95,52 @@ impl PracticeDefinition {
             .or_else(|| self.parts.first())
     }
 
+    pub fn stray_series(&self) -> Option<&PracticePart> {
+        let series = self.series_part()?;
+        self.series_parts()
+            .iter()
+            .any(|p| *p != series.id)
+            .then_some(series)
+    }
+
+    pub fn part_kinds(&self) -> Vec<String> {
+        let series = self.series_part().map(|p| p.id.as_str());
+        self.parts
+            .iter()
+            .map(|p| self.kind_given_series(p, series).to_string())
+            .collect()
+    }
+
+    pub fn with_effective_kinds(mut self) -> PracticeDefinition {
+        let kinds = self.part_kinds();
+        for (part, kind) in self.parts.iter_mut().zip(kinds) {
+            part.effective_kind = kind;
+        }
+        self
+    }
+
+    pub fn with_mirrored_kind(mut self) -> PracticeDefinition {
+        if self.parts.iter().any(|p| p.analysis_kind.is_some()) {
+            self.analysis_kind = Some(
+                self.parts
+                    .iter()
+                    .filter_map(|p| p.analysis_kind.clone())
+                    .find(|k| is_point_based(Some(k)))
+                    .unwrap_or_else(|| "estadistico".into()),
+            );
+        }
+        self
+    }
+
     pub fn part_kind(&self, part: &PracticePart) -> &str {
-        match self.series_part() {
-            Some(series) if series.id == part.id => {
-                self.analysis_kind.as_deref().unwrap_or("estadistico")
-            }
-            _ => "estadistico",
+        self.kind_given_series(part, self.series_part().map(|p| p.id.as_str()))
+    }
+
+    fn kind_given_series(&self, part: &PracticePart, series: Option<&str>) -> &str {
+        if series == Some(part.id.as_str()) {
+            self.analysis_kind.as_deref().unwrap_or("estadistico")
+        } else {
+            "estadistico"
         }
     }
 

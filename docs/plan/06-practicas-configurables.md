@@ -485,10 +485,46 @@ el uso real conviene no editar estructuralmente prácticas con entregas hasta F5
 **Aceptación**: golden idénticos; los formularios de P1, P2-CC e Hidrostática se ven igual que
 antes (capturas de `visual-forms.mjs`); una práctica nueva puede tener pestañas.
 
-### F3 — Análisis por parte
+### F3 — Análisis por parte ✅ HECHA
 
-1. Mover `analysis_kind`, `x_formula`, `y_formula`, `operator_count` a `practice_parts`; las
-   columnas de `practices` quedan como espejo de la primera parte hasta retirarlas.
+**Estado (2026-11-03)**: hecho en #91, #92 y la PR del admin por parte. Estas son las diferencias con
+lo planeado:
+- **Una sola parte con serie.** Cada parte elige su tipo (`practice_parts.analysis_kind`), pero
+  solo una puede ser de regresión o curva. Es la que lleva las magnitudes por punto, las
+  intermedias, las curvas, el ajuste, las derivadas por punto y los agregados. Las demás son
+  estadísticas. Las 10 prácticas entran en este modelo. Cuando una práctica necesite dos series,
+  hay que agregar `part_id` a las intermedias, curvas, derivadas por punto y agregados.
+- **Ejes y operadores siguen en la práctica.** Con una sola parte con serie, los ejes de
+  `practices` son los de esa parte. Los operadores solo aplican si la práctica es estadística. El
+  tipo de `practices` es un espejo: es el de la parte con serie, o `estadistico` si no hay
+  ninguna. Elegir el tipo de una parte lo actualiza.
+- **Sin parte elegida.** Si ninguna parte tiene tipo guardado (prácticas sembradas o anteriores),
+  la parte con serie es la que tiene las magnitudes por punto, o la primera si la serie no tiene
+  sección. Cuando el docente elige el tipo de una parte, se guarda el de todas, y desde ahí solo
+  cuenta lo elegido: una parte nueva nace estadística, y borrar la parte con serie deja la
+  práctica estadística. Las magnitudes por punto tienen que estar en la parte con serie (se valida
+  en cada cambio).
+- **JSON sin adaptador.** `FormAnalysis` suma `parts[]`, que no se serializa si está vacío. Con
+  partes, el nivel superior es lo compartido. Las prácticas sin partes no cambian.
+- **Alcance de las fórmulas.**
+  - Una parte ve lo compartido y lo suyo; lo compartido, solo lo compartido.
+  - Un mensurando **sin sección** va a la parte de la que dependen sus símbolos (magnitudes,
+    `slope`, alias de curva, intermedias, o el hecho de que lo usen las derivadas por punto). Si
+    no depende de ninguna, es compartido.
+  - Uno puesto a propósito en una sección compartida sigue siendo compartido.
+  - Una migración de una sola vez pasó a su parte los mensurandos compartidos que usaban datos de
+    una sola parte: `Q` de P1 pasó a Op1.
+- **Motor tolerante.** Si un mensurando, una derivada por punto o un agregado no se puede evaluar,
+  o si una parte entera falla, queda un aviso y no se pierde la entrega. El admin sigue
+  rechazando los cambios que rompen fórmulas: crear, renombrar o mover elementos, secciones y
+  partes pasa por `guard_change`.
+- **P3 conserva su id** (`p3-relajacion`). La migración conserva la habilitación en cursos, los
+  subgrupos y las mesas, y borra las entregas de las dos prácticas viejas.
+
+1. ~~Mover `analysis_kind`, `x_formula`, `y_formula`, `operator_count` a `practice_parts`; las
+   columnas de `practices` quedan como espejo de la primera parte hasta retirarlas.~~ Hecho
+   distinto: solo `analysis_kind` pasó a la parte; las columnas de `practices` son el espejo de
+   **la parte con serie** (ver Estado arriba).
 2. Motor: `analyze` calcula lo compartido y después cada parte con su motor
    (`compute`/`compute_regresion`/`compute_curva`), recibiendo lo compartido como escalares. El
    resultado pasa a ser `FormAnalysis { shared, parts: [PartAnalysis] }`; se mantiene un
