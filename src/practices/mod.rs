@@ -93,6 +93,8 @@ pub struct ResultInput {
 #[derive(Debug, Clone, Serialize)]
 pub struct PracticeDefinition {
     pub practice_id: String,
+    /// `borrador`, `publicada` o `archivada`: una publicada no puede quedar incompleta al editarla.
+    pub status: String,
     pub analysis_kind: Option<String>,
     /// Solo `regresion_lineal`: expresiones por punto de los ejes `x` e `y` del ajuste.
     pub x_formula: Option<String>,

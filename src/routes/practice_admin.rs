@@ -114,6 +114,18 @@ pub(super) struct StatusBody {
 /// Qué le falta a una práctica para poder publicarse: algo que el alumno cargue, algo que se
 /// calcule y todas sus fórmulas compilando. Vacío = se puede publicar.
 fn publish_problems(def: &practices::PracticeDefinition) -> Vec<String> {
+    let mut problems = structure_problems(def);
+    problems.extend(
+        formula_problems(def)
+            .into_iter()
+            .map(|(element, message)| format!("{element}: {message}")),
+    );
+    problems
+}
+
+/// La parte estructural de [`publish_problems`]: algo que el alumno cargue y algo que se calcule.
+/// [`guard_change`] la exige también al editar una práctica ya publicada.
+fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
     let mut problems = Vec::new();
     if def.quantities.is_empty() {
         problems.push("no tiene magnitudes de entrada".to_string());
@@ -131,11 +143,6 @@ fn publish_problems(def: &practices::PracticeDefinition) -> Vec<String> {
         }
         _ => {}
     }
-    problems.extend(
-        formula_problems(def)
-            .into_iter()
-            .map(|(element, message)| format!("{element}: {message}")),
-    );
     problems
 }
 
@@ -313,6 +320,12 @@ pub(super) async fn set_practice_regression_formulas(
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &id).await?;
     check_axes(&def, &body.x_formula, &body.y_formula)?;
+    // Vaciar un eje deja la regresión sin ajuste: en una publicada no se permite.
+    let mut after = def.clone();
+    let axis = |f: &str| Some(f.trim().to_string()).filter(|f| !f.is_empty());
+    after.x_formula = axis(&body.x_formula);
+    after.y_formula = axis(&body.y_formula);
+    guard_change(&def, &after, "guardar los ejes")?;
     if !practices::set_regression_formulas(&state.pool, &id, &body.x_formula, &body.y_formula)
         .await?
     {
@@ -997,6 +1010,19 @@ fn guard_change(
     after: &practices::PracticeDefinition,
     what: &str,
 ) -> Result<(), AppError> {
+    // Una publicada (la ven y la entregan los estudiantes) no puede quedar incompleta.
+    if after.status == "publicada" {
+        let before_missing = structure_problems(before);
+        if let Some(missing) = structure_problems(after)
+            .into_iter()
+            .find(|p| !before_missing.contains(p))
+        {
+            return Err(AppError::bad_request(format!(
+                "No se puede {what}: la practica esta publicada y quedaria sin lo necesario ({missing}). \
+                 Archivala si ya no se usa."
+            )));
+        }
+    }
     let already_broken: Vec<String> = formula_problems(before)
         .into_iter()
         .map(|(element, _)| element)
@@ -1082,6 +1108,10 @@ pub(super) async fn delete_curve(
     Path((id, cid)): Path<(String, String)>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    let before = load_definition(&state, &id).await?;
+    let mut after = before.clone();
+    after.curves.retain(|c| c.id != cid);
+    guard_change(&before, &after, "eliminar la curva")?;
     if !practices::delete_curve(&state.pool, &id, &cid).await? {
         return Err(AppError::not_found("curva no encontrada"));
     }
@@ -1371,6 +1401,7 @@ mod tests {
         };
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),
+            status: "borrador".into(),
             analysis_kind: Some("regresion_lineal".into()),
             x_formula: None,
             y_formula: None,
@@ -1444,6 +1475,7 @@ mod tests {
         };
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),
+            status: "borrador".into(),
             analysis_kind: Some("regresion_lineal".into()),
             x_formula: None,
             y_formula: None,
@@ -1572,6 +1604,7 @@ mod tests {
     fn validate_result_allows_dimensionless_unit() {
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),
+            status: "borrador".into(),
             analysis_kind: Some("regresion_lineal".into()),
             x_formula: None,
             y_formula: None,
@@ -1624,6 +1657,39 @@ mod tests {
 
     /// Un cambio que dejaría fórmulas guardadas sin compilar se rechaza antes de hacerlo, pero una
     /// fórmula que ya estaba rota (guardada cuando no se validaba) no bloquea otros cambios.
+    #[tokio::test]
+    async fn a_published_practice_cannot_be_left_incomplete() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let published = practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(published.status, "publicada");
+        // Sin mensurandos: se rechaza en una publicada…
+        let mut emptied = published.clone();
+        emptied.results.clear();
+        let err = guard_change(&published, &emptied, "x").unwrap_err();
+        assert!(
+            err.message().contains("no tiene mensurandos"),
+            "{}",
+            err.message()
+        );
+        // …y pasa en un borrador (se está armando).
+        let mut draft = published.clone();
+        draft.status = "borrador".into();
+        let mut draft_emptied = draft.clone();
+        draft_emptied.results.clear();
+        assert!(guard_change(&draft, &draft_emptied, "x").is_ok());
+        // Una regresión publicada no puede quedar sin ejes.
+        let reg = practices::definition(&pool, "fluidos-2")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut no_axes = reg.clone();
+        no_axes.y_formula = None;
+        assert!(guard_change(&reg, &no_axes, "x").is_err());
+    }
+
     #[tokio::test]
     async fn changes_that_break_saved_formulas_are_detected() {
         let (pool, _dir) = crate::computation::tests::setup().await;

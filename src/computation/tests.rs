@@ -128,6 +128,7 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
     };
     let definition = PracticeDefinition {
         practice_id: "viscosidad".into(),
+        status: "borrador".into(),
         analysis_kind: Some("regresion_lineal".into()),
         x_formula: None,
         y_formula: None,

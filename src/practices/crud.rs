@@ -10,6 +10,7 @@ use uuid::Uuid;
 /// Fila cruda con la configuración de análisis de una práctica.
 #[derive(sqlx::FromRow)]
 struct PracticeConfigRow {
+    status: String,
     analysis_kind: Option<String>,
     x_formula: Option<String>,
     y_formula: Option<String>,
@@ -22,7 +23,7 @@ pub async fn definition(
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
     let row: Option<PracticeConfigRow> = sqlx::query_as(
-        "SELECT analysis_kind, x_formula, y_formula, operator_count FROM practices WHERE id = ?1",
+        "SELECT status, analysis_kind, x_formula, y_formula, operator_count FROM practices WHERE id = ?1",
     )
     .bind(practice_id)
     .fetch_optional(pool)
@@ -38,6 +39,7 @@ pub async fn definition(
     let aggregates = aggregates_for(pool, practice_id).await?;
     Ok(Some(PracticeDefinition {
         practice_id: practice_id.to_string(),
+        status: row.status,
         analysis_kind: row.analysis_kind,
         x_formula: row.x_formula,
         y_formula: row.y_formula,
