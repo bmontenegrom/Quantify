@@ -86,20 +86,26 @@ impl PracticeDefinition {
             return Some(chosen);
         }
         let holding = self.series_parts();
+        let open = |p: &&PracticePart| p.analysis_kind.is_none();
         self.parts
             .iter()
+            .filter(open)
             .find(|p| holding.contains(&p.id))
-            .or_else(|| self.parts.first())
+            .or_else(|| self.parts.iter().find(open))
     }
 
     pub fn with_effective_kinds(mut self) -> PracticeDefinition {
-        let kinds: Vec<String> = self
-            .parts
-            .iter()
-            .map(|p| self.part_kind(p).to_string())
-            .collect();
-        for (part, kind) in self.parts.iter_mut().zip(kinds) {
-            part.effective_kind = kind;
+        let series = self.series_part().map(|p| p.id.clone());
+        let kind = self
+            .analysis_kind
+            .clone()
+            .unwrap_or_else(|| "estadistico".into());
+        for part in &mut self.parts {
+            part.effective_kind = if series.as_deref() == Some(part.id.as_str()) {
+                kind.clone()
+            } else {
+                "estadistico".into()
+            };
         }
         self
     }

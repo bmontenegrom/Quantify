@@ -4,6 +4,8 @@ import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
 import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel } from "./lib.js";
 import { selectView } from "./navigation.js";
 
+const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
+
 function adminSymbolHtml(symbol) {
   return `<strong>${symbolHtml(symbol)}</strong> <code title="Así se escribe en las fórmulas">${escapeHtml(symbol)}</code>`;
 }
@@ -399,13 +401,12 @@ function practiceStatusChip(status) {
 }
 
 function renderNewPracticeForm() {
-  const kinds = ["estadistico", "regresion_lineal", "curva"];
   return `
     <form id="new-practice-form" class="detail-form detail-form-grid">
       <label>Nombre <input name="name" required placeholder="Péndulo simple" /></label>
       <label>Tipo de análisis
         <select name="analysis_kind">
-          ${kinds.map((k) => `<option value="${k}">${escapeHtml(analysisKindLabel(k))}</option>`).join("")}
+          ${ANALYSIS_KINDS.map((k) => `<option value="${k}">${escapeHtml(analysisKindLabel(k))}</option>`).join("")}
         </select>
       </label>
       <label>Descripción <input name="description" placeholder="Qué se mide y qué se determina" /></label>
@@ -557,7 +558,7 @@ function renderAnalysisKindForm(practice, def) {
       <label>Tipo de análisis
         <select name="analysis_kind" required>
           ${placeholder}
-          ${["estadistico", "regresion_lineal", "curva"].map((k) =>
+          ${ANALYSIS_KINDS.map((k) =>
             `<option value="${k}" ${k === current ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
           ).join("")}
         </select>
@@ -1092,7 +1093,7 @@ function renderLayoutSection(practice, def) {
       </td>
       <td>
         <select data-part-kind data-id="${escapeHtml(p.id)}" aria-label="Análisis de la parte">
-          ${["estadistico", "regresion_lineal", "curva"].map((k) =>
+          ${ANALYSIS_KINDS.map((k) =>
             `<option value="${k}" ${k === p.effective_kind ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
           ).join("")}
         </select>
@@ -1172,6 +1173,7 @@ async function setPartKind(partId, kind, practiceId) {
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/parts/${partId}/analysis-kind`, { analysis_kind: kind });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    state.practices = await fetchJson("/api/practices");
   }, "Análisis de la parte guardado");
 }
 

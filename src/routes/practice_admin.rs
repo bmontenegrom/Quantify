@@ -132,6 +132,12 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
     {
         problems.push("no tiene mensurandos".to_string());
     }
+    if practices::is_point_based(def.analysis_kind.as_deref()) && def.series_part().is_none() {
+        problems.push(
+            "es de regresion o curva pero ninguna parte lleva la serie (elegila en \"Partes y secciones\")"
+                .to_string(),
+        );
+    }
     if let Some(series) = def.series_part() {
         if def.series_parts().iter().any(|p| *p != series.id) {
             problems.push(format!(
@@ -1019,6 +1025,23 @@ fn guard_series_part(
              secciones primero sin parte (compartidas) y después asignales la nueva."
         )));
     }
+    let stray = |def: &practices::PracticeDefinition| {
+        def.series_part().map(|series| {
+            (
+                series.title.clone(),
+                def.series_parts().iter().any(|p| *p != series.id),
+            )
+        })
+    };
+    if let Some((title, true)) = stray(after) {
+        if !matches!(stray(before), Some((_, true))) {
+            return Err(AppError::bad_request(format!(
+                "No se puede {what}: las magnitudes por punto tienen que estar en la parte de la \
+                 serie (\"{title}\"). Para cambiar de parte la serie, dejá sus secciones sin \
+                 parte, elegí la nueva parte de la serie y después asignáselas."
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -1442,8 +1465,14 @@ pub(super) async fn create_part(
     require_title(&input.title)?;
     let before = load_definition(&state, &id).await?;
     guard_change(&before, &with_new_part(&before), "agregar la parte")?;
+    let created = practices::create_part(&state.pool, &id, &input).await?;
+    let after = load_definition(&state, &id).await?;
     Ok(Json(
-        practices::create_part(&state.pool, &id, &input).await?,
+        after
+            .parts
+            .into_iter()
+            .find(|p| p.id == created.id)
+            .unwrap_or(created),
     ))
 }
 
@@ -1473,15 +1502,17 @@ fn with_part_kind(
     def.parts.iter().find(|p| p.id == part_id)?;
     let was_series = def.series_part().is_some_and(|p| p.id == part_id);
     let mut after = def.clone();
-    if practices::is_point_based(Some(kind)) {
-        for part in &mut after.parts {
-            part.analysis_kind = (part.id == part_id).then(|| kind.to_string());
+    let point_based = practices::is_point_based(Some(kind));
+    for part in &mut after.parts {
+        if part.id == part_id {
+            part.analysis_kind = Some(kind.to_string());
+        } else if point_based {
+            part.analysis_kind = Some("estadistico".into());
         }
+    }
+    if point_based {
         after.analysis_kind = Some(kind.to_string());
     } else if was_series {
-        for part in &mut after.parts {
-            part.analysis_kind = None;
-        }
         after.analysis_kind = Some("estadistico".into());
     }
     Some(after)
@@ -2594,6 +2625,64 @@ mod tests {
             Some("estadistico")
         );
         assert!(guard_change(&cc, &potencia_as_stat, "x").is_err());
+    }
+
+    #[tokio::test]
+    async fn the_chosen_series_part_and_the_series_stay_together() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        for title in ["A", "B"] {
+            practices::create_part(
+                &pool,
+                "fluidos-1",
+                &practices::PartInput {
+                    title: title.into(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let mut def = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        let (a, b) = (def.parts[0].id.clone(), def.parts[1].id.clone());
+        let series: Vec<String> = def
+            .quantities
+            .iter()
+            .filter(|q| q.per_point && !q.is_given)
+            .map(|q| q.symbol.clone())
+            .collect();
+        def.sections.push(practices::PracticeSection {
+            id: "sa".into(),
+            practice_id: def.practice_id.clone(),
+            part_id: Some(a.clone()),
+            title: "Serie".into(),
+            position: 0,
+            quantities: series.clone(),
+            results: vec![],
+        });
+        assert_eq!(def.series_part().unwrap().id, a);
+
+        let b_series = with_part_kind(&def, &b, "regresion_lineal").unwrap();
+        let err = guard_change(&def, &b_series, "cambiar el tipo de la parte").unwrap_err();
+        assert!(format!("{err:?}").contains("parte de la"), "{err:?}");
+
+        let a_series = with_part_kind(&def, &a, "regresion_lineal").unwrap();
+        assert_eq!(
+            a_series.parts[1].analysis_kind.as_deref(),
+            Some("estadistico")
+        );
+        let mut moved = a_series.clone();
+        moved.sections[0].part_id = Some(b.clone());
+        assert!(guard_change(&a_series, &moved, "cambiar la parte de la sección").is_err());
+
+        let mut without_a = a_series.clone();
+        without_a.parts.retain(|p| p.id != a);
+        without_a.sections[0].part_id = None;
+        assert!(without_a.series_part().is_none());
+        assert!(structure_problems(&without_a)
+            .iter()
+            .any(|p| p.contains("ninguna parte lleva la serie")));
     }
 
     #[tokio::test]
