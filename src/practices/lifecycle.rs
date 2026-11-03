@@ -132,12 +132,19 @@ pub async fn duplicate_practice(
         return Ok(None);
     }
     let id = free_practice_id(&mut tx, &slugify(name)).await?;
-    sqlx::query(
-        "INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula, \
-         operator_count, status, created_by, created_at) \
-         SELECT ?2, ?3, description, analysis_kind, x_formula, y_formula, operator_count, \
-         'borrador', ?4, ?5 FROM practices WHERE id = ?1",
+    // Igual que las tablas de la definición: el resto de las columnas (descripción, tipo, ejes,
+    // operadores y las que se agreguen) se copia tal cual, leídas del esquema.
+    let copied: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM pragma_table_info('practices') \
+         WHERE name NOT IN ('id', 'name', 'status', 'created_by', 'created_at')",
     )
+    .fetch_all(&mut *tx)
+    .await?;
+    let copied = copied.join(", ");
+    sqlx::query(&format!(
+        "INSERT INTO practices (id, name, status, created_by, created_at, {copied}) \
+         SELECT ?2, ?3, 'borrador', ?4, ?5, {copied} FROM practices WHERE id = ?1"
+    ))
     .bind(source_id)
     .bind(&id)
     .bind(name.trim())
@@ -236,9 +243,18 @@ pub async fn delete_practice(
     if submissions > 0 {
         return Ok(DeletePractice::HasSubmissions);
     }
-    sqlx::query("DELETE FROM practices WHERE id = ?1")
-        .bind(practice_id)
-        .execute(pool)
-        .await?;
+    // Las mismas condiciones en el DELETE: si en el medio se publicó o recibió una entrega, no
+    // se borra (y la FK sin cascada de las entregas no termina en un error 500).
+    let deleted = sqlx::query(
+        "DELETE FROM practices WHERE id = ?1 AND status = 'borrador' \
+         AND NOT EXISTS (SELECT 1 FROM submissions WHERE practice_id = ?1)",
+    )
+    .bind(practice_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    if deleted == 0 {
+        return Ok(DeletePractice::NotDraft);
+    }
     Ok(DeletePractice::Deleted)
 }
