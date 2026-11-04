@@ -951,7 +951,7 @@ fn ca_rlc_chained() -> Vec<(&'static str, String)> {
     .to_vec()
 }
 
-fn chained(formulas: &[(&str, String)], symbol: &str) -> String {
+fn formula_of(formulas: &[(&str, String)], symbol: &str) -> String {
     formulas
         .iter()
         .find(|(s, _)| *s == symbol)
@@ -962,7 +962,7 @@ fn chained(formulas: &[(&str, String)], symbol: &str) -> String {
 pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
     let (xl, xc) = ca_rlc_reactances();
     let formulas = ca_rlc_chained();
-    let f = |symbol: &str| chained(&formulas, symbol);
+    let f = |symbol: &str| formula_of(&formulas, symbol);
     seed_practice(
         pool,
         "ca-rlc",
@@ -1126,7 +1126,7 @@ pub(super) async fn chain_seeded_formulas(pool: &SqlitePool) -> anyhow::Result<(
                 "UPDATE practice_results SET formula = ?1 \
                  WHERE practice_id = ?2 AND symbol = ?3 AND formula = ?4",
             )
-            .bind(chained(&chained_formulas, symbol))
+            .bind(formula_of(&chained_formulas, symbol))
             .bind(practice)
             .bind(symbol)
             .bind(old)
@@ -1206,7 +1206,7 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
     }
 
     let formulas = hidro_chained();
-    let f = |symbol: &str| chained(&formulas, symbol);
+    let f = |symbol: &str| formula_of(&formulas, symbol);
     let mut results = Vec::new();
     for k in 1..=HIDRO_MEDIDAS {
         results.push(res(
@@ -1428,11 +1428,11 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
 
     let expanded = ca_rlc_expanded();
     let phase_updates = [
-        ("phiR_teo", chained(&expanded, "phiR_teo")),
+        ("phiR_teo", formula_of(&expanded, "phiR_teo")),
         ("phiR_exp", "math::asin(b_R/a_R)*180/pi".to_string()),
-        ("phiC_teo", chained(&expanded, "phiC_teo")),
+        ("phiC_teo", formula_of(&expanded, "phiC_teo")),
         ("phiC_exp", "math::asin(b_C/a_C)*180/pi".to_string()),
-        ("phiL_teo", chained(&expanded, "phiL_teo")),
+        ("phiL_teo", formula_of(&expanded, "phiL_teo")),
         ("phiL_exp", "math::asin(b_L/a_L)*180/pi".to_string()),
     ];
     for (symbol, formula) in phase_updates {

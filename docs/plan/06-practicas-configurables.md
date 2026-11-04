@@ -556,8 +556,8 @@ con distinto análisis.
 - **Fórmulas simplificadas** de `ca-rlc` (`Z`, `I_teo`, `V*_teo`, `phi*_teo`) y de `hidrostatica`
   (los tres promedios). Una migración de una sola vez cambia solo las filas que tienen la
   fórmula sembrada vieja. En los golden cambia el campo `formula`; `value` y `u` dan iguales
-  hasta 1e-9 relativo (en `phiC_teo`/`phiL_teo` difieren en ~1e-11, ruido de la derivada
-  numérica al cambiar cómo está escrita la fórmula).
+  hasta 1e-9 relativo (la `u` de `phiC_teo` difiere en ~1e-11 y la de `phiL_teo` en ~1e-10:
+  ruido de la derivada numérica al cambiar cómo está escrita la fórmula).
 
 1. Resultados que referencian resultados (compartidos o de su parte), con grafo de dependencias,
    rechazo de ciclos y orden topológico; propagación compuesta contra las magnitudes de entrada
