@@ -554,6 +554,39 @@ con distinto análisis.
 correlación (un resultado que usa dos resultados que dependen de la misma magnitud propaga igual
 que la fórmula expandida).
 
+**Plan de PRs**
+
+1. **`feat(analisis)`: resultados que usan otros resultados (F4, 1/2).**
+   - **Motor** (`derive_results` en `engines.rs`): grafo de los símbolos de resultado de cada
+     fórmula y orden topológico. Un ciclo deja un aviso y saltea los resultados involucrados.
+     Cada resultado se propaga con una sola llamada a `propagate` sobre sus hojas (magnitudes,
+     `slope`/`intercept`, escalares de curva). El closure evalúa las dependencias en orden y
+     después la fórmula propia, sin reescribir texto, así se conservan las correlaciones. Sirve
+     para estadística, regresión, curva y operadores.
+   - **Partes** (`parts.rs`): un resultado que usa uno de la parte X va a X (`inferred_part`
+     resuelve en orden topológico). `part_view` incluye los resultados compartidos, y `analyze`
+     los saca de la salida de la parte, como hace con las magnitudes compartidas.
+   - **Validación** (`practice_admin.rs`): `result_scope_in` suma los resultados visibles en cada
+     view (los compartidos en el compartido; en una parte, los suyos más los compartidos).
+     `formula_problems` rechaza ciclos, así que crear, editar, mover o borrar un resultado pasa
+     por `guard_change`.
+   - **Admin**: un texto de ayuda en el alta de mensurandos, que dice que se pueden usar otros
+     mensurandos.
+   - **Tests**: ciclo rechazado; correlación (`A + B` con `A = 2x` y `B = 3x` da la misma `u`
+     que `5x`); un compartido usado en una parte sin quedar repetido; inferencia de parte; borrar
+     un resultado usado. Golden sin cambios.
+2. **`refactor(practicas)`: fórmulas de `ca-rlc` e `hidrostatica` con encadenamiento (F4, 2/2).**
+   - **Fórmulas nuevas en la siembra**:
+     - `ca-rlc`: `Z`, `I_teo = Vg/Z`, `VR/VC/VL_teo = I_teo*R/XC/XL`, `phiR_teo` sobre `XL-XC`, y
+       `phiC/phiL_teo = phiR_teo ∓ 90`;
+     - `hidrostatica`: `E_medio`, `rho_medio` y `gamma_medio` como promedio de los tres
+       resultados.
+   - **Migración de una sola vez**: un `UPDATE … WHERE formula = <vieja sembrada>`, así no pisa
+     las ediciones del docente.
+   - **Golden**: se regeneran. Con un script se comprueba que solo cambia `formula` y que `value` y
+     `u` dan iguales.
+   - **Doc**: F4 se marca como hecha.
+
 ### F5 — Versionado
 
 1. Schema: `practice_versions`, `practices.current_version_id`,
