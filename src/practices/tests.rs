@@ -2872,6 +2872,48 @@ async fn reordering_skips_retired_quantities() {
 }
 
 #[tokio::test]
+async fn a_retired_symbol_matches_exactly_when_seeds_look_for_it() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let rename = |symbol: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                "UPDATE practice_quantities SET symbol = ?1 \
+                 WHERE practice_id = 'p2-cc' AND name = 'Fuente de prueba'",
+            )
+            .bind(symbol)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+    let def = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    let vg = def.quantities.iter().find(|q| q.symbol == "Vg_s").unwrap();
+    sqlx::query("UPDATE practice_quantities SET name = 'Fuente de prueba' WHERE id = ?1")
+        .bind(&vg.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert!(!seed::quantity_missing(&pool, "p2-cc", "Vg_s")
+        .await
+        .unwrap());
+    rename("Vg_s~abc").await;
+    assert!(!seed::quantity_missing(&pool, "p2-cc", "Vg_s")
+        .await
+        .unwrap());
+    rename("VgXs~abc").await;
+    assert!(seed::quantity_missing(&pool, "p2-cc", "Vg_s")
+        .await
+        .unwrap());
+    rename("Vg_sX").await;
+    assert!(seed::quantity_missing(&pool, "p2-cc", "Vg_s")
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
 async fn seeds_do_not_react_to_a_retired_quantity() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
