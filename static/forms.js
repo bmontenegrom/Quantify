@@ -968,6 +968,7 @@ studentComment?.addEventListener("input", scheduleDraftSave);
 courseSelect.addEventListener("change", updateStudentSelectors);
 groupSelect.addEventListener("change", updateTableSelector);
 practiceSelect.addEventListener("change", () => {
+  if (state.editingSubmissionId && state.editingPracticeId !== practiceSelect.value) exitEditMode();
   updateTableSelector();
   loadSubmissionForm();
 });

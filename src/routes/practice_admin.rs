@@ -508,9 +508,9 @@ pub(super) async fn delete_quantity(
     if after.quantities.len() == before.quantities.len() {
         return Err(AppError::not_found("magnitud no encontrada en la practica"));
     }
-    if practices::quantity_in_a_version(&state.pool, &id, &qid).await? {
+    if practices::quantity_still_needed(&state.pool, &id, &qid).await? {
         return Err(AppError::bad_request(
-            "La magnitud está en una versión publicada de la práctica: todavía no se puede borrar.",
+            "La magnitud está en la versión vigente o tiene mediciones guardadas: todavía no se puede borrar.",
         ));
     }
     guard_change(&before, &after, "eliminar la magnitud")?;

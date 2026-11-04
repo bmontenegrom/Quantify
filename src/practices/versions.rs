@@ -24,14 +24,19 @@ pub async fn current_version(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeVersion>> {
-    let row: Option<(String, i64, String)> = sqlx::query_as(
-        "SELECT v.id, v.number, v.definition_json FROM practices p \
+    let row: Option<(String, i64, String, String)> = sqlx::query_as(
+        "SELECT v.id, v.number, v.definition_json, p.status FROM practices p \
          JOIN practice_versions v ON v.id = p.current_version_id WHERE p.id = ?1",
     )
     .bind(practice_id)
     .fetch_optional(pool)
     .await?;
-    row.map(version_from_row).transpose()
+    row.map(|(id, number, json, status)| {
+        let mut version = version_from_row((id, number, json))?;
+        version.definition.status = status;
+        Ok(version)
+    })
+    .transpose()
 }
 
 pub async fn version_for_form(
@@ -59,12 +64,19 @@ pub async fn version_definition(
     pool: &SqlitePool,
     version_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT definition_json FROM practice_versions WHERE id = ?1")
-            .bind(version_id)
-            .fetch_optional(pool)
-            .await?;
-    row.map(|(json,)| parse(&json)).transpose()
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT v.definition_json, p.status FROM practice_versions v \
+         JOIN practices p ON p.id = v.practice_id WHERE v.id = ?1",
+    )
+    .bind(version_id)
+    .fetch_optional(pool)
+    .await?;
+    row.map(|(json, status)| {
+        let mut definition = parse(&json)?;
+        definition.status = status;
+        Ok(definition)
+    })
+    .transpose()
 }
 
 pub async fn published_definition(
@@ -255,18 +267,21 @@ pub async fn ensure_versions(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn quantity_in_a_version(
+pub async fn quantity_still_needed(
     pool: &SqlitePool,
     practice_id: &str,
     quantity_id: &str,
 ) -> anyhow::Result<bool> {
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM practice_versions v, json_each(v.definition_json, '$.quantities') q \
-         WHERE v.practice_id = ?1 AND json_extract(q.value, '$.id') = ?2 LIMIT 1",
+    let (needed,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM practices p \
+         JOIN practice_versions v ON v.id = p.current_version_id, \
+         json_each(v.definition_json, '$.quantities') q \
+         WHERE p.id = ?1 AND json_extract(q.value, '$.id') = ?2) \
+         OR EXISTS (SELECT 1 FROM submission_measurements WHERE quantity_id = ?2)",
     )
     .bind(practice_id)
     .bind(quantity_id)
-    .fetch_optional(pool)
+    .fetch_one(pool)
     .await?;
-    Ok(row.is_some())
+    Ok(needed)
 }

@@ -2651,7 +2651,7 @@ async fn a_quantity_in_a_published_version_is_detected() {
     seed_definitions(&pool).await.unwrap();
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     let t1 = def.quantities.iter().find(|q| q.symbol == "T1").unwrap();
-    assert!(quantity_in_a_version(&pool, "p1-estadistica", &t1.id)
+    assert!(quantity_still_needed(&pool, "p1-estadistica", &t1.id)
         .await
         .unwrap());
     let fresh = create_quantity(
@@ -2674,7 +2674,7 @@ async fn a_quantity_in_a_published_version_is_detected() {
     )
     .await
     .unwrap();
-    assert!(!quantity_in_a_version(&pool, "p1-estadistica", &fresh.id)
+    assert!(!quantity_still_needed(&pool, "p1-estadistica", &fresh.id)
         .await
         .unwrap());
 }
@@ -2740,6 +2740,11 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
     set_practice_status(&pool, &copy.id, "archivada")
         .await
         .unwrap();
+    let archived = published_definition(&pool, &copy.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(archived.status, "archivada");
     assert!(matches!(
         publish_draft(&pool, &copy.id, None, |_| vec![
             "borrador a medio editar".into()

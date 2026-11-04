@@ -195,8 +195,9 @@ pub async fn create_form_submission(
             ?9,
             ?10,
             ?11
-        FROM users u, lab_groups g, courses c
+        FROM users u, lab_groups g, courses c, practices p
         WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
+            AND p.id = ?5 AND p.current_version_id = ?11
         "#,
     )
     .bind(&id)
@@ -224,6 +225,17 @@ pub async fn create_form_submission(
     })?;
 
     if inserted.rows_affected() == 0 {
+        let current: Option<String> =
+            sqlx::query_scalar("SELECT current_version_id FROM practices WHERE id = ?1")
+                .bind(&input.practice_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if current.as_deref() != Some(version_id.as_str()) {
+            anyhow::bail!(
+                "La práctica se actualizó mientras entregabas: recargá la página (lo que \
+                 cargaste queda guardado como borrador)."
+            );
+        }
         anyhow::bail!("el curso o el grupo indicados no existen");
     }
 
