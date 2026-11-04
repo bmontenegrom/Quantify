@@ -2731,14 +2731,11 @@ async fn curve_results_chain_and_skip_what_depends_on_series_values() {
         2.0 * fpasaje + 1.0,
         1e-9
     ));
-    for symbol in ["A", "B"] {
-        assert!(
-            a.warnings
-                .iter()
-                .any(|w| w.contains(&format!("'{symbol}'")) && w.contains("escalares")),
-            "{:?}",
-            a.warnings
-        );
-    }
-    assert!(!a.warnings.iter().any(|w| w.contains("no es una magnitud")));
+    let warned = |symbol: &str, text: &str| {
+        a.warnings
+            .iter()
+            .any(|w| w.contains(&format!("mensurando {symbol}:")) && w.contains(text))
+    };
+    assert!(warned("A", "\"f\""), "{:?}", a.warnings);
+    assert!(warned("B", "no se pudo calcular"), "{:?}", a.warnings);
 }

@@ -217,9 +217,7 @@ impl PracticeDefinition {
                 .iter()
                 .filter(|r| match self.result_part(&r.symbol) {
                     Some(p) => p == part.id,
-                    None => crate::computation::formula_symbols(&r.formula)
-                        .iter()
-                        .all(|s| self.symbol_part(s).is_none()),
+                    None => self.purely_shared(&r.formula, &mut Vec::new()),
                 })
                 .cloned()
                 .collect(),
@@ -246,6 +244,23 @@ impl PracticeDefinition {
             sections: vec![],
             ..self.clone()
         }
+    }
+
+    fn purely_shared(&self, formula: &str, seen: &mut Vec<String>) -> bool {
+        crate::computation::formula_symbols(formula)
+            .iter()
+            .all(|s| {
+                let Some(result) = self.results.iter().find(|r| r.symbol == *s) else {
+                    return self.symbol_part(s).is_none();
+                };
+                if seen.contains(s) || self.result_part(s).is_some() {
+                    return false;
+                }
+                seen.push(s.clone());
+                let shared = self.purely_shared(&result.formula, seen);
+                seen.pop();
+                shared
+            })
     }
 
     pub fn point_view(&self) -> PracticeDefinition {

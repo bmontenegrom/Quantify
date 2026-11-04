@@ -1142,44 +1142,13 @@ fn run_kind_raw(
                 }
             }
         }
-        if !definition.results.is_empty() {
-            let mut scope = symbols.clone();
-            let mut pending: Vec<&PracticeResult> = definition.results.iter().collect();
-            loop {
-                let before = pending.len();
-                pending.retain(|r| {
-                    let fits = compile_formula(r.formula.trim(), &scope).is_ok();
-                    if fits {
-                        scope.push(r.symbol.clone());
-                    }
-                    !fits
-                });
-                if pending.len() == before {
-                    break;
-                }
-            }
-            for r in &pending {
-                analysis.warnings.push(format!(
-                    "mensurando '{}': la fórmula no puede evaluarse con las magnitudes escalares disponibles",
-                    r.symbol
-                ));
-            }
-            let scalar_results: Vec<PracticeResult> = definition
-                .results
-                .iter()
-                .filter(|r| scope.contains(&r.symbol))
-                .cloned()
-                .collect();
-            if !scalar_results.is_empty() {
-                analysis.derived = derive_results(
-                    &scalar_results,
-                    &symbols,
-                    &means,
-                    &us,
-                    &mut analysis.warnings,
-                )?;
-            }
-        }
+        analysis.derived = derive_results(
+            &definition.results,
+            &symbols,
+            &means,
+            &us,
+            &mut analysis.warnings,
+        )?;
         return Ok(analysis);
     }
 

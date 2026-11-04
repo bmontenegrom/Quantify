@@ -2869,21 +2869,23 @@ mod tests {
         let err = guard_change(&def, &cyclic, "x").unwrap_err();
         assert!(format!("{err:?}").contains("ciclo"), "{err:?}");
         let crossing = with_new_result(&def, &input("K", "L2 + T1 + T2"), None);
+        let crossing = with_new_result(&crossing, &input("S", "K*2"), None);
         assert!(crossing.parts.iter().all(|p| crossing
             .part_view(p)
             .results
             .iter()
-            .all(|r| r.symbol != "K")));
+            .all(|r| r.symbol != "K" && r.symbol != "S")));
         assert!(crossing.parts.iter().all(|p| crossing
             .part_view(p)
             .results
             .iter()
             .any(|r| r.symbol == "L2")));
-        let k_problems = formula_problems(&crossing)
+        let problems: Vec<String> = formula_problems(&crossing)
             .into_iter()
-            .filter(|(element, _)| element == "el mensurando K")
-            .count();
-        assert_eq!(k_problems, 1);
+            .map(|(element, _)| element)
+            .filter(|element| element.ends_with(" K") || element.ends_with(" S"))
+            .collect();
+        assert_eq!(problems, ["el mensurando K"]);
         let mut without_l2 = def.clone();
         without_l2.results.retain(|r| r.symbol != "L2");
         assert!(guard_change(&def, &without_l2, "x").is_err());
