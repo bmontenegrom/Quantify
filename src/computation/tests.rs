@@ -2882,10 +2882,18 @@ async fn ensure_versions_creates_version_one_and_links_old_submissions() {
     .await
     .unwrap();
     assert_eq!(count, 1);
+    db::seed_academic(&pool).await.unwrap();
+    db::seed_submissions(&pool).await.unwrap();
+    let (seeded,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(seeded > 0);
     for sql in [
         "UPDATE practices SET current_version_id = NULL WHERE id = 'p1-estadistica'",
         "DELETE FROM practice_versions WHERE practice_id = 'p1-estadistica'",
         "UPDATE submissions SET practice_version_id = NULL",
+        "DELETE FROM applied_migrations WHERE name = '2026-11-entregas-a-su-version'",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
     }

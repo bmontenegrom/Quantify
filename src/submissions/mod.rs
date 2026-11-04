@@ -175,10 +175,11 @@ pub async fn create_submission(
         INSERT INTO submissions (
             id, student_name, group_name, course, practice_id, file_name,
             csv_path, analysis_json, status, submitted_at,
-            submitted_by_user_id, course_id, group_id
+            submitted_by_user_id, course_id, group_id, practice_version_id
         )
         SELECT ?1, u.display_name, g.name, c.name, ?5, ?6, ?7, ?8,
-            'pendiente', ?9, ?10, ?11, ?12
+            'pendiente', ?9, ?10, ?11, ?12,
+            (SELECT current_version_id FROM practices WHERE id = ?5)
         FROM users u, lab_groups g, courses c
         WHERE u.id = ?10 AND g.id = ?12 AND c.id = ?11
         "#,
@@ -1050,6 +1051,52 @@ mod tests {
             .find(|s| s.student.id == student.id)
             .unwrap();
         assert!((summary.total_points - 4.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn a_csv_submission_is_pinned_to_the_current_version() {
+        let (pool, dir) = seeded().await;
+        crate::practices::seed_definitions(&pool).await.unwrap();
+        let student = find_user(&pool, STUDENT).await;
+        let analysis = crate::analysis::analyze_csv(
+            "x,y
+1,2
+2,4
+3,6
+",
+        )
+        .unwrap();
+        let created = create_submission(
+            &pool,
+            dir.path(),
+            NewSubmission {
+                submitted_by_user_id: student.id.clone(),
+                course_id: COURSE.into(),
+                group_id: GROUP.into(),
+                practice_id: "p1-estadistica".into(),
+                file_name: "medidas.csv".into(),
+                csv_content: "x,y
+1,2
+2,4
+3,6
+"
+                .into(),
+                analysis,
+            },
+        )
+        .await
+        .unwrap();
+        let current = crate::practices::current_version(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let (pinned,): (Option<String>,) =
+            sqlx::query_as("SELECT practice_version_id FROM submissions WHERE id = ?1")
+                .bind(&created.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pinned, Some(current.id));
     }
 
     #[tokio::test]

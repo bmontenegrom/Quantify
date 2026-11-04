@@ -125,12 +125,32 @@ pub async fn ensure_versions(pool: &SqlitePool) -> anyhow::Result<()> {
     for practice_id in missing {
         publish_version(pool, &practice_id, None).await?;
     }
+    link_legacy_submissions(pool).await
+}
+
+const LEGACY_SUBMISSIONS: &str = "2026-11-entregas-a-su-version";
+
+async fn link_legacy_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
+    let (done,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+        .bind(LEGACY_SUBMISSIONS)
+        .fetch_one(pool)
+        .await?;
+    if done > 0 {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
     sqlx::query(
         "UPDATE submissions SET practice_version_id = \
          (SELECT current_version_id FROM practices WHERE practices.id = submissions.practice_id) \
          WHERE practice_version_id IS NULL",
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(LEGACY_SUBMISSIONS)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(())
 }
