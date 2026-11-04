@@ -620,6 +620,90 @@ que la fórmula expandida).
 entregas existentes (test); una entrega nueva usa la versión nueva; golden idénticos.
 **Hito**: a partir de acá es seguro que el docente edite en producción prácticas con entregas.
 
+**Plan de PRs**
+
+Lo que se relevó en el código (2026-11-03):
+- **Hoy todo lee la definición en vivo.**
+  - `update_form_submission` vuelve a correr `analyze` contra la definición actual.
+  - La vista de la entrega (`submissions.js` → `analysis.js`) y el formulario de edición
+    (`forms.js`) traen `/practices/{id}/definition`.
+  - `submission_detail` lee las tolerancias de `practice_results`.
+  - `is_point_based_practice` lee `practices.analysis_kind`.
+- **Borrar una magnitud con mediciones da un 500** por la FK de `submission_measurements`.
+
+Decisiones y desvíos respecto de los puntos 1–4:
+- **El snapshot es el `PracticeDefinition` serializado.**
+  - Hay que sumar `Deserialize` a sus structs: `PracticeDefinition`, `PracticePart`,
+    `PracticeSection`, `PracticeCurve`, `PracticeIntermediate`, `PracticePointResult`,
+    `PracticeAggregate`, `PracticeQuantity` y `PracticeResult`.
+  - `effective_kind` y los símbolos de cada sección ya salen calculados de `definition()`.
+- **`analyze` se parte en dos:**
+  - `analyze_definition(pool, &def, …)` calcula sobre una definición dada;
+  - `analyze(pool, practice_id, …)` queda como envoltorio que calcula sobre el borrador (golden,
+    tests).
+- **No se reconstruye `submission_measurements`** (punto 2).
+  - Una magnitud que alguna versión usa no se borra: se marca `removed`.
+  - Su símbolo se renombra (`{símbolo}~{id}`) para liberar el `UNIQUE(practice_id, symbol)`.
+  - La FK sigue siendo válida, y la versión conserva el símbolo original en su JSON.
+- **El alumno ve la versión vigente, no el borrador.** El formulario nuevo, `analyze-preview` y
+  `/practices/{id}/definition` para estudiantes leen la versión vigente; el borrador lo ve solo el
+  editor.
+
+1. **`feat(practicas)`: versiones publicadas y entregas atadas a su versión (F5, 1/3).**
+   - **Schema:**
+     - tabla `practice_versions(id, practice_id, number, definition_json, published_at, published_by)`;
+     - columnas `practices.current_version_id` y `submissions.practice_version_id`.
+   - **Migración de una sola vez:**
+     - versión 1 de cada práctica publicada o archivada, con su definición actual;
+     - todas sus entregas apuntan a esa versión 1.
+   - **Crear versiones:**
+     - publicar un borrador crea la versión 1;
+     - `POST /practices/{id}/versions` crea la N+1 desde el borrador, con los chequeos de
+       `publish_problems`;
+     - en el admin, un botón simple "Publicar versión N+1".
+   - **Entregas:**
+     - `create_form_submission` guarda la versión vigente;
+     - todo lo que lee una entrega usa la definición de su versión: `update_form_submission`,
+       `validate_student_results`, `set_student_results`, las tolerancias de `submission_detail`
+       e `is_point_based_practice`.
+   - **Frontend:**
+     - endpoint nuevo `GET /submissions/{id}/definition`, que usan `submissions.js` y `forms.js`
+       al editar una entrega;
+     - `/practices/{id}/definition` y `analyze-preview` devuelven la versión vigente a los
+       estudiantes.
+   - **Tests:**
+     - editar estructuralmente una práctica con entregas no cambia la vista ni la edición de una
+       entrega vieja;
+     - después de publicar la N+1, una entrega nueva la usa;
+     - la migración de una base con entregas;
+     - golden idénticos.
+2. **`feat(practicas)`: magnitudes retiradas en vez de borradas (F5, 2/3).**
+   - **Borrar una magnitud:** si una versión la usa, se marca `removed` y se le libera el símbolo;
+     si no, se borra como hoy. Se acaba el 500.
+   - **Filtrar las retiradas** en `definition()`, en `symbol_taken_in_practice` y en
+     `duplicate_practice`.
+   - **Tests:**
+     - la entrega vieja sigue mostrando la magnitud retirada;
+     - el símbolo se puede reusar;
+     - duplicar no copia las retiradas.
+3. **`feat(practicas)`: cambios sin publicar en el admin (F5, 3/3).**
+   - **Aviso de "Cambios sin publicar"** cuando el borrador difiere de la versión vigente. Se
+     comparan los JSON sin los campos cosméticos.
+   - **Resumen de diferencias:** magnitudes y mensurandos agregados, quitados y con fórmula
+     cambiada; partes; tipo de análisis.
+   - **Cantidad de entregas** que quedan en versiones anteriores.
+   - **Cambios cosméticos:** si solo cambian nombres, descripción, tolerancias o títulos,
+     "Publicar" actualiza la versión vigente sin crear otra (3.3).
+   - **E2E de aceptación:**
+     1. el alumno entrega;
+     2. el docente cambia una fórmula y publica la versión 2;
+     3. la entrega vieja muestra los mismos números;
+     4. una entrega nueva usa la fórmula nueva.
+   - **Doc:** F5 queda marcada como hecha.
+
+**Ojo para las fases siguientes**: las migraciones de las siembras (como la de F4) solo tocan el
+borrador. Si una cambia números de una práctica publicada, tiene que crear la versión siguiente.
+
 ### F6 — Sin casos especiales en el frontend ni en las siembras
 
 1. Propiedades de presentación (3.8) en schema, API y admin.
