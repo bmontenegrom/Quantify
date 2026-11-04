@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/bmontenegrom/Quantify/compare/v0.3.0...v0.4.0) (2026-11-04)
+
+
+### Funcionalidades
+
+* **analisis:** resultados que usan otros resultados (F4, 1/2) ([#100](https://github.com/bmontenegrom/Quantify/issues/100)) ([da0401f](https://github.com/bmontenegrom/Quantify/commit/da0401f07aa149dcf7d568320352aaa1929b448b))
+
 ## [0.3.0](https://github.com/bmontenegrom/Quantify/compare/v0.2.0...v0.3.0) (2026-11-03)
 
 
