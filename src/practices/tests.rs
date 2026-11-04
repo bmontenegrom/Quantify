@@ -891,7 +891,7 @@ async fn seed_definitions_backfills_gamma_and_q_as_final() {
     .await
     .unwrap();
 
-    seed_definitions(&pool).await.unwrap();
+    seed::run_seeds(&pool).await.unwrap();
 
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     for symbol in ["gamma", "Q"] {
@@ -2464,7 +2464,7 @@ async fn the_two_old_p3_practices_become_one() {
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
     }
-    seed_definitions(&pool).await.unwrap();
+    seed::run_seeds(&pool).await.unwrap();
     assert!(definition(&pool, "p3-relajacion-desfasaje")
         .await
         .unwrap()
@@ -2515,7 +2515,7 @@ async fn an_old_p3_without_desfasaje_is_unified_too() {
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
     }
-    seed_definitions(&pool).await.unwrap();
+    seed::run_seeds(&pool).await.unwrap();
     let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
     assert_eq!(p3.analysis_kind.as_deref(), Some("regresion_lineal"));
     assert_eq!(p3.quantities.len(), 8);
@@ -2534,7 +2534,7 @@ async fn reseeding_p3_with_its_parts_still_there_does_not_fail() {
         .await
         .unwrap();
     }
-    seed_definitions(&pool).await.unwrap();
+    seed::run_seeds(&pool).await.unwrap();
     let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
     assert_eq!(p3.parts.len(), 2);
     assert_eq!(p3.quantities.len(), 8);
@@ -2768,4 +2768,61 @@ async fn a_damaged_snapshot_is_an_internal_error() {
     .unwrap();
     let err = current_version(&pool, "p1-estadistica").await.unwrap_err();
     assert!(err.downcast_ref::<sqlx::Error>().is_some(), "{err}");
+}
+
+#[tokio::test]
+async fn restarting_keeps_what_the_teacher_changed() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let rename = |practice: &'static str, from: &'static str, to: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let changed = sqlx::query(
+                "UPDATE practice_quantities SET symbol = ?3 WHERE practice_id = ?1 AND symbol = ?2",
+            )
+            .bind(practice)
+            .bind(from)
+            .bind(to)
+            .execute(&pool)
+            .await
+            .unwrap()
+            .rows_affected();
+            assert_eq!(changed, 1, "{from}");
+        }
+    };
+    rename("p1-estadistica", "T1", "Tx").await;
+    rename("p2-cc", "Vg_s", "Vfuente").await;
+    sqlx::query(
+        "UPDATE practice_results SET name = 'Editado', is_final = 0, has_uncertainty = 1 \
+         WHERE practice_id = 'p2-cc' AND symbol = 'P_max_e'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let snapshot = |d: PracticeDefinition| serde_json::to_string(&d).unwrap();
+    let before_p1 = snapshot(definition(&pool, "p1-estadistica").await.unwrap().unwrap());
+    let before_cc = snapshot(definition(&pool, "p2-cc").await.unwrap().unwrap());
+
+    db::migrate(&pool).await.unwrap();
+    seed_definitions(&pool).await.unwrap();
+
+    assert_eq!(
+        before_p1,
+        snapshot(definition(&pool, "p1-estadistica").await.unwrap().unwrap())
+    );
+    assert_eq!(
+        before_cc,
+        snapshot(definition(&pool, "p2-cc").await.unwrap().unwrap())
+    );
+}
+
+#[tokio::test]
+async fn the_power_results_have_no_uncertainty_from_the_first_start() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    for symbol in ["P_max_e", "P_max_t", "RP_max_e", "RP_max_t"] {
+        let result = cc.results.iter().find(|r| r.symbol == symbol).unwrap();
+        assert!(!result.has_uncertainty, "{symbol}");
+    }
 }

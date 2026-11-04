@@ -708,6 +708,13 @@ Decisiones y desvíos respecto de los puntos 1–4:
 **Ojo para las fases siguientes**: las migraciones de las siembras (como la de F4) solo tocan el
 borrador. Si una cambia números de una práctica publicada, tiene que crear la versión siguiente.
 
+**Regla desde 2026-11-04: arrancar no modifica las definiciones.** `seed_definitions` corre una sola
+vez (`applied_migrations`, `2026-11-definiciones-sembradas`) y los backfills de `schema.rs` también:
+después el servidor toma lo que está en la base. Un cambio futuro a una práctica sembrada ya no se
+aplica editando un `seed_*`: tiene que ser una migración de una sola vez. Esto resuelve R3 y R4 de la
+sección 2.5. Siguen corriendo en cada arranque `seed_practices`, `seed_users`, `seed_academic`,
+`seed_instruments` y `seed_submissions`: quedan para revisar.
+
 ### F6 — Sin casos especiales en el frontend ni en las siembras
 
 1. Propiedades de presentación (3.8) en schema, API y admin.
