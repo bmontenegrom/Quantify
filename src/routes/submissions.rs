@@ -41,6 +41,24 @@ pub(super) async fn submission_detail(
     Ok(Json(gate_analysis(submission, &user)))
 }
 
+pub(super) async fn submission_definition(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<practices::PracticeDefinition>, AppError> {
+    let user = current_user(&state, &headers).await?;
+    if !matches!(user.role.as_str(), "docente" | "admin") {
+        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
+        if !is_member {
+            return Err(AppError::forbidden("no tenes acceso a esta entrega"));
+        }
+    }
+    practices::submission_definition(&state.pool, &id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found("entrega no encontrada"))
+}
+
 fn analysis_hidden_for(role: &str, results_visible: bool) -> bool {
     !matches!(role, "docente" | "admin") && !results_visible
 }
@@ -194,7 +212,6 @@ pub(super) async fn edit_form_submission(
     let updated = computation::update_form_submission(
         &state.pool,
         &id,
-        &detail.practice_id,
         &input.measurements,
         input.meta.as_ref(),
         input.student_results.as_deref(),
@@ -289,9 +306,9 @@ pub(super) async fn set_student_results(
             "no podes modificar tus calculos una vez que el docente habilito los resultados",
         ));
     }
-    let definition = practices::definition(&state.pool, &submission.practice_id)
+    let definition = practices::submission_definition(&state.pool, &id)
         .await?
-        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+        .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
     computation::check_student_result_symbols(&definition, &body.results)
         .map_err(AppError::bad_request)?;
     db::save_student_results(&state.pool, &id, &body.results).await?;

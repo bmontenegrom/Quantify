@@ -149,6 +149,7 @@ pub fn api_router(state: SharedState) -> Router {
             post(update_practice).delete(delete_practice),
         )
         .route("/practices/{id}/duplicate", post(duplicate_practice))
+        .route("/practices/{id}/versions", post(publish_practice_version))
         .route("/practices/{id}/parts", post(create_part))
         .route(
             "/practices/{id}/parts/{pid}",
@@ -245,6 +246,7 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/submissions/invitations", get(submission_invitations))
         .route("/submissions/existing", get(existing_report))
         .route("/submissions/{id}/edit", post(edit_form_submission))
+        .route("/submissions/{id}/definition", get(submission_definition))
         .route(
             "/submissions/{id}",
             get(submission_detail).delete(cancel_submission),

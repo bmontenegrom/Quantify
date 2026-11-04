@@ -12,7 +12,7 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 pub(super) struct SetAnalysisKindBody {
@@ -176,7 +176,7 @@ pub(super) async fn set_practice_status(
     Path(id): Path<String>,
     Json(body): Json<StatusBody>,
 ) -> Result<Json<db::Practice>, AppError> {
-    require_teacher(&state, &headers).await?;
+    let user = require_teacher(&state, &headers).await?;
     let status = body.status.trim();
     if status == "publicada" {
         let def = load_definition(&state, &id).await?;
@@ -189,15 +189,59 @@ pub(super) async fn set_practice_status(
         }
     }
     match practices::set_practice_status(&state.pool, &id, status).await? {
-        practices::StatusChange::Done => practices::practice(&state.pool, &id)
-            .await?
-            .map(Json)
-            .ok_or_else(|| AppError::not_found("practica no encontrada")),
+        practices::StatusChange::Done => {
+            if status == "publicada"
+                && practices::current_version(&state.pool, &id)
+                    .await?
+                    .is_none()
+            {
+                practices::publish_version(&state.pool, &id, Some(&user.id)).await?;
+            }
+            practices::practice(&state.pool, &id)
+                .await?
+                .map(Json)
+                .ok_or_else(|| AppError::not_found("practica no encontrada"))
+        }
         practices::StatusChange::NotFound => Err(AppError::not_found("practica no encontrada")),
         practices::StatusChange::NotAllowed(current) => Err(AppError::bad_request(format!(
             "Una practica {current} no puede pasar a {status}."
         ))),
     }
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct PublishedVersion {
+    number: i64,
+}
+
+pub(super) async fn publish_practice_version(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<PublishedVersion>, AppError> {
+    let user = require_teacher(&state, &headers).await?;
+    let practice = practices::practice(&state.pool, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    if practice.status == "borrador" {
+        return Err(AppError::bad_request(
+            "La práctica es un borrador: publicala para crear su primera versión.",
+        ));
+    }
+    let def = load_definition(&state, &id).await?;
+    let problems = publish_problems(&def);
+    if !problems.is_empty() {
+        return Err(AppError::bad_request(format!(
+            "Todavía no se puede publicar una versión nueva: {}.",
+            problems.join("; ")
+        )));
+    }
+    let version = practices::publish_version(&state.pool, &id, Some(&user.id))
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    Ok(Json(PublishedVersion {
+        number: version.number,
+    }))
 }
 
 pub(super) async fn delete_practice(
@@ -225,8 +269,20 @@ pub(super) async fn practice_definition(
 ) -> Result<Json<practices::PracticeDefinition>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
-    let def = load_definition(&state, &id).await?;
-    Ok(Json(def))
+    Ok(Json(visible_definition(&state, &user, &id).await?))
+}
+
+async fn visible_definition(
+    state: &SharedState,
+    user: &db::AuthUser,
+    practice_id: &str,
+) -> Result<practices::PracticeDefinition, AppError> {
+    if matches!(user.role.as_str(), "docente" | "admin") {
+        return load_definition(state, practice_id).await;
+    }
+    practices::published_definition(&state.pool, practice_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
 async fn ensure_student_can_see(
@@ -257,7 +313,8 @@ pub(super) async fn analyze_preview(
 ) -> Result<Json<computation::FormAnalysis>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada"]).await?;
-    let analysis = computation::analyze(&state.pool, &id, &body.measurements)
+    let definition = visible_definition(&state, &user, &id).await?;
+    let analysis = computation::analyze_definition(&state.pool, &definition, &body.measurements)
         .await
         .map_err(AppError::from_domain_or_db)?;
     Ok(Json(analysis))
@@ -1869,6 +1926,7 @@ mod tests {
             aggregates: vec![],
             parts: vec![],
             sections: vec![],
+            current_version: None,
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
             symbol: symbol.into(),
@@ -1950,6 +2008,7 @@ mod tests {
             aggregates: vec![agg("a0", "Re_max", 0), agg("a1", "Re_min", 1)],
             parts: vec![],
             sections: vec![],
+            current_version: None,
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
             symbol: symbol.into(),
@@ -2050,6 +2109,7 @@ mod tests {
             aggregates: vec![],
             parts: vec![],
             sections: vec![],
+            current_version: None,
         };
         let r = |unit: &str| ResultInput {
             symbol: "M_medio".into(),

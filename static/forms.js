@@ -139,7 +139,11 @@ export async function loadSubmissionForm() {
 
   try {
     const [definition, instruments] = await Promise.all([
-      fetchJson(`/api/practices/${encodeURIComponent(practiceId)}/definition`),
+      fetchJson(
+        state.editingSubmissionId
+          ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
+          : `/api/practices/${encodeURIComponent(practiceId)}/definition`,
+      ),
       fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`),
     ]);
     state.practiceForm = { definition, instruments };

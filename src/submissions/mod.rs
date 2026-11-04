@@ -729,15 +729,17 @@ pub async fn submission_detail(
     let student_results = student_results_for(pool, &row.id).await?;
     let measurements = measurements_for(pool, &row.id).await?;
     let members = report_members_for(pool, &row.id).await?;
-    let result_tolerances: HashMap<String, f64> = sqlx::query_as::<_, (String, f64)>(
-        "SELECT symbol, tolerance FROM practice_results \
-         WHERE practice_id = ?1 AND tolerance IS NOT NULL",
-    )
-    .bind(&row.practice_id)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .collect();
+    let result_tolerances: HashMap<String, f64> =
+        crate::practices::submission_definition(pool, &row.id)
+            .await?
+            .map(|definition| {
+                definition
+                    .results
+                    .into_iter()
+                    .filter_map(|r| r.tolerance.map(|t| (r.symbol, t)))
+                    .collect()
+            })
+            .unwrap_or_default();
     let editable_until = row.submitted_at
         + chrono::Duration::milliseconds((row.submission_edit_hours * 3_600_000.0) as i64);
     let can_edit = row.entry_mode == "form"

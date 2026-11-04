@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, SqlitePool};
 use std::{collections::HashMap, env, path::PathBuf, sync::Mutex};
 use uuid::Uuid;
@@ -135,7 +135,7 @@ pub struct Practice {
 
 pub(crate) const PRACTICE_COLS: &str = "id, name, description, analysis_kind, status";
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PracticeQuantity {
     pub id: String,
     pub practice_id: String,
@@ -156,7 +156,7 @@ pub struct PracticeQuantity {
     pub slot_count: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PracticeResult {
     pub id: String,
     pub practice_id: String,

@@ -59,8 +59,10 @@ pub(crate) async fn setup() -> (SqlitePool, TempDir) {
 async fn validate_student_results_accepts_final_aggregates() {
     let (pool, _dir) = setup().await;
     validate_student_results(
-        &pool,
-        "fluidos-2",
+        &crate::practices::definition(&pool, "fluidos-2")
+            .await
+            .unwrap()
+            .unwrap(),
         &[
             db::StudentResultInput {
                 symbol: "Re_max".into(),
@@ -74,19 +76,19 @@ async fn validate_student_results_accepts_final_aggregates() {
             },
         ],
     )
-    .await
     .unwrap();
 
     let err = validate_student_results(
-        &pool,
-        "fluidos-2",
+        &crate::practices::definition(&pool, "fluidos-2")
+            .await
+            .unwrap()
+            .unwrap(),
         &[db::StudentResultInput {
             symbol: "no_existe".into(),
             value: 1.0,
             u_expanded: None,
         }],
     )
-    .await
     .unwrap_err();
     assert!(err.to_string().contains("no_existe"));
 }
@@ -95,8 +97,10 @@ async fn validate_student_results_accepts_final_aggregates() {
 async fn validate_student_results_accepts_point_results_per_run() {
     let (pool, _dir) = setup().await;
     validate_student_results(
-        &pool,
-        "viscosidad",
+        &crate::practices::definition(&pool, "viscosidad")
+            .await
+            .unwrap()
+            .unwrap(),
         &[
             db::StudentResultInput {
                 symbol: "Re#0".into(),
@@ -110,20 +114,20 @@ async fn validate_student_results_accepts_point_results_per_run() {
             },
         ],
     )
-    .await
     .unwrap();
 
     for bad in ["Re#x", "Nope#0"] {
         let err = validate_student_results(
-            &pool,
-            "viscosidad",
+            &crate::practices::definition(&pool, "viscosidad")
+                .await
+                .unwrap()
+                .unwrap(),
             &[db::StudentResultInput {
                 symbol: bad.into(),
                 value: 1.0,
                 u_expanded: None,
             }],
         )
-        .await
         .unwrap_err();
         assert!(err.to_string().contains(bad));
     }
@@ -176,6 +180,7 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
         aggregates: vec![aggregate("Re_medio", true), aggregate("Re_min", false)],
         parts: vec![],
         sections: vec![],
+        current_version: None,
     };
     let sr = |symbol: &str| db::StudentResultInput {
         symbol: symbol.into(),
@@ -799,6 +804,9 @@ async fn operator_submission_stores_operator_index_per_operator() {
         student_results: vec![],
         student_comment: None,
     };
+    crate::practices::publish_version(&pool, "p1-estadistica", None)
+        .await
+        .unwrap();
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
     let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
     let t_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == t_id).collect();
@@ -903,6 +911,9 @@ async fn point_based_submission_stores_point_index_per_point() {
         student_results: vec![],
         student_comment: None,
     };
+    crate::practices::publish_version(&pool, "p1-estadistica", None)
+        .await
+        .unwrap();
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
     let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
 
@@ -1010,6 +1021,9 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
         student_results: vec![],
         student_comment: None,
     };
+    crate::practices::publish_version(&pool, "p1-estadistica", None)
+        .await
+        .unwrap();
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
     let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
 
@@ -1093,6 +1107,9 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
         student_results: vec![],
         student_comment: None,
     };
+    crate::practices::publish_version(&pool, "p1-estadistica", None)
+        .await
+        .unwrap();
     let created = create_form_submission(&pool, &user, mk(vec![5.0, 5.2, 4.9]))
         .await
         .unwrap();
@@ -1102,7 +1119,6 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
     let edited = update_form_submission(
         &pool,
         &created.id,
-        "p1-estadistica",
         &mk(vec![10.0, 12.0, 11.0]).measurements,
         None,
         None,
@@ -1282,7 +1298,6 @@ async fn update_form_submission_replaces_student_comment() {
     let edited = update_form_submission(
         &pool,
         &created.id,
-        "p1-estadistica",
         &measurements,
         None,
         None,
@@ -1295,17 +1310,9 @@ async fn update_form_submission_replaces_student_comment() {
         Some("faltó una réplica por corte de luz")
     );
 
-    let cleared = update_form_submission(
-        &pool,
-        &created.id,
-        "p1-estadistica",
-        &measurements,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
+    let cleared = update_form_submission(&pool, &created.id, &measurements, None, None, None)
+        .await
+        .unwrap();
     assert_eq!(cleared.student_comment, None);
 }
 
@@ -2738,4 +2745,168 @@ async fn curve_results_chain_and_skip_what_depends_on_series_values() {
     };
     assert!(warned("A", "\"f\""), "{:?}", a.warnings);
     assert!(warned("B", "no se pudo calcular"), "{:?}", a.warnings);
+}
+
+fn derived_value(analysis: &serde_json::Value, symbol: &str) -> Option<f64> {
+    let own = analysis["derived"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|d| d["symbol"] == symbol)
+        .and_then(|d| d["value"].as_f64());
+    own.or_else(|| {
+        analysis["parts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find_map(|p| derived_value(&p["analysis"], symbol))
+    })
+}
+
+#[tokio::test]
+async fn editing_a_published_practice_does_not_change_old_submissions() {
+    let (pool, _dir) = setup().await;
+    let course = db::create_course(
+        &pool,
+        db::CreateCourse {
+            name: "Curso".into(),
+            term: "2026".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let group = db::create_group(
+        &pool,
+        &course.id,
+        db::CreateGroup {
+            name: "Grupo 1".into(),
+            table_count: Some(4),
+            group_type: None,
+        },
+    )
+    .await
+    .unwrap();
+    let user = db::users(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|u| u.email == "docente@quantify.local")
+        .unwrap();
+    let def = crate::practices::definition(&pool, "p1-estadistica")
+        .await
+        .unwrap()
+        .unwrap();
+    let id = |sym: &str| {
+        def.quantities
+            .iter()
+            .find(|q| q.symbol == sym)
+            .unwrap()
+            .id
+            .clone()
+    };
+    let m = |sym: &str, values: Vec<f64>, given_u: Option<f64>| MeasurementInput {
+        quantity_id: id(sym),
+        instrument_id: None,
+        scale_id: None,
+        values,
+        given_u,
+        point_replicas: None,
+        operator_replicas: None,
+    };
+    let measurements = vec![
+        m("L", vec![1.0], Some(0.002)),
+        m("t_med", vec![2.0], Some(0.0)),
+        m("T1", vec![2.0, 2.02, 1.98], None),
+    ];
+    let mk = || FormSubmissionInput {
+        course_id: course.id.clone(),
+        group_id: group.id.clone(),
+        practice_id: "p1-estadistica".into(),
+        measurements: measurements.clone(),
+        meta: None,
+        table_number: None,
+        student_results: vec![],
+        student_comment: None,
+    };
+    let old = create_form_submission(&pool, &user, mk()).await.unwrap();
+    let old_g1 = derived_value(&old.analysis, "g1").unwrap();
+
+    sqlx::query(
+        "UPDATE practice_results SET formula = '2*(' || formula || ')' \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 'g1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let edited = update_form_submission(&pool, &old.id, &measurements, None, None, None)
+        .await
+        .unwrap();
+    assert!((derived_value(&edited.analysis, "g1").unwrap() - old_g1).abs() < 1e-12);
+    let old_def = crate::practices::submission_definition(&pool, &old.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let old_formula = &old_def
+        .results
+        .iter()
+        .find(|r| r.symbol == "g1")
+        .unwrap()
+        .formula;
+    assert!(!old_formula.starts_with("2*("), "{old_formula}");
+
+    let v2 = crate::practices::publish_version(&pool, "p1-estadistica", None)
+        .await
+        .unwrap()
+        .unwrap();
+    let new = create_form_submission(&pool, &user, mk()).await.unwrap();
+    assert!((derived_value(&new.analysis, "g1").unwrap() - 2.0 * old_g1).abs() < 1e-9);
+    let versions: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT id, practice_version_id FROM submissions WHERE id IN (?1, ?2)")
+            .bind(&old.id)
+            .bind(&new.id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let version_of = |sid: &str| versions.iter().find(|(s, _)| s == sid).unwrap().1.clone();
+    assert_eq!(version_of(&new.id).as_deref(), Some(v2.id.as_str()));
+    assert_ne!(version_of(&old.id), version_of(&new.id));
+}
+
+#[tokio::test]
+async fn ensure_versions_creates_version_one_and_links_old_submissions() {
+    let (pool, _dir) = setup().await;
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_versions WHERE practice_id = 'p1-estadistica'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1);
+    for sql in [
+        "UPDATE practices SET current_version_id = NULL WHERE id = 'p1-estadistica'",
+        "DELETE FROM practice_versions WHERE practice_id = 'p1-estadistica'",
+        "UPDATE submissions SET practice_version_id = NULL",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    crate::practices::ensure_versions(&pool).await.unwrap();
+    crate::practices::ensure_versions(&pool).await.unwrap();
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_versions WHERE practice_id = 'p1-estadistica'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1);
+    let (unlinked,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM submissions WHERE practice_version_id IS NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(unlinked, 0);
+    let published = crate::practices::published_definition(&pool, "p1-estadistica")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(published.current_version, Some(1));
 }

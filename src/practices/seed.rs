@@ -1580,5 +1580,6 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     chain_seeded_formulas(pool).await?;
     super::layout::migrate_legacy_layout(pool).await?;
     super::layout::migrate_shared_results_to_parts(pool).await?;
+    super::versions::ensure_versions(pool).await?;
     Ok(())
 }
