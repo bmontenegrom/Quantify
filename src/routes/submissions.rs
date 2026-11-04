@@ -1,4 +1,7 @@
-use super::{current_user, read_text, require_teacher, required, Health, SharedState};
+use super::{
+    current_user, ensure_submission_access, read_text, require_teacher, required, Health,
+    SharedState,
+};
 use crate::{
     analysis,
     computation::{self, FormSubmissionInput},
@@ -29,12 +32,7 @@ pub(super) async fn submission_detail(
     Path(id): Path<String>,
 ) -> Result<Json<db::SubmissionDetail>, AppError> {
     let user = current_user(&state, &headers).await?;
-    if !matches!(user.role.as_str(), "docente" | "admin") {
-        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
-        if !is_member {
-            return Err(AppError::forbidden("no tenes acceso a esta entrega"));
-        }
-    }
+    ensure_submission_access(&state, &user, &id).await?;
     let submission = db::submission_detail(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
@@ -47,12 +45,7 @@ pub(super) async fn submission_definition(
     Path(id): Path<String>,
 ) -> Result<Json<practices::PracticeDefinition>, AppError> {
     let user = current_user(&state, &headers).await?;
-    if !matches!(user.role.as_str(), "docente" | "admin") {
-        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
-        if !is_member {
-            return Err(AppError::forbidden("no tenes acceso a esta entrega"));
-        }
-    }
+    ensure_submission_access(&state, &user, &id).await?;
     practices::submission_definition(&state.pool, &id)
         .await?
         .map(Json)
@@ -122,10 +115,7 @@ pub(super) async fn create_submission(
         ));
     }
 
-    if practices::current_version(&state.pool, &practice_id)
-        .await?
-        .is_none()
-    {
+    if !practices::has_published_version(&state.pool, &practice_id).await? {
         return Err(AppError::bad_request(
             "La práctica todavía no tiene una versión publicada: publicala para recibir entregas.",
         ));
@@ -300,12 +290,7 @@ pub(super) async fn set_student_results(
     Json(body): Json<SaveStudentResults>,
 ) -> Result<Json<db::SubmissionDetail>, AppError> {
     let user = current_user(&state, &headers).await?;
-    if !matches!(user.role.as_str(), "docente" | "admin") {
-        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
-        if !is_member {
-            return Err(AppError::forbidden("no tenes acceso a esta entrega"));
-        }
-    }
+    ensure_submission_access(&state, &user, &id).await?;
     let submission = db::submission_detail(&state.pool, &id)
         .await?
         .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;

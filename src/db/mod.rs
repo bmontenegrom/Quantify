@@ -135,7 +135,8 @@ pub struct Practice {
 
 pub(crate) const PRACTICE_COLS: &str = "id, name, description, analysis_kind, status";
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, FromRow)]
+#[serde(default)]
 pub struct PracticeQuantity {
     pub id: String,
     pub practice_id: String,
@@ -156,7 +157,8 @@ pub struct PracticeQuantity {
     pub slot_count: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, FromRow)]
+#[serde(default)]
 pub struct PracticeResult {
     pub id: String,
     pub practice_id: String,

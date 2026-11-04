@@ -2832,7 +2832,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
     let old_g1 = derived_value(&old.analysis, "g1").unwrap();
 
     sqlx::query(
-        "UPDATE practice_results SET formula = '2*(' || formula || ')' \
+        "UPDATE practice_results SET formula = '2*(' || formula || ')', tolerance = 5 \
          WHERE practice_id = 'p1-estadistica' AND symbol = 'g1'",
     )
     .execute(&pool)
@@ -2842,6 +2842,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
         .await
         .unwrap();
     assert!((derived_value(&edited.analysis, "g1").unwrap() - old_g1).abs() < 1e-12);
+    assert!(!edited.result_tolerances.contains_key("g1"));
     let old_def = crate::practices::submission_definition(&pool, &old.id)
         .await
         .unwrap()
@@ -2860,6 +2861,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
         .unwrap();
     let new = create_form_submission(&pool, &user, mk()).await.unwrap();
     assert!((derived_value(&new.analysis, "g1").unwrap() - 2.0 * old_g1).abs() < 1e-9);
+    assert_eq!(new.result_tolerances.get("g1"), Some(&5.0));
     let versions: Vec<(String, Option<String>)> =
         sqlx::query_as("SELECT id, practice_version_id FROM submissions WHERE id IN (?1, ?2)")
             .bind(&old.id)

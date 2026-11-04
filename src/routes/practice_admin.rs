@@ -1,4 +1,4 @@
-use super::{current_user, require_teacher, Health, SharedState};
+use super::{current_user, ensure_submission_access, require_teacher, Health, SharedState};
 use crate::{
     computation, db,
     error::AppError,
@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     Json,
 };
@@ -188,20 +188,14 @@ pub(super) async fn set_practice_status(
             )));
         }
     }
+    if status == "publicada" && !practices::has_published_version(&state.pool, &id).await? {
+        practices::publish_version(&state.pool, &id, Some(&user.id)).await?;
+    }
     match practices::set_practice_status(&state.pool, &id, status).await? {
-        practices::StatusChange::Done => {
-            if status == "publicada"
-                && practices::current_version(&state.pool, &id)
-                    .await?
-                    .is_none()
-            {
-                practices::publish_version(&state.pool, &id, Some(&user.id)).await?;
-            }
-            practices::practice(&state.pool, &id)
-                .await?
-                .map(Json)
-                .ok_or_else(|| AppError::not_found("practica no encontrada"))
-        }
+        practices::StatusChange::Done => practices::practice(&state.pool, &id)
+            .await?
+            .map(Json)
+            .ok_or_else(|| AppError::not_found("practica no encontrada")),
         practices::StatusChange::NotFound => Err(AppError::not_found("practica no encontrada")),
         practices::StatusChange::NotAllowed(current) => Err(AppError::bad_request(format!(
             "Una practica {current} no puede pasar a {status}."
@@ -262,24 +256,30 @@ pub(super) async fn delete_practice(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct DefinitionQuery {
+    #[serde(default)]
+    published: bool,
+}
+
 pub(super) async fn practice_definition(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(query): Query<DefinitionQuery>,
 ) -> Result<Json<practices::PracticeDefinition>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
-    Ok(Json(visible_definition(&state, &user, &id).await?))
+    if matches!(user.role.as_str(), "docente" | "admin") && !query.published {
+        return Ok(Json(load_definition(&state, &id).await?));
+    }
+    Ok(Json(published_definition(&state, &id).await?))
 }
 
-async fn visible_definition(
+async fn published_definition(
     state: &SharedState,
-    user: &db::AuthUser,
     practice_id: &str,
 ) -> Result<practices::PracticeDefinition, AppError> {
-    if matches!(user.role.as_str(), "docente" | "admin") {
-        return load_definition(state, practice_id).await;
-    }
     practices::published_definition(&state.pool, practice_id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
@@ -303,6 +303,8 @@ async fn ensure_student_can_see(
 #[derive(serde::Deserialize)]
 pub(super) struct AnalyzePreviewBody {
     measurements: Vec<computation::MeasurementInput>,
+    #[serde(default)]
+    submission_id: Option<String>,
 }
 
 pub(super) async fn analyze_preview(
@@ -313,7 +315,16 @@ pub(super) async fn analyze_preview(
 ) -> Result<Json<computation::FormAnalysis>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada"]).await?;
-    let definition = visible_definition(&state, &user, &id).await?;
+    let definition = match &body.submission_id {
+        Some(submission_id) => {
+            ensure_submission_access(&state, &user, submission_id).await?;
+            practices::submission_definition(&state.pool, submission_id)
+                .await?
+                .filter(|d| d.practice_id == id)
+                .ok_or_else(|| AppError::not_found("entrega no encontrada"))?
+        }
+        None => published_definition(&state, &id).await?,
+    };
     let analysis = computation::analyze_definition(&state.pool, &definition, &body.measurements)
         .await
         .map_err(AppError::from_domain_or_db)?;
@@ -482,6 +493,11 @@ pub(super) async fn delete_quantity(
     after.quantities.retain(|q| q.id != qid);
     if after.quantities.len() == before.quantities.len() {
         return Err(AppError::not_found("magnitud no encontrada en la practica"));
+    }
+    if practices::quantity_in_a_version(&state.pool, &id, &qid).await? {
+        return Err(AppError::bad_request(
+            "La magnitud está en una versión publicada de la práctica: todavía no se puede borrar.",
+        ));
     }
     guard_change(&before, &after, "eliminar la magnitud")?;
     if !practices::delete_quantity(&state.pool, &qid).await? {

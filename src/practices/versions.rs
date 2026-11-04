@@ -81,27 +81,22 @@ pub async fn publish_version(
         return Ok(None);
     };
     let mut tx = pool.begin().await?;
-    let (last,): (Option<i64>,) =
-        sqlx::query_as("SELECT MAX(number) FROM practice_versions WHERE practice_id = ?1")
-            .bind(practice_id)
-            .fetch_one(&mut *tx)
-            .await?;
-    let number = last.unwrap_or(0) + 1;
-    definition.current_version = Some(number);
     let id = uuid::Uuid::new_v4().to_string();
-    sqlx::query(
+    let (number,): (i64,) = sqlx::query_as(
         "INSERT INTO practice_versions \
          (id, practice_id, number, definition_json, published_at, published_by) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+         SELECT ?1, ?2, n, json_set(?3, '$.current_version', n), ?4, ?5 FROM \
+         (SELECT COALESCE(MAX(number), 0) + 1 AS n FROM practice_versions WHERE practice_id = ?2) \
+         RETURNING number",
     )
     .bind(&id)
     .bind(practice_id)
-    .bind(number)
     .bind(serde_json::to_string(&definition)?)
     .bind(chrono::Utc::now())
     .bind(published_by)
-    .execute(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
+    definition.current_version = Some(number);
     sqlx::query("UPDATE practices SET current_version_id = ?1 WHERE id = ?2")
         .bind(&id)
         .bind(practice_id)
@@ -153,4 +148,29 @@ async fn link_legacy_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     tx.commit().await?;
     Ok(())
+}
+
+pub async fn has_published_version(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<bool> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM practices WHERE id = ?1 AND current_version_id IS NOT NULL")
+            .bind(practice_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.is_some())
+}
+
+pub async fn quantity_in_a_version(
+    pool: &SqlitePool,
+    practice_id: &str,
+    quantity_id: &str,
+) -> anyhow::Result<bool> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM practice_versions v, json_each(v.definition_json, '$.quantities') q \
+         WHERE v.practice_id = ?1 AND json_extract(q.value, '$.id') = ?2 LIMIT 1",
+    )
+    .bind(practice_id)
+    .bind(quantity_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.is_some())
 }

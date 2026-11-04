@@ -2629,3 +2629,50 @@ async fn seeded_submissions_are_pinned_to_their_version() {
     assert!(!rows.is_empty());
     assert!(rows.iter().all(|(_, v)| v.is_some()), "{rows:?}");
 }
+
+#[test]
+fn an_old_snapshot_missing_fields_still_reads() {
+    let def: PracticeDefinition = serde_json::from_str(
+        r#"{"practice_id":"p","status":"publicada","quantities":[{"id":"q","symbol":"L"}],
+            "results":[{"id":"r","symbol":"g","formula":"L"}],"parts":[{"id":"a","title":"A"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(def.quantities[0].symbol, "L");
+    assert_eq!(def.results[0].tolerance, None);
+    assert_eq!(def.parts[0].analysis_kind, None);
+    assert!(def.curves.is_empty());
+}
+
+#[tokio::test]
+async fn a_quantity_in_a_published_version_is_detected() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    let t1 = def.quantities.iter().find(|q| q.symbol == "T1").unwrap();
+    assert!(quantity_in_a_version(&pool, "p1-estadistica", &t1.id)
+        .await
+        .unwrap());
+    let fresh = create_quantity(
+        &pool,
+        "p1-estadistica",
+        QuantityInput {
+            symbol: "Tn".into(),
+            name: "Nueva".into(),
+            unit: "s".into(),
+            repeated: false,
+            quantity: None,
+            is_given: false,
+            replicas_per_point: None,
+            per_point: false,
+            has_uncertainty: true,
+            optional: false,
+            default_value: None,
+            slot_count: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!quantity_in_a_version(&pool, "p1-estadistica", &fresh.id)
+        .await
+        .unwrap());
+}

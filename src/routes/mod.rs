@@ -331,6 +331,19 @@ fn is_valid_email(email: &str) -> bool {
     !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
 }
 
+async fn ensure_submission_access(
+    state: &SharedState,
+    user: &db::AuthUser,
+    submission_id: &str,
+) -> Result<(), AppError> {
+    if matches!(user.role.as_str(), "docente" | "admin")
+        || db::is_accepted_member(&state.pool, submission_id, &user.id).await?
+    {
+        return Ok(());
+    }
+    Err(AppError::forbidden("no tenes acceso a esta entrega"))
+}
+
 async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::AuthUser, AppError> {
     let token = session_token(headers).ok_or_else(|| AppError::unauthorized("login requerido"))?;
     db::user_by_session(&state.pool, &token)

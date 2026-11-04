@@ -50,7 +50,8 @@ pub struct ResultInput {
     pub has_uncertainty: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PracticeDefinition {
     pub practice_id: String,
     pub status: String,
@@ -70,7 +71,8 @@ pub struct PracticeDefinition {
     pub current_version: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(default)]
 pub struct PracticePart {
     pub id: String,
     pub practice_id: String,
@@ -81,7 +83,8 @@ pub struct PracticePart {
     pub effective_kind: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(default)]
 pub struct PracticeSection {
     pub id: String,
     pub practice_id: String,
@@ -106,7 +109,8 @@ pub struct SectionInput {
     pub part_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(default)]
 pub struct PracticeCurve {
     pub id: String,
     pub practice_id: String,
@@ -124,7 +128,8 @@ pub struct CurveInput {
     pub x_log: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(default)]
 pub struct PracticeIntermediate {
     pub id: String,
     pub practice_id: String,
@@ -143,7 +148,8 @@ pub struct IntermediateInput {
     pub formula: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(default)]
 pub struct PracticePointResult {
     pub id: String,
     pub practice_id: String,
@@ -162,7 +168,8 @@ pub struct PointResultInput {
     pub formula: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(default)]
 pub struct PracticeAggregate {
     pub id: String,
     pub practice_id: String,

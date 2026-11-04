@@ -730,17 +730,21 @@ pub async fn submission_detail(
     let student_results = student_results_for(pool, &row.id).await?;
     let measurements = measurements_for(pool, &row.id).await?;
     let members = report_members_for(pool, &row.id).await?;
-    let result_tolerances: HashMap<String, f64> =
-        crate::practices::submission_definition(pool, &row.id)
-            .await?
-            .map(|definition| {
-                definition
-                    .results
-                    .into_iter()
-                    .filter_map(|r| r.tolerance.map(|t| (r.symbol, t)))
-                    .collect()
-            })
-            .unwrap_or_default();
+    let result_tolerances: HashMap<String, f64> = sqlx::query_as::<_, (String, f64)>(
+        "SELECT json_extract(r.value, '$.symbol'), json_extract(r.value, '$.tolerance') \
+         FROM submissions s JOIN practice_versions v ON v.id = s.practice_version_id, \
+         json_each(v.definition_json, '$.results') r \
+         WHERE s.id = ?1 AND json_extract(r.value, '$.tolerance') IS NOT NULL \
+         UNION ALL \
+         SELECT pr.symbol, pr.tolerance FROM submissions s \
+         JOIN practice_results pr ON pr.practice_id = s.practice_id \
+         WHERE s.id = ?1 AND s.practice_version_id IS NULL AND pr.tolerance IS NOT NULL",
+    )
+    .bind(&row.id)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .collect();
     let editable_until = row.submitted_at
         + chrono::Duration::milliseconds((row.submission_edit_hours * 3_600_000.0) as i64);
     let can_edit = row.entry_mode == "form"

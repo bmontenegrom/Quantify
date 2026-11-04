@@ -540,11 +540,14 @@ async function setPracticeStatus(practiceId, status) {
 }
 
 async function publishPracticeVersion(practiceId) {
-  const next = (state.practiceDefinition?.current_version ?? 0) + 1;
-  await runPracticeAction(async () => {
-    await postJson(`/api/practices/${practiceId}/versions`, {});
+  try {
+    const { number } = await postJson(`/api/practices/${practiceId}/versions`, {});
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-  }, `Versión ${next} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`);
+    state.practiceActionStatus = `Versión ${number} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`;
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+  }
+  renderPracticesPage();
 }
 
 async function savePracticeInfo(event) {

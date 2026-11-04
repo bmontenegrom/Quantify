@@ -142,7 +142,7 @@ export async function loadSubmissionForm() {
       fetchJson(
         state.editingSubmissionId
           ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
-          : `/api/practices/${encodeURIComponent(practiceId)}/definition`,
+          : `/api/practices/${encodeURIComponent(practiceId)}/definition?published=true`,
       ),
       fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`),
     ]);
