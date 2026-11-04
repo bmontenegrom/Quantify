@@ -303,7 +303,7 @@
         "derived": [
           {
             "formula": "RA_c + R2*R3/(R2+R3)",
-            "has_uncertainty": true,
+            "has_uncertainty": false,
             "name": "Resistencia de maxima transferencia teorica (Rth)",
             "symbol": "RP_max_t",
             "u": 7.745534813737881,
@@ -313,7 +313,7 @@
           },
           {
             "formula": "Vg_c*Vg_c/(4*(RA_c + R2*R3/(R2+R3)))",
-            "has_uncertainty": true,
+            "has_uncertainty": false,
             "name": "Potencia maxima teorica",
             "symbol": "P_max_t",
             "u": 0.00005047452507333078,
@@ -323,7 +323,7 @@
           },
           {
             "formula": "P_max",
-            "has_uncertainty": true,
+            "has_uncertainty": false,
             "name": "Potencia maxima experimental (de la tabla)",
             "symbol": "P_max_e",
             "u": 0.0,
@@ -333,7 +333,7 @@
           },
           {
             "formula": "R_at_P_max",
-            "has_uncertainty": true,
+            "has_uncertainty": false,
             "name": "Resistencia de maxima transferencia experimental",
             "symbol": "RP_max_e",
             "u": 0.0,
