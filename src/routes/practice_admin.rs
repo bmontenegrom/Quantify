@@ -1,4 +1,4 @@
-use super::{current_user, require_teacher, Health, SharedState};
+use super::{current_user, ensure_submission_access, require_teacher, Health, SharedState};
 use crate::{
     computation, db,
     error::AppError,
@@ -8,11 +8,11 @@ use crate::{
     },
 };
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 pub(super) struct SetAnalysisKindBody {
@@ -176,16 +176,37 @@ pub(super) async fn set_practice_status(
     Path(id): Path<String>,
     Json(body): Json<StatusBody>,
 ) -> Result<Json<db::Practice>, AppError> {
-    require_teacher(&state, &headers).await?;
+    let user = require_teacher(&state, &headers).await?;
     let status = body.status.trim();
     if status == "publicada" {
-        let def = load_definition(&state, &id).await?;
-        let problems = publish_problems(&def);
-        if !problems.is_empty() {
-            return Err(AppError::bad_request(format!(
-                "Todavia no se puede publicar: {}.",
-                problems.join("; ")
-            )));
+        match practices::publish_draft(&state.pool, &id, Some(&user.id), publish_problems).await? {
+            practices::DraftPublish::Published => {
+                return practices::practice(&state.pool, &id)
+                    .await?
+                    .map(Json)
+                    .ok_or_else(|| AppError::not_found("practica no encontrada"));
+            }
+            practices::DraftPublish::Rejected(problems) => {
+                return Err(AppError::bad_request(format!(
+                    "Todavia no se puede publicar: {}.",
+                    problems.join("; ")
+                )));
+            }
+            practices::DraftPublish::NotFound => {
+                return Err(AppError::not_found("practica no encontrada"));
+            }
+            practices::DraftPublish::NotDraft => {
+                if let Some(version) = practices::current_version(&state.pool, &id).await? {
+                    let problems = publish_problems(&version.definition);
+                    if !problems.is_empty() {
+                        return Err(AppError::bad_request(format!(
+                            "No se puede restaurar la versión {}: {}.",
+                            version.number,
+                            problems.join("; ")
+                        )));
+                    }
+                }
+            }
         }
     }
     match practices::set_practice_status(&state.pool, &id, status).await? {
@@ -197,6 +218,33 @@ pub(super) async fn set_practice_status(
         practices::StatusChange::NotAllowed(current) => Err(AppError::bad_request(format!(
             "Una practica {current} no puede pasar a {status}."
         ))),
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct PublishedVersion {
+    number: i64,
+}
+
+pub(super) async fn publish_practice_version(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<PublishedVersion>, AppError> {
+    let user = require_teacher(&state, &headers).await?;
+    match practices::publish_checked(&state.pool, &id, Some(&user.id), publish_problems).await? {
+        practices::Publish::Published { number } => Ok(Json(PublishedVersion { number })),
+        practices::Publish::Rejected(problems) => Err(AppError::bad_request(format!(
+            "Todavía no se puede publicar una versión nueva: {}.",
+            problems.join("; ")
+        ))),
+        practices::Publish::Unchanged(number) => Err(AppError::bad_request(format!(
+            "No hay cambios desde la versión {number}: no hace falta publicar otra."
+        ))),
+        practices::Publish::IsDraft => Err(AppError::bad_request(
+            "La práctica es un borrador: publicala para crear su primera versión.",
+        )),
+        practices::Publish::NotFound => Err(AppError::not_found("practica no encontrada")),
     }
 }
 
@@ -218,15 +266,33 @@ pub(super) async fn delete_practice(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct DefinitionQuery {
+    #[serde(default)]
+    published: bool,
+}
+
 pub(super) async fn practice_definition(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(query): Query<DefinitionQuery>,
 ) -> Result<Json<practices::PracticeDefinition>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
-    let def = load_definition(&state, &id).await?;
-    Ok(Json(def))
+    if matches!(user.role.as_str(), "docente" | "admin") && !query.published {
+        return Ok(Json(load_definition(&state, &id).await?));
+    }
+    Ok(Json(published_definition(&state, &id).await?))
+}
+
+async fn published_definition(
+    state: &SharedState,
+    practice_id: &str,
+) -> Result<practices::PracticeDefinition, AppError> {
+    practices::published_definition(&state.pool, practice_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
 async fn ensure_student_can_see(
@@ -247,6 +313,10 @@ async fn ensure_student_can_see(
 #[derive(serde::Deserialize)]
 pub(super) struct AnalyzePreviewBody {
     measurements: Vec<computation::MeasurementInput>,
+    #[serde(default)]
+    submission_id: Option<String>,
+    #[serde(default)]
+    practice_version: Option<i64>,
 }
 
 pub(super) async fn analyze_preview(
@@ -257,7 +327,23 @@ pub(super) async fn analyze_preview(
 ) -> Result<Json<computation::FormAnalysis>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada"]).await?;
-    let analysis = computation::analyze(&state.pool, &id, &body.measurements)
+    let definition = match &body.submission_id {
+        Some(submission_id) => {
+            ensure_submission_access(&state, &user, submission_id).await?;
+            practices::submission_definition(&state.pool, submission_id)
+                .await?
+                .filter(|d| d.practice_id == id)
+                .ok_or_else(|| AppError::not_found("entrega no encontrada"))?
+        }
+        None if body.practice_version.is_some() => {
+            practices::version_for_form(&state.pool, &id, body.practice_version)
+                .await
+                .map_err(AppError::from_domain_or_db)?
+                .definition
+        }
+        None => published_definition(&state, &id).await?,
+    };
+    let analysis = computation::analyze_definition(&state.pool, &definition, &body.measurements)
         .await
         .map_err(AppError::from_domain_or_db)?;
     Ok(Json(analysis))
@@ -425,6 +511,11 @@ pub(super) async fn delete_quantity(
     after.quantities.retain(|q| q.id != qid);
     if after.quantities.len() == before.quantities.len() {
         return Err(AppError::not_found("magnitud no encontrada en la practica"));
+    }
+    if practices::quantity_still_needed(&state.pool, &id, &qid).await? {
+        return Err(AppError::bad_request(
+            "La magnitud está en la versión vigente o tiene mediciones guardadas, así que no se puede borrar. Para sacarla ya, duplicá la práctica y editá la copia.",
+        ));
     }
     guard_change(&before, &after, "eliminar la magnitud")?;
     if !practices::delete_quantity(&state.pool, &qid).await? {
@@ -1869,6 +1960,7 @@ mod tests {
             aggregates: vec![],
             parts: vec![],
             sections: vec![],
+            current_version: None,
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
             symbol: symbol.into(),
@@ -1950,6 +2042,7 @@ mod tests {
             aggregates: vec![agg("a0", "Re_max", 0), agg("a1", "Re_min", 1)],
             parts: vec![],
             sections: vec![],
+            current_version: None,
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
             symbol: symbol.into(),
@@ -2050,6 +2143,7 @@ mod tests {
             aggregates: vec![],
             parts: vec![],
             sections: vec![],
+            current_version: None,
         };
         let r = |unit: &str| ResultInput {
             symbol: "M_medio".into(),

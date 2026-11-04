@@ -19,7 +19,7 @@ import {
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
-  replicaInputHtml, cellReplicaValues, definitionSections, definitionParts,
+  replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -29,7 +29,7 @@ import {
   renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
   refreshSeries, SERIES_INITIAL_ROWS,
 } from "./forms-series.js";
-import { loadDraft, clearDraft, scheduleDraftSave } from "./forms-draft.js";
+import { loadDraft, clearDraft, saveDraft, scheduleDraftSave } from "./forms-draft.js";
 
 export function quantityNameHtml(q) {
   const base = inlineMathHtml(q.name);
@@ -116,8 +116,9 @@ export async function loadSubmissionForm() {
   if (canReview(state.user)) return;
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
-  if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const practiceId = practiceSelect.value;
+  if (state.editingSubmissionId && state.editingPracticeId !== practiceId) exitEditMode();
+  if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const courseId = courseSelect.value;
   if (practicaTitle) {
     const practiceName =
@@ -139,7 +140,11 @@ export async function loadSubmissionForm() {
 
   try {
     const [definition, instruments] = await Promise.all([
-      fetchJson(`/api/practices/${encodeURIComponent(practiceId)}/definition`),
+      fetchJson(
+        state.editingSubmissionId && state.editingPracticeId === practiceId
+          ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
+          : `/api/practices/${encodeURIComponent(practiceId)}/definition?published=true`,
+      ),
       fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`),
     ]);
     state.practiceForm = { definition, instruments };
@@ -704,6 +709,7 @@ export async function submitFormSubmission() {
       openSubmissionWorkspace(editingId);
       return;
     }
+    saveDraft();
     const groupId = groupSelect.value;
     if (tableSelect.value) {
       await postJson(`/api/academic/groups/${groupId}/practice-table`, {
@@ -719,6 +725,7 @@ export async function submitFormSubmission() {
       meta: collectMeta(),
       student_results: collectFinalResults(),
       student_comment: studentComment?.value.trim() || null,
+      practice_version: formPracticeVersion(practiceSelect.value),
     });
     submitStatus.textContent = "Entrega guardada";
     showToast("Entrega guardada", "success");
@@ -737,6 +744,7 @@ export async function submitFormSubmission() {
 
 export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
+  state.editingPracticeId = submission.practice_id;
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
@@ -745,6 +753,7 @@ export function startEditSubmission(submission) {
 
 export function exitEditMode() {
   state.editingSubmissionId = null;
+  state.editingPracticeId = null;
   state.editPrefillComment = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;

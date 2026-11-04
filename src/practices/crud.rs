@@ -14,6 +14,7 @@ struct PracticeConfigRow {
     x_formula: Option<String>,
     y_formula: Option<String>,
     operator_count: Option<i64>,
+    current_version: Option<i64>,
 }
 
 pub async fn definition(
@@ -21,7 +22,9 @@ pub async fn definition(
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
     let row: Option<PracticeConfigRow> = sqlx::query_as(
-        "SELECT status, analysis_kind, x_formula, y_formula, operator_count FROM practices WHERE id = ?1",
+        "SELECT status, analysis_kind, x_formula, y_formula, operator_count, \
+         (SELECT number FROM practice_versions WHERE id = practices.current_version_id) \
+         AS current_version FROM practices WHERE id = ?1",
     )
     .bind(practice_id)
     .fetch_optional(pool)
@@ -53,6 +56,7 @@ pub async fn definition(
             aggregates,
             parts,
             sections,
+            current_version: row.current_version,
         }
         .with_effective_kinds(),
     ))

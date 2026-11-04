@@ -130,7 +130,8 @@ pub async fn duplicate_practice(
     let id = free_practice_id(&mut tx, &slugify(name)).await?;
     let copied: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM pragma_table_info('practices') \
-         WHERE name NOT IN ('id', 'name', 'status', 'created_by', 'created_at')",
+         WHERE name NOT IN ('id', 'name', 'status', 'created_by', 'created_at', \
+         'current_version_id')",
     )
     .fetch_all(&mut *tx)
     .await?;

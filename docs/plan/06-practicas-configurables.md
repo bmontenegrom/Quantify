@@ -692,6 +692,10 @@ Decisiones y desvíos respecto de los puntos 1–4:
    - **Resumen de diferencias:** magnitudes y mensurandos agregados, quitados y con fórmula
      cambiada; partes; tipo de análisis.
    - **Cantidad de entregas** que quedan en versiones anteriores.
+   - **Probar el borrador antes de publicar:** el docente puede ver el formulario y calcular la
+     vista previa con el borrador, sin crear una versión ni guardar una entrega. Hoy el formulario
+     y `analyze-preview` usan siempre la versión publicada, así que la única forma de ver un cambio
+     funcionando es publicarlo.
    - **Cambios cosméticos:** si solo cambian nombres, descripción, tolerancias o títulos,
      "Publicar" actualiza la versión vigente sin crear otra (3.3).
    - **E2E de aceptación:**

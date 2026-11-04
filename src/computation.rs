@@ -4,7 +4,11 @@ mod submission;
 
 use serde::{Deserialize, Serialize};
 
-pub use engines::{analyze, compute, compute_curva, compute_regresion, scale_spec, PointContext};
+#[cfg(test)]
+pub use engines::analyze;
+pub use engines::{
+    analyze_definition, compute, compute_curva, compute_regresion, scale_spec, PointContext,
+};
 pub use formula::check_formula;
 pub(crate) use formula::{chain_order, formula_symbols};
 pub use submission::{

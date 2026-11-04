@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, SqlitePool};
 use std::{collections::HashMap, env, path::PathBuf, sync::Mutex};
 use uuid::Uuid;
@@ -135,19 +135,27 @@ pub struct Practice {
 
 pub(crate) const PRACTICE_COLS: &str = "id, name, description, analysis_kind, status";
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, FromRow)]
+#[serde(default)]
 pub struct PracticeQuantity {
     pub id: String,
     pub practice_id: String,
     pub symbol: String,
     pub name: String,
     pub unit: String,
+    #[serde(default = "default_true")]
     pub repeated: bool,
     pub quantity: Option<String>,
     pub position: i64,
     pub is_given: bool,
     pub replicas_per_point: Option<i64>,
+    #[serde(default = "default_true")]
     pub per_point: bool,
+    #[serde(default = "default_true")]
     pub has_uncertainty: bool,
     pub optional: bool,
     #[sqlx(default)]
@@ -156,7 +164,8 @@ pub struct PracticeQuantity {
     pub slot_count: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, FromRow)]
+#[serde(default)]
 pub struct PracticeResult {
     pub id: String,
     pub practice_id: String,
@@ -167,6 +176,7 @@ pub struct PracticeResult {
     pub position: i64,
     pub tolerance: Option<f64>,
     pub is_final: bool,
+    #[serde(default = "default_true")]
     pub has_uncertainty: bool,
 }
 
@@ -552,12 +562,13 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
             INSERT INTO submissions (
                 id, student_name, group_name, course, practice_id, file_name, csv_path,
                 analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
-                entry_mode, score, teacher_comment, reviewed_at
+                entry_mode, score, teacher_comment, reviewed_at, practice_version_id
             )
             SELECT
                 ?1, u.display_name, g.name, c.name, ?5,
                 '(formulario)', '', ?6, ?7, ?8, u.id, c.id, g.id,
-                'form', ?9, ?10, ?11
+                'form', ?9, ?10, ?11,
+                (SELECT current_version_id FROM practices WHERE id = ?5)
             FROM users u, lab_groups g, courses c
             WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
             "#,

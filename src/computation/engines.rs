@@ -914,6 +914,7 @@ fn derive_results(
     Ok(derived)
 }
 
+#[cfg(test)]
 pub async fn analyze(
     pool: &sqlx::SqlitePool,
     practice_id: &str,
@@ -922,7 +923,16 @@ pub async fn analyze(
     let definition = crate::practices::definition(pool, practice_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("la practica no existe"))?;
+    let definition: crate::practices::PracticeDefinition =
+        serde_json::from_str(&serde_json::to_string(&definition)?)?;
+    analyze_definition(pool, &definition, measurements).await
+}
 
+pub async fn analyze_definition(
+    pool: &sqlx::SqlitePool,
+    definition: &crate::practices::PracticeDefinition,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<FormAnalysis> {
     let by_id: HashMap<&str, &PracticeQuantity> = definition
         .quantities
         .iter()
@@ -965,7 +975,7 @@ pub async fn analyze(
     }
 
     if definition.parts.is_empty() {
-        return run_kind(&definition, &scales, measurements);
+        return run_kind(definition, &scales, measurements);
     }
     let shared = definition.shared_view();
     let mut analysis = run_kind(&shared, &scales, &measurements_of(&shared, measurements))?;

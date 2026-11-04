@@ -2588,3 +2588,184 @@ async fn seeded_expanded_formulas_become_chained() {
     }
     assert_eq!(migrated, expected);
 }
+
+#[tokio::test]
+async fn a_duplicate_does_not_share_the_source_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    assert_eq!(
+        definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap()
+            .current_version,
+        Some(1)
+    );
+    let copy = duplicate_practice(&pool, "p2-cc", "Copia CC", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(current_version(&pool, &copy.id).await.unwrap().is_none());
+    let published = publish_version(&pool, &copy.id, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(published.number, 1);
+    assert_eq!(published.definition.practice_id, copy.id);
+}
+
+#[tokio::test]
+async fn seeded_submissions_are_pinned_to_their_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    crate::db::seed_users(&pool).await.unwrap();
+    crate::db::seed_academic(&pool).await.unwrap();
+    crate::db::seed_submissions(&pool).await.unwrap();
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT practice_id, practice_version_id FROM submissions")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(!rows.is_empty());
+    assert!(rows.iter().all(|(_, v)| v.is_some()), "{rows:?}");
+}
+
+#[test]
+fn an_old_snapshot_missing_fields_still_reads() {
+    let def: PracticeDefinition = serde_json::from_str(
+        r#"{"practice_id":"p","status":"publicada","quantities":[{"id":"q","symbol":"L"}],
+            "results":[{"id":"r","symbol":"g","formula":"L"}],"parts":[{"id":"a","title":"A"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(def.quantities[0].symbol, "L");
+    assert!(def.quantities[0].has_uncertainty);
+    assert!(def.results[0].has_uncertainty);
+    assert_eq!(def.results[0].tolerance, None);
+    assert!(def.quantities[0].repeated && def.quantities[0].per_point);
+    assert_eq!(def.parts[0].analysis_kind, None);
+    assert!(def.curves.is_empty());
+}
+
+#[tokio::test]
+async fn a_quantity_in_a_published_version_is_detected() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    let t1 = def.quantities.iter().find(|q| q.symbol == "T1").unwrap();
+    assert!(quantity_still_needed(&pool, "p1-estadistica", &t1.id)
+        .await
+        .unwrap());
+    let fresh = create_quantity(
+        &pool,
+        "p1-estadistica",
+        QuantityInput {
+            symbol: "Tn".into(),
+            name: "Nueva".into(),
+            unit: "s".into(),
+            repeated: false,
+            quantity: None,
+            is_given: false,
+            replicas_per_point: None,
+            per_point: false,
+            has_uncertainty: true,
+            optional: false,
+            default_value: None,
+            slot_count: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!quantity_still_needed(&pool, "p1-estadistica", &fresh.id)
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
+async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let copy = duplicate_practice(&pool, "p2-cc", "Copia CC", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    let none = |_: &PracticeDefinition| Vec::new();
+    assert!(matches!(
+        publish_draft(&pool, &copy.id, None, none).await.unwrap(),
+        DraftPublish::Published
+    ));
+    assert!(matches!(
+        publish_draft(&pool, &copy.id, None, none).await.unwrap(),
+        DraftPublish::NotDraft
+    ));
+    let rejected = duplicate_practice(&pool, "p2-cc", "Otra copia", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        publish_draft(&pool, &rejected.id, None, |_| vec!["falta algo".into()])
+            .await
+            .unwrap(),
+        DraftPublish::Rejected(_)
+    ));
+    assert!(current_version(&pool, &rejected.id)
+        .await
+        .unwrap()
+        .is_none());
+    let (count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM practice_versions WHERE practice_id = ?1")
+            .bind(&copy.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 1);
+    let published = published_definition(&pool, &copy.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(published.status, "publicada");
+    assert_eq!(published.current_version, Some(1));
+
+    assert!(matches!(
+        publish_checked(&pool, &copy.id, None, none).await.unwrap(),
+        Publish::Unchanged(1)
+    ));
+    sqlx::query("UPDATE practice_results SET formula = formula || ' * 1' WHERE practice_id = ?1")
+        .bind(&copy.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        publish_checked(&pool, &copy.id, None, none).await.unwrap(),
+        Publish::Published { number: 2 }
+    ));
+    set_practice_status(&pool, &copy.id, "archivada")
+        .await
+        .unwrap();
+    let archived = published_definition(&pool, &copy.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(archived.status, "archivada");
+    assert!(matches!(
+        publish_draft(&pool, &copy.id, None, |_| vec![
+            "borrador a medio editar".into()
+        ])
+        .await
+        .unwrap(),
+        DraftPublish::NotDraft
+    ));
+}
+
+#[tokio::test]
+async fn a_damaged_snapshot_is_an_internal_error() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = '{}' WHERE practice_id = 'p1-estadistica'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let err = current_version(&pool, "p1-estadistica").await.unwrap_err();
+    assert!(err.downcast_ref::<sqlx::Error>().is_some(), "{err}");
+}
