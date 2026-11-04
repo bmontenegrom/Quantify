@@ -139,13 +139,15 @@ pub async fn create_form_submission(
         }
     }
 
-    let version = crate::practices::current_version(pool, &input.practice_id).await?;
-    let definition = match &version {
-        Some(version) => version.definition.clone(),
-        None => crate::practices::definition(pool, &input.practice_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("practica no encontrada"))?,
-    };
+    let version = crate::practices::current_version(pool, &input.practice_id)
+        .await?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "La práctica todavía no tiene una versión publicada: publicala para recibir \
+                 entregas (para probar el cálculo usá la vista previa)."
+            )
+        })?;
+    let definition = version.definition.clone();
     validate_student_results(&definition, &input.student_results)?;
 
     let analysis = analyze_definition(pool, &definition, &input.measurements).await?;
@@ -206,7 +208,7 @@ pub async fn create_form_submission(
     .bind(&meta_json)
     .bind(table_number)
     .bind(student_comment)
-    .bind(version.as_ref().map(|v| v.id.as_str()))
+    .bind(&version.id)
     .execute(&mut *tx)
     .await
     .map_err(|e| {

@@ -122,6 +122,15 @@ pub(super) async fn create_submission(
         ));
     }
 
+    if practices::current_version(&state.pool, &practice_id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::bad_request(
+            "La práctica todavía no tiene una versión publicada: publicala para recibir entregas.",
+        ));
+    }
+
     let submission = NewSubmission {
         submitted_by_user_id: user.id.clone(),
         course_id,

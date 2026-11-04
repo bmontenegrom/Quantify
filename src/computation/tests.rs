@@ -2918,3 +2918,55 @@ async fn ensure_versions_creates_version_one_and_links_old_submissions() {
         .unwrap();
     assert_eq!(published.current_version, Some(1));
 }
+
+#[tokio::test]
+async fn a_practice_without_a_published_version_rejects_submissions() {
+    let (pool, _dir) = setup().await;
+    let course = db::create_course(
+        &pool,
+        db::CreateCourse {
+            name: "Curso".into(),
+            term: "2026".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let group = db::create_group(
+        &pool,
+        &course.id,
+        db::CreateGroup {
+            name: "Grupo 1".into(),
+            table_count: Some(4),
+            group_type: None,
+        },
+    )
+    .await
+    .unwrap();
+    let teacher = db::users(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|u| u.email == "docente@quantify.local")
+        .unwrap();
+    sqlx::query("UPDATE practices SET current_version_id = NULL WHERE id = 'p1-estadistica'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = create_form_submission(
+        &pool,
+        &teacher,
+        FormSubmissionInput {
+            course_id: course.id.clone(),
+            group_id: group.id.clone(),
+            practice_id: "p1-estadistica".into(),
+            measurements: vec![],
+            meta: None,
+            table_number: None,
+            student_results: vec![],
+            student_comment: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("versión publicada"), "{err}");
+}
