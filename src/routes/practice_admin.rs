@@ -179,20 +179,21 @@ pub(super) async fn set_practice_status(
     let user = require_teacher(&state, &headers).await?;
     let status = body.status.trim();
     if status == "publicada" {
-        let def = load_definition(&state, &id).await?;
-        let problems = publish_problems(&def);
-        if !problems.is_empty() {
-            return Err(AppError::bad_request(format!(
-                "Todavia no se puede publicar: {}.",
-                problems.join("; ")
-            )));
+        match practices::publish_draft(&state.pool, &id, Some(&user.id), publish_problems).await? {
+            practices::Publish::Published { .. } => {
+                return practices::practice(&state.pool, &id)
+                    .await?
+                    .map(Json)
+                    .ok_or_else(|| AppError::not_found("practica no encontrada"));
+            }
+            practices::Publish::Rejected(problems) => {
+                return Err(AppError::bad_request(format!(
+                    "Todavia no se puede publicar: {}.",
+                    problems.join("; ")
+                )));
+            }
+            practices::Publish::Unchanged(_) | practices::Publish::NotFound => {}
         }
-    }
-    if status == "publicada" && practices::publish_draft(&state.pool, &id, Some(&user.id)).await? {
-        return practices::practice(&state.pool, &id)
-            .await?
-            .map(Json)
-            .ok_or_else(|| AppError::not_found("practica no encontrada"));
     }
     match practices::set_practice_status(&state.pool, &id, status).await? {
         practices::StatusChange::Done => practices::practice(&state.pool, &id)
@@ -225,25 +226,17 @@ pub(super) async fn publish_practice_version(
             "La práctica es un borrador: publicala para crear su primera versión.",
         ));
     }
-    let def = load_definition(&state, &id).await?;
-    let problems = publish_problems(&def);
-    if !problems.is_empty() {
-        return Err(AppError::bad_request(format!(
+    match practices::publish_checked(&state.pool, &id, Some(&user.id), publish_problems).await? {
+        practices::Publish::Published { number } => Ok(Json(PublishedVersion { number })),
+        practices::Publish::Rejected(problems) => Err(AppError::bad_request(format!(
             "Todavía no se puede publicar una versión nueva: {}.",
             problems.join("; ")
-        )));
-    }
-    if let Some(number) = practices::unchanged_since_current(&state.pool, &id).await? {
-        return Err(AppError::bad_request(format!(
+        ))),
+        practices::Publish::Unchanged(number) => Err(AppError::bad_request(format!(
             "No hay cambios desde la versión {number}: no hace falta publicar otra."
-        )));
+        ))),
+        practices::Publish::NotFound => Err(AppError::not_found("practica no encontrada")),
     }
-    let version = practices::publish_version(&state.pool, &id, Some(&user.id))
-        .await?
-        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
-    Ok(Json(PublishedVersion {
-        number: version.number,
-    }))
 }
 
 pub(super) async fn delete_practice(
@@ -313,6 +306,8 @@ pub(super) struct AnalyzePreviewBody {
     measurements: Vec<computation::MeasurementInput>,
     #[serde(default)]
     submission_id: Option<String>,
+    #[serde(default)]
+    practice_version: Option<i64>,
 }
 
 pub(super) async fn analyze_preview(
@@ -330,6 +325,12 @@ pub(super) async fn analyze_preview(
                 .await?
                 .filter(|d| d.practice_id == id)
                 .ok_or_else(|| AppError::not_found("entrega no encontrada"))?
+        }
+        None if body.practice_version.is_some() => {
+            practices::version_for_form(&state.pool, &id, body.practice_version)
+                .await
+                .map_err(AppError::from_domain_or_db)?
+                .definition
         }
         None => published_definition(&state, &id).await?,
     };

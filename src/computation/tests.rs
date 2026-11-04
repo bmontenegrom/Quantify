@@ -2885,28 +2885,30 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
     assert_eq!(version_of(&new.id).as_deref(), Some(v2.id.as_str()));
     assert_ne!(version_of(&old.id), version_of(&new.id));
 
-    let from_old_form = create_form_submission(
+    for stale in [1, 99] {
+        let err = create_form_submission(
+            &pool,
+            &user,
+            FormSubmissionInput {
+                practice_version: Some(stale),
+                ..mk()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("recargá"), "{err}");
+    }
+    let current_form = create_form_submission(
         &pool,
         &user,
         FormSubmissionInput {
-            practice_version: Some(1),
+            practice_version: Some(v2.number),
             ..mk()
         },
     )
     .await
     .unwrap();
-    assert!((derived_value(&from_old_form.analysis, "g1").unwrap() - old_g1).abs() < 1e-12);
-    let missing = create_form_submission(
-        &pool,
-        &user,
-        FormSubmissionInput {
-            practice_version: Some(99),
-            ..mk()
-        },
-    )
-    .await
-    .unwrap_err();
-    assert!(missing.to_string().contains("recargá"), "{missing}");
+    assert!((derived_value(&current_form.analysis, "g1").unwrap() - 2.0 * old_g1).abs() < 1e-9);
 }
 
 #[tokio::test]
@@ -2927,7 +2929,7 @@ async fn ensure_versions_creates_version_one_and_links_old_submissions() {
         .unwrap();
     assert!(seeded > 0);
     for sql in [
-        "UPDATE submissions SET practice_version_id = NULL",
+        "UPDATE submissions SET practice_version_id = NULL WHERE practice_id = 'p1-estadistica'",
         "UPDATE practices SET current_version_id = NULL WHERE id = 'p1-estadistica'",
         "DELETE FROM practice_versions WHERE practice_id = 'p1-estadistica'",
         "DELETE FROM applied_migrations WHERE name = '2026-11-entregas-a-su-version'",

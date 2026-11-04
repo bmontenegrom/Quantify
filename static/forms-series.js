@@ -146,7 +146,11 @@ async function updateRegressionPreview() {
   try {
     const full = await postJson(
       `/api/practices/${encodeURIComponent(practiceSelect.value)}/analyze-preview`,
-      { measurements, submission_id: state.editingSubmissionId ?? null }
+      {
+        measurements,
+        submission_id: state.editingSubmissionId ?? null,
+        practice_version: state.practiceForm?.definition?.current_version ?? null,
+      }
     );
     const analysis = analysisSections(full)
       .map((s) => s.analysis)

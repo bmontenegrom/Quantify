@@ -34,20 +34,25 @@ pub async fn current_version(
     row.map(version_from_row).transpose()
 }
 
-pub async fn version_by_number(
+pub async fn version_for_form(
     pool: &SqlitePool,
     practice_id: &str,
-    number: i64,
-) -> anyhow::Result<Option<PracticeVersion>> {
-    let row: Option<(String, i64, String)> = sqlx::query_as(
-        "SELECT id, number, definition_json FROM practice_versions \
-         WHERE practice_id = ?1 AND number = ?2",
-    )
-    .bind(practice_id)
-    .bind(number)
-    .fetch_optional(pool)
-    .await?;
-    row.map(version_from_row).transpose()
+    loaded: Option<i64>,
+) -> anyhow::Result<PracticeVersion> {
+    let current = current_version(pool, practice_id).await?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "La práctica todavía no tiene una versión publicada: publicala para recibir \
+             entregas (para probar el cálculo usá la vista previa)."
+        )
+    })?;
+    if let Some(loaded) = loaded.filter(|n| *n != current.number) {
+        anyhow::bail!(
+            "La práctica pasó de la versión {loaded} a la {} mientras completabas el \
+             formulario: recargá la página (lo que cargaste queda guardado como borrador).",
+            current.number
+        );
+    }
+    Ok(current)
 }
 
 pub async fn version_definition(
@@ -145,11 +150,21 @@ async fn insert_version(
     })
 }
 
+static PUBLISHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+pub enum Publish {
+    Published { number: i64 },
+    Unchanged(i64),
+    Rejected(Vec<String>),
+    NotFound,
+}
+
 pub async fn publish_version(
     pool: &SqlitePool,
     practice_id: &str,
     published_by: Option<&str>,
 ) -> anyhow::Result<Option<PracticeVersion>> {
+    let _guard = PUBLISHING.lock().await;
     let Some(definition) = super::definition(pool, practice_id).await? else {
         return Ok(None);
     };
@@ -159,14 +174,45 @@ pub async fn publish_version(
     Ok(Some(version))
 }
 
+pub async fn publish_checked(
+    pool: &SqlitePool,
+    practice_id: &str,
+    published_by: Option<&str>,
+    problems: impl Fn(&PracticeDefinition) -> Vec<String>,
+) -> anyhow::Result<Publish> {
+    let _guard = PUBLISHING.lock().await;
+    let Some(definition) = super::definition(pool, practice_id).await? else {
+        return Ok(Publish::NotFound);
+    };
+    let found = problems(&definition);
+    if !found.is_empty() {
+        return Ok(Publish::Rejected(found));
+    }
+    if let Some(number) = unchanged(pool, &definition).await? {
+        return Ok(Publish::Unchanged(number));
+    }
+    let mut tx = pool.begin().await?;
+    let version = insert_version(&mut tx, &definition, published_by).await?;
+    tx.commit().await?;
+    Ok(Publish::Published {
+        number: version.number,
+    })
+}
+
 pub async fn publish_draft(
     pool: &SqlitePool,
     practice_id: &str,
     published_by: Option<&str>,
-) -> anyhow::Result<bool> {
+    problems: impl Fn(&PracticeDefinition) -> Vec<String>,
+) -> anyhow::Result<Publish> {
+    let _guard = PUBLISHING.lock().await;
     let Some(definition) = super::definition(pool, practice_id).await? else {
-        return Ok(false);
+        return Ok(Publish::NotFound);
     };
+    let found = problems(&definition);
+    if !found.is_empty() {
+        return Ok(Publish::Rejected(found));
+    }
     let mut tx = pool.begin().await?;
     let changed = sqlx::query(
         "UPDATE practices SET status = 'publicada' WHERE id = ?1 AND status = 'borrador'",
@@ -176,31 +222,50 @@ pub async fn publish_draft(
     .await?
     .rows_affected();
     if changed == 0 {
-        return Ok(false);
+        return Ok(Publish::NotFound);
     }
-    let (has_version,): (bool,) =
-        sqlx::query_as("SELECT current_version_id IS NOT NULL FROM practices WHERE id = ?1")
+    let current: Option<String> =
+        sqlx::query_scalar("SELECT current_version_id FROM practices WHERE id = ?1")
             .bind(practice_id)
             .fetch_one(&mut *tx)
             .await?;
-    if !has_version {
-        insert_version(&mut tx, &definition, published_by).await?;
-    }
+    let number = match current {
+        Some(_) => definition.current_version.unwrap_or(1),
+        None => {
+            insert_version(&mut tx, &definition, published_by)
+                .await?
+                .number
+        }
+    };
     tx.commit().await?;
-    Ok(true)
+    Ok(Publish::Published { number })
+}
+
+async fn unchanged(pool: &SqlitePool, draft: &PracticeDefinition) -> anyhow::Result<Option<i64>> {
+    let row: Option<(i64, String)> = sqlx::query_as(
+        "SELECT v.number, v.definition_json FROM practices p \
+         JOIN practice_versions v ON v.id = p.current_version_id WHERE p.id = ?1",
+    )
+    .bind(&draft.practice_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((number, json)) = row else {
+        return Ok(None);
+    };
+    let mut current: serde_json::Value = serde_json::from_str(&json)?;
+    current["current_version"] = serde_json::Value::Null;
+    let draft: serde_json::Value = serde_json::from_str(&snapshot(draft)?)?;
+    Ok((draft == current).then_some(number))
 }
 
 pub async fn unchanged_since_current(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<i64>> {
-    let Some(current) = current_version(pool, practice_id).await? else {
-        return Ok(None);
-    };
     let Some(draft) = super::definition(pool, practice_id).await? else {
         return Ok(None);
     };
-    Ok((snapshot(&draft)? == snapshot(&current.definition)?).then_some(current.number))
+    unchanged(pool, &draft).await
 }
 
 pub async fn ensure_versions(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -213,33 +278,6 @@ pub async fn ensure_versions(pool: &SqlitePool) -> anyhow::Result<()> {
     for practice_id in missing {
         publish_version(pool, &practice_id, None).await?;
     }
-    link_legacy_submissions(pool).await
-}
-
-const LEGACY_SUBMISSIONS: &str = "2026-11-entregas-a-su-version";
-
-async fn link_legacy_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
-    let (done,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
-        .bind(LEGACY_SUBMISSIONS)
-        .fetch_one(pool)
-        .await?;
-    if done > 0 {
-        return Ok(());
-    }
-    let mut tx = pool.begin().await?;
-    sqlx::query(
-        "UPDATE submissions SET practice_version_id = \
-         (SELECT current_version_id FROM practices WHERE practices.id = submissions.practice_id) \
-         WHERE practice_version_id IS NULL",
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
-        .bind(LEGACY_SUBMISSIONS)
-        .bind(chrono::Utc::now())
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
     Ok(())
 }
 

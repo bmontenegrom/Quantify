@@ -141,24 +141,9 @@ pub async fn create_form_submission(
         }
     }
 
-    let version = match input.practice_version {
-        Some(number) => crate::practices::version_by_number(pool, &input.practice_id, number)
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "La versión {number} de la práctica no existe: recargá la página para \
-                     cargar la vigente."
-                )
-            })?,
-        None => crate::practices::current_version(pool, &input.practice_id)
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "La práctica todavía no tiene una versión publicada: publicala para recibir \
-                     entregas (para probar el cálculo usá la vista previa)."
-                )
-            })?,
-    };
+    let version =
+        crate::practices::version_for_form(pool, &input.practice_id, input.practice_version)
+            .await?;
     let crate::practices::PracticeVersion {
         id: version_id,
         definition,

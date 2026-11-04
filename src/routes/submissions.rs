@@ -126,8 +126,12 @@ pub(super) async fn create_submission(
     };
 
     let created = db::create_submission(&state.pool, &state.upload_dir, submission)
-        .await
-        .map_err(AppError::from_domain_or_db)?;
+        .await?
+        .ok_or_else(|| {
+            AppError::bad_request(
+                "La práctica todavía no tiene una versión publicada: publicala para recibir entregas.",
+            )
+        })?;
     Ok(Json(gate_analysis(created, &user)))
 }
 

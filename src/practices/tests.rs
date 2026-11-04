@@ -2685,8 +2685,29 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
         .await
         .unwrap()
         .unwrap();
-    assert!(publish_draft(&pool, &copy.id, None).await.unwrap());
-    assert!(!publish_draft(&pool, &copy.id, None).await.unwrap());
+    let none = |_: &PracticeDefinition| Vec::new();
+    assert!(matches!(
+        publish_draft(&pool, &copy.id, None, none).await.unwrap(),
+        Publish::Published { .. }
+    ));
+    assert!(matches!(
+        publish_draft(&pool, &copy.id, None, none).await.unwrap(),
+        Publish::NotFound
+    ));
+    let rejected = duplicate_practice(&pool, "p2-cc", "Otra copia", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        publish_draft(&pool, &rejected.id, None, |_| vec!["falta algo".into()])
+            .await
+            .unwrap(),
+        Publish::Rejected(_)
+    ));
+    assert!(current_version(&pool, &rejected.id)
+        .await
+        .unwrap()
+        .is_none());
     let (count,): (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM practice_versions WHERE practice_id = ?1")
             .bind(&copy.id)
@@ -2705,6 +2726,10 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
         unchanged_since_current(&pool, &copy.id).await.unwrap(),
         Some(1)
     );
+    assert!(matches!(
+        publish_checked(&pool, &copy.id, None, none).await.unwrap(),
+        Publish::Unchanged(1)
+    ));
     sqlx::query("UPDATE practice_results SET formula = formula || ' * 1' WHERE practice_id = ?1")
         .bind(&copy.id)
         .execute(&pool)
@@ -2714,4 +2739,8 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
         unchanged_since_current(&pool, &copy.id).await.unwrap(),
         None
     );
+    assert!(matches!(
+        publish_checked(&pool, &copy.id, None, none).await.unwrap(),
+        Publish::Published { number: 2 }
+    ));
 }

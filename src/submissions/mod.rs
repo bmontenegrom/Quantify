@@ -163,7 +163,7 @@ pub async fn create_submission(
     pool: &SqlitePool,
     upload_dir: &Path,
     submission: NewSubmission,
-) -> anyhow::Result<SubmissionDetail> {
+) -> anyhow::Result<Option<SubmissionDetail>> {
     let id = Uuid::new_v4().to_string();
     let submitted_at = Utc::now();
     let csv_path = upload_dir.join(format!("{id}.csv"));
@@ -201,9 +201,16 @@ pub async fn create_submission(
     .rows_affected();
     if inserted == 0 {
         let _ = tokio::fs::remove_file(&csv_path).await;
-        anyhow::bail!(
-            "La práctica todavía no tiene una versión publicada: publicala para recibir entregas."
-        );
+        let (versioned,): (bool,) = sqlx::query_as(
+            "SELECT EXISTS (SELECT 1 FROM practices WHERE id = ?1 AND current_version_id IS NOT NULL)",
+        )
+        .bind(&submission.practice_id)
+        .fetch_one(pool)
+        .await?;
+        if !versioned {
+            return Ok(None);
+        }
+        anyhow::bail!("no se pudo crear la entrega {id}");
     }
 
     sqlx::query(
@@ -218,6 +225,7 @@ pub async fn create_submission(
 
     submission_detail(pool, &id)
         .await?
+        .map(Some)
         .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
 }
 
@@ -968,6 +976,7 @@ mod tests {
         )
         .await
         .unwrap()
+        .unwrap()
         .id
     }
 
@@ -1097,6 +1106,7 @@ mod tests {
             },
         )
         .await
+        .unwrap()
         .unwrap();
         let current = crate::practices::current_version(&pool, "p1-estadistica")
             .await
@@ -1131,6 +1141,7 @@ mod tests {
             },
         )
         .await
+        .unwrap()
         .unwrap();
         assert_eq!(created.status, "pendiente");
 
