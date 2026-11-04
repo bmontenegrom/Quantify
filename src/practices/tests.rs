@@ -131,8 +131,18 @@ async fn update_and_delete_quantity() {
         assert_eq!(q.default_value, expected, "pedido {input:?}");
     }
 
-    assert!(delete_quantity(&pool, &q.id).await.unwrap());
-    assert!(!delete_quantity(&pool, &q.id).await.unwrap());
+    assert_eq!(
+        remove_quantity(&pool, "p1-estadistica", &q.id)
+            .await
+            .unwrap(),
+        QuantityRemoval::Deleted
+    );
+    assert_eq!(
+        remove_quantity(&pool, "p1-estadistica", &q.id)
+            .await
+            .unwrap(),
+        QuantityRemoval::NotFound
+    );
 }
 
 #[tokio::test]
@@ -2647,40 +2657,6 @@ fn an_old_snapshot_missing_fields_still_reads() {
 }
 
 #[tokio::test]
-async fn a_quantity_in_a_published_version_is_detected() {
-    let (pool, _dir) = setup().await;
-    seed_definitions(&pool).await.unwrap();
-    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-    let t1 = def.quantities.iter().find(|q| q.symbol == "T1").unwrap();
-    assert!(quantity_still_needed(&pool, "p1-estadistica", &t1.id)
-        .await
-        .unwrap());
-    let fresh = create_quantity(
-        &pool,
-        "p1-estadistica",
-        QuantityInput {
-            symbol: "Tn".into(),
-            name: "Nueva".into(),
-            unit: "s".into(),
-            repeated: false,
-            quantity: None,
-            is_given: false,
-            replicas_per_point: None,
-            per_point: false,
-            has_uncertainty: true,
-            optional: false,
-            default_value: None,
-            slot_count: None,
-        },
-    )
-    .await
-    .unwrap();
-    assert!(!quantity_still_needed(&pool, "p1-estadistica", &fresh.id)
-        .await
-        .unwrap());
-}
-
-#[tokio::test]
 async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
@@ -2768,4 +2744,157 @@ async fn a_damaged_snapshot_is_an_internal_error() {
     .unwrap();
     let err = current_version(&pool, "p1-estadistica").await.unwrap_err();
     assert!(err.downcast_ref::<sqlx::Error>().is_some(), "{err}");
+}
+
+fn new_quantity(symbol: &str) -> QuantityInput {
+    QuantityInput {
+        symbol: symbol.into(),
+        name: "Nueva".into(),
+        unit: "s".into(),
+        repeated: false,
+        quantity: None,
+        is_given: false,
+        replicas_per_point: None,
+        per_point: false,
+        has_uncertainty: true,
+        optional: false,
+        default_value: None,
+        slot_count: None,
+    }
+}
+
+#[tokio::test]
+async fn a_quantity_in_a_version_is_retired_and_frees_its_symbol() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let fresh = create_quantity(&pool, practice, new_quantity("Tn"))
+        .await
+        .unwrap();
+    assert_eq!(
+        remove_quantity(&pool, practice, &fresh.id).await.unwrap(),
+        QuantityRemoval::Deleted
+    );
+
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let t2 = def
+        .quantities
+        .iter()
+        .find(|q| q.symbol == "T2")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        remove_quantity(&pool, "p2-cc", &t2.id).await.unwrap(),
+        QuantityRemoval::NotFound,
+        "una magnitud de otra práctica no se toca"
+    );
+    assert_eq!(
+        remove_quantity(&pool, practice, &t2.id).await.unwrap(),
+        QuantityRemoval::Retired
+    );
+    assert_eq!(
+        remove_quantity(&pool, practice, &t2.id).await.unwrap(),
+        QuantityRemoval::NotFound
+    );
+
+    let draft = definition(&pool, practice).await.unwrap().unwrap();
+    assert!(draft.quantities.iter().all(|q| q.id != t2.id));
+    let version = current_version(&pool, practice).await.unwrap().unwrap();
+    assert!(version
+        .definition
+        .quantities
+        .iter()
+        .any(|q| q.id == t2.id && q.symbol == "T2"));
+    let (symbol, section): (String, Option<String>) =
+        sqlx::query_as("SELECT symbol, section_id FROM practice_quantities WHERE id = ?1")
+            .bind(&t2.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(symbol, format!("T2~{}", t2.id));
+    assert_eq!(section, None);
+
+    assert!(
+        !symbol_taken_in_practice(&pool, practice, "T2", None, None, None, None, None)
+            .await
+            .unwrap()
+    );
+    create_quantity(&pool, practice, new_quantity("T2"))
+        .await
+        .unwrap();
+
+    let copy = duplicate_practice(&pool, practice, "Copia", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    let (retired,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1 AND removed = 1",
+    )
+    .bind(&copy.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(retired, 0);
+    let copied = definition(&pool, &copy.id).await.unwrap().unwrap();
+    assert_eq!(
+        copied
+            .quantities
+            .iter()
+            .filter(|q| q.symbol == "T2")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn reordering_skips_retired_quantities() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let before = definition(&pool, practice).await.unwrap().unwrap();
+    let symbols = |d: &PracticeDefinition| -> Vec<String> {
+        d.quantities.iter().map(|q| q.symbol.clone()).collect()
+    };
+    let t2 = before.quantities.iter().find(|q| q.symbol == "T2").unwrap();
+    let t3 = before.quantities.iter().find(|q| q.symbol == "T3").unwrap();
+    remove_quantity(&pool, practice, &t2.id).await.unwrap();
+    assert_eq!(
+        move_item(&pool, Orderable::Quantities, practice, &t3.id, true)
+            .await
+            .unwrap(),
+        Some(true)
+    );
+    let after = definition(&pool, practice).await.unwrap().unwrap();
+    let order = symbols(&after);
+    let t1_at = order.iter().position(|s| s == "T1").unwrap();
+    let t3_at = order.iter().position(|s| s == "T3").unwrap();
+    assert!(t3_at < t1_at, "{order:?}");
+}
+
+#[tokio::test]
+async fn seeds_do_not_react_to_a_retired_quantity() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for (practice, symbol) in [("p1-estadistica", "T1"), ("p2-cc", "Vg_s")] {
+        let def = definition(&pool, practice).await.unwrap().unwrap();
+        let q = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
+        let id = q.id.clone();
+        assert_eq!(
+            remove_quantity(&pool, practice, &id).await.unwrap(),
+            QuantityRemoval::Retired
+        );
+        seed_definitions(&pool).await.unwrap();
+        let (removed,): (bool,) =
+            sqlx::query_as("SELECT removed FROM practice_quantities WHERE id = ?1")
+                .bind(&id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(removed, "{symbol} tenía que seguir retirada");
+        let after = definition(&pool, practice).await.unwrap().unwrap();
+        assert!(
+            after.quantities.iter().all(|q| q.symbol != symbol),
+            "{symbol} volvió"
+        );
+    }
 }

@@ -483,13 +483,13 @@ pub enum Orderable {
 }
 
 impl Orderable {
-    fn table_and_order(self) -> (&'static str, &'static str) {
+    fn table_filter_and_order(self) -> (&'static str, &'static str, &'static str) {
         match self {
-            Orderable::Curves => ("practice_curves", "position, id"),
-            Orderable::Quantities => ("practice_quantities", "position, symbol"),
-            Orderable::Results => ("practice_results", "position, symbol"),
-            Orderable::Parts => ("practice_parts", "position, id"),
-            Orderable::Sections => ("practice_sections", "position, id"),
+            Orderable::Curves => ("practice_curves", "", "position, id"),
+            Orderable::Quantities => ("practice_quantities", "AND removed = 0", "position, symbol"),
+            Orderable::Results => ("practice_results", "", "position, symbol"),
+            Orderable::Parts => ("practice_parts", "", "position, id"),
+            Orderable::Sections => ("practice_sections", "", "position, id"),
         }
     }
 }
@@ -501,10 +501,10 @@ pub async fn move_item(
     item_id: &str,
     up: bool,
 ) -> anyhow::Result<Option<bool>> {
-    let (table, order) = list.table_and_order();
+    let (table, filter, order) = list.table_filter_and_order();
     let mut tx = pool.begin().await?;
     let mut ids: Vec<String> = sqlx::query_scalar(&format!(
-        "SELECT id FROM {table} WHERE practice_id = ?1 ORDER BY {order}"
+        "SELECT id FROM {table} WHERE practice_id = ?1 {filter} ORDER BY {order}"
     ))
     .bind(practice_id)
     .fetch_all(&mut *tx)
@@ -603,14 +603,6 @@ pub async fn submissions_off_slots(
     .fetch_one(pool)
     .await?;
     Ok(count)
-}
-
-pub async fn delete_quantity(pool: &SqlitePool, quantity_id: &str) -> anyhow::Result<bool> {
-    let result = sqlx::query("DELETE FROM practice_quantities WHERE id = ?1")
-        .bind(quantity_id)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() > 0)
 }
 
 pub async fn create_result(
@@ -801,7 +793,7 @@ async fn quantities_for(
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count \
-         FROM practice_quantities WHERE practice_id = ?1 ORDER BY position, symbol",
+         FROM practice_quantities WHERE practice_id = ?1 AND removed = 0 ORDER BY position, symbol",
     )
     .bind(practice_id)
     .fetch_all(pool)

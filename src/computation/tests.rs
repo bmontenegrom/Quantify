@@ -3009,3 +3009,121 @@ async fn a_practice_without_a_published_version_rejects_submissions() {
     .unwrap_err();
     assert!(err.to_string().contains("versión publicada"), "{err}");
 }
+
+#[tokio::test]
+async fn a_retired_quantity_stays_in_the_submissions_that_used_it() {
+    let (pool, _dir) = setup().await;
+    let course = db::create_course(
+        &pool,
+        db::CreateCourse {
+            name: "Curso".into(),
+            term: "2026".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let group = db::create_group(
+        &pool,
+        &course.id,
+        db::CreateGroup {
+            name: "Grupo 1".into(),
+            table_count: Some(4),
+            group_type: None,
+        },
+    )
+    .await
+    .unwrap();
+    let user = db::users(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|u| u.email == "docente@quantify.local")
+        .unwrap();
+    let practice = "p1-estadistica";
+    let def = crate::practices::definition(&pool, practice)
+        .await
+        .unwrap()
+        .unwrap();
+    let id = |sym: &str| {
+        def.quantities
+            .iter()
+            .find(|q| q.symbol == sym)
+            .unwrap()
+            .id
+            .clone()
+    };
+    let m = |sym: &str, values: Vec<f64>, given_u: Option<f64>| MeasurementInput {
+        quantity_id: id(sym),
+        instrument_id: None,
+        scale_id: None,
+        values,
+        given_u,
+        point_replicas: None,
+        operator_replicas: None,
+    };
+    let measurements = vec![
+        m("L", vec![1.0], Some(0.002)),
+        m("t_med", vec![2.0], Some(0.0)),
+        m("T1", vec![2.0, 2.02, 1.98], None),
+        m("T2", vec![2.1, 2.12, 2.08], None),
+    ];
+    let mk = |measurements: Vec<MeasurementInput>| FormSubmissionInput {
+        course_id: course.id.clone(),
+        group_id: group.id.clone(),
+        practice_id: practice.into(),
+        measurements,
+        meta: None,
+        table_number: None,
+        student_results: vec![],
+        student_comment: None,
+        practice_version: None,
+    };
+    let old = create_form_submission(&pool, &user, mk(measurements.clone()))
+        .await
+        .unwrap();
+    let old_g2 = derived_value(&old.analysis, "g2").unwrap();
+
+    assert_eq!(
+        crate::practices::remove_quantity(&pool, practice, &id("T2"))
+            .await
+            .unwrap(),
+        crate::practices::QuantityRemoval::Retired
+    );
+    let on_current_version = create_form_submission(&pool, &user, mk(measurements.clone()))
+        .await
+        .unwrap();
+    assert!((derived_value(&on_current_version.analysis, "g2").unwrap() - old_g2).abs() < 1e-12);
+
+    crate::practices::publish_version(&pool, practice, None)
+        .await
+        .unwrap();
+    let edited = update_form_submission(&pool, &old.id, &measurements, None, None, None)
+        .await
+        .unwrap();
+    assert!((derived_value(&edited.analysis, "g2").unwrap() - old_g2).abs() < 1e-12);
+    assert!(edited
+        .measurements
+        .iter()
+        .any(|x| x.quantity_id == id("T2")));
+    let old_def = crate::practices::submission_definition(&pool, &old.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(old_def
+        .quantities
+        .iter()
+        .any(|q| q.id == id("T2") && q.symbol == "T2"));
+
+    let err = create_form_submission(&pool, &user, mk(measurements.clone()))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("no corresponde"), "{err}");
+    let without_t2: Vec<MeasurementInput> = measurements
+        .iter()
+        .filter(|x| x.quantity_id != id("T2"))
+        .cloned()
+        .collect();
+    create_form_submission(&pool, &user, mk(without_t2))
+        .await
+        .unwrap();
+}

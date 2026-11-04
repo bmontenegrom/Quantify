@@ -492,6 +492,13 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
     add_column_if_missing(pool, "practice_parts", "analysis_kind", "TEXT").await?;
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "removed",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS practice_versions (

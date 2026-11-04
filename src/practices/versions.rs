@@ -282,21 +282,47 @@ pub async fn ensure_versions(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn quantity_still_needed(
+#[derive(Debug, PartialEq)]
+pub enum QuantityRemoval {
+    Deleted,
+    Retired,
+    NotFound,
+}
+
+pub async fn remove_quantity(
     pool: &SqlitePool,
     practice_id: &str,
     quantity_id: &str,
-) -> anyhow::Result<bool> {
-    let (needed,): (bool,) = sqlx::query_as(
-        "SELECT EXISTS (SELECT 1 FROM practices p \
-         JOIN practice_versions v ON v.id = p.current_version_id, \
+) -> anyhow::Result<QuantityRemoval> {
+    let _guard = PUBLISHING.lock().await;
+    let mut tx = pool.begin().await?;
+    let (referenced,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM practice_versions v, \
          json_each(v.definition_json, '$.quantities') q \
-         WHERE p.id = ?1 AND json_extract(q.value, '$.id') = ?2) \
+         WHERE v.practice_id = ?1 AND json_extract(q.value, '$.id') = ?2) \
          OR EXISTS (SELECT 1 FROM submission_measurements WHERE quantity_id = ?2)",
     )
     .bind(practice_id)
     .bind(quantity_id)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await?;
-    Ok(needed)
+    let sql = if referenced {
+        "UPDATE practice_quantities SET removed = 1, section_id = NULL, \
+         symbol = symbol || '~' || id \
+         WHERE id = ?1 AND practice_id = ?2 AND removed = 0"
+    } else {
+        "DELETE FROM practice_quantities WHERE id = ?1 AND practice_id = ?2 AND removed = 0"
+    };
+    let changed = sqlx::query(sql)
+        .bind(quantity_id)
+        .bind(practice_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    tx.commit().await?;
+    Ok(match (changed, referenced) {
+        (0, _) => QuantityRemoval::NotFound,
+        (_, true) => QuantityRemoval::Retired,
+        (_, false) => QuantityRemoval::Deleted,
+    })
 }

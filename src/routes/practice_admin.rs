@@ -512,13 +512,10 @@ pub(super) async fn delete_quantity(
     if after.quantities.len() == before.quantities.len() {
         return Err(AppError::not_found("magnitud no encontrada en la practica"));
     }
-    if practices::quantity_still_needed(&state.pool, &id, &qid).await? {
-        return Err(AppError::bad_request(
-            "La magnitud está en la versión vigente o tiene mediciones guardadas, así que no se puede borrar. Para sacarla ya, duplicá la práctica y editá la copia.",
-        ));
-    }
     guard_change(&before, &after, "eliminar la magnitud")?;
-    if !practices::delete_quantity(&state.pool, &qid).await? {
+    if practices::remove_quantity(&state.pool, &id, &qid).await?
+        == practices::QuantityRemoval::NotFound
+    {
         return Err(AppError::not_found("magnitud no encontrada"));
     }
     Ok(Json(Health { status: "ok" }))
