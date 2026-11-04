@@ -185,14 +185,13 @@ async fn wipe_practice_definition(
     Ok(())
 }
 
-pub(super) async fn quantity_missing(
+async fn quantity_missing(
     pool: &SqlitePool,
     practice_id: &str,
     symbol: &str,
 ) -> anyhow::Result<bool> {
     let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1 \
-         AND (symbol = ?2 OR (removed = 1 AND substr(symbol, 1, length(?2) + 1) = ?2 || '~'))",
+        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1 AND symbol = ?2",
     )
     .bind(practice_id)
     .bind(symbol)

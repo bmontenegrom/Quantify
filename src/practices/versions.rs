@@ -286,6 +286,7 @@ pub async fn ensure_versions(pool: &SqlitePool) -> anyhow::Result<()> {
 pub enum QuantityRemoval {
     Deleted,
     Retired,
+    HasMeasurements,
     NotFound,
 }
 
@@ -295,17 +296,20 @@ pub async fn remove_quantity(
     quantity_id: &str,
 ) -> anyhow::Result<QuantityRemoval> {
     let _guard = PUBLISHING.lock().await;
-    let (referenced,): (bool,) = sqlx::query_as(
+    let (in_version, measured): (bool, bool) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM practice_versions v, \
          json_each(v.definition_json, '$.quantities') q \
-         WHERE v.practice_id = ?1 AND json_extract(q.value, '$.id') = ?2) \
-         OR EXISTS (SELECT 1 FROM submission_measurements WHERE quantity_id = ?2)",
+         WHERE v.practice_id = ?1 AND json_extract(q.value, '$.id') = ?2), \
+         EXISTS (SELECT 1 FROM submission_measurements WHERE quantity_id = ?2)",
     )
     .bind(practice_id)
     .bind(quantity_id)
     .fetch_one(pool)
     .await?;
-    let sql = if referenced {
+    if measured && !in_version {
+        return Ok(QuantityRemoval::HasMeasurements);
+    }
+    let sql = if in_version {
         "UPDATE practice_quantities SET removed = 1, section_id = NULL, \
          symbol = symbol || '~' || id \
          WHERE id = ?1 AND practice_id = ?2 AND removed = 0"
@@ -318,7 +322,7 @@ pub async fn remove_quantity(
         .execute(pool)
         .await?
         .rows_affected();
-    Ok(match (changed, referenced) {
+    Ok(match (changed, in_version) {
         (0, _) => QuantityRemoval::NotFound,
         (_, true) => QuantityRemoval::Retired,
         (_, false) => QuantityRemoval::Deleted,

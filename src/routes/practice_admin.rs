@@ -521,6 +521,9 @@ pub(super) async fn delete_quantity(
     match practices::remove_quantity(&state.pool, &id, &qid).await? {
         practices::QuantityRemoval::NotFound => Err(AppError::not_found("magnitud no encontrada")),
         practices::QuantityRemoval::Retired => Ok(Json(RemovedQuantity { retired: true })),
+        practices::QuantityRemoval::HasMeasurements => Err(AppError::bad_request(
+            "La magnitud tiene mediciones guardadas en entregas sin versión, así que no se puede borrar. Publicá la práctica primero.",
+        )),
         practices::QuantityRemoval::Deleted => Ok(Json(RemovedQuantity { retired: false })),
     }
 }

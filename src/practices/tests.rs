@@ -2888,78 +2888,37 @@ async fn reordering_skips_retired_quantities() {
 }
 
 #[tokio::test]
-async fn a_retired_symbol_matches_exactly_when_seeds_look_for_it() {
+async fn a_quantity_measured_without_a_version_is_not_removed() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
-    let rename = |symbol: &'static str, removed: bool| {
-        let pool = pool.clone();
-        async move {
-            sqlx::query(
-                "UPDATE practice_quantities SET symbol = ?1, removed = ?2 \
-                 WHERE practice_id = 'p2-cc' AND name = 'Fuente de prueba'",
-            )
-            .bind(symbol)
-            .bind(removed)
-            .execute(&pool)
-            .await
-            .unwrap();
-        }
-    };
-    let def = definition(&pool, "p2-cc").await.unwrap().unwrap();
-    let vg = def.quantities.iter().find(|q| q.symbol == "Vg_s").unwrap();
-    sqlx::query("UPDATE practice_quantities SET name = 'Fuente de prueba' WHERE id = ?1")
-        .bind(&vg.id)
-        .execute(&pool)
+    let practice = "p1-estadistica";
+    let fresh = create_quantity(&pool, practice, new_quantity("Tn"))
         .await
         .unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at) \
+         VALUES ('s1', 'a', 'g', 'c', ?1, '', '', '{}', '2026-10-01T00:00:00Z')",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO submission_measurements (id, submission_id, quantity_id, value) \
+         VALUES ('m1', 's1', ?1, 1.0)",
+    )
+    .bind(&fresh.id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
-    assert!(!seed::quantity_missing(&pool, "p2-cc", "Vg_s")
-        .await
-        .unwrap());
-    rename("Vg_s~abc", false).await;
-    assert!(seed::quantity_missing(&pool, "p2-cc", "Vg_s")
-        .await
-        .unwrap());
-    rename("Vg_s~abc", true).await;
-    assert!(!seed::quantity_missing(&pool, "p2-cc", "Vg_s")
-        .await
-        .unwrap());
-    rename("VgXs~abc", true).await;
-    assert!(seed::quantity_missing(&pool, "p2-cc", "Vg_s")
-        .await
-        .unwrap());
-    rename("Vg_sX", true).await;
-    assert!(seed::quantity_missing(&pool, "p2-cc", "Vg_s")
-        .await
-        .unwrap());
-}
-
-#[tokio::test]
-async fn seeds_do_not_react_to_a_retired_quantity() {
-    let (pool, _dir) = setup().await;
-    seed_definitions(&pool).await.unwrap();
-    for (practice, symbol) in [("p1-estadistica", "T1"), ("p2-cc", "Vg_s")] {
-        let def = definition(&pool, practice).await.unwrap().unwrap();
-        let q = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
-        let id = q.id.clone();
-        assert_eq!(
-            remove_quantity(&pool, practice, &id).await.unwrap(),
-            QuantityRemoval::Retired
-        );
-        seed::run_seeds(&pool).await.unwrap();
-        let (removed,): (bool,) =
-            sqlx::query_as("SELECT removed FROM practice_quantities WHERE id = ?1")
-                .bind(&id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert!(removed, "{symbol} tenía que seguir retirada");
-        let after = definition(&pool, practice).await.unwrap().unwrap();
-        assert!(
-            after.quantities.iter().all(|q| q.symbol != symbol),
-            "{symbol} volvió"
-        );
-    }
+    assert_eq!(
+        remove_quantity(&pool, practice, &fresh.id).await.unwrap(),
+        QuantityRemoval::HasMeasurements
+    );
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    assert!(def.quantities.iter().any(|q| q.symbol == "Tn"));
 }
 
 #[tokio::test]

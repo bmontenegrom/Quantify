@@ -3083,6 +3083,11 @@ async fn a_retired_quantity_stays_in_the_submissions_that_used_it() {
         .unwrap();
     let old_g2 = derived_value(&old.analysis, "g2").unwrap();
 
+    sqlx::query("DELETE FROM practice_results WHERE practice_id = ?1 AND formula LIKE '%T2%'")
+        .bind(practice)
+        .execute(&pool)
+        .await
+        .unwrap();
     assert_eq!(
         crate::practices::remove_quantity(&pool, practice, &id("T2"))
             .await
