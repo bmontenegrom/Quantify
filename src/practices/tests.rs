@@ -2737,11 +2737,15 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
         publish_checked(&pool, &copy.id, None, none).await.unwrap(),
         Publish::Published { number: 2 }
     ));
-    set_practice_status(&pool, &copy.id, "archivada").await.unwrap();
+    set_practice_status(&pool, &copy.id, "archivada")
+        .await
+        .unwrap();
     assert!(matches!(
-        publish_draft(&pool, &copy.id, None, |_| vec!["borrador a medio editar".into()])
-            .await
-            .unwrap(),
+        publish_draft(&pool, &copy.id, None, |_| vec![
+            "borrador a medio editar".into()
+        ])
+        .await
+        .unwrap(),
         Publish::NotDraft
     ));
 }
