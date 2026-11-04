@@ -164,6 +164,15 @@ pub async fn create_submission(
     upload_dir: &Path,
     submission: NewSubmission,
 ) -> anyhow::Result<Option<SubmissionDetail>> {
+    let (versioned,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM practices WHERE id = ?1 AND current_version_id IS NOT NULL)",
+    )
+    .bind(&submission.practice_id)
+    .fetch_one(pool)
+    .await?;
+    if !versioned {
+        return Ok(None);
+    }
     let id = Uuid::new_v4().to_string();
     let submitted_at = Utc::now();
     let csv_path = upload_dir.join(format!("{id}.csv"));
@@ -201,15 +210,6 @@ pub async fn create_submission(
     .rows_affected();
     if inserted == 0 {
         let _ = tokio::fs::remove_file(&csv_path).await;
-        let (versioned,): (bool,) = sqlx::query_as(
-            "SELECT EXISTS (SELECT 1 FROM practices WHERE id = ?1 AND current_version_id IS NOT NULL)",
-        )
-        .bind(&submission.practice_id)
-        .fetch_one(pool)
-        .await?;
-        if !versioned {
-            return Ok(None);
-        }
         anyhow::bail!("no se pudo crear la entrega {id}");
     }
 

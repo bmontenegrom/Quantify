@@ -135,6 +135,10 @@ pub struct Practice {
 
 pub(crate) const PRACTICE_COLS: &str = "id, name, description, analysis_kind, status";
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, FromRow)]
 #[serde(default)]
 pub struct PracticeQuantity {
@@ -149,6 +153,7 @@ pub struct PracticeQuantity {
     pub is_given: bool,
     pub replicas_per_point: Option<i64>,
     pub per_point: bool,
+    #[serde(default = "default_true")]
     pub has_uncertainty: bool,
     pub optional: bool,
     #[sqlx(default)]
@@ -169,6 +174,7 @@ pub struct PracticeResult {
     pub position: i64,
     pub tolerance: Option<f64>,
     pub is_final: bool,
+    #[serde(default = "default_true")]
     pub has_uncertainty: bool,
 }
 

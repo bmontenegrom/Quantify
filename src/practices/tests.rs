@@ -2638,6 +2638,8 @@ fn an_old_snapshot_missing_fields_still_reads() {
     )
     .unwrap();
     assert_eq!(def.quantities[0].symbol, "L");
+    assert!(def.quantities[0].has_uncertainty);
+    assert!(def.results[0].has_uncertainty);
     assert_eq!(def.results[0].tolerance, None);
     assert_eq!(def.parts[0].analysis_kind, None);
     assert!(def.curves.is_empty());
@@ -2692,7 +2694,7 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
     ));
     assert!(matches!(
         publish_draft(&pool, &copy.id, None, none).await.unwrap(),
-        Publish::NotFound
+        Publish::NotDraft
     ));
     let rejected = duplicate_practice(&pool, "p2-cc", "Otra copia", "u1")
         .await
@@ -2722,10 +2724,6 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
     assert_eq!(published.status, "publicada");
     assert_eq!(published.current_version, Some(1));
 
-    assert_eq!(
-        unchanged_since_current(&pool, &copy.id).await.unwrap(),
-        Some(1)
-    );
     assert!(matches!(
         publish_checked(&pool, &copy.id, None, none).await.unwrap(),
         Publish::Unchanged(1)
@@ -2735,12 +2733,15 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(
-        unchanged_since_current(&pool, &copy.id).await.unwrap(),
-        None
-    );
     assert!(matches!(
         publish_checked(&pool, &copy.id, None, none).await.unwrap(),
         Publish::Published { number: 2 }
+    ));
+    set_practice_status(&pool, &copy.id, "archivada").await.unwrap();
+    assert!(matches!(
+        publish_draft(&pool, &copy.id, None, |_| vec!["borrador a medio editar".into()])
+            .await
+            .unwrap(),
+        Publish::NotDraft
     ));
 }

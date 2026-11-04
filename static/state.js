@@ -30,6 +30,7 @@ export const state = {
   chronometers: new Map(),
   seriesDebug: new Map(),
   editingSubmissionId: null,
+  editingPracticeId: null,
   editPrefill: null,
   invitations: [],
   submissionFilters: { groupId: "", tableNumber: "" },

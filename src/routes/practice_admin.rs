@@ -192,7 +192,10 @@ pub(super) async fn set_practice_status(
                     problems.join("; ")
                 )));
             }
-            practices::Publish::Unchanged(_) | practices::Publish::NotFound => {}
+            practices::Publish::NotDraft | practices::Publish::Unchanged(_) => {}
+            practices::Publish::NotFound => {
+                return Err(AppError::not_found("practica no encontrada"));
+            }
         }
     }
     match practices::set_practice_status(&state.pool, &id, status).await? {
@@ -235,7 +238,9 @@ pub(super) async fn publish_practice_version(
         practices::Publish::Unchanged(number) => Err(AppError::bad_request(format!(
             "No hay cambios desde la versión {number}: no hace falta publicar otra."
         ))),
-        practices::Publish::NotFound => Err(AppError::not_found("practica no encontrada")),
+        practices::Publish::NotDraft | practices::Publish::NotFound => {
+            Err(AppError::not_found("practica no encontrada"))
+        }
     }
 }
 

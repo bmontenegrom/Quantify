@@ -336,12 +336,21 @@ async fn ensure_submission_access(
     user: &db::AuthUser,
     submission_id: &str,
 ) -> Result<(), AppError> {
+    ensure_submission_member(state, user, submission_id, "no tenes acceso a esta entrega").await
+}
+
+async fn ensure_submission_member(
+    state: &SharedState,
+    user: &db::AuthUser,
+    submission_id: &str,
+    forbidden: &str,
+) -> Result<(), AppError> {
     if matches!(user.role.as_str(), "docente" | "admin")
         || db::is_accepted_member(&state.pool, submission_id, &user.id).await?
     {
         return Ok(());
     }
-    Err(AppError::forbidden("no tenes acceso a esta entrega"))
+    Err(AppError::forbidden(forbidden))
 }
 
 async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::AuthUser, AppError> {

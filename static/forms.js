@@ -140,7 +140,7 @@ export async function loadSubmissionForm() {
   try {
     const [definition, instruments] = await Promise.all([
       fetchJson(
-        state.editingSubmissionId
+        state.editingSubmissionId && state.editingPracticeId === practiceId
           ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
           : `/api/practices/${encodeURIComponent(practiceId)}/definition?published=true`,
       ),
@@ -742,6 +742,7 @@ export async function submitFormSubmission() {
 
 export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
+  state.editingPracticeId = submission.practice_id;
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
@@ -750,6 +751,7 @@ export function startEditSubmission(submission) {
 
 export function exitEditMode() {
   state.editingSubmissionId = null;
+  state.editingPracticeId = null;
   state.editPrefillComment = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;

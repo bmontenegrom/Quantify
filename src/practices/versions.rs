@@ -156,6 +156,7 @@ pub enum Publish {
     Published { number: i64 },
     Unchanged(i64),
     Rejected(Vec<String>),
+    NotDraft,
     NotFound,
 }
 
@@ -209,6 +210,9 @@ pub async fn publish_draft(
     let Some(definition) = super::definition(pool, practice_id).await? else {
         return Ok(Publish::NotFound);
     };
+    if definition.status != "borrador" {
+        return Ok(Publish::NotDraft);
+    }
     let found = problems(&definition);
     if !found.is_empty() {
         return Ok(Publish::Rejected(found));
@@ -222,50 +226,20 @@ pub async fn publish_draft(
     .await?
     .rows_affected();
     if changed == 0 {
-        return Ok(Publish::NotFound);
+        return Ok(Publish::NotDraft);
     }
-    let current: Option<String> =
-        sqlx::query_scalar("SELECT current_version_id FROM practices WHERE id = ?1")
-            .bind(practice_id)
-            .fetch_one(&mut *tx)
-            .await?;
-    let number = match current {
-        Some(_) => definition.current_version.unwrap_or(1),
-        None => {
-            insert_version(&mut tx, &definition, published_by)
-                .await?
-                .number
-        }
-    };
+    let number = insert_version(&mut tx, &definition, published_by)
+        .await?
+        .number;
     tx.commit().await?;
     Ok(Publish::Published { number })
 }
 
 async fn unchanged(pool: &SqlitePool, draft: &PracticeDefinition) -> anyhow::Result<Option<i64>> {
-    let row: Option<(i64, String)> = sqlx::query_as(
-        "SELECT v.number, v.definition_json FROM practices p \
-         JOIN practice_versions v ON v.id = p.current_version_id WHERE p.id = ?1",
-    )
-    .bind(&draft.practice_id)
-    .fetch_optional(pool)
-    .await?;
-    let Some((number, json)) = row else {
+    let Some(current) = current_version(pool, &draft.practice_id).await? else {
         return Ok(None);
     };
-    let mut current: serde_json::Value = serde_json::from_str(&json)?;
-    current["current_version"] = serde_json::Value::Null;
-    let draft: serde_json::Value = serde_json::from_str(&snapshot(draft)?)?;
-    Ok((draft == current).then_some(number))
-}
-
-pub async fn unchanged_since_current(
-    pool: &SqlitePool,
-    practice_id: &str,
-) -> anyhow::Result<Option<i64>> {
-    let Some(draft) = super::definition(pool, practice_id).await? else {
-        return Ok(None);
-    };
-    unchanged(pool, &draft).await
+    Ok((snapshot(draft)? == snapshot(&current.definition)?).then_some(current.number))
 }
 
 pub async fn ensure_versions(pool: &SqlitePool) -> anyhow::Result<()> {

@@ -2912,7 +2912,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
 }
 
 #[tokio::test]
-async fn ensure_versions_creates_version_one_and_links_old_submissions() {
+async fn version_one_links_the_submissions_without_a_version() {
     let (pool, _dir) = setup().await;
     let (count,): (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM practice_versions WHERE practice_id = 'p1-estadistica'",
@@ -2932,7 +2932,6 @@ async fn ensure_versions_creates_version_one_and_links_old_submissions() {
         "UPDATE submissions SET practice_version_id = NULL WHERE practice_id = 'p1-estadistica'",
         "UPDATE practices SET current_version_id = NULL WHERE id = 'p1-estadistica'",
         "DELETE FROM practice_versions WHERE practice_id = 'p1-estadistica'",
-        "DELETE FROM applied_migrations WHERE name = '2026-11-entregas-a-su-version'",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
     }

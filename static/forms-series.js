@@ -148,7 +148,8 @@ async function updateRegressionPreview() {
       `/api/practices/${encodeURIComponent(practiceSelect.value)}/analyze-preview`,
       {
         measurements,
-        submission_id: state.editingSubmissionId ?? null,
+        submission_id:
+          state.editingPracticeId === practiceSelect.value ? state.editingSubmissionId : null,
         practice_version: state.practiceForm?.definition?.current_version ?? null,
       }
     );

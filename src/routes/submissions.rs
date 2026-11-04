@@ -1,6 +1,6 @@
 use super::{
-    current_user, ensure_submission_access, read_text, require_teacher, required, Health,
-    SharedState,
+    current_user, ensure_submission_access, ensure_submission_member, read_text, require_teacher,
+    required, Health, SharedState,
 };
 use crate::{
     analysis,
@@ -182,14 +182,13 @@ pub(super) async fn edit_form_submission(
         .await?
         .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
 
-    if !matches!(user.role.as_str(), "docente" | "admin") {
-        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
-        if !is_member {
-            return Err(AppError::forbidden(
-                "Solo podés editar entregas de las que sos miembro.",
-            ));
-        }
-    }
+    ensure_submission_member(
+        &state,
+        &user,
+        &id,
+        "Solo podés editar entregas de las que sos miembro.",
+    )
+    .await?;
     if !detail.can_edit {
         let expired = detail
             .editable_until
@@ -231,14 +230,13 @@ pub(super) async fn cancel_submission(
         .await?
         .ok_or_else(|| AppError::not_found("entrega no encontrada"))?;
 
-    if !matches!(user.role.as_str(), "docente" | "admin") {
-        let is_member = db::is_accepted_member(&state.pool, &id, &user.id).await?;
-        if !is_member {
-            return Err(AppError::forbidden(
-                "Solo podés cancelar entregas de las que sos miembro.",
-            ));
-        }
-    }
+    ensure_submission_member(
+        &state,
+        &user,
+        &id,
+        "Solo podés cancelar entregas de las que sos miembro.",
+    )
+    .await?;
     if !detail.can_edit {
         let expired = detail
             .editable_until

@@ -914,6 +914,7 @@ fn derive_results(
     Ok(derived)
 }
 
+#[cfg(test)]
 pub async fn analyze(
     pool: &sqlx::SqlitePool,
     practice_id: &str,
