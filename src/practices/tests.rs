@@ -2796,6 +2796,22 @@ async fn a_quantity_in_a_version_is_retired_and_frees_its_symbol() {
         remove_quantity(&pool, practice, &t2.id).await.unwrap(),
         QuantityRemoval::NotFound
     );
+    assert!(update_quantity(&pool, &t2.id, new_quantity("T2"))
+        .await
+        .unwrap()
+        .is_none());
+    let any_section = definition(&pool, practice).await.unwrap().unwrap().sections[0]
+        .id
+        .clone();
+    assert!(!set_member_section(
+        &pool,
+        practice,
+        SectionMember::Quantity,
+        &t2.id,
+        Some(&any_section)
+    )
+    .await
+    .unwrap());
 
     let draft = definition(&pool, practice).await.unwrap().unwrap();
     assert!(draft.quantities.iter().all(|q| q.id != t2.id));
@@ -2875,14 +2891,15 @@ async fn reordering_skips_retired_quantities() {
 async fn a_retired_symbol_matches_exactly_when_seeds_look_for_it() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
-    let rename = |symbol: &'static str| {
+    let rename = |symbol: &'static str, removed: bool| {
         let pool = pool.clone();
         async move {
             sqlx::query(
-                "UPDATE practice_quantities SET symbol = ?1 \
+                "UPDATE practice_quantities SET symbol = ?1, removed = ?2 \
                  WHERE practice_id = 'p2-cc' AND name = 'Fuente de prueba'",
             )
             .bind(symbol)
+            .bind(removed)
             .execute(&pool)
             .await
             .unwrap();
@@ -2899,15 +2916,19 @@ async fn a_retired_symbol_matches_exactly_when_seeds_look_for_it() {
     assert!(!seed::quantity_missing(&pool, "p2-cc", "Vg_s")
         .await
         .unwrap());
-    rename("Vg_s~abc").await;
-    assert!(!seed::quantity_missing(&pool, "p2-cc", "Vg_s")
-        .await
-        .unwrap());
-    rename("VgXs~abc").await;
+    rename("Vg_s~abc", false).await;
     assert!(seed::quantity_missing(&pool, "p2-cc", "Vg_s")
         .await
         .unwrap());
-    rename("Vg_sX").await;
+    rename("Vg_s~abc", true).await;
+    assert!(!seed::quantity_missing(&pool, "p2-cc", "Vg_s")
+        .await
+        .unwrap());
+    rename("VgXs~abc", true).await;
+    assert!(seed::quantity_missing(&pool, "p2-cc", "Vg_s")
+        .await
+        .unwrap());
+    rename("Vg_sX", true).await;
     assert!(seed::quantity_missing(&pool, "p2-cc", "Vg_s")
         .await
         .unwrap());

@@ -565,7 +565,7 @@ pub async fn update_quantity(
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
              replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11, \
              slot_count = ?12, default_value = CASE WHEN ?13 THEN ?14 ELSE default_value END \
-         WHERE id = ?1",
+         WHERE id = ?1 AND removed = 0",
     )
     .bind(quantity_id)
     .bind(input.symbol.trim())

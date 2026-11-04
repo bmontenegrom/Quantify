@@ -295,7 +295,6 @@ pub async fn remove_quantity(
     quantity_id: &str,
 ) -> anyhow::Result<QuantityRemoval> {
     let _guard = PUBLISHING.lock().await;
-    let mut tx = pool.begin().await?;
     let (referenced,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM practice_versions v, \
          json_each(v.definition_json, '$.quantities') q \
@@ -304,7 +303,7 @@ pub async fn remove_quantity(
     )
     .bind(practice_id)
     .bind(quantity_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(pool)
     .await?;
     let sql = if referenced {
         "UPDATE practice_quantities SET removed = 1, section_id = NULL, \
@@ -316,10 +315,9 @@ pub async fn remove_quantity(
     let changed = sqlx::query(sql)
         .bind(quantity_id)
         .bind(practice_id)
-        .execute(&mut *tx)
+        .execute(pool)
         .await?
         .rows_affected();
-    tx.commit().await?;
     Ok(match (changed, referenced) {
         (0, _) => QuantityRemoval::NotFound,
         (_, true) => QuantityRemoval::Retired,

@@ -1028,8 +1028,11 @@ async function deletePracticeQuantity(qid, practiceId) {
   if (!window.confirm("¿Eliminar esta magnitud? Esta accion no se puede deshacer.")) return;
   await runPracticeAction(
     async () => {
-      await deleteJson(`/api/practices/${practiceId}/quantities/${qid}`);
+      const { retired } = await deleteJson(`/api/practices/${practiceId}/quantities/${qid}`);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      return retired
+        ? "Magnitud quitada del borrador: los alumnos la siguen viendo hasta que publiques la versión siguiente."
+        : "Magnitud eliminada";
     },
     "Magnitud eliminada",
     { resetEditing: true },

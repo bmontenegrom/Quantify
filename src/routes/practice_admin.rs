@@ -500,11 +500,16 @@ pub(super) async fn update_quantity(
     Ok(Json(updated))
 }
 
+#[derive(Debug, Serialize)]
+pub(super) struct RemovedQuantity {
+    retired: bool,
+}
+
 pub(super) async fn delete_quantity(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path((id, qid)): Path<(String, String)>,
-) -> Result<Json<Health>, AppError> {
+) -> Result<Json<RemovedQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     let before = load_definition(&state, &id).await?;
     let mut after = before.clone();
@@ -513,12 +518,11 @@ pub(super) async fn delete_quantity(
         return Err(AppError::not_found("magnitud no encontrada en la practica"));
     }
     guard_change(&before, &after, "eliminar la magnitud")?;
-    if practices::remove_quantity(&state.pool, &id, &qid).await?
-        == practices::QuantityRemoval::NotFound
-    {
-        return Err(AppError::not_found("magnitud no encontrada"));
+    match practices::remove_quantity(&state.pool, &id, &qid).await? {
+        practices::QuantityRemoval::NotFound => Err(AppError::not_found("magnitud no encontrada")),
+        practices::QuantityRemoval::Retired => Ok(Json(RemovedQuantity { retired: true })),
+        practices::QuantityRemoval::Deleted => Ok(Json(RemovedQuantity { retired: false })),
     }
-    Ok(Json(Health { status: "ok" }))
 }
 
 pub(super) async fn create_curve(
