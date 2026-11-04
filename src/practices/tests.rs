@@ -2580,14 +2580,11 @@ async fn seeded_expanded_formulas_become_chained() {
 
     chain_seeded_formulas(&pool).await.unwrap();
     let migrated = fresh(pool.clone()).await;
-    for ((symbol, after), (_, seeded)) in migrated.iter().zip(&chained) {
+    let mut expected = chained.clone();
+    for (symbol, formula) in &mut expected {
         if symbol == "I_teo" {
-            assert_eq!(after, "Vg/R");
-        } else {
-            assert_eq!(after, seeded, "{symbol}");
+            *formula = "Vg/R".into();
         }
     }
-    assert!(chained
-        .iter()
-        .any(|(s, f)| s == "E_medio" && f == "(E1 + E2 + E3)/3"));
+    assert_eq!(migrated, expected);
 }

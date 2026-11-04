@@ -936,28 +936,33 @@ pub(super) fn ca_rlc_expanded() -> Vec<(&'static str, String)> {
     ]
 }
 
-const CA_RLC_CHAINED: [(&str, &str); 8] = [
-    ("Z", "math::sqrt(R*R + (XL-XC)*(XL-XC))"),
-    ("I_teo", "Vg/Z"),
-    ("VR_teo", "I_teo*R"),
-    ("VC_teo", "I_teo*XC"),
-    ("VL_teo", "I_teo*XL"),
-    ("phiR_teo", "-math::atan((XL-XC)/R)*180/pi"),
-    ("phiC_teo", "phiR_teo - 90"),
-    ("phiL_teo", "phiR_teo + 90"),
-];
+fn ca_rlc_chained() -> Vec<(&'static str, String)> {
+    [
+        ("Z", "math::sqrt(R*R + (XL-XC)*(XL-XC))"),
+        ("I_teo", "Vg/Z"),
+        ("VR_teo", "I_teo*R"),
+        ("VC_teo", "I_teo*XC"),
+        ("VL_teo", "I_teo*XL"),
+        ("phiR_teo", "-math::atan((XL-XC)/R)*180/pi"),
+        ("phiC_teo", "phiR_teo - 90"),
+        ("phiL_teo", "phiR_teo + 90"),
+    ]
+    .map(|(symbol, formula)| (symbol, formula.to_string()))
+    .to_vec()
+}
 
-fn chained(formulas: &[(&str, &'static str)], symbol: &str) -> &'static str {
+fn chained(formulas: &[(&str, String)], symbol: &str) -> String {
     formulas
         .iter()
         .find(|(s, _)| *s == symbol)
-        .map(|(_, f)| *f)
-        .unwrap_or_default()
+        .map(|(_, f)| f.clone())
+        .unwrap_or_else(|| panic!("falta la fórmula encadenada de {symbol}"))
 }
 
 pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
     let (xl, xc) = ca_rlc_reactances();
-    let f = |symbol: &str| chained(&CA_RLC_CHAINED, symbol);
+    let formulas = ca_rlc_chained();
+    let f = |symbol: &str| chained(&formulas, symbol);
     seed_practice(
         pool,
         "ca-rlc",
@@ -986,19 +991,19 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
         &[
             res("XL", "Reactancia inductiva", "ohm", &xl),
             res("XC", "Reactancia capacitiva", "ohm", &xc),
-            res("Z", "Impedancia", "ohm", f("Z")),
+            res("Z", "Impedancia", "ohm", &f("Z")),
             res_final(
                 "f_res",
                 "Frecuencia de resonancia teorica",
                 "Hz",
                 "1/(2*pi*math::sqrt(L*C))",
             ),
-            res_final("I_teo", "Corriente teorica", "A", f("I_teo")),
+            res_final("I_teo", "Corriente teorica", "A", &f("I_teo")),
             res_final(
                 "VR_teo",
                 "Voltaje teorico en la resistencia",
                 "V",
-                f("VR_teo"),
+                &f("VR_teo"),
             ),
             res_final(
                 "VR_exp",
@@ -1010,7 +1015,7 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "VC_teo",
                 "Voltaje teorico en el capacitor",
                 "V",
-                f("VC_teo"),
+                &f("VC_teo"),
             ),
             res_final(
                 "VC_exp",
@@ -1018,28 +1023,33 @@ pub(super) async fn seed_ca_rlc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "V",
                 "VCpp/2",
             ),
-            res_final("VL_teo", "Voltaje teorico en el inductor", "V", f("VL_teo")),
+            res_final(
+                "VL_teo",
+                "Voltaje teorico en el inductor",
+                "V",
+                &f("VL_teo"),
+            ),
             res_final(
                 "VL_exp",
                 "Voltaje experimental en el inductor",
                 "V",
                 "VLpp/2",
             ),
-            res_final("phiR_teo", "Desfasaje teorico en R", "°", f("phiR_teo")),
+            res_final("phiR_teo", "Desfasaje teorico en R", "°", &f("phiR_teo")),
             res_final(
                 "phiR_exp",
                 "Desfasaje experimental en R",
                 "°",
                 "math::asin(b_R/a_R)*180/pi",
             ),
-            res_final("phiC_teo", "Desfasaje teorico en C", "°", f("phiC_teo")),
+            res_final("phiC_teo", "Desfasaje teorico en C", "°", &f("phiC_teo")),
             res_final(
                 "phiC_exp",
                 "Desfasaje experimental en C",
                 "°",
                 "math::asin(b_C/a_C)*180/pi",
             ),
-            res_final("phiL_teo", "Desfasaje teorico en L", "°", f("phiL_teo")),
+            res_final("phiL_teo", "Desfasaje teorico en L", "°", &f("phiL_teo")),
             res_final(
                 "phiL_exp",
                 "Desfasaje experimental en L",
@@ -1075,21 +1085,26 @@ fn gamma(k: usize) -> String {
     format!("mw{k}*g_ac*dw{k}*100/(2*l*d*1000)")
 }
 
+fn promedio(each: impl Fn(usize) -> String) -> String {
+    let sum: Vec<String> = (1..=HIDRO_MEDIDAS).map(each).collect();
+    format!("({})/{HIDRO_MEDIDAS}", sum.join(" + "))
+}
+
 pub(super) fn hidro_expanded() -> Vec<(&'static str, String)> {
-    let promedio =
-        |each: fn(usize) -> String| format!("(({}) + ({}) + ({}))/3", each(1), each(2), each(3));
     vec![
-        ("E_medio", promedio(empuje)),
-        ("rho_medio", promedio(densidad)),
-        ("gamma_medio", promedio(gamma)),
+        ("E_medio", promedio(|k| format!("({})", empuje(k)))),
+        ("rho_medio", promedio(|k| format!("({})", densidad(k)))),
+        ("gamma_medio", promedio(|k| format!("({})", gamma(k)))),
     ]
 }
 
-const HIDRO_CHAINED: [(&str, &str); 3] = [
-    ("E_medio", "(E1 + E2 + E3)/3"),
-    ("rho_medio", "(rho1 + rho2 + rho3)/3"),
-    ("gamma_medio", "(gamma1 + gamma2 + gamma3)/3"),
-];
+fn hidro_chained() -> Vec<(&'static str, String)> {
+    vec![
+        ("E_medio", promedio(|k| format!("E{k}"))),
+        ("rho_medio", promedio(|k| format!("rho{k}"))),
+        ("gamma_medio", promedio(|k| format!("gamma{k}"))),
+    ]
+}
 
 const CHAINED_FORMULAS: &str = "2026-11-formulas-encadenadas";
 
@@ -1103,14 +1118,15 @@ pub(super) async fn chain_seeded_formulas(pool: &SqlitePool) -> anyhow::Result<(
     }
     let mut tx = pool.begin().await?;
     for (practice, expanded, chained_formulas) in [
-        ("ca-rlc", ca_rlc_expanded(), &CA_RLC_CHAINED[..]),
-        ("hidrostatica", hidro_expanded(), &HIDRO_CHAINED[..]),
+        ("ca-rlc", ca_rlc_expanded(), ca_rlc_chained()),
+        ("hidrostatica", hidro_expanded(), hidro_chained()),
     ] {
         for (symbol, old) in expanded {
             sqlx::query(
-                "UPDATE practice_results SET formula = ?1                  WHERE practice_id = ?2 AND symbol = ?3 AND formula = ?4",
+                "UPDATE practice_results SET formula = ?1 \
+                 WHERE practice_id = ?2 AND symbol = ?3 AND formula = ?4",
             )
-            .bind(chained(chained_formulas, symbol))
+            .bind(chained(&chained_formulas, symbol))
             .bind(practice)
             .bind(symbol)
             .bind(old)
@@ -1189,7 +1205,8 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
         ));
     }
 
-    let f = |symbol: &str| chained(&HIDRO_CHAINED, symbol);
+    let formulas = hidro_chained();
+    let f = |symbol: &str| chained(&formulas, symbol);
     let mut results = Vec::new();
     for k in 1..=HIDRO_MEDIDAS {
         results.push(res(
@@ -1205,12 +1222,12 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
             &densidad(k),
         ));
     }
-    results.push(res_final("E_medio", "Empuje promedio", "N", f("E_medio")));
+    results.push(res_final("E_medio", "Empuje promedio", "N", &f("E_medio")));
     results.push(res_final(
         "rho_medio",
         "Densidad de la goma promedio",
         "kg/m3",
-        f("rho_medio"),
+        &f("rho_medio"),
     ));
     for k in 1..=HIDRO_MEDIDAS {
         results.push(res_no_u(res(
@@ -1224,7 +1241,7 @@ pub(super) async fn seed_hidrostatica(pool: &SqlitePool) -> anyhow::Result<()> {
         "gamma_medio",
         "Tension superficial promedio",
         "N/m",
-        f("gamma_medio"),
+        &f("gamma_medio"),
     )));
 
     seed_practice(pool, "hidrostatica", &quantities, &results).await?;
@@ -1409,16 +1426,13 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     }
 
-    let omega = "(2*pi*f_trabajo)";
-    let xl = format!("({omega}*L)");
-    let xc = format!("(1/({omega}*C))");
-    let phi_teo = format!("math::atan((({xl})-({xc}))/R)");
+    let expanded = ca_rlc_expanded();
     let phase_updates = [
-        ("phiR_teo", format!("(-({phi_teo}))*180/pi")),
+        ("phiR_teo", chained(&expanded, "phiR_teo")),
         ("phiR_exp", "math::asin(b_R/a_R)*180/pi".to_string()),
-        ("phiC_teo", format!("(-({phi_teo})-pi/2)*180/pi")),
+        ("phiC_teo", chained(&expanded, "phiC_teo")),
         ("phiC_exp", "math::asin(b_C/a_C)*180/pi".to_string()),
-        ("phiL_teo", format!("(-({phi_teo})+pi/2)*180/pi")),
+        ("phiL_teo", chained(&expanded, "phiL_teo")),
         ("phiL_exp", "math::asin(b_L/a_L)*180/pi".to_string()),
     ];
     for (symbol, formula) in phase_updates {
