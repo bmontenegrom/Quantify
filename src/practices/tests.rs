@@ -2588,3 +2588,44 @@ async fn seeded_expanded_formulas_become_chained() {
     }
     assert_eq!(migrated, expected);
 }
+
+#[tokio::test]
+async fn a_duplicate_does_not_share_the_source_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    assert_eq!(
+        definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap()
+            .current_version,
+        Some(1)
+    );
+    let copy = duplicate_practice(&pool, "p2-cc", "Copia CC", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(current_version(&pool, &copy.id).await.unwrap().is_none());
+    let published = publish_version(&pool, &copy.id, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(published.number, 1);
+    assert_eq!(published.definition.practice_id, copy.id);
+}
+
+#[tokio::test]
+async fn seeded_submissions_are_pinned_to_their_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    crate::db::seed_users(&pool).await.unwrap();
+    crate::db::seed_academic(&pool).await.unwrap();
+    crate::db::seed_submissions(&pool).await.unwrap();
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT practice_id, practice_version_id FROM submissions")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(!rows.is_empty());
+    assert!(rows.iter().all(|(_, v)| v.is_some()), "{rows:?}");
+}

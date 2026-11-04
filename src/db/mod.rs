@@ -552,12 +552,13 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
             INSERT INTO submissions (
                 id, student_name, group_name, course, practice_id, file_name, csv_path,
                 analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
-                entry_mode, score, teacher_comment, reviewed_at
+                entry_mode, score, teacher_comment, reviewed_at, practice_version_id
             )
             SELECT
                 ?1, u.display_name, g.name, c.name, ?5,
                 '(formulario)', '', ?6, ?7, ?8, u.id, c.id, g.id,
-                'form', ?9, ?10, ?11
+                'form', ?9, ?10, ?11,
+                (SELECT current_version_id FROM practices WHERE id = ?5)
             FROM users u, lab_groups g, courses c
             WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
             "#,
