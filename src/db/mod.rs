@@ -15,6 +15,7 @@ mod schema;
 #[allow(unused_imports)]
 pub(crate) use password::{digest_password, hash_password, verify_password, VerifyResult};
 pub use schema::migrate;
+pub(crate) use schema::{mark_migration_applied, migration_applied};
 
 pub const MAX_LOGIN_ATTEMPTS: u8 = 5;
 pub const LOGIN_BLOCK_MINUTES: i64 = 15;
