@@ -533,6 +533,9 @@ async function setPracticeStatus(practiceId, status) {
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/status`, { status });
     await refreshPractices();
+    if (state.practiceDefinition?.practice_id === practiceId) {
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    }
   }, STATUS_DONE[status] ?? "Estado actualizado");
 }
 
