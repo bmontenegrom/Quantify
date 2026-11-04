@@ -2666,3 +2666,79 @@ fn a_cycle_skips_its_results_with_a_warning() {
         3
     );
 }
+
+#[tokio::test]
+async fn curve_results_chain_and_skip_what_depends_on_series_values() {
+    let (pool, _dir) = setup().await;
+    let input = |symbol: &str, formula: &str| crate::practices::ResultInput {
+        symbol: symbol.into(),
+        name: symbol.into(),
+        unit: "u".into(),
+        formula: formula.into(),
+        tolerance: None,
+        is_final: false,
+        has_uncertainty: true,
+    };
+    for (symbol, formula) in [
+        ("A", "f*2"),
+        ("B", "A*3"),
+        ("D", "E + 1"),
+        ("E", "fpasaje*2"),
+    ] {
+        crate::practices::create_result(&pool, "filtros", input(symbol, formula), None)
+            .await
+            .unwrap();
+    }
+    let def = crate::practices::definition(&pool, "filtros")
+        .await
+        .unwrap()
+        .unwrap();
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/golden/filtros.input.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let measurements: Vec<MeasurementInput> = golden["measurements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| MeasurementInput {
+            quantity_id: def
+                .quantities
+                .iter()
+                .find(|q| q.symbol == m["symbol"].as_str().unwrap())
+                .unwrap()
+                .id
+                .clone(),
+            instrument_id: None,
+            scale_id: None,
+            values: serde_json::from_value(m["values"].clone()).unwrap_or_default(),
+            given_u: m["given_u"].as_f64(),
+            point_replicas: None,
+            operator_replicas: None,
+        })
+        .collect();
+    let a = analyze(&pool, "filtros", &measurements).await.unwrap();
+    let derived = |s: &str| a.derived.iter().find(|d| d.symbol == s);
+    assert!(derived("A").is_none() && derived("B").is_none());
+    let fpasaje = derived("fpasaje").unwrap().value;
+    assert!(close(derived("E").unwrap().value, 2.0 * fpasaje, 1e-9));
+    assert!(close(
+        derived("D").unwrap().value,
+        2.0 * fpasaje + 1.0,
+        1e-9
+    ));
+    for symbol in ["A", "B"] {
+        assert!(
+            a.warnings
+                .iter()
+                .any(|w| w.contains(&format!("'{symbol}'")) && w.contains("escalares")),
+            "{:?}",
+            a.warnings
+        );
+    }
+    assert!(!a.warnings.iter().any(|w| w.contains("no es una magnitud")));
+}

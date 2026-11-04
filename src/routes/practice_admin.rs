@@ -902,7 +902,7 @@ fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> 
         .map(|i| {
             (
                 format!("el mensurando {}", def.results[i].symbol),
-                "se usa a sí mismo a través de otros mensurandos (forma un ciclo, o depende de                  uno que lo forma)"
+                "se usa a sí mismo a través de otros mensurandos (forma un ciclo, o depende de uno que lo forma)"
                     .to_string(),
             )
         })
@@ -2868,6 +2868,22 @@ mod tests {
         let cyclic = with_updated_result(&def, &l2.id, &input("L2", "G1*2")).unwrap();
         let err = guard_change(&def, &cyclic, "x").unwrap_err();
         assert!(format!("{err:?}").contains("ciclo"), "{err:?}");
+        let crossing = with_new_result(&def, &input("K", "L2 + T1 + T2"), None);
+        assert!(crossing.parts.iter().all(|p| crossing
+            .part_view(p)
+            .results
+            .iter()
+            .all(|r| r.symbol != "K")));
+        assert!(crossing.parts.iter().all(|p| crossing
+            .part_view(p)
+            .results
+            .iter()
+            .any(|r| r.symbol == "L2")));
+        let k_problems = formula_problems(&crossing)
+            .into_iter()
+            .filter(|(element, _)| element == "el mensurando K")
+            .count();
+        assert_eq!(k_problems, 1);
         let mut without_l2 = def.clone();
         without_l2.results.retain(|r| r.symbol != "L2");
         assert!(guard_change(&def, &without_l2, "x").is_err());

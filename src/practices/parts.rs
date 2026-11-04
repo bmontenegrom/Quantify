@@ -217,7 +217,9 @@ impl PracticeDefinition {
                 .iter()
                 .filter(|r| match self.result_part(&r.symbol) {
                     Some(p) => p == part.id,
-                    None => true,
+                    None => crate::computation::formula_symbols(&r.formula)
+                        .iter()
+                        .all(|s| self.symbol_part(s).is_none()),
                 })
                 .cloned()
                 .collect(),
