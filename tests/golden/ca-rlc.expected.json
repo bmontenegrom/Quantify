@@ -22,7 +22,7 @@
       "value": 157.579151576134
     },
     {
-      "formula": "math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C)))))",
+      "formula": "math::sqrt(R*R + (XL-XC)*(XL-XC))",
       "has_uncertainty": true,
       "name": "Impedancia",
       "symbol": "Z",
@@ -42,7 +42,7 @@
       "value": 500.7943779793135
     },
     {
-      "formula": "(Vg/(math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C)))))))",
+      "formula": "Vg/Z",
       "has_uncertainty": true,
       "name": "Corriente teorica",
       "symbol": "I_teo",
@@ -52,7 +52,7 @@
       "value": 0.010388846946297412
     },
     {
-      "formula": "((Vg/(math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))))))*R",
+      "formula": "I_teo*R",
       "has_uncertainty": true,
       "name": "Voltaje teorico en la resistencia",
       "symbol": "VR_teo",
@@ -72,7 +72,7 @@
       "value": 1.0425
     },
     {
-      "formula": "((Vg/(math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))))))*((1/((2*pi*f_trabajo)*C)))",
+      "formula": "I_teo*XC",
       "has_uncertainty": true,
       "name": "Voltaje teorico en el capacitor",
       "symbol": "VC_teo",
@@ -92,7 +92,7 @@
       "value": 1.659
     },
     {
-      "formula": "((Vg/(math::sqrt(R*R + ((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))*((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))))))*(((2*pi*f_trabajo)*L))",
+      "formula": "I_teo*XL",
       "has_uncertainty": true,
       "name": "Voltaje teorico en el inductor",
       "symbol": "VL_teo",
@@ -112,7 +112,7 @@
       "value": 6.55
     },
     {
-      "formula": "(-(math::atan(((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))/R)))*180/pi",
+      "formula": "-math::atan((XL-XC)/R)*180/pi",
       "has_uncertainty": true,
       "name": "Desfasaje teorico en R",
       "symbol": "phiR_teo",
@@ -132,12 +132,12 @@
       "value": -77.95939225883437
     },
     {
-      "formula": "(-(math::atan(((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))/R))-pi/2)*180/pi",
+      "formula": "phiR_teo - 90",
       "has_uncertainty": true,
       "name": "Desfasaje teorico en C",
       "symbol": "phiC_teo",
-      "u": 0.5006190525885602,
-      "u_expanded": 1.0012381051771204,
+      "u": 0.5006190526004672,
+      "u_expanded": 1.0012381052009345,
       "unit": "°",
       "value": -167.98355129656903
     },
@@ -152,14 +152,14 @@
       "value": -12.03153373776962
     },
     {
-      "formula": "(-(math::atan(((((2*pi*f_trabajo)*L))-((1/((2*pi*f_trabajo)*C))))/R))+pi/2)*180/pi",
+      "formula": "phiR_teo + 90",
       "has_uncertainty": true,
       "name": "Desfasaje teorico en L",
       "symbol": "phiL_teo",
-      "u": 0.5006190526998667,
-      "u_expanded": 1.0012381053997335,
+      "u": 0.5006190525885602,
+      "u_expanded": 1.0012381051771204,
       "unit": "°",
-      "value": 12.016448703430955
+      "value": 12.016448703430953
     },
     {
       "formula": "math::asin(b_L/a_L)*180/pi",

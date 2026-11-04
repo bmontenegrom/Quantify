@@ -2607,3 +2607,135 @@ fn a_point_result_that_uses_a_skipped_result_is_skipped_too() {
         .iter()
         .any(|w| w.contains("derivada por punto w")));
 }
+
+#[test]
+fn chained_results_propagate_against_the_inputs() {
+    let x = PracticeQuantity {
+        per_point: false,
+        ..quantity("x")
+    };
+    let results = vec![
+        result("S", "A + B"),
+        result("A", "2*x"),
+        result("B", "3*x"),
+        result("E", "5*x"),
+    ];
+    let a = compute(
+        &[x],
+        &results,
+        &HashMap::new(),
+        &[measurement("x", &[1.0, 2.0, 3.0])],
+        None,
+    )
+    .unwrap();
+    let by = |s: &str| a.derived.iter().find(|d| d.symbol == s).unwrap();
+    assert!(close(by("S").value, by("E").value, 1e-9));
+    assert!(close(by("S").u, by("E").u, 1e-12));
+    assert!(by("S").u > (by("A").u.powi(2) + by("B").u.powi(2)).sqrt() + 1e-6);
+    let order: Vec<&str> = a.derived.iter().map(|d| d.symbol.as_str()).collect();
+    assert_eq!(order, ["S", "A", "B", "E"]);
+}
+
+#[test]
+fn a_cycle_skips_its_results_with_a_warning() {
+    let x = PracticeQuantity {
+        per_point: false,
+        ..quantity("x")
+    };
+    let results = vec![
+        result("A", "B + x"),
+        result("B", "A*2"),
+        result("C", "B + 1"),
+        result("D", "x*2"),
+    ];
+    let a = compute(
+        &[x],
+        &results,
+        &HashMap::new(),
+        &[measurement("x", &[1.0, 2.0])],
+        None,
+    )
+    .unwrap();
+    let symbols: Vec<&str> = a.derived.iter().map(|d| d.symbol.as_str()).collect();
+    assert_eq!(symbols, ["D"]);
+    assert_eq!(
+        a.warnings
+            .iter()
+            .filter(|w| w.contains("depende de sí mismo"))
+            .count(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn curve_results_chain_and_skip_what_depends_on_series_values() {
+    let (pool, _dir) = setup().await;
+    let input = |symbol: &str, formula: &str| crate::practices::ResultInput {
+        symbol: symbol.into(),
+        name: symbol.into(),
+        unit: "u".into(),
+        formula: formula.into(),
+        tolerance: None,
+        is_final: false,
+        has_uncertainty: true,
+    };
+    for (symbol, formula) in [
+        ("A", "f*2"),
+        ("B", "A*3"),
+        ("D", "E + 1"),
+        ("E", "fpasaje*2"),
+    ] {
+        crate::practices::create_result(&pool, "filtros", input(symbol, formula), None)
+            .await
+            .unwrap();
+    }
+    let def = crate::practices::definition(&pool, "filtros")
+        .await
+        .unwrap()
+        .unwrap();
+    let golden: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/golden/filtros.input.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let measurements: Vec<MeasurementInput> = golden["measurements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| MeasurementInput {
+            quantity_id: def
+                .quantities
+                .iter()
+                .find(|q| q.symbol == m["symbol"].as_str().unwrap())
+                .unwrap()
+                .id
+                .clone(),
+            instrument_id: None,
+            scale_id: None,
+            values: serde_json::from_value(m["values"].clone()).unwrap_or_default(),
+            given_u: m["given_u"].as_f64(),
+            point_replicas: None,
+            operator_replicas: None,
+        })
+        .collect();
+    let a = analyze(&pool, "filtros", &measurements).await.unwrap();
+    let derived = |s: &str| a.derived.iter().find(|d| d.symbol == s);
+    assert!(derived("A").is_none() && derived("B").is_none());
+    let fpasaje = derived("fpasaje").unwrap().value;
+    assert!(close(derived("E").unwrap().value, 2.0 * fpasaje, 1e-9));
+    assert!(close(
+        derived("D").unwrap().value,
+        2.0 * fpasaje + 1.0,
+        1e-9
+    ));
+    let warned = |symbol: &str, text: &str| {
+        a.warnings
+            .iter()
+            .any(|w| w.contains(&format!("mensurando {symbol}:")) && w.contains(text))
+    };
+    assert!(warned("A", "\"f\""), "{:?}", a.warnings);
+    assert!(warned("B", "no se pudo calcular"), "{:?}", a.warnings);
+}

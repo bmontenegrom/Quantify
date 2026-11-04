@@ -795,19 +795,76 @@ fn derive_results(
     u_by_symbol: &HashMap<String, f64>,
     warnings: &mut Vec<String>,
 ) -> anyhow::Result<Vec<DerivedComputation>> {
-    let mut derived = Vec::with_capacity(results.len());
+    let mut scope = allowed.to_vec();
+    scope.extend(results.iter().map(|r| r.symbol.clone()));
+    let index: HashMap<&str, usize> = results
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.symbol.as_str(), i))
+        .collect();
+    let mut trees: Vec<Option<Node>> = Vec::with_capacity(results.len());
     for result in results {
-        let tree = match compile_formula(&result.formula, allowed) {
-            Ok(tree) => tree,
+        match compile_formula(&result.formula, &scope) {
+            Ok(tree) => trees.push(Some(tree)),
             Err(e) => {
                 warnings.push(skipped("el mensurando", &result.symbol, &e));
-                continue;
+                trees.push(None);
             }
+        }
+    }
+    let vars_of = |i: usize| -> Vec<String> {
+        trees[i].as_ref().map_or_else(Vec::new, |tree| {
+            tree.iter_variable_identifiers()
+                .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
+                .map(|s| s.to_string())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        })
+    };
+    let uses: Vec<Vec<usize>> = (0..results.len())
+        .map(|i| {
+            if trees[i].is_none() {
+                return vec![i];
+            }
+            vars_of(i)
+                .iter()
+                .filter_map(|v| index.get(v.as_str()).copied())
+                .collect()
+        })
+        .collect();
+    let (order, blocked) = super::formula::chain_order(&uses);
+    for &i in &blocked {
+        if trees[i].is_some() {
+            warnings.push(format!(
+                "No se calculó el mensurando {}: depende de sí mismo o de un mensurando que no se pudo calcular. Revisá su fórmula en la práctica.",
+                results[i].symbol
+            ));
+        }
+    }
+
+    let mut derived = Vec::with_capacity(results.len());
+    for (i, result) in results.iter().enumerate() {
+        if blocked.contains(&i) {
+            continue;
+        }
+        let Some(tree) = trees[i].as_ref() else {
+            continue;
         };
-        let vars: Vec<String> = tree
-            .iter_variable_identifiers()
-            .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
-            .map(|s| s.to_string())
+        let mut needed = vec![false; results.len()];
+        let mut stack = uses[i].clone();
+        while let Some(d) = stack.pop() {
+            if !needed[d] {
+                needed[d] = true;
+                stack.extend(uses[d].iter().copied());
+            }
+        }
+        let chain: Vec<usize> = order.iter().copied().filter(|&d| needed[d]).collect();
+        let vars: Vec<String> = chain
+            .iter()
+            .chain(std::iter::once(&i))
+            .flat_map(|&d| vars_of(d))
+            .filter(|v| !index.contains_key(v.as_str()))
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
@@ -821,12 +878,18 @@ fn derive_results(
             .collect();
         let (value, u) = uncertainty::propagate(
             |x: &[f64]| {
-                let bound: HashMap<&str, f64> = vars
+                let mut bound: HashMap<&str, f64> = vars
                     .iter()
                     .map(|s| s.as_str())
                     .zip(x.iter().copied())
                     .collect();
-                eval_compiled(&tree, &bound)
+                for &d in &chain {
+                    if let Some(dep) = trees[d].as_ref() {
+                        let v = eval_compiled(dep, &bound);
+                        bound.insert(results[d].symbol.as_str(), v);
+                    }
+                }
+                eval_compiled(tree, &bound)
             },
             &means,
             &us,
@@ -911,6 +974,7 @@ pub async fn analyze(
         .iter()
         .map(|q| q.symbol.as_str())
         .collect();
+    let shared_results: Vec<&str> = shared.results.iter().map(|r| r.symbol.as_str()).collect();
     for part in &definition.parts {
         if !definition.part_has_content(part) {
             continue;
@@ -933,10 +997,16 @@ pub async fn analyze(
         part_analysis
             .quantities
             .retain(|q| !shared_symbols.contains(&q.symbol.as_str()));
+        part_analysis
+            .derived
+            .retain(|d| !shared_results.contains(&d.symbol.as_str()));
         for operator in &mut part_analysis.operators {
             operator
                 .quantities
                 .retain(|q| !shared_symbols.contains(&q.symbol.as_str()));
+            operator
+                .derived
+                .retain(|d| !shared_results.contains(&d.symbol.as_str()));
         }
         part_analysis
             .warnings
@@ -1072,33 +1142,13 @@ fn run_kind_raw(
                 }
             }
         }
-        if !definition.results.is_empty() {
-            let scalar_results: Vec<PracticeResult> = definition
-                .results
-                .iter()
-                .filter(|r| {
-                    if compile_formula(r.formula.trim(), &symbols).is_ok() {
-                        true
-                    } else {
-                        analysis.warnings.push(format!(
-                            "mensurando '{}': la fórmula no puede evaluarse con las magnitudes escalares disponibles",
-                            r.symbol
-                        ));
-                        false
-                    }
-                })
-                .cloned()
-                .collect();
-            if !scalar_results.is_empty() {
-                analysis.derived = derive_results(
-                    &scalar_results,
-                    &symbols,
-                    &means,
-                    &us,
-                    &mut analysis.warnings,
-                )?;
-            }
-        }
+        analysis.derived = derive_results(
+            &definition.results,
+            &symbols,
+            &means,
+            &us,
+            &mut analysis.warnings,
+        )?;
         return Ok(analysis);
     }
 

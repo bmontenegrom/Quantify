@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub use engines::{analyze, compute, compute_curva, compute_regresion, scale_spec, PointContext};
 pub use formula::check_formula;
-pub(crate) use formula::formula_symbols;
+pub(crate) use formula::{chain_order, formula_symbols};
 pub use submission::{
     check_student_result_symbols, create_form_submission, update_form_submission,
     validate_student_results, FormSubmissionInput,

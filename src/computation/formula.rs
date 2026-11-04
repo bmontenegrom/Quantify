@@ -60,3 +60,22 @@ pub(crate) fn eval_compiled(tree: &Node, values: &HashMap<&str, f64>) -> f64 {
     }
     tree.eval_float_with_context(&context).unwrap_or(f64::NAN)
 }
+
+pub(crate) fn chain_order(uses: &[Vec<usize>]) -> (Vec<usize>, Vec<usize>) {
+    let mut ordered: Vec<usize> = Vec::with_capacity(uses.len());
+    let mut done = vec![false; uses.len()];
+    loop {
+        let ready: Vec<usize> = (0..uses.len())
+            .filter(|&i| !done[i] && uses[i].iter().all(|&d| done[d]))
+            .collect();
+        if ready.is_empty() {
+            break;
+        }
+        for i in ready {
+            done[i] = true;
+            ordered.push(i);
+        }
+    }
+    let blocked = (0..uses.len()).filter(|&i| !done[i]).collect();
+    (ordered, blocked)
+}

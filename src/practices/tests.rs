@@ -1,6 +1,9 @@
 use super::*;
 use crate::db;
-use seed::{fix_ca_rlc_labels, reset_legacy_hidrostatica, seed_ca_rlc, seed_hidrostatica};
+use seed::{
+    ca_rlc_expanded, chain_seeded_formulas, fix_ca_rlc_labels, hidro_expanded,
+    reset_legacy_hidrostatica, seed_ca_rlc, seed_hidrostatica,
+};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::str::FromStr;
 use tempfile::TempDir;
@@ -2535,4 +2538,53 @@ async fn reseeding_p3_with_its_parts_still_there_does_not_fail() {
     let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
     assert_eq!(p3.parts.len(), 2);
     assert_eq!(p3.quantities.len(), 8);
+}
+
+#[tokio::test]
+async fn seeded_expanded_formulas_become_chained() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let fresh = |pool: SqlitePool| async move {
+        let mut formulas = Vec::new();
+        for practice in ["ca-rlc", "hidrostatica"] {
+            let def = definition(&pool, practice).await.unwrap().unwrap();
+            formulas.extend(def.results.into_iter().map(|r| (r.symbol, r.formula)));
+        }
+        formulas
+    };
+    let chained = fresh(pool.clone()).await;
+    for (practice, expanded) in [
+        ("ca-rlc", ca_rlc_expanded()),
+        ("hidrostatica", hidro_expanded()),
+    ] {
+        for (symbol, formula) in expanded {
+            sqlx::query(
+                "UPDATE practice_results SET formula = ?1 WHERE practice_id = ?2 AND symbol = ?3",
+            )
+            .bind(formula)
+            .bind(practice)
+            .bind(symbol)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    }
+    sqlx::query("UPDATE practice_results SET formula = 'Vg/R' WHERE practice_id = 'ca-rlc' AND symbol = 'I_teo'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-formulas-encadenadas'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    chain_seeded_formulas(&pool).await.unwrap();
+    let migrated = fresh(pool.clone()).await;
+    let mut expected = chained.clone();
+    for (symbol, formula) in &mut expected {
+        if symbol == "I_teo" {
+            *formula = "Vg/R".into();
+        }
+    }
+    assert_eq!(migrated, expected);
 }
