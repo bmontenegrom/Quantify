@@ -2641,6 +2641,7 @@ fn an_old_snapshot_missing_fields_still_reads() {
     assert!(def.quantities[0].has_uncertainty);
     assert!(def.results[0].has_uncertainty);
     assert_eq!(def.results[0].tolerance, None);
+    assert!(def.quantities[0].repeated && def.quantities[0].per_point);
     assert_eq!(def.parts[0].analysis_kind, None);
     assert!(def.curves.is_empty());
 }
@@ -2690,11 +2691,11 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
     let none = |_: &PracticeDefinition| Vec::new();
     assert!(matches!(
         publish_draft(&pool, &copy.id, None, none).await.unwrap(),
-        Publish::Published { .. }
+        DraftPublish::Published
     ));
     assert!(matches!(
         publish_draft(&pool, &copy.id, None, none).await.unwrap(),
-        Publish::NotDraft
+        DraftPublish::NotDraft
     ));
     let rejected = duplicate_practice(&pool, "p2-cc", "Otra copia", "u1")
         .await
@@ -2704,7 +2705,7 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
         publish_draft(&pool, &rejected.id, None, |_| vec!["falta algo".into()])
             .await
             .unwrap(),
-        Publish::Rejected(_)
+        DraftPublish::Rejected(_)
     ));
     assert!(current_version(&pool, &rejected.id)
         .await
@@ -2751,6 +2752,20 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
         ])
         .await
         .unwrap(),
-        Publish::NotDraft
+        DraftPublish::NotDraft
     ));
+}
+
+#[tokio::test]
+async fn a_damaged_snapshot_is_an_internal_error() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = '{}' WHERE practice_id = 'p1-estadistica'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let err = current_version(&pool, "p1-estadistica").await.unwrap_err();
+    assert!(err.downcast_ref::<sqlx::Error>().is_some(), "{err}");
 }

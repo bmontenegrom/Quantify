@@ -7,7 +7,7 @@ function draftKey() {
   return `quantify-draft:${uid}:${courseSelect.value}:${groupSelect.value}:${practiceSelect.value}`;
 }
 
-function saveDraft() {
+export function saveDraft() {
   if (state.editingSubmissionId || state.restoringCancelledSubmission || !state.practiceForm) return;
   const draft = {
     measurements: collectMeasurements(),

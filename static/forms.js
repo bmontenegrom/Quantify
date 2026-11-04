@@ -19,7 +19,7 @@ import {
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
-  replicaInputHtml, cellReplicaValues, definitionSections, definitionParts,
+  replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -29,7 +29,7 @@ import {
   renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
   refreshSeries, SERIES_INITIAL_ROWS,
 } from "./forms-series.js";
-import { loadDraft, clearDraft, scheduleDraftSave } from "./forms-draft.js";
+import { loadDraft, clearDraft, saveDraft, scheduleDraftSave } from "./forms-draft.js";
 
 export function quantityNameHtml(q) {
   const base = inlineMathHtml(q.name);
@@ -116,8 +116,9 @@ export async function loadSubmissionForm() {
   if (canReview(state.user)) return;
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
-  if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const practiceId = practiceSelect.value;
+  if (state.editingSubmissionId && state.editingPracticeId !== practiceId) exitEditMode();
+  if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const courseId = courseSelect.value;
   if (practicaTitle) {
     const practiceName =
@@ -708,6 +709,7 @@ export async function submitFormSubmission() {
       openSubmissionWorkspace(editingId);
       return;
     }
+    saveDraft();
     const groupId = groupSelect.value;
     if (tableSelect.value) {
       await postJson(`/api/academic/groups/${groupId}/practice-table`, {
@@ -723,7 +725,7 @@ export async function submitFormSubmission() {
       meta: collectMeta(),
       student_results: collectFinalResults(),
       student_comment: studentComment?.value.trim() || null,
-      practice_version: state.practiceForm?.definition?.current_version ?? null,
+      practice_version: formPracticeVersion(practiceSelect.value),
     });
     submitStatus.textContent = "Entrega guardada";
     showToast("Entrega guardada", "success");
@@ -968,7 +970,6 @@ studentComment?.addEventListener("input", scheduleDraftSave);
 courseSelect.addEventListener("change", updateStudentSelectors);
 groupSelect.addEventListener("change", updateTableSelector);
 practiceSelect.addEventListener("change", () => {
-  if (state.editingSubmissionId && state.editingPracticeId !== practiceSelect.value) exitEditMode();
   updateTableSelector();
   loadSubmissionForm();
 });

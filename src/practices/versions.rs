@@ -9,7 +9,14 @@ pub struct PracticeVersion {
 }
 
 fn parse(json: &str) -> anyhow::Result<PracticeDefinition> {
-    serde_json::from_str(json).map_err(|e| anyhow::Error::new(sqlx::Error::Decode(Box::new(e))))
+    let definition: PracticeDefinition = serde_json::from_str(json)
+        .map_err(|e| anyhow::Error::new(sqlx::Error::Decode(Box::new(e))))?;
+    if definition.practice_id.is_empty() {
+        return Err(anyhow::Error::new(sqlx::Error::Decode(
+            "una versión guardada no tiene practice_id".into(),
+        )));
+    }
+    Ok(definition)
 }
 
 fn version_from_row((id, number, json): (String, i64, String)) -> anyhow::Result<PracticeVersion> {
@@ -168,6 +175,13 @@ pub enum Publish {
     Published { number: i64 },
     Unchanged(i64),
     Rejected(Vec<String>),
+    IsDraft,
+    NotFound,
+}
+
+pub enum DraftPublish {
+    Published,
+    Rejected(Vec<String>),
     NotDraft,
     NotFound,
 }
@@ -197,6 +211,9 @@ pub async fn publish_checked(
     let Some(definition) = super::definition(pool, practice_id).await? else {
         return Ok(Publish::NotFound);
     };
+    if definition.status == "borrador" {
+        return Ok(Publish::IsDraft);
+    }
     let found = problems(&definition);
     if !found.is_empty() {
         return Ok(Publish::Rejected(found));
@@ -217,17 +234,17 @@ pub async fn publish_draft(
     practice_id: &str,
     published_by: Option<&str>,
     problems: impl Fn(&PracticeDefinition) -> Vec<String>,
-) -> anyhow::Result<Publish> {
+) -> anyhow::Result<DraftPublish> {
     let _guard = PUBLISHING.lock().await;
     let Some(definition) = super::definition(pool, practice_id).await? else {
-        return Ok(Publish::NotFound);
+        return Ok(DraftPublish::NotFound);
     };
     if definition.status != "borrador" {
-        return Ok(Publish::NotDraft);
+        return Ok(DraftPublish::NotDraft);
     }
     let found = problems(&definition);
     if !found.is_empty() {
-        return Ok(Publish::Rejected(found));
+        return Ok(DraftPublish::Rejected(found));
     }
     let mut tx = pool.begin().await?;
     let changed = sqlx::query(
@@ -238,13 +255,11 @@ pub async fn publish_draft(
     .await?
     .rows_affected();
     if changed == 0 {
-        return Ok(Publish::NotDraft);
+        return Ok(DraftPublish::NotDraft);
     }
-    let number = insert_version(&mut tx, &definition, published_by)
-        .await?
-        .number;
+    insert_version(&mut tx, &definition, published_by).await?;
     tx.commit().await?;
-    Ok(Publish::Published { number })
+    Ok(DraftPublish::Published)
 }
 
 async fn unchanged(pool: &SqlitePool, draft: &PracticeDefinition) -> anyhow::Result<Option<i64>> {

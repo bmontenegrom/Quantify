@@ -147,11 +147,13 @@ pub struct PracticeQuantity {
     pub symbol: String,
     pub name: String,
     pub unit: String,
+    #[serde(default = "default_true")]
     pub repeated: bool,
     pub quantity: Option<String>,
     pub position: i64,
     pub is_given: bool,
     pub replicas_per_point: Option<i64>,
+    #[serde(default = "default_true")]
     pub per_point: bool,
     #[serde(default = "default_true")]
     pub has_uncertainty: bool,

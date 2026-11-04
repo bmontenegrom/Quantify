@@ -180,21 +180,32 @@ pub(super) async fn set_practice_status(
     let status = body.status.trim();
     if status == "publicada" {
         match practices::publish_draft(&state.pool, &id, Some(&user.id), publish_problems).await? {
-            practices::Publish::Published { .. } => {
+            practices::DraftPublish::Published => {
                 return practices::practice(&state.pool, &id)
                     .await?
                     .map(Json)
                     .ok_or_else(|| AppError::not_found("practica no encontrada"));
             }
-            practices::Publish::Rejected(problems) => {
+            practices::DraftPublish::Rejected(problems) => {
                 return Err(AppError::bad_request(format!(
                     "Todavia no se puede publicar: {}.",
                     problems.join("; ")
                 )));
             }
-            practices::Publish::NotDraft | practices::Publish::Unchanged(_) => {}
-            practices::Publish::NotFound => {
+            practices::DraftPublish::NotFound => {
                 return Err(AppError::not_found("practica no encontrada"));
+            }
+            practices::DraftPublish::NotDraft => {
+                if let Some(version) = practices::current_version(&state.pool, &id).await? {
+                    let problems = publish_problems(&version.definition);
+                    if !problems.is_empty() {
+                        return Err(AppError::bad_request(format!(
+                            "No se puede restaurar la versión {}: {}.",
+                            version.number,
+                            problems.join("; ")
+                        )));
+                    }
+                }
             }
         }
     }
@@ -221,14 +232,6 @@ pub(super) async fn publish_practice_version(
     Path(id): Path<String>,
 ) -> Result<Json<PublishedVersion>, AppError> {
     let user = require_teacher(&state, &headers).await?;
-    let practice = practices::practice(&state.pool, &id)
-        .await?
-        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
-    if practice.status == "borrador" {
-        return Err(AppError::bad_request(
-            "La práctica es un borrador: publicala para crear su primera versión.",
-        ));
-    }
     match practices::publish_checked(&state.pool, &id, Some(&user.id), publish_problems).await? {
         practices::Publish::Published { number } => Ok(Json(PublishedVersion { number })),
         practices::Publish::Rejected(problems) => Err(AppError::bad_request(format!(
@@ -238,9 +241,10 @@ pub(super) async fn publish_practice_version(
         practices::Publish::Unchanged(number) => Err(AppError::bad_request(format!(
             "No hay cambios desde la versión {number}: no hace falta publicar otra."
         ))),
-        practices::Publish::NotDraft | practices::Publish::NotFound => {
-            Err(AppError::not_found("practica no encontrada"))
-        }
+        practices::Publish::IsDraft => Err(AppError::bad_request(
+            "La práctica es un borrador: publicala para crear su primera versión.",
+        )),
+        practices::Publish::NotFound => Err(AppError::not_found("practica no encontrada")),
     }
 }
 
@@ -510,7 +514,7 @@ pub(super) async fn delete_quantity(
     }
     if practices::quantity_still_needed(&state.pool, &id, &qid).await? {
         return Err(AppError::bad_request(
-            "La magnitud está en la versión vigente o tiene mediciones guardadas: todavía no se puede borrar.",
+            "La magnitud está en la versión vigente o tiene mediciones guardadas, así que no se puede borrar. Para sacarla ya, duplicá la práctica y editá la copia.",
         ));
     }
     guard_change(&before, &after, "eliminar la magnitud")?;

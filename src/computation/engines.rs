@@ -923,6 +923,8 @@ pub async fn analyze(
     let definition = crate::practices::definition(pool, practice_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("la practica no existe"))?;
+    let definition: crate::practices::PracticeDefinition =
+        serde_json::from_str(&serde_json::to_string(&definition)?)?;
     analyze_definition(pool, &definition, measurements).await
 }
 
