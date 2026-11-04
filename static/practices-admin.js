@@ -830,6 +830,7 @@ function renderResultForm(res, practiceId, def = null) {
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" /></label>
+      <p class="submission-meta">Podés usar magnitudes y otros mensurandos (p. ej. <code>I_teo*R</code>); la incertidumbre se propaga desde las magnitudes.</p>
       ${res ? "" : newResultSectionHtml(def)}
       <label>Tolerancia (%)
         <input name="tolerance" type="number" min="0" step="any"
