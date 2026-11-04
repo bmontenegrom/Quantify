@@ -885,13 +885,38 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
     check_axes(def, &input.x_formula, &input.y_formula)
 }
 
-fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
-    if def.parts.is_empty() {
-        return formula_problems_in(def);
-    }
-    let mut problems: Vec<(String, String)> = formula_problems_in(&def.shared_view())
+fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
+    let uses: Vec<Vec<usize>> = def
+        .results
+        .iter()
+        .map(|r| {
+            computation::formula_symbols(&r.formula)
+                .iter()
+                .filter_map(|s| def.results.iter().position(|o| o.symbol == *s))
+                .collect()
+        })
+        .collect();
+    let (_, blocked) = computation::chain_order(&uses);
+    blocked
         .into_iter()
-        .map(|(element, message)| {
+        .map(|i| {
+            (
+                format!("el mensurando {}", def.results[i].symbol),
+                "se usa a sí mismo a través de otros mensurandos (forma un ciclo, o depende de uno que lo forma)"
+                    .to_string(),
+            )
+        })
+        .collect()
+}
+
+fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
+    let mut problems = cycle_problems(def);
+    if def.parts.is_empty() {
+        problems.extend(formula_problems_in(def));
+        return problems;
+    }
+    problems.extend(formula_problems_in(&def.shared_view()).into_iter().map(
+        |(element, message)| {
             (
                 element,
                 format!(
@@ -899,8 +924,8 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
                      compartidos: pasalo a una sección de la parte que corresponda)"
                 ),
             )
-        })
-        .collect();
+        },
+    ));
     for part in def.parts.iter().filter(|p| def.part_has_content(p)) {
         problems.extend(formula_problems_in(&def.part_view(part)).into_iter().map(
             |(element, message)| {
@@ -1097,7 +1122,8 @@ fn result_scope_in(def: &practices::PracticeDefinition) -> Vec<String> {
         .quantities
         .iter()
         .filter(|q| !q.per_point || q.is_given)
-        .map(|q| q.symbol.clone());
+        .map(|q| q.symbol.clone())
+        .chain(def.results.iter().map(|r| r.symbol.clone()));
     match def.analysis_kind.as_deref() {
         Some("regresion_lineal") => shared
             .chain(["slope".to_string(), "intercept".to_string()])
@@ -1122,7 +1148,12 @@ fn result_scope_in(def: &practices::PracticeDefinition) -> Vec<String> {
             }
             allowed
         }
-        _ => def.quantities.iter().map(|q| q.symbol.clone()).collect(),
+        _ => def
+            .quantities
+            .iter()
+            .map(|q| q.symbol.clone())
+            .chain(def.results.iter().map(|r| r.symbol.clone()))
+            .collect(),
     }
 }
 
@@ -2793,6 +2824,113 @@ mod tests {
         assert!(!check(&cc, "P*2"));
         let err = check_axes(&f2, "h", "t*zzz").unwrap_err();
         assert!(format!("{err:?}").contains("Eje y"), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn results_can_use_other_results() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let input = |symbol: &str, formula: &str| ResultInput {
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "m".into(),
+            formula: formula.into(),
+            tolerance: None,
+            is_final: false,
+            has_uncertainty: true,
+        };
+        let p1 = practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let with_l2 = with_new_result(&p1, &input("L2", "L*2"), None);
+        assert!(guard_change(&p1, &with_l2, "x").is_ok());
+        assert_eq!(with_l2.result_part("L2"), None);
+        assert!(validate_result(&with_l2, &input("G1", "L2 + T1")).is_ok());
+        let with_g1 = with_new_result(&with_l2, &input("G1", "L2 + T1"), None);
+        assert!(guard_change(&with_l2, &with_g1, "x").is_ok());
+        let op1 = with_g1.quantity_part("T1").unwrap();
+        assert_eq!(with_g1.result_part("G1"), Some(op1));
+        let with_h = with_new_result(&with_g1, &input("H", "G1*3"), None);
+        assert_eq!(with_h.result_part("H"), Some(op1));
+        let crossing = with_new_result(&with_g1, &input("K", "G1 + T2"), None);
+        assert!(guard_change(&with_g1, &crossing, "x").is_err());
+
+        let l2 = practices::create_result(&pool, "p1-estadistica", input("L2", "L*2"), None)
+            .await
+            .unwrap();
+        practices::create_result(&pool, "p1-estadistica", input("G1", "L2 + T1"), None)
+            .await
+            .unwrap();
+        let def = practices::definition(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let cyclic = with_updated_result(&def, &l2.id, &input("L2", "G1*2")).unwrap();
+        let err = guard_change(&def, &cyclic, "x").unwrap_err();
+        assert!(format!("{err:?}").contains("ciclo"), "{err:?}");
+        let crossing = with_new_result(&def, &input("K", "L2 + T1 + T2"), None);
+        let crossing = with_new_result(&crossing, &input("S", "K*2"), None);
+        assert!(crossing.parts.iter().all(|p| crossing
+            .part_view(p)
+            .results
+            .iter()
+            .all(|r| r.symbol != "K" && r.symbol != "S")));
+        assert!(crossing.parts.iter().all(|p| crossing
+            .part_view(p)
+            .results
+            .iter()
+            .any(|r| r.symbol == "L2")));
+        let problems: Vec<String> = formula_problems(&crossing)
+            .into_iter()
+            .map(|(element, _)| element)
+            .filter(|element| element.ends_with(" K") || element.ends_with(" S"))
+            .collect();
+        assert_eq!(problems, ["el mensurando K"]);
+        let mut without_l2 = def.clone();
+        without_l2.results.retain(|r| r.symbol != "L2");
+        assert!(guard_change(&def, &without_l2, "x").is_err());
+
+        let id = |symbol: &str| {
+            def.quantities
+                .iter()
+                .find(|q| q.symbol == symbol)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let measurement =
+            |symbol: &str, values: Vec<f64>, given_u: Option<f64>| computation::MeasurementInput {
+                quantity_id: id(symbol),
+                instrument_id: None,
+                scale_id: None,
+                values,
+                given_u,
+                point_replicas: None,
+                operator_replicas: None,
+            };
+        let analysis = computation::analyze(
+            &pool,
+            "p1-estadistica",
+            &[
+                measurement("L", vec![1.0], Some(0.002)),
+                measurement("t_med", vec![95.3], None),
+                measurement("T1", vec![2.0, 2.0, 2.0], None),
+            ],
+        )
+        .await
+        .unwrap();
+        let mut all: Vec<&computation::DerivedComputation> = analysis.derived.iter().collect();
+        for part in &analysis.parts {
+            all.extend(&part.analysis.derived);
+            all.extend(part.analysis.operators.iter().flat_map(|o| &o.derived));
+        }
+        assert_eq!(all.iter().filter(|d| d.symbol == "L2").count(), 1);
+        assert!(analysis.derived.iter().any(|d| d.symbol == "L2"));
+        let g1 = all.iter().find(|d| d.symbol == "G1").unwrap();
+        assert!((g1.value - 4.0).abs() < 1e-9, "{}", g1.value);
+        let l2 = all.iter().find(|d| d.symbol == "L2").unwrap();
+        assert!(l2.u > 0.0);
+        assert!((g1.u - l2.u).abs() < 1e-12, "{} {}", g1.u, l2.u);
     }
 
     #[test]
