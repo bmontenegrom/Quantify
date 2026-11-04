@@ -19,6 +19,8 @@ pub struct FormSubmissionInput {
     pub student_results: Vec<crate::db::StudentResultInput>,
     #[serde(default)]
     pub student_comment: Option<String>,
+    #[serde(default)]
+    pub practice_version: Option<i64>,
 }
 
 async fn insert_measurements(
@@ -139,15 +141,29 @@ pub async fn create_form_submission(
         }
     }
 
-    let version = crate::practices::current_version(pool, &input.practice_id)
-        .await?
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "La práctica todavía no tiene una versión publicada: publicala para recibir \
-                 entregas (para probar el cálculo usá la vista previa)."
-            )
-        })?;
-    let definition = version.definition.clone();
+    let version = match input.practice_version {
+        Some(number) => crate::practices::version_by_number(pool, &input.practice_id, number)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "La versión {number} de la práctica no existe: recargá la página para \
+                     cargar la vigente."
+                )
+            })?,
+        None => crate::practices::current_version(pool, &input.practice_id)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "La práctica todavía no tiene una versión publicada: publicala para recibir \
+                     entregas (para probar el cálculo usá la vista previa)."
+                )
+            })?,
+    };
+    let crate::practices::PracticeVersion {
+        id: version_id,
+        definition,
+        ..
+    } = version;
     validate_student_results(&definition, &input.student_results)?;
 
     let analysis = analyze_definition(pool, &definition, &input.measurements).await?;
@@ -208,7 +224,7 @@ pub async fn create_form_submission(
     .bind(&meta_json)
     .bind(table_number)
     .bind(student_comment)
-    .bind(&version.id)
+    .bind(&version_id)
     .execute(&mut *tx)
     .await
     .map_err(|e| {

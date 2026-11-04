@@ -518,6 +518,7 @@ async fn create_form_submission_persists_and_reads_back() {
         table_number: None,
         student_results: vec![],
         student_comment: None,
+        practice_version: None,
     };
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
     assert_eq!(detail.entry_mode, "form");
@@ -584,6 +585,7 @@ async fn create_form_submission_trims_and_persists_student_comment() {
         table_number: None,
         student_results: vec![],
         student_comment: comment.map(String::from),
+        practice_version: None,
     };
 
     let detail = create_form_submission(&pool, &user, mk(Some("  anduvo mal el generador  ")))
@@ -666,6 +668,7 @@ async fn create_form_submission_persists_optional_student_result() {
             u_expanded: Some(0.1),
         }],
         student_comment: None,
+        practice_version: None,
     };
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
     assert_eq!(detail.student_results.len(), 1);
@@ -734,6 +737,7 @@ async fn create_form_submission_rejects_unknown_student_result_symbol() {
             u_expanded: None,
         }],
         student_comment: None,
+        practice_version: None,
     };
     let err = create_form_submission(&pool, &user, input)
         .await
@@ -803,6 +807,7 @@ async fn operator_submission_stores_operator_index_per_operator() {
         table_number: None,
         student_results: vec![],
         student_comment: None,
+        practice_version: None,
     };
     crate::practices::publish_version(&pool, "p1-estadistica", None)
         .await
@@ -910,6 +915,7 @@ async fn point_based_submission_stores_point_index_per_point() {
         table_number: None,
         student_results: vec![],
         student_comment: None,
+        practice_version: None,
     };
     crate::practices::publish_version(&pool, "p1-estadistica", None)
         .await
@@ -1020,6 +1026,7 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
         table_number: None,
         student_results: vec![],
         student_comment: None,
+        practice_version: None,
     };
     crate::practices::publish_version(&pool, "p1-estadistica", None)
         .await
@@ -1106,6 +1113,7 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
         table_number: None,
         student_results: vec![],
         student_comment: None,
+        practice_version: None,
     };
     crate::practices::publish_version(&pool, "p1-estadistica", None)
         .await
@@ -1198,6 +1206,7 @@ async fn cancel_submission_deletes_and_frees_table() {
             u_expanded: Some(0.1),
         }],
         student_comment: Some("un comentario".into()),
+        practice_version: None,
     };
     let created = create_form_submission(&pool, &user, mk()).await.unwrap();
 
@@ -1291,6 +1300,7 @@ async fn update_form_submission_replaces_student_comment() {
         table_number: None,
         student_results: vec![],
         student_comment: None,
+        practice_version: None,
     };
     let created = create_form_submission(&pool, &user, input).await.unwrap();
     assert_eq!(created.student_comment, None);
@@ -1370,6 +1380,7 @@ async fn create_form_submission_rejects_unknown_course_and_rolls_back() {
         table_number: None,
         student_results: vec![],
         student_comment: None,
+        practice_version: None,
     };
     assert!(create_form_submission(&pool, &user, input).await.is_err());
     let subs: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
@@ -2827,6 +2838,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
         table_number: None,
         student_results: vec![],
         student_comment: None,
+        practice_version: None,
     };
     let old = create_form_submission(&pool, &user, mk()).await.unwrap();
     let old_g1 = derived_value(&old.analysis, "g1").unwrap();
@@ -2872,6 +2884,29 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
     let version_of = |sid: &str| versions.iter().find(|(s, _)| s == sid).unwrap().1.clone();
     assert_eq!(version_of(&new.id).as_deref(), Some(v2.id.as_str()));
     assert_ne!(version_of(&old.id), version_of(&new.id));
+
+    let from_old_form = create_form_submission(
+        &pool,
+        &user,
+        FormSubmissionInput {
+            practice_version: Some(1),
+            ..mk()
+        },
+    )
+    .await
+    .unwrap();
+    assert!((derived_value(&from_old_form.analysis, "g1").unwrap() - old_g1).abs() < 1e-12);
+    let missing = create_form_submission(
+        &pool,
+        &user,
+        FormSubmissionInput {
+            practice_version: Some(99),
+            ..mk()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(missing.to_string().contains("recargá"), "{missing}");
 }
 
 #[tokio::test]
@@ -2892,9 +2927,9 @@ async fn ensure_versions_creates_version_one_and_links_old_submissions() {
         .unwrap();
     assert!(seeded > 0);
     for sql in [
+        "UPDATE submissions SET practice_version_id = NULL",
         "UPDATE practices SET current_version_id = NULL WHERE id = 'p1-estadistica'",
         "DELETE FROM practice_versions WHERE practice_id = 'p1-estadistica'",
-        "UPDATE submissions SET practice_version_id = NULL",
         "DELETE FROM applied_migrations WHERE name = '2026-11-entregas-a-su-version'",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
@@ -2966,6 +3001,7 @@ async fn a_practice_without_a_published_version_rejects_submissions() {
             table_number: None,
             student_results: vec![],
             student_comment: None,
+            practice_version: None,
         },
     )
     .await

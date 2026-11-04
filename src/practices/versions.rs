@@ -1,11 +1,23 @@
 use super::PracticeDefinition;
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 
 #[derive(Debug, Clone)]
 pub struct PracticeVersion {
     pub id: String,
     pub number: i64,
     pub definition: PracticeDefinition,
+}
+
+fn parse(json: &str) -> anyhow::Result<PracticeDefinition> {
+    serde_json::from_str(json).map_err(|e| anyhow::Error::new(sqlx::Error::Decode(Box::new(e))))
+}
+
+fn version_from_row((id, number, json): (String, i64, String)) -> anyhow::Result<PracticeVersion> {
+    Ok(PracticeVersion {
+        id,
+        number,
+        definition: parse(&json)?,
+    })
 }
 
 pub async fn current_version(
@@ -19,14 +31,23 @@ pub async fn current_version(
     .bind(practice_id)
     .fetch_optional(pool)
     .await?;
-    row.map(|(id, number, json)| {
-        Ok(PracticeVersion {
-            id,
-            number,
-            definition: serde_json::from_str(&json)?,
-        })
-    })
-    .transpose()
+    row.map(version_from_row).transpose()
+}
+
+pub async fn version_by_number(
+    pool: &SqlitePool,
+    practice_id: &str,
+    number: i64,
+) -> anyhow::Result<Option<PracticeVersion>> {
+    let row: Option<(String, i64, String)> = sqlx::query_as(
+        "SELECT id, number, definition_json FROM practice_versions \
+         WHERE practice_id = ?1 AND number = ?2",
+    )
+    .bind(practice_id)
+    .bind(number)
+    .fetch_optional(pool)
+    .await?;
+    row.map(version_from_row).transpose()
 }
 
 pub async fn version_definition(
@@ -38,8 +59,7 @@ pub async fn version_definition(
             .bind(version_id)
             .fetch_optional(pool)
             .await?;
-    row.map(|(json,)| Ok(serde_json::from_str(&json)?))
-        .transpose()
+    row.map(|(json,)| parse(&json)).transpose()
 }
 
 pub async fn published_definition(
@@ -72,15 +92,19 @@ pub async fn submission_definition(
     super::definition(pool, &practice_id).await
 }
 
-pub async fn publish_version(
-    pool: &SqlitePool,
-    practice_id: &str,
+fn snapshot(definition: &PracticeDefinition) -> anyhow::Result<String> {
+    let mut definition = definition.clone();
+    definition.status = "publicada".into();
+    definition.current_version = None;
+    Ok(serde_json::to_string(&definition)?)
+}
+
+async fn insert_version(
+    conn: &mut SqliteConnection,
+    definition: &PracticeDefinition,
     published_by: Option<&str>,
-) -> anyhow::Result<Option<PracticeVersion>> {
-    let Some(mut definition) = super::definition(pool, practice_id).await? else {
-        return Ok(None);
-    };
-    let mut tx = pool.begin().await?;
+) -> anyhow::Result<PracticeVersion> {
+    let practice_id = &definition.practice_id;
     let id = uuid::Uuid::new_v4().to_string();
     let (number,): (i64,) = sqlx::query_as(
         "INSERT INTO practice_versions \
@@ -91,23 +115,92 @@ pub async fn publish_version(
     )
     .bind(&id)
     .bind(practice_id)
-    .bind(serde_json::to_string(&definition)?)
+    .bind(snapshot(definition)?)
     .bind(chrono::Utc::now())
     .bind(published_by)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
-    definition.current_version = Some(number);
     sqlx::query("UPDATE practices SET current_version_id = ?1 WHERE id = ?2")
         .bind(&id)
         .bind(practice_id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
-    tx.commit().await?;
-    Ok(Some(PracticeVersion {
+    if number == 1 {
+        sqlx::query(
+            "UPDATE submissions SET practice_version_id = ?1 \
+             WHERE practice_id = ?2 AND practice_version_id IS NULL",
+        )
+        .bind(&id)
+        .bind(practice_id)
+        .execute(&mut *conn)
+        .await?;
+    }
+    let mut definition = definition.clone();
+    definition.status = "publicada".into();
+    definition.current_version = Some(number);
+    Ok(PracticeVersion {
         id,
         number,
         definition,
-    }))
+    })
+}
+
+pub async fn publish_version(
+    pool: &SqlitePool,
+    practice_id: &str,
+    published_by: Option<&str>,
+) -> anyhow::Result<Option<PracticeVersion>> {
+    let Some(definition) = super::definition(pool, practice_id).await? else {
+        return Ok(None);
+    };
+    let mut tx = pool.begin().await?;
+    let version = insert_version(&mut tx, &definition, published_by).await?;
+    tx.commit().await?;
+    Ok(Some(version))
+}
+
+pub async fn publish_draft(
+    pool: &SqlitePool,
+    practice_id: &str,
+    published_by: Option<&str>,
+) -> anyhow::Result<bool> {
+    let Some(definition) = super::definition(pool, practice_id).await? else {
+        return Ok(false);
+    };
+    let mut tx = pool.begin().await?;
+    let changed = sqlx::query(
+        "UPDATE practices SET status = 'publicada' WHERE id = ?1 AND status = 'borrador'",
+    )
+    .bind(practice_id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if changed == 0 {
+        return Ok(false);
+    }
+    let (has_version,): (bool,) =
+        sqlx::query_as("SELECT current_version_id IS NOT NULL FROM practices WHERE id = ?1")
+            .bind(practice_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if !has_version {
+        insert_version(&mut tx, &definition, published_by).await?;
+    }
+    tx.commit().await?;
+    Ok(true)
+}
+
+pub async fn unchanged_since_current(
+    pool: &SqlitePool,
+    practice_id: &str,
+) -> anyhow::Result<Option<i64>> {
+    let Some(current) = current_version(pool, practice_id).await? else {
+        return Ok(None);
+    };
+    let Some(draft) = super::definition(pool, practice_id).await? else {
+        return Ok(None);
+    };
+    Ok((snapshot(&draft)? == snapshot(&current.definition)?).then_some(current.number))
 }
 
 pub async fn ensure_versions(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -148,15 +241,6 @@ async fn link_legacy_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
     tx.commit().await?;
     Ok(())
-}
-
-pub async fn has_published_version(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<bool> {
-    let row: Option<(i64,)> =
-        sqlx::query_as("SELECT 1 FROM practices WHERE id = ?1 AND current_version_id IS NOT NULL")
-            .bind(practice_id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(row.is_some())
 }
 
 pub async fn quantity_in_a_version(

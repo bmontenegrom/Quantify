@@ -723,6 +723,7 @@ export async function submitFormSubmission() {
       meta: collectMeta(),
       student_results: collectFinalResults(),
       student_comment: studentComment?.value.trim() || null,
+      practice_version: state.practiceForm?.definition?.current_version ?? null,
     });
     submitStatus.textContent = "Entrega guardada";
     showToast("Entrega guardada", "success");

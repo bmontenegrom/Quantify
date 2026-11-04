@@ -188,8 +188,11 @@ pub(super) async fn set_practice_status(
             )));
         }
     }
-    if status == "publicada" && !practices::has_published_version(&state.pool, &id).await? {
-        practices::publish_version(&state.pool, &id, Some(&user.id)).await?;
+    if status == "publicada" && practices::publish_draft(&state.pool, &id, Some(&user.id)).await? {
+        return practices::practice(&state.pool, &id)
+            .await?
+            .map(Json)
+            .ok_or_else(|| AppError::not_found("practica no encontrada"));
     }
     match practices::set_practice_status(&state.pool, &id, status).await? {
         practices::StatusChange::Done => practices::practice(&state.pool, &id)
@@ -228,6 +231,11 @@ pub(super) async fn publish_practice_version(
         return Err(AppError::bad_request(format!(
             "Todavía no se puede publicar una versión nueva: {}.",
             problems.join("; ")
+        )));
+    }
+    if let Some(number) = practices::unchanged_since_current(&state.pool, &id).await? {
+        return Err(AppError::bad_request(format!(
+            "No hay cambios desde la versión {number}: no hace falta publicar otra."
         )));
     }
     let version = practices::publish_version(&state.pool, &id, Some(&user.id))

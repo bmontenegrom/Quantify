@@ -2676,3 +2676,42 @@ async fn a_quantity_in_a_published_version_is_detected() {
         .await
         .unwrap());
 }
+
+#[tokio::test]
+async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let copy = duplicate_practice(&pool, "p2-cc", "Copia CC", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(publish_draft(&pool, &copy.id, None).await.unwrap());
+    assert!(!publish_draft(&pool, &copy.id, None).await.unwrap());
+    let (count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM practice_versions WHERE practice_id = ?1")
+            .bind(&copy.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 1);
+    let published = published_definition(&pool, &copy.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(published.status, "publicada");
+    assert_eq!(published.current_version, Some(1));
+
+    assert_eq!(
+        unchanged_since_current(&pool, &copy.id).await.unwrap(),
+        Some(1)
+    );
+    sqlx::query("UPDATE practice_results SET formula = formula || ' * 1' WHERE practice_id = ?1")
+        .bind(&copy.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        unchanged_since_current(&pool, &copy.id).await.unwrap(),
+        None
+    );
+}

@@ -139,9 +139,9 @@ function symbolFormulaPayloadFromForm(form, kind) {
 
 async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) {
   try {
-    await fn();
+    const message = await fn();
     if (resetEditing) state.editing = { kind: null, id: null };
-    state.practiceActionStatus = successMsg;
+    state.practiceActionStatus = typeof message === "string" ? message : successMsg;
   } catch (error) {
     state.practiceActionStatus = error.message;
   }
@@ -540,14 +540,11 @@ async function setPracticeStatus(practiceId, status) {
 }
 
 async function publishPracticeVersion(practiceId) {
-  try {
+  await runPracticeAction(async () => {
     const { number } = await postJson(`/api/practices/${practiceId}/versions`, {});
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    state.practiceActionStatus = `Versión ${number} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`;
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-  }
-  renderPracticesPage();
+    return `Versión ${number} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`;
+  }, "Versión publicada");
 }
 
 async function savePracticeInfo(event) {

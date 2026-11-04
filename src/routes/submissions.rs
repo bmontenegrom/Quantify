@@ -115,12 +115,6 @@ pub(super) async fn create_submission(
         ));
     }
 
-    if !practices::has_published_version(&state.pool, &practice_id).await? {
-        return Err(AppError::bad_request(
-            "La práctica todavía no tiene una versión publicada: publicala para recibir entregas.",
-        ));
-    }
-
     let submission = NewSubmission {
         submitted_by_user_id: user.id.clone(),
         course_id,
@@ -131,7 +125,9 @@ pub(super) async fn create_submission(
         analysis,
     };
 
-    let created = db::create_submission(&state.pool, &state.upload_dir, submission).await?;
+    let created = db::create_submission(&state.pool, &state.upload_dir, submission)
+        .await
+        .map_err(AppError::from_domain_or_db)?;
     Ok(Json(gate_analysis(created, &user)))
 }
 

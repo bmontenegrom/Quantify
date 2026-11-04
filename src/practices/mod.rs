@@ -67,7 +67,6 @@ pub struct PracticeDefinition {
     pub aggregates: Vec<PracticeAggregate>,
     pub parts: Vec<PracticePart>,
     pub sections: Vec<PracticeSection>,
-    #[serde(default)]
     pub current_version: Option<i64>,
 }
 
