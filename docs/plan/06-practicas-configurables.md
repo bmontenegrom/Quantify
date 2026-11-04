@@ -370,7 +370,7 @@ Cómo queda cada práctica en el modelo nuevo. Ninguna cambia sus números.
 | `viscosidad` | 1 regresión | – | `v` en vivo: nueva intermedia `v = dx/t` con `show_live` (hoy calculada en JS). |
 | `fluidos-2` | 1 regresión | – | Sin cambios. |
 | `filtros` | 1 curva (2 curvas) | – | Sin cambios. |
-| `ca-rlc` | 1 estadística, una sola pestaña (decidido) | – | Fórmulas expandidas se simplifican con encadenamiento (F4); teórico vs experimental vía `compare_with`. |
+| `ca-rlc` | 1 estadística, una sola pestaña (decidido) | – | Fórmulas encadenadas desde F4 (`I_teo = Vg/Z`…); teórico vs experimental vía `compare_with`. |
 | `hidrostatica` | Arquímedes (estadística) + Tensión superficial (estadística) | `g_ac` (hoy mal ubicado en la parte 1) | Con F9 las 3 determinaciones dejan de ser símbolos separados (`m{k}_{i}` → magnitudes repetidas por determinación). |
 
 ---
@@ -541,7 +541,23 @@ lo planeado:
 dar lo mismo que las dos viejas sobre los mismos datos); E2E de una práctica nueva de dos partes
 con distinto análisis.
 
-### F4 — Encadenamiento y resultados compartidos
+### F4 — Encadenamiento y resultados compartidos ✅ HECHA
+
+**Estado (2026-11-03)**: hecho en dos PRs. Los detalles:
+- **Composición sin reescribir texto.** Cada mensurando se propaga con una sola llamada a
+  `propagate` sobre sus hojas (magnitudes, `slope`/`intercept`, escalares de curva). El closure
+  evalúa las dependencias en orden topológico. La `u` es la de la fórmula expandida.
+- **Sin `part_id` en los resultados**, igual que en F2. Un mensurando sin sección que usa uno de
+  una parte va a esa parte. Los compartidos se recalculan en cada parte y se sacan de su salida.
+- **Motor tolerante.** Un ciclo, o depender de un mensurando que no compila, deja un aviso y
+  saltea solo los afectados. El admin rechaza los ciclos con `guard_change`.
+- **Solo mensurandos.** Las intermedias, las derivadas por punto y los agregados siguen
+  encadenando por posición, como antes.
+- **Fórmulas simplificadas** de `ca-rlc` (`Z`, `I_teo`, `V*_teo`, `phi*_teo`) y de `hidrostatica`
+  (los tres promedios). Una migración de una sola vez cambia solo las filas que tienen la
+  fórmula sembrada vieja. En los golden cambia el campo `formula`; `value` y `u` dan iguales
+  hasta 1e-9 relativo (la `u` de `phiC_teo` difiere en ~1e-11 y la de `phiL_teo` en ~1e-10:
+  ruido de la derivada numérica al cambiar cómo está escrita la fórmula).
 
 1. Resultados que referencian resultados (compartidos o de su parte), con grafo de dependencias,
    rechazo de ciclos y orden topológico; propagación compuesta contra las magnitudes de entrada
