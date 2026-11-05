@@ -30,6 +30,7 @@ Requisitos:
 Ejecutar:
 
 ```powershell
+$env:SEED_DEMO_DATA="true"
 cargo run
 ```
 
@@ -44,7 +45,8 @@ http://localhost:8080
 ```
 
 Usuarios iniciales de desarrollo. En una base sin usuarios se crea siempre el admin; el docente, el
-estudiante, su inscripción y las entregas de prueba se crean solo con `SEED_DEMO_DATA=true`:
+estudiante, su inscripción y las entregas de prueba se crean solo con `SEED_DEMO_DATA=true`. Sin
+esa variable, el primer arranque exige `SEED_ADMIN_PASSWORD`:
 
 ```text
 admin@quantify.local       / admin123

@@ -29,12 +29,8 @@ async fn main() -> anyhow::Result<()> {
     let configured_secret = env::var("APP_SECRET_KEY")
         .ok()
         .filter(|k| !k.trim().is_empty());
-    let secure_cookies = env::var("APP_SECURE_COOKIES")
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(false);
-    let demo_data = env::var("SEED_DEMO_DATA")
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(false);
+    let secure_cookies = env_flag("APP_SECURE_COOKIES");
+    let demo_data = env_flag("SEED_DEMO_DATA");
 
     let secret_key = match configured_secret {
         Some(key) => key,
@@ -78,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("connecting to database {database_url}"))?;
 
     db::migrate(&pool).await?;
-    db::run_startup_seeds(&pool, demo_data, secure_cookies).await?;
+    db::run_startup_seeds(&pool, demo_data, db::env_password("SEED_ADMIN_PASSWORD")).await?;
 
     let state = Arc::new(AppState {
         pool,
@@ -98,4 +94,10 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+fn env_flag(name: &str) -> bool {
+    env::var(name)
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false)
 }

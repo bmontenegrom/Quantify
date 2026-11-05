@@ -285,8 +285,7 @@ pub fn change_kind(
     )
 }
 
-/// Compara una versión publicada con el borrador. Los nombres, títulos, tolerancias y el orden de
-/// las listas que no afecta el cálculo son cosméticos.
+/// Compara una versión publicada con el borrador; nombres, títulos, tolerancias y orden son cosméticos.
 ///
 /// ```
 /// use quantify::db::PracticeResult;
