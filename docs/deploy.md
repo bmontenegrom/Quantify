@@ -81,4 +81,5 @@ export APP_SECURE_COOKIES="true"        # la cookie solo viaja por HTTPS
   `docente@quantify.local` y `estudiante@quantify.local`, con las contraseñas de
   `SEED_ADMIN_PASSWORD`, `SEED_TEACHER_PASSWORD` y `SEED_STUDENT_PASSWORD` (si faltan, las de
   desarrollo del README), además de entregas de prueba. Definí esas variables antes del primer
-  arranque. Si borrás una de estas cuentas, no vuelve al reiniciar.
+  arranque; si falta alguna, el server lo avisa en el log. Si borrás una de estas cuentas, no vuelve
+  al reiniciar. Si dejás la tabla de usuarios vacía, el próximo arranque las crea de nuevo.

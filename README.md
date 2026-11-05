@@ -44,7 +44,7 @@ http://localhost:8080
 ```
 
 Usuarios iniciales de desarrollo, que se crean solo si la base no tiene ningún usuario (junto con
-las entregas de prueba):
+la inscripción del estudiante y las entregas de prueba):
 
 ```text
 admin@quantify.local       / admin123

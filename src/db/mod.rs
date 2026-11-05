@@ -226,54 +226,70 @@ pub async fn next_position(
     Ok(position.0)
 }
 
-const TEST_SUBMISSIONS_PENDING: &str = "entregas-de-prueba-pendientes";
-
 pub async fn run_startup_seeds(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_practices(pool).await?;
-    seed_users(pool).await?;
-    seed_academic(pool).await?;
+    seed_course(pool).await?;
     crate::instruments::seed_instruments(pool, "fisica-experimental-i-2026").await?;
     crate::practices::seed_definitions(pool).await?;
-    if migration_applied(pool, TEST_SUBMISSIONS_PENDING).await? {
-        seed_submissions(pool).await?;
-        sqlx::query("DELETE FROM applied_migrations WHERE name = ?1")
-            .bind(TEST_SUBMISSIONS_PENDING)
-            .execute(pool)
-            .await?;
-    }
-    Ok(())
+    seed_test_data(pool).await
 }
 
-pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
+async fn seed_test_data(pool: &SqlitePool) -> anyhow::Result<()> {
     let (has_users,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM users)")
         .fetch_one(pool)
         .await?;
     if has_users {
         return Ok(());
     }
-    let users = [
+    let accounts = test_accounts();
+    let mut tx = pool.begin().await?;
+    insert_test_accounts(&mut tx, &accounts).await?;
+    enroll_test_student(&mut tx).await?;
+    insert_test_submissions(&mut tx).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+fn seed_password(variable: &str, development_default: &str) -> String {
+    env::var(variable)
+        .ok()
+        .filter(|password| !password.is_empty())
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "{variable} no está definida: la cuenta de prueba usa la contraseña de desarrollo"
+            );
+            development_default.to_string()
+        })
+}
+
+fn test_accounts() -> [(&'static str, &'static str, &'static str, String); 3] {
+    [
         (
             "admin@quantify.local",
             "Administrador",
             "admin",
-            env::var("SEED_ADMIN_PASSWORD").unwrap_or_else(|_| "admin123".into()),
+            hash_password(&seed_password("SEED_ADMIN_PASSWORD", "admin123")),
         ),
         (
             "docente@quantify.local",
             "Docente de prueba",
             "docente",
-            env::var("SEED_TEACHER_PASSWORD").unwrap_or_else(|_| "docente123".into()),
+            hash_password(&seed_password("SEED_TEACHER_PASSWORD", "docente123")),
         ),
         (
             "estudiante@quantify.local",
             "Estudiante de prueba",
             "estudiante",
-            env::var("SEED_STUDENT_PASSWORD").unwrap_or_else(|_| "estudiante123".into()),
+            hash_password(&seed_password("SEED_STUDENT_PASSWORD", "estudiante123")),
         ),
-    ];
+    ]
+}
 
-    let mut tx = pool.begin().await?;
-    for (email, display_name, role, password) in users {
+async fn insert_test_accounts(
+    conn: &mut sqlx::SqliteConnection,
+    accounts: &[(&'static str, &'static str, &'static str, String); 3],
+) -> anyhow::Result<()> {
+    for (email, display_name, role, password_hash) in accounts {
         sqlx::query(
             r#"
             INSERT INTO users (id, username, email, display_name, role, password_hash, created_at)
@@ -281,23 +297,23 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
             "#,
         )
         .bind(Uuid::new_v4().to_string())
-        .bind(email)
-        .bind(email)
-        .bind(display_name)
-        .bind(role)
-        .bind(hash_password(&password))
+        .bind(*email)
+        .bind(*email)
+        .bind(*display_name)
+        .bind(*role)
+        .bind(password_hash)
         .bind(Utc::now())
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
     }
-    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
-        .bind(TEST_SUBMISSIONS_PENDING)
-        .bind(Utc::now())
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-
     Ok(())
+}
+
+#[cfg(test)]
+pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
+    let accounts = test_accounts();
+    let mut conn = pool.acquire().await?;
+    insert_test_accounts(&mut conn, &accounts).await
 }
 
 pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f.";
@@ -437,8 +453,10 @@ async fn ensure_lab_group_columns(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
-    let course_id = "fisica-experimental-i-2026";
+const TEST_COURSE_ID: &str = "fisica-experimental-i-2026";
+
+async fn seed_course(pool: &SqlitePool) -> anyhow::Result<()> {
+    let course_id = TEST_COURSE_ID;
     let group_id = "fisica-exp-i-grupo-1";
 
     sqlx::query(
@@ -465,32 +483,6 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
     .bind(Utc::now())
     .execute(pool)
     .await?;
-
-    if let Some((student_id,)) =
-        sqlx::query_as::<_, (String,)>("SELECT id FROM users WHERE username = 'estudiante'")
-            .fetch_optional(pool)
-            .await?
-            .or(sqlx::query_as::<_, (String,)>(
-                "SELECT id FROM users WHERE email = 'estudiante@quantify.local'",
-            )
-            .fetch_optional(pool)
-            .await?)
-    {
-        enroll_course_member(pool, course_id, &student_id).await?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO group_members (group_id, user_id, created_at)
-            VALUES (?1, ?2, ?3)
-            ON CONFLICT(group_id, user_id) DO NOTHING
-            "#,
-        )
-        .bind(group_id)
-        .bind(student_id)
-        .bind(Utc::now())
-        .execute(pool)
-        .await?;
-    }
 
     for practice in [
         "p1-estadistica",
@@ -520,38 +512,64 @@ pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
+    seed_course(pool).await?;
+    let mut conn = pool.acquire().await?;
+    enroll_test_student(&mut conn).await
+}
+
+async fn test_student_id(conn: &mut sqlx::SqliteConnection) -> anyhow::Result<Option<String>> {
+    let student: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM users WHERE email = 'estudiante@quantify.local'")
+            .fetch_optional(&mut *conn)
+            .await?;
+    Ok(student.map(|(id,)| id))
+}
+
+async fn test_group_id(conn: &mut sqlx::SqliteConnection) -> anyhow::Result<String> {
+    let (group_id,): (String,) =
+        sqlx::query_as("SELECT id FROM lab_groups WHERE course_id = ?1 AND name = 'Grupo 1'")
+            .bind(TEST_COURSE_ID)
+            .fetch_one(&mut *conn)
+            .await?;
+    Ok(group_id)
+}
+
+async fn enroll_test_student(conn: &mut sqlx::SqliteConnection) -> anyhow::Result<()> {
+    let Some(student_id) = test_student_id(conn).await? else {
+        return Ok(());
+    };
+    enroll_in_course(conn, TEST_COURSE_ID, &student_id).await?;
+    let group_id = test_group_id(conn).await?;
+    sqlx::query(
+        r#"
+        INSERT INTO group_members (group_id, user_id, created_at)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(group_id, user_id) DO NOTHING
+        "#,
+    )
+    .bind(group_id)
+    .bind(student_id)
+    .bind(Utc::now())
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+#[cfg(test)]
 pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
-    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
-        .fetch_one(pool)
-        .await?;
-    if count.0 > 0 {
-        return Ok(());
-    }
+    let mut conn = pool.acquire().await?;
+    insert_test_submissions(&mut conn).await
+}
 
-    let student = sqlx::query_as::<_, (String, String)>(
-        "SELECT id, display_name FROM users WHERE email = 'estudiante@quantify.local'",
-    )
-    .fetch_optional(pool)
-    .await?;
-
-    let Some((student_id, _)) = student else {
+async fn insert_test_submissions(conn: &mut sqlx::SqliteConnection) -> anyhow::Result<()> {
+    let Some(student_id) = test_student_id(conn).await? else {
         return Ok(());
     };
-
-    let course_id = "fisica-experimental-i-2026";
-    let group_row = sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM lab_groups WHERE course_id = ?1 AND name = 'Grupo 1'",
-    )
-    .bind(course_id)
-    .fetch_optional(pool)
-    .await?;
-
-    let Some((group_id,)) = group_row else {
-        return Ok(());
-    };
-
+    let course_id = TEST_COURSE_ID;
+    let group_id = test_group_id(conn).await?;
     let now = Utc::now();
-    let mut tx = pool.begin().await?;
 
     let submissions: &[(&str, &str, &str)] = &[
         ("p1-estadistica", "pendiente", ""),
@@ -610,7 +628,7 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(score)
         .bind(comment)
         .bind(reviewed_at)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
 
         sqlx::query(
@@ -623,10 +641,9 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(&submission_id)
         .bind(&student_id)
         .bind(now)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
     }
-    tx.commit().await?;
 
     Ok(())
 }
@@ -770,48 +787,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seed_users_creates_three_only_on_an_empty_base() {
+    async fn an_interrupted_first_start_retries_all_the_test_data() {
         let (pool, _dir) = pool().await;
-        seed_users(&pool).await.unwrap();
-        seed_users(&pool).await.unwrap();
-        assert_eq!(users(&pool).await.unwrap().len(), 3);
-    }
-
-    #[tokio::test]
-    async fn an_interrupted_seed_of_users_leaves_no_partial_accounts() {
-        let (pool, _dir) = pool().await;
-        sqlx::query(
-            "CREATE TRIGGER stop_seed BEFORE INSERT ON users \
-             WHEN NEW.email = 'estudiante@quantify.local' \
-             BEGIN SELECT RAISE(ABORT, 'interrumpido'); END",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        assert!(seed_users(&pool).await.is_err());
-        assert_eq!(users(&pool).await.unwrap().len(), 0);
-
-        sqlx::query("DROP TRIGGER stop_seed")
-            .execute(&pool)
-            .await
-            .unwrap();
-        seed_users(&pool).await.unwrap();
-        assert_eq!(users(&pool).await.unwrap().len(), 3);
-    }
-
-    #[tokio::test]
-    async fn an_interrupted_first_start_retries_the_test_submissions() {
-        let (pool, _dir) = pool().await;
-        let submissions = || {
+        let count = |sql: &'static str| {
             let pool = pool.clone();
             async move {
-                let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+                let (n,): (i64,) = sqlx::query_as(sql).fetch_one(&pool).await.unwrap();
                 n
             }
         };
+        let accounts = "SELECT COUNT(*) FROM users";
+        let submissions = "SELECT COUNT(*) FROM submissions";
         sqlx::query(
             "CREATE TRIGGER stop_seed BEFORE INSERT ON report_members \
              BEGIN SELECT RAISE(ABORT, 'interrumpido'); END",
@@ -820,26 +806,24 @@ mod tests {
         .await
         .unwrap();
         assert!(run_startup_seeds(&pool).await.is_err());
-        assert_eq!(users(&pool).await.unwrap().len(), 3);
-        assert_eq!(submissions().await, 0, "no debían quedar entregas a medias");
+        assert_eq!(
+            count(accounts).await,
+            0,
+            "no debían quedar cuentas a medias"
+        );
+        assert_eq!(
+            count(submissions).await,
+            0,
+            "no debían quedar entregas a medias"
+        );
 
         sqlx::query("DROP TRIGGER stop_seed")
             .execute(&pool)
             .await
             .unwrap();
         run_startup_seeds(&pool).await.unwrap();
-        assert_eq!(submissions().await, 2);
-
-        sqlx::query("DELETE FROM submissions")
-            .execute(&pool)
-            .await
-            .unwrap();
-        run_startup_seeds(&pool).await.unwrap();
-        assert_eq!(
-            submissions().await,
-            0,
-            "el reintento debía correr una sola vez"
-        );
+        assert_eq!(count(accounts).await, 3);
+        assert_eq!(count(submissions).await, 2);
     }
 
     #[tokio::test]
@@ -855,14 +839,21 @@ mod tests {
         };
         let submissions = "SELECT COUNT(*) FROM submissions";
         let teacher = "SELECT COUNT(*) FROM users WHERE email = 'docente@quantify.local'";
+        let enrollments = "SELECT COUNT(*) FROM group_members m \
+             JOIN users u ON u.id = m.user_id WHERE u.email = 'estudiante@quantify.local'";
         assert!(
             count(submissions).await > 0,
             "la base nueva trae entregas de prueba"
         );
         assert_eq!(count(teacher).await, 1);
+        assert!(
+            count(enrollments).await > 0,
+            "la base nueva inscribe al estudiante"
+        );
 
         for sql in [
             "DELETE FROM submissions",
+            "DELETE FROM group_members",
             "DELETE FROM users WHERE email = 'docente@quantify.local'",
         ] {
             sqlx::query(sql).execute(&pool).await.unwrap();
@@ -876,6 +867,11 @@ mod tests {
             "volvieron las entregas de prueba"
         );
         assert_eq!(count(teacher).await, 0, "volvió la cuenta de prueba");
+        assert_eq!(
+            count(enrollments).await,
+            0,
+            "volvió a inscribirse el estudiante"
+        );
     }
 
     #[tokio::test]
