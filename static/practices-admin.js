@@ -519,13 +519,13 @@ function practiceLifecycleActions(practice, def) {
     <div id="practice-draft-changes"></div>`;
 }
 
-function draftChangesMarkup(practiceId, { version, kind, changes, submissions }) {
+function draftChangesMarkup(practiceId, { version, kind, changes, submissions, version_submissions: versionSubmissions }) {
   const id = escapeHtml(practiceId);
   const structural = kind === "structural";
   const list = changes.map((change) => `<li>${escapeHtml(change)}</li>`).join("");
   const explanation = structural
     ? `Publicar crea la versión ${version + 1}.${submissions ? ` Entregas existentes: ${submissions}; siguen con su versión.` : ""}`
-    : `Solo cambian nombres, títulos, tolerancias o el orden: publicar actualiza la versión ${version}, sin crear otra. Si cambiaste una tolerancia, las entregas de esa versión se comparan con la nueva.`;
+    : `Solo cambian nombres, títulos, tolerancias o el orden de la lista: publicar actualiza la versión ${version}, sin crear otra. ${versionSubmissions ? ` Si cambiaste una tolerancia, las entregas de esa versión (${versionSubmissions}) se comparan con la nueva.` : ""}`;
   return `
     <div class="edit-banner draft-changes">
       <div>
@@ -553,7 +553,7 @@ function paintDraftChanges(box, practiceId, changes) {
   const pending = changes.kind === "none" ? "" : draftChangesMarkup(practiceId, changes);
   box.innerHTML = versionUpdateMarkup(changes) + pending;
   box.querySelector("[data-practice-publish-version]")?.addEventListener("click", () => {
-    publishPracticeVersion(practiceId);
+    publishPracticeVersion(practiceId, changes.kind);
   });
 }
 
@@ -592,9 +592,9 @@ async function setPracticeStatus(practiceId, status) {
   }, STATUS_DONE[status] ?? "Estado actualizado");
 }
 
-async function publishPracticeVersion(practiceId) {
+async function publishPracticeVersion(practiceId, expectedKind) {
   await runPracticeAction(async () => {
-    const { number, new_version } = await postJson(`/api/practices/${practiceId}/versions`, {});
+    const { number, new_version } = await postJson(`/api/practices/${practiceId}/versions`, { expected_kind: expectedKind });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     return new_version
       ? `Versión ${number} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`

@@ -111,6 +111,12 @@ await withE2E({ port: PORT, dbName: "quantify-versionado.db" }, async ({ login }
   const trial = page.locator(".measurement-row--given").first();
   await trial.locator(".measure-given-value").fill("5");
   await trial.locator(".measure-given-u").fill("0.1");
+  await page.locator("#course-select").dispatchEvent("change");
+  await page.waitForLoadState("networkidle");
+  assert(
+    (await page.locator(".measurement-row--given .measure-given-value").first().inputValue()) === "5",
+    "cambiar de curso no debía borrar lo cargado",
+  );
   await page.click("#submit-button");
   await page.waitForSelector('#submit-status:has-text("no se guardó nada")', { timeout: 15_000 });
   const previewed = (await page.locator("#latest-result").textContent()) ?? "";

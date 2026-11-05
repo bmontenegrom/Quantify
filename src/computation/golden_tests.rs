@@ -49,7 +49,12 @@ fn sorted_lists(value: &mut Value) {
         Value::Object(map) => map.values_mut().for_each(sorted_lists),
         Value::Array(items) => {
             items.iter_mut().for_each(sorted_lists);
-            items.sort_by_key(|item| item.to_string());
+            if items
+                .iter()
+                .all(|item| item.is_object() || item.is_string())
+            {
+                items.sort_by_key(|item| item.to_string());
+            }
         }
         _ => {}
     }
@@ -195,7 +200,6 @@ async fn golden_practices_match() {
         for table in [
             "practice_quantities",
             "practice_results",
-            "practice_curves",
             "practice_parts",
             "practice_sections",
         ] {

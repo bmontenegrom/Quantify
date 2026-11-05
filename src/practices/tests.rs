@@ -2702,7 +2702,9 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
     assert_eq!(published.current_version, Some(1));
 
     assert!(matches!(
-        publish_checked(&pool, &copy.id, None, none).await.unwrap(),
+        publish_checked(&pool, &copy.id, None, None, none)
+            .await
+            .unwrap(),
         Publish::Unchanged(1)
     ));
     sqlx::query("UPDATE practice_results SET formula = formula || ' * 1' WHERE practice_id = ?1")
@@ -2711,7 +2713,9 @@ async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
         .await
         .unwrap();
     assert!(matches!(
-        publish_checked(&pool, &copy.id, None, none).await.unwrap(),
+        publish_checked(&pool, &copy.id, None, None, none)
+            .await
+            .unwrap(),
         Publish::Published { number: 2 }
     ));
     set_practice_status(&pool, &copy.id, "archivada")
@@ -3026,7 +3030,7 @@ async fn cosmetic_changes_update_the_current_version_without_a_new_one() {
     assert_eq!(changes(pool.clone()).await.kind, DraftChangeKind::Cosmetic);
     let before = current_version(&pool, practice).await.unwrap().unwrap();
     assert!(matches!(
-        publish_checked(&pool, practice, None, no_problems)
+        publish_checked(&pool, practice, None, None, no_problems)
             .await
             .unwrap(),
         Publish::UpdatedCurrent { number } if number == before.number
@@ -3060,7 +3064,7 @@ async fn cosmetic_changes_update_the_current_version_without_a_new_one() {
     assert_eq!(structural.kind, DraftChangeKind::Structural);
     assert_eq!(structural.changes, ["Cambia la fórmula de g1"]);
     assert!(matches!(
-        publish_checked(&pool, practice, None, no_problems)
+        publish_checked(&pool, practice, None, None, no_problems)
             .await
             .unwrap(),
         Publish::Published { number } if number == before.number + 1
@@ -3141,7 +3145,7 @@ async fn reordering_updates_the_current_version_and_records_who() {
 
     let no_problems = |_: &PracticeDefinition| Vec::new();
     assert!(matches!(
-        publish_checked(&pool, practice, Some("docente-x"), no_problems)
+        publish_checked(&pool, practice, Some("docente-x"), None, no_problems)
             .await
             .unwrap(),
         Publish::UpdatedCurrent { number } if number == before.number
@@ -3180,6 +3184,111 @@ async fn reordering_intermediates_stays_structural() {
         .unwrap();
     let found = draft_changes(&pool, practice).await.unwrap().unwrap();
     assert_eq!(found.kind, DraftChangeKind::Structural);
+    assert_eq!(found.changes, ["Cambia el orden de las intermedias"]);
+}
+
+#[tokio::test]
+async fn reordering_curves_stays_structural() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "filtros";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    assert!(def.curves.len() >= 2, "{practice} debía tener curvas");
+    move_item(&pool, Orderable::Curves, practice, &def.curves[1].id, true)
+        .await
+        .unwrap()
+        .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    assert_eq!(found.changes, ["Cambia el orden de las curvas"]);
+}
+
+#[tokio::test]
+async fn a_section_move_is_listed_next_to_a_formula_change() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p2-cc";
+    sqlx::query(
+        "UPDATE practice_results SET section_id = NULL, formula = '2*Vg_s' \
+         WHERE practice_id = ?1 AND symbol = 'P_max_e'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(
+        found.changes,
+        [
+            "Cambia la fórmula de P_max_e",
+            "Cambia la organización en secciones"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn publishing_rejects_a_draft_that_changed_kind_since_it_was_shown() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    sqlx::query(
+        "UPDATE practice_results SET formula = '2*L' WHERE practice_id = ?1 AND symbol = 'g1'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(matches!(
+        publish_checked(
+            &pool,
+            practice,
+            None,
+            Some(DraftChangeKind::Cosmetic),
+            no_problems
+        )
+        .await
+        .unwrap(),
+        Publish::KindChanged
+    ));
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(after.number, before.number);
+    assert!(matches!(
+        publish_checked(
+            &pool,
+            practice,
+            None,
+            Some(DraftChangeKind::Structural),
+            no_problems
+        )
+        .await
+        .unwrap(),
+        Publish::Published { .. }
+    ));
+}
+
+#[tokio::test]
+async fn draft_changes_count_the_submissions_of_the_current_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let first = current_version(&pool, practice).await.unwrap().unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at, practice_version_id) \
+         VALUES ('s1', 'a', 'g', 'c', ?1, '', '', '{}', '2026-10-01T00:00:00Z', ?2)",
+    )
+    .bind(practice)
+    .bind(&first.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!((found.submissions, found.version_submissions), (1, 1));
+    publish_version(&pool, practice, None).await.unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!((found.submissions, found.version_submissions), (1, 0));
 }
 
 #[tokio::test]
@@ -3262,7 +3371,7 @@ async fn an_unrelated_problem_does_not_block_a_cosmetic_update() {
 
     set("UPDATE practice_results SET name = 'Otro' WHERE practice_id = ?1 AND symbol = 'g1'").await;
     assert!(matches!(
-        publish_checked(&pool, practice, None, broken)
+        publish_checked(&pool, practice, None, None, broken)
             .await
             .unwrap(),
         Publish::UpdatedCurrent { .. }
@@ -3271,7 +3380,7 @@ async fn an_unrelated_problem_does_not_block_a_cosmetic_update() {
     set("UPDATE practice_results SET formula = '2*L' WHERE practice_id = ?1 AND symbol = 'g1'")
         .await;
     assert!(matches!(
-        publish_checked(&pool, practice, None, broken)
+        publish_checked(&pool, practice, None, None, broken)
             .await
             .unwrap(),
         Publish::Rejected(_)

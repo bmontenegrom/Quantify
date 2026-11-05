@@ -227,13 +227,28 @@ pub(super) struct PublishedVersion {
     new_version: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct PublishVersionBody {
+    #[serde(default)]
+    expected_kind: Option<practices::DraftChangeKind>,
+}
+
 pub(super) async fn publish_practice_version(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Json(body): Json<PublishVersionBody>,
 ) -> Result<Json<PublishedVersion>, AppError> {
     let user = require_teacher(&state, &headers).await?;
-    match practices::publish_checked(&state.pool, &id, Some(&user.id), publish_problems).await? {
+    match practices::publish_checked(
+        &state.pool,
+        &id,
+        Some(&user.id),
+        body.expected_kind,
+        publish_problems,
+    )
+    .await?
+    {
         practices::Publish::Published { number } => Ok(Json(PublishedVersion {
             number,
             new_version: true,
@@ -242,6 +257,9 @@ pub(super) async fn publish_practice_version(
             number,
             new_version: false,
         })),
+        practices::Publish::KindChanged => Err(AppError::bad_request(
+            "El borrador cambió desde que se mostró el aviso: revisá el resumen y volvé a publicar.",
+        )),
         practices::Publish::Rejected(problems) => Err(AppError::bad_request(format!(
             "Todavía no se puede publicar una versión nueva: {}.",
             problems.join("; ")

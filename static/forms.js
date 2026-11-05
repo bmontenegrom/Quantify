@@ -145,6 +145,8 @@ export async function loadSubmissionForm() {
     if (blocked) return;
   }
 
+  const carried =
+    previewing && state.practiceForm?.definition.practice_id === practiceId ? collectMeasurements() : null;
   try {
     const [definition, instruments] = await Promise.all([
       fetchJson(
@@ -163,6 +165,7 @@ export async function loadSubmissionForm() {
     renderMeasurementFields();
     applyPrefill();
     applyDraftPrefill();
+    if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried), [], "");
     applyPartVisibility();
   } catch (error) {
     state.practiceForm = null;
@@ -691,6 +694,7 @@ function buildMetaMap(measurements) {
 
 export async function submitFormSubmission() {
   if (!practiceSelect.value) return;
+  if (state.draftPreviewPracticeId) latestResult.classList.add("hidden");
 
   const measurements = collectMeasurements();
   const analysisKind = state.practiceForm?.definition?.analysis_kind ?? "";
@@ -757,6 +761,7 @@ export async function submitFormSubmission() {
 }
 
 async function calculateDraftPreview(measurements) {
+  if (submitButton) submitButton.disabled = true;
   submitStatus.textContent = "Calculando...";
   try {
     const analysis = await postJson(
@@ -769,6 +774,8 @@ async function calculateDraftPreview(measurements) {
     submitStatus.textContent = "Calculado con el borrador: no se guardó nada.";
   } catch (error) {
     submitStatus.textContent = error.message;
+  } finally {
+    if (submitButton) submitButton.disabled = false;
   }
 }
 
@@ -794,7 +801,7 @@ export async function openDraftPreview(practiceId) {
   showDraftPreviewChrome(true);
   const banner = document.querySelector("#draft-preview-banner");
   banner.innerHTML = `
-    <div>Estás probando el borrador. No se crea ninguna versión ni se guarda ninguna entrega.</div>
+    <div>Estás probando el borrador. No se crea ninguna versión ni se guarda ninguna entrega. Los resultados finales que cargues acá no se comparan.</div>
     <button type="button" id="draft-preview-back">Volver al editor</button>`;
   banner.querySelector("#draft-preview-back").addEventListener("click", async () => {
     exitEditMode();
@@ -816,7 +823,10 @@ export function startEditSubmission(submission) {
 }
 
 export function exitEditMode() {
-  if (state.draftPreviewPracticeId) showDraftPreviewChrome(false);
+  if (state.draftPreviewPracticeId) {
+    showDraftPreviewChrome(false);
+    state.practiceForm = null;
+  }
   state.draftPreviewPracticeId = null;
   state.editingSubmissionId = null;
   state.editingPracticeId = null;

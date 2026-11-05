@@ -175,6 +175,7 @@ pub enum Publish {
     Published { number: i64 },
     UpdatedCurrent { number: i64 },
     Unchanged(i64),
+    KindChanged,
     Rejected(Vec<String>),
     IsDraft,
     NotFound,
@@ -206,6 +207,7 @@ pub async fn publish_checked(
     pool: &SqlitePool,
     practice_id: &str,
     published_by: Option<&str>,
+    expected: Option<super::DraftChangeKind>,
     problems: impl Fn(&PracticeDefinition) -> Vec<String>,
 ) -> anyhow::Result<Publish> {
     let _guard = PUBLISHING.lock().await;
@@ -217,7 +219,14 @@ pub async fn publish_checked(
     }
     if let Some(current) = current_version(pool, practice_id).await? {
         let number = current.number;
-        match super::compare_definitions(&current.definition, &definition)?.kind {
+        let kind = super::compare_definitions(&current.definition, &definition)?.kind;
+        if kind == super::DraftChangeKind::None {
+            return Ok(Publish::Unchanged(number));
+        }
+        if expected.is_some_and(|expected| expected != kind) {
+            return Ok(Publish::KindChanged);
+        }
+        match kind {
             super::DraftChangeKind::None => return Ok(Publish::Unchanged(number)),
             super::DraftChangeKind::Cosmetic => {
                 let mut tx = pool.begin().await?;

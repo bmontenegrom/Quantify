@@ -231,10 +231,11 @@ El `id` lo genera el servidor a partir del nombre (slug único), editable solo e
   existiendo conserva su id, así las mediciones viejas se siguen leyendo. Quitar una magnitud del
   borrador no borra la fila si alguna versión publicada la referencia (se marca `removed`).
 - Cambios "cosméticos" (nombre, descripción, textos de ayuda, tolerancias, y el orden de magnitudes,
-  mensurandos, curvas, partes y secciones) se pueden aplicar a la versión vigente sin crear otra, y
+  mensurandos, partes y secciones) se pueden aplicar a la versión vigente sin crear otra, y
   queda registrado quién y cuándo (`practice_version_updates`). Los estructurales (símbolos, fórmulas,
   unidades, roles, partes, tipo de análisis, pertenencia a secciones, orden de las intermedias y
-  agregados, que se evalúan en secuencia) siempre crean versión. La UI lo explica antes de publicar ("esto crea la versión 4; las
+  agregados, que se evalúan en secuencia, y de las curvas, porque los resultados de los extremos
+  salen de los puntos de la primera) siempre crean versión. La UI lo explica antes de publicar ("esto crea la versión 4; las
   12 entregas existentes siguen con la versión 3").
 - Las entregas **se quedan en su versión** (decisión 2026-11-02). Migrar entregas de la versión N
   a la N+1 queda fuera de alcance; si aparece la necesidad, va a F10.
