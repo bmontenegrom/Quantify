@@ -3004,3 +3004,156 @@ async fn the_power_results_have_no_uncertainty_from_the_first_start() {
         assert!(!result.has_uncertainty, "{symbol}");
     }
 }
+
+#[tokio::test]
+async fn cosmetic_changes_update_the_current_version_without_a_new_one() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    let changes =
+        |pool: SqlitePool| async move { draft_changes(&pool, practice).await.unwrap().unwrap() };
+    assert_eq!(changes(pool.clone()).await.kind, DraftChangeKind::None);
+
+    sqlx::query(
+        "UPDATE practice_results SET name = 'Gravedad editada', tolerance = 3.0 \
+         WHERE practice_id = ?1 AND symbol = 'g1'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(changes(pool.clone()).await.kind, DraftChangeKind::Cosmetic);
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    assert!(matches!(
+        publish_checked(&pool, practice, None, no_problems)
+            .await
+            .unwrap(),
+        Publish::UpdatedCurrent { number } if number == before.number
+    ));
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(
+        (after.id.as_str(), after.number),
+        (before.id.as_str(), before.number)
+    );
+    assert_eq!(after.definition.current_version, Some(before.number));
+    let g1 = after
+        .definition
+        .results
+        .iter()
+        .find(|r| r.symbol == "g1")
+        .unwrap();
+    assert_eq!(
+        (g1.name.as_str(), g1.tolerance),
+        ("Gravedad editada", Some(3.0))
+    );
+    assert_eq!(changes(pool.clone()).await.kind, DraftChangeKind::None);
+
+    sqlx::query(
+        "UPDATE practice_results SET formula = '2*L' WHERE practice_id = ?1 AND symbol = 'g1'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let structural = changes(pool.clone()).await;
+    assert_eq!(structural.kind, DraftChangeKind::Structural);
+    assert_eq!(structural.changes, ["Cambia la fórmula de g1"]);
+    assert!(matches!(
+        publish_checked(&pool, practice, None, no_problems)
+            .await
+            .unwrap(),
+        Publish::Published { number } if number == before.number + 1
+    ));
+}
+
+#[tokio::test]
+async fn draft_changes_list_what_differs_and_count_submissions() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let t3 = def.quantities.iter().find(|q| q.symbol == "T3").unwrap();
+    sqlx::query("DELETE FROM practice_results WHERE practice_id = ?1 AND formula LIKE '%T3%'")
+        .bind(practice)
+        .execute(&pool)
+        .await
+        .unwrap();
+    remove_quantity(&pool, practice, &t3.id).await.unwrap();
+    create_quantity(&pool, practice, new_quantity("Tn"))
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET unit = 'ms' WHERE practice_id = ?1 AND symbol = 'T1'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at) \
+         VALUES ('s1', 'a', 'g', 'c', ?1, '', '', '{}', '2026-10-01T00:00:00Z')",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    assert_eq!(found.submissions, 1);
+    for line in [
+        "Se agrega la magnitud Tn",
+        "Se quita la magnitud T3",
+        "Cambia la magnitud T1",
+        "Se quita el mensurando g3",
+    ] {
+        assert!(
+            found.changes.iter().any(|c| c == line),
+            "{line}: {:?}",
+            found.changes
+        );
+    }
+}
+
+#[tokio::test]
+async fn reordering_alone_is_a_structural_change_with_its_own_line() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    assert!(move_item(
+        &pool,
+        Orderable::Quantities,
+        practice,
+        &def.quantities[1].id,
+        true
+    )
+    .await
+    .unwrap()
+    .unwrap());
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    assert_eq!(
+        found.changes,
+        ["Cambia el orden o la organización en secciones"]
+    );
+}
+
+#[tokio::test]
+async fn a_practice_without_a_version_has_no_draft_changes() {
+    let (pool, _dir) = setup().await;
+    let practice = create_practice(
+        &pool,
+        &NewPracticeInput {
+            name: "Nueva".into(),
+            description: "desc".into(),
+            analysis_kind: "estadistico".into(),
+        },
+        "u1",
+    )
+    .await
+    .unwrap();
+    assert!(draft_changes(&pool, &practice.id).await.unwrap().is_none());
+}

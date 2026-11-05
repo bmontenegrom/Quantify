@@ -224,6 +224,7 @@ pub(super) async fn set_practice_status(
 #[derive(Debug, Serialize)]
 pub(super) struct PublishedVersion {
     number: i64,
+    new_version: bool,
 }
 
 pub(super) async fn publish_practice_version(
@@ -233,7 +234,14 @@ pub(super) async fn publish_practice_version(
 ) -> Result<Json<PublishedVersion>, AppError> {
     let user = require_teacher(&state, &headers).await?;
     match practices::publish_checked(&state.pool, &id, Some(&user.id), publish_problems).await? {
-        practices::Publish::Published { number } => Ok(Json(PublishedVersion { number })),
+        practices::Publish::Published { number } => Ok(Json(PublishedVersion {
+            number,
+            new_version: true,
+        })),
+        practices::Publish::UpdatedCurrent { number } => Ok(Json(PublishedVersion {
+            number,
+            new_version: false,
+        })),
         practices::Publish::Rejected(problems) => Err(AppError::bad_request(format!(
             "Todavía no se puede publicar una versión nueva: {}.",
             problems.join("; ")
@@ -246,6 +254,15 @@ pub(super) async fn publish_practice_version(
         )),
         practices::Publish::NotFound => Err(AppError::not_found("practica no encontrada")),
     }
+}
+
+pub(super) async fn practice_draft_changes(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Option<practices::DraftChanges>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    Ok(Json(practices::draft_changes(&state.pool, &id).await?))
 }
 
 pub(super) async fn delete_practice(
@@ -317,6 +334,8 @@ pub(super) struct AnalyzePreviewBody {
     submission_id: Option<String>,
     #[serde(default)]
     practice_version: Option<i64>,
+    #[serde(default)]
+    draft: bool,
 }
 
 pub(super) async fn analyze_preview(
@@ -327,7 +346,11 @@ pub(super) async fn analyze_preview(
 ) -> Result<Json<computation::FormAnalysis>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada"]).await?;
+    if body.draft {
+        require_teacher(&state, &headers).await?;
+    }
     let definition = match &body.submission_id {
+        None if body.draft => load_definition(&state, &id).await?,
         Some(submission_id) => {
             ensure_submission_access(&state, &user, submission_id).await?;
             practices::submission_definition(&state.pool, submission_id)

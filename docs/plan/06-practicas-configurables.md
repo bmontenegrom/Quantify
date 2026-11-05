@@ -603,7 +603,7 @@ que la fórmula expandida).
      `u` dan iguales.
    - **Doc**: F4 se marca como hecha.
 
-### F5 — Versionado
+### F5 — Versionado ✅ HECHA
 
 1. Schema: `practice_versions`, `practices.current_version_id`,
    `submissions.practice_version_id`. Migración: versión 1 de cada práctica con la definición

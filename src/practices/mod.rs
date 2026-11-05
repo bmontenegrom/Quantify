@@ -206,6 +206,7 @@ pub struct PracticeInfoInput {
     pub description: String,
 }
 
+mod changes;
 mod crud;
 mod layout;
 mod lifecycle;
@@ -215,6 +216,7 @@ mod seed;
 mod tests;
 mod versions;
 
+pub use changes::*;
 pub use crud::*;
 pub use layout::*;
 pub use lifecycle::*;

@@ -113,7 +113,8 @@ export function selectedTableAssignment() {
 
 export async function loadSubmissionForm() {
   if (!measurementFields) return;
-  if (canReview(state.user)) return;
+  const previewing = Boolean(state.draftPreviewPracticeId);
+  if (canReview(state.user) && !previewing) return;
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
   const practiceId = practiceSelect.value;
@@ -126,14 +127,19 @@ export async function loadSubmissionForm() {
     practicaTitle.textContent = state.editingSubmissionId ? `Editar — ${practiceName}` : practiceName;
   }
   if (submitButton) submitButton.textContent = state.editingSubmissionId ? "Guardar cambios" : "Entregar";
+  if (previewing) {
+    const practiceName = state.practices.find((p) => p.id === practiceId)?.name ?? practiceId;
+    if (practicaTitle) practicaTitle.textContent = `Probar el borrador — ${practiceName}`;
+    if (submitButton) submitButton.textContent = "Calcular";
+  }
   renderPartTabs(practiceId);
-  if (!practiceId || !courseId) {
+  if (!practiceId || (!courseId && !previewing)) {
     state.practiceForm = null;
     measurementFields.innerHTML = "";
     return;
   }
 
-  if (!state.editingSubmissionId) {
+  if (!state.editingSubmissionId && !previewing) {
     const blocked = await checkExistingReport(practiceId);
     if (blocked) return;
   }
@@ -141,11 +147,13 @@ export async function loadSubmissionForm() {
   try {
     const [definition, instruments] = await Promise.all([
       fetchJson(
-        state.editingSubmissionId && state.editingPracticeId === practiceId
-          ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
-          : `/api/practices/${encodeURIComponent(practiceId)}/definition?published=true`,
+        previewing
+          ? `/api/practices/${encodeURIComponent(practiceId)}/definition`
+          : state.editingSubmissionId && state.editingPracticeId === practiceId
+            ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
+            : `/api/practices/${encodeURIComponent(practiceId)}/definition?published=true`,
       ),
-      fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`),
+      courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
     ]);
     state.practiceForm = { definition, instruments };
     state.chronometers.clear();
@@ -691,6 +699,11 @@ export async function submitFormSubmission() {
     return;
   }
 
+  if (state.draftPreviewPracticeId) {
+    await calculateDraftPreview(measurements);
+    return;
+  }
+
   if (submitButton) submitButton.disabled = true;
   const editingId = state.editingSubmissionId;
   submitStatus.textContent = editingId ? "Guardando cambios..." : "Entregando...";
@@ -742,6 +755,47 @@ export async function submitFormSubmission() {
   }
 }
 
+async function calculateDraftPreview(measurements) {
+  submitStatus.textContent = "Calculando...";
+  try {
+    const analysis = await postJson(
+      `/api/practices/${encodeURIComponent(state.draftPreviewPracticeId)}/analyze-preview`,
+      { measurements, draft: true },
+    );
+    const { formAnalysisMarkup } = await import("./analysis.js");
+    latestResult.innerHTML = formAnalysisMarkup(analysis);
+    latestResult.classList.remove("hidden");
+    submitStatus.textContent = "Calculado con el borrador: no se guardó nada.";
+  } catch (error) {
+    submitStatus.textContent = error.message;
+  }
+}
+
+export async function openDraftPreview(practiceId) {
+  state.draftPreviewPracticeId = practiceId;
+  const course = state.academic?.courses.find((c) => c.practices.some((p) => p.id === practiceId));
+  if (course) courseSelect.value = course.id;
+  const option = document.createElement("option");
+  option.value = practiceId;
+  practiceSelect.replaceChildren(option);
+  courseSelect.closest(".form-grid")?.classList.add("hidden");
+  studentComment?.closest("label")?.classList.add("hidden");
+  document.querySelector("#submission-form").noValidate = true;
+  const banner = document.querySelector("#draft-preview-banner");
+  banner.innerHTML = `
+    <div>Estás probando el borrador. No se crea ninguna versión ni se guarda ninguna entrega.</div>
+    <button type="button" id="draft-preview-back">Volver al editor</button>`;
+  banner.classList.remove("hidden");
+  banner.querySelector("#draft-preview-back").addEventListener("click", async () => {
+    exitEditMode();
+    const { selectView } = await import("./navigation.js");
+    selectView("practices");
+  });
+  const { selectView } = await import("./navigation.js");
+  selectView("practica");
+  await loadSubmissionForm();
+}
+
 export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
   state.editingPracticeId = submission.practice_id;
@@ -752,6 +806,7 @@ export function startEditSubmission(submission) {
 }
 
 export function exitEditMode() {
+  state.draftPreviewPracticeId = null;
   state.editingSubmissionId = null;
   state.editingPracticeId = null;
   state.editPrefillComment = null;
@@ -861,7 +916,7 @@ export function applyPrefill() {
 }
 
 function applyDraftPrefill() {
-  if (state.editingSubmissionId || state.restoringCancelledSubmission) return;
+  if (state.draftPreviewPracticeId || state.editingSubmissionId || state.restoringCancelledSubmission) return;
   const draft = loadDraft();
   if (!draft) return;
   applyMeasurementPrefill(

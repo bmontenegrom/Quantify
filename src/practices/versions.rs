@@ -173,6 +173,7 @@ static PUBLISHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub enum Publish {
     Published { number: i64 },
+    UpdatedCurrent { number: i64 },
     Unchanged(i64),
     Rejected(Vec<String>),
     IsDraft,
@@ -218,8 +219,24 @@ pub async fn publish_checked(
     if !found.is_empty() {
         return Ok(Publish::Rejected(found));
     }
-    if let Some(number) = unchanged(pool, &definition).await? {
-        return Ok(Publish::Unchanged(number));
+    if let Some(current) = current_version(pool, practice_id).await? {
+        let number = current.number;
+        match super::compare_definitions(&current.definition, &definition)?.kind {
+            super::DraftChangeKind::None => return Ok(Publish::Unchanged(number)),
+            super::DraftChangeKind::Cosmetic => {
+                sqlx::query(
+                    "UPDATE practice_versions \
+                     SET definition_json = json_set(?1, '$.current_version', number) \
+                     WHERE id = ?2",
+                )
+                .bind(snapshot(&definition)?)
+                .bind(&current.id)
+                .execute(pool)
+                .await?;
+                return Ok(Publish::UpdatedCurrent { number });
+            }
+            super::DraftChangeKind::Structural => {}
+        }
     }
     let mut tx = pool.begin().await?;
     let version = insert_version(&mut tx, &definition, published_by).await?;
@@ -260,13 +277,6 @@ pub async fn publish_draft(
     insert_version(&mut tx, &definition, published_by).await?;
     tx.commit().await?;
     Ok(DraftPublish::Published)
-}
-
-async fn unchanged(pool: &SqlitePool, draft: &PracticeDefinition) -> anyhow::Result<Option<i64>> {
-    let Some(current) = current_version(pool, &draft.practice_id).await? else {
-        return Ok(None);
-    };
-    Ok((snapshot(draft)? == snapshot(&current.definition)?).then_some(current.number))
 }
 
 pub async fn ensure_versions(pool: &SqlitePool) -> anyhow::Result<()> {

@@ -296,9 +296,12 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("[data-practice-status]").forEach((btn) => {
     btn.addEventListener("click", () => setPracticeStatus(btn.dataset.practiceId, btn.dataset.practiceStatus));
   });
-  practiceWorkspace.querySelector("[data-practice-publish-version]")?.addEventListener("click", (e) => {
-    publishPracticeVersion(e.currentTarget.dataset.practiceId);
+  practiceWorkspace.querySelector("[data-practice-try-draft]")?.addEventListener("click", async (e) => {
+    const practiceId = e.currentTarget.dataset.practiceId;
+    const { openDraftPreview } = await import("./forms.js");
+    await openDraftPreview(practiceId);
   });
+  renderDraftChanges(practice.id);
   practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
     deletePractice(e.currentTarget.dataset.practiceId);
   });
@@ -503,10 +506,7 @@ async function duplicatePractice(practiceId) {
 function practiceLifecycleActions(practice, def) {
   const id = escapeHtml(practice.id);
   const version = def?.current_version;
-  const versionInfo = version
-    ? `<span class="submission-meta">Versión ${version}</span>
-      <button type="button" data-practice-publish-version data-practice-id="${id}">Publicar versión ${version + 1}</button>`
-    : "";
+  const versionInfo = version ? `<span class="submission-meta">Versión ${version}</span>` : "";
   const buttons = {
     borrador: `<button type="button" data-practice-status="publicada" data-practice-id="${id}">Publicar</button>
       <button type="button" class="btn-danger" data-practice-delete data-practice-id="${id}">Eliminar</button>`,
@@ -514,7 +514,44 @@ function practiceLifecycleActions(practice, def) {
     archivada: `<button type="button" data-practice-status="publicada" data-practice-id="${id}">Restaurar</button>`,
   };
   const publishedActions = practice.status === "borrador" ? "" : versionInfo;
-  return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""} ${publishedActions}</div>`;
+  const tryDraft = `<button type="button" data-practice-try-draft data-practice-id="${id}">Probar el borrador</button>`;
+  return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""} ${publishedActions} ${tryDraft}</div>
+    <div id="practice-draft-changes"></div>`;
+}
+
+function draftChangesMarkup(practiceId, { version, kind, changes, submissions }) {
+  const id = escapeHtml(practiceId);
+  const structural = kind === "structural";
+  const list = changes.map((change) => `<li>${escapeHtml(change)}</li>`).join("");
+  const explanation = structural
+    ? `Publicar crea la versión ${version + 1}.${submissions ? ` Entregas existentes: ${submissions}; siguen con su versión.` : ""}`
+    : `Solo cambian nombres, títulos o tolerancias: publicar actualiza la versión ${version}, sin crear otra.`;
+  return `
+    <div class="edit-banner draft-changes">
+      <div>
+        <strong>Cambios sin publicar</strong>
+        ${list ? `<ul>${list}</ul>` : ""}
+        <p class="submission-meta">${explanation}</p>
+      </div>
+      <button type="button" data-practice-publish-version data-practice-id="${id}">${structural ? `Publicar versión ${version + 1}` : `Actualizar versión ${version}`}</button>
+    </div>`;
+}
+
+async function renderDraftChanges(practiceId) {
+  const box = practiceWorkspace.querySelector("#practice-draft-changes");
+  if (!box) return;
+  let changes;
+  try {
+    changes = await fetchJson(`/api/practices/${practiceId}/draft-changes`);
+  } catch (error) {
+    box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+    return;
+  }
+  if (!changes || changes.kind === "none") return;
+  box.innerHTML = draftChangesMarkup(practiceId, changes);
+  box.querySelector("[data-practice-publish-version]").addEventListener("click", () => {
+    publishPracticeVersion(practiceId);
+  });
 }
 
 function renderPracticeInfoForm(practice) {
@@ -541,9 +578,11 @@ async function setPracticeStatus(practiceId, status) {
 
 async function publishPracticeVersion(practiceId) {
   await runPracticeAction(async () => {
-    const { number } = await postJson(`/api/practices/${practiceId}/versions`, {});
+    const { number, new_version } = await postJson(`/api/practices/${practiceId}/versions`, {});
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
-    return `Versión ${number} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`;
+    return new_version
+      ? `Versión ${number} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`
+      : `Versión ${number} actualizada, sin crear otra.`;
   }, "Versión publicada");
 }
 
