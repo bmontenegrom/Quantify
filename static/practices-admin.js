@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel } from "./lib.js";
+import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel, formatDate } from "./lib.js";
 import { selectView } from "./navigation.js";
 
 const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
@@ -525,7 +525,7 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions })
   const list = changes.map((change) => `<li>${escapeHtml(change)}</li>`).join("");
   const explanation = structural
     ? `Publicar crea la versión ${version + 1}.${submissions ? ` Entregas existentes: ${submissions}; siguen con su versión.` : ""}`
-    : `Solo cambian nombres, títulos o tolerancias: publicar actualiza la versión ${version}, sin crear otra. Si cambiaste una tolerancia, las entregas de esa versión se comparan con la nueva.`;
+    : `Solo cambian nombres, títulos, tolerancias o el orden: publicar actualiza la versión ${version}, sin crear otra. Si cambiaste una tolerancia, las entregas de esa versión se comparan con la nueva.`;
   return `
     <div class="edit-banner draft-changes">
       <div>
@@ -539,13 +539,20 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions })
 
 let lastDraftChanges = null;
 
+function versionUpdateMarkup({ version, last_update: update }) {
+  if (!update) return "";
+  const by = update.updated_by ? ` por ${escapeHtml(update.updated_by)}` : "";
+  return `<p class="submission-meta version-update">Versión ${version} actualizada${by} el ${escapeHtml(formatDate(update.updated_at))}.</p>`;
+}
+
 function paintDraftChanges(box, practiceId, changes) {
-  if (!changes || changes.kind === "none") {
+  if (!changes) {
     box.replaceChildren();
     return;
   }
-  box.innerHTML = draftChangesMarkup(practiceId, changes);
-  box.querySelector("[data-practice-publish-version]").addEventListener("click", () => {
+  const pending = changes.kind === "none" ? "" : draftChangesMarkup(practiceId, changes);
+  box.innerHTML = versionUpdateMarkup(changes) + pending;
+  box.querySelector("[data-practice-publish-version]")?.addEventListener("click", () => {
     publishPracticeVersion(practiceId);
   });
 }

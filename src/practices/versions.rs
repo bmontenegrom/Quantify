@@ -220,6 +220,7 @@ pub async fn publish_checked(
         match super::compare_definitions(&current.definition, &definition)?.kind {
             super::DraftChangeKind::None => return Ok(Publish::Unchanged(number)),
             super::DraftChangeKind::Cosmetic => {
+                let mut tx = pool.begin().await?;
                 sqlx::query(
                     "UPDATE practice_versions \
                      SET definition_json = json_set(?1, '$.current_version', number) \
@@ -227,8 +228,19 @@ pub async fn publish_checked(
                 )
                 .bind(snapshot(&definition)?)
                 .bind(&current.id)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await?;
+                sqlx::query(
+                    "INSERT INTO practice_version_updates (id, version_id, updated_at, updated_by) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                )
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(&current.id)
+                .bind(chrono::Utc::now())
+                .bind(published_by)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
                 return Ok(Publish::UpdatedCurrent { number });
             }
             super::DraftChangeKind::Structural => {}

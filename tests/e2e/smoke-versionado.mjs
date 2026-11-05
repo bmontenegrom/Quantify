@@ -88,6 +88,7 @@ await withE2E({ port: PORT, dbName: "quantify-versionado.db" }, async ({ login }
   );
   await page.waitForLoadState("networkidle");
   assert((await page.locator(".draft-changes").count()) === 0, "el aviso debía irse al actualizar");
+  await page.waitForSelector('.version-update:has-text("Versión 1 actualizada por Docente")');
 
   step("docente: cambia la fórmula a 3*x; el aviso resume el cambio y cuenta las entregas");
   await apiPost(page, `${base}/results/${y.id}`, { ...cosmetic, name: "Salida editada", formula: "3*x" });

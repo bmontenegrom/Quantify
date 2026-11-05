@@ -514,6 +514,18 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(pool)
     .await?;
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_version_updates (
+            id TEXT PRIMARY KEY,
+            version_id TEXT NOT NULL REFERENCES practice_versions(id) ON DELETE CASCADE,
+            updated_at TEXT NOT NULL,
+            updated_by TEXT
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
     add_column_if_missing(
         pool,
         "practices",

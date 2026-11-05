@@ -4,6 +4,7 @@ use serde_json::Value;
 use sqlx::SqlitePool;
 
 const COSMETIC_KEYS: [&str; 3] = ["name", "title", "tolerance"];
+const FREELY_ORDERED: [&str; 5] = ["quantities", "results", "curves", "parts", "sections"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -25,6 +26,13 @@ pub struct DraftChanges {
     pub kind: DraftChangeKind,
     pub changes: Vec<String>,
     pub submissions: i64,
+    pub last_update: Option<VersionUpdate>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct VersionUpdate {
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub updated_by: Option<String>,
 }
 
 struct Item {
@@ -50,6 +58,27 @@ fn shape<T: Serialize>(value: &T, keys: &[&str]) -> anyhow::Result<Value> {
     let mut value = serde_json::to_value(value)?;
     strip(&mut value, keys);
     Ok(value)
+}
+
+fn sort_strings(value: Option<&mut Value>) {
+    if let Some(Value::Array(items)) = value {
+        items.sort_by_key(|item| item.to_string());
+    }
+}
+
+fn ignoring_order(mut definition: Value) -> Value {
+    for key in FREELY_ORDERED {
+        if let Some(Value::Array(items)) = definition.get_mut(key) {
+            items.sort_by_key(|item| item["id"].to_string());
+            if key == "sections" {
+                for section in items.iter_mut() {
+                    sort_strings(section.get_mut("quantities"));
+                    sort_strings(section.get_mut("results"));
+                }
+            }
+        }
+    }
+    definition
 }
 
 fn diff_items<T: Serialize>(
@@ -166,12 +195,13 @@ fn list_changes(
         &mut changes,
     )?;
     if changes.is_empty() {
-        changes.push("Cambia el orden o la organización en secciones".to_string());
+        changes.push("Cambia la organización en secciones".to_string());
     }
     Ok(changes)
 }
 
-/// Compara una versión publicada con el borrador. Los nombres, títulos y tolerancias son cosméticos.
+/// Compara una versión publicada con el borrador. Los nombres, títulos, tolerancias y el orden de
+/// las listas que no afecta el cálculo son cosméticos.
 ///
 /// ```
 /// use quantify::db::PracticeResult;
@@ -202,16 +232,16 @@ pub fn compare_definitions(
 ) -> anyhow::Result<DefinitionComparison> {
     let volatile = ["status", "current_version", "position"];
     let comparable = [volatile.as_slice(), COSMETIC_KEYS.as_slice()].concat();
-    let unchanged = |keys: &[&str]| -> anyhow::Result<bool> {
-        Ok(shape(published, keys)? == shape(draft, keys)?)
+    let structure = |definition: &PracticeDefinition| -> anyhow::Result<Value> {
+        Ok(ignoring_order(shape(definition, &comparable)?))
     };
-    if !unchanged(&comparable)? {
+    if structure(published)? != structure(draft)? {
         return Ok(DefinitionComparison {
             kind: DraftChangeKind::Structural,
             changes: list_changes(published, draft)?,
         });
     }
-    let kind = if unchanged(&volatile)? {
+    let kind = if shape(published, &volatile)? == shape(draft, &volatile)? {
         DraftChangeKind::None
     } else {
         DraftChangeKind::Cosmetic
@@ -238,10 +268,19 @@ pub async fn draft_changes(
             .bind(practice_id)
             .fetch_one(pool)
             .await?;
+    let last_update: Option<VersionUpdate> = sqlx::query_as(
+        "SELECT v.updated_at, u.display_name AS updated_by \
+         FROM practice_version_updates v LEFT JOIN users u ON u.id = v.updated_by \
+         WHERE v.version_id = ?1 ORDER BY v.updated_at DESC, v.rowid DESC LIMIT 1",
+    )
+    .bind(&current.id)
+    .fetch_optional(pool)
+    .await?;
     Ok(Some(DraftChanges {
         version: current.number,
         kind: comparison.kind,
         changes: comparison.changes,
         submissions,
+        last_update,
     }))
 }

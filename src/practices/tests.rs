@@ -3118,27 +3118,85 @@ async fn draft_changes_list_what_differs_and_count_submissions() {
 }
 
 #[tokio::test]
-async fn reordering_alone_is_a_structural_change_with_its_own_line() {
+async fn reordering_updates_the_current_version_and_records_who() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
     let practice = "p1-estadistica";
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    assert!(draft_changes(&pool, practice)
+        .await
+        .unwrap()
+        .unwrap()
+        .last_update
+        .is_none());
+    let moved = before.definition.quantities[1].id.clone();
+    assert_eq!(
+        move_item(&pool, Orderable::Quantities, practice, &moved, true)
+            .await
+            .unwrap(),
+        Some(true)
+    );
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    assert!(matches!(
+        publish_checked(&pool, practice, Some("docente-x"), no_problems)
+            .await
+            .unwrap(),
+        Publish::UpdatedCurrent { number } if number == before.number
+    ));
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(after.definition.quantities[0].id, moved);
+    let (who,): (String,) =
+        sqlx::query_as("SELECT updated_by FROM practice_version_updates WHERE version_id = ?1")
+            .bind(&after.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(who, "docente-x");
+    assert!(draft_changes(&pool, practice)
+        .await
+        .unwrap()
+        .unwrap()
+        .last_update
+        .is_some());
+}
+
+#[tokio::test]
+async fn reordering_intermediates_stays_structural() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "filtros";
     let def = definition(&pool, practice).await.unwrap().unwrap();
-    assert!(move_item(
-        &pool,
-        Orderable::Quantities,
-        practice,
-        &def.quantities[1].id,
-        true
-    )
-    .await
-    .unwrap()
-    .unwrap());
+    assert!(
+        def.intermediates.len() >= 2,
+        "{practice} debía tener intermedias"
+    );
+    sqlx::query("UPDATE practice_intermediates SET position = -position WHERE practice_id = ?1")
+        .bind(practice)
+        .execute(&pool)
+        .await
+        .unwrap();
     let found = draft_changes(&pool, practice).await.unwrap().unwrap();
     assert_eq!(found.kind, DraftChangeKind::Structural);
-    assert_eq!(
-        found.changes,
-        ["Cambia el orden o la organización en secciones"]
-    );
+}
+
+#[tokio::test]
+async fn moving_a_result_to_another_section_stays_structural() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p2-cc";
+    sqlx::query(
+        "UPDATE practice_results SET section_id = NULL WHERE practice_id = ?1 AND symbol = 'P_max_e'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    assert_eq!(found.changes, ["Cambia la organización en secciones"]);
 }
 
 #[tokio::test]
