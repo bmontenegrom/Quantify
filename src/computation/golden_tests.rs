@@ -44,6 +44,22 @@ fn strip_ids(value: &mut Value) {
     }
 }
 
+fn sorted_lists(value: &mut Value) {
+    match value {
+        Value::Object(map) => map.values_mut().for_each(sorted_lists),
+        Value::Array(items) => {
+            items.iter_mut().for_each(sorted_lists);
+            if items
+                .iter()
+                .all(|item| item.is_object() || item.is_string())
+            {
+                items.sort_by_key(|item| item.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
 fn diff(path: &str, actual: &Value, expected: &Value) -> Option<String> {
     match (actual, expected) {
         (Value::Number(a), Value::Number(e)) => {
@@ -179,6 +195,31 @@ async fn golden_practices_match() {
         };
         if let Some(d) = diff("", &actual, &expected) {
             failures.push(format!("{}: {d}", input.practice_id));
+        }
+
+        for table in [
+            "practice_quantities",
+            "practice_results",
+            "practice_parts",
+            "practice_sections",
+        ] {
+            sqlx::query(&format!(
+                "UPDATE {table} SET position = -position WHERE practice_id = ?1"
+            ))
+            .bind(&input.practice_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let reordered = analyze(&pool, &input.practice_id, &measurements)
+            .await
+            .unwrap_or_else(|e| panic!("{}: analyze falló: {e:#}", input.practice_id));
+        let mut reordered = serde_json::to_value(&reordered).unwrap();
+        strip_ids(&mut reordered);
+        sorted_lists(&mut reordered);
+        sorted_lists(&mut actual);
+        if let Some(d) = diff("", &reordered, &actual) {
+            failures.push(format!("{}: al reordenar, {d}", input.practice_id));
         }
     }
     assert!(

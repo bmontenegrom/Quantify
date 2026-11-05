@@ -149,6 +149,8 @@ pub fn api_router(state: SharedState) -> Router {
             post(update_practice).delete(delete_practice),
         )
         .route("/practices/{id}/duplicate", post(duplicate_practice))
+        .route("/practices/{id}/versions", post(publish_practice_version))
+        .route("/practices/{id}/draft-changes", get(practice_draft_changes))
         .route("/practices/{id}/parts", post(create_part))
         .route(
             "/practices/{id}/parts/{pid}",
@@ -245,6 +247,7 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/submissions/invitations", get(submission_invitations))
         .route("/submissions/existing", get(existing_report))
         .route("/submissions/{id}/edit", post(edit_form_submission))
+        .route("/submissions/{id}/definition", get(submission_definition))
         .route(
             "/submissions/{id}",
             get(submission_detail).delete(cancel_submission),
@@ -327,6 +330,28 @@ fn is_valid_email(email: &str) -> bool {
         return false;
     };
     !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
+}
+
+async fn ensure_submission_access(
+    state: &SharedState,
+    user: &db::AuthUser,
+    submission_id: &str,
+) -> Result<(), AppError> {
+    ensure_submission_member(state, user, submission_id, "no tenes acceso a esta entrega").await
+}
+
+async fn ensure_submission_member(
+    state: &SharedState,
+    user: &db::AuthUser,
+    submission_id: &str,
+    forbidden: &str,
+) -> Result<(), AppError> {
+    if matches!(user.role.as_str(), "docente" | "admin")
+        || db::is_accepted_member(&state.pool, submission_id, &user.id).await?
+    {
+        return Ok(());
+    }
+    Err(AppError::forbidden(forbidden))
 }
 
 async fn current_user(state: &SharedState, headers: &HeaderMap) -> Result<db::AuthUser, AppError> {

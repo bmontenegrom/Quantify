@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel } from "./lib.js";
+import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel, formatDate } from "./lib.js";
 import { selectView } from "./navigation.js";
 
 const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
@@ -139,9 +139,9 @@ function symbolFormulaPayloadFromForm(form, kind) {
 
 async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) {
   try {
-    await fn();
+    const message = await fn();
     if (resetEditing) state.editing = { kind: null, id: null };
-    state.practiceActionStatus = successMsg;
+    state.practiceActionStatus = typeof message === "string" ? message : successMsg;
   } catch (error) {
     state.practiceActionStatus = error.message;
   }
@@ -228,7 +228,7 @@ export function renderPracticesPage() {
         <button type="button" class="back-link" id="practice-workspace-back">Volver al listado</button>
         <h3>${escapeHtml(practice.name)}</h3>
         <p class="submission-meta">${escapeHtml(practice.description)}</p>
-        ${practiceLifecycleActions(practice)}
+        ${practiceLifecycleActions(practice, def)}
       </div>
       <div class="metrics compact-metrics">
         <div class="metric">
@@ -296,6 +296,12 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("[data-practice-status]").forEach((btn) => {
     btn.addEventListener("click", () => setPracticeStatus(btn.dataset.practiceId, btn.dataset.practiceStatus));
   });
+  practiceWorkspace.querySelector("[data-practice-try-draft]")?.addEventListener("click", async (e) => {
+    const practiceId = e.currentTarget.dataset.practiceId;
+    const { openDraftPreview } = await import("./forms.js");
+    await openDraftPreview(practiceId);
+  });
+  if (def?.current_version) renderDraftChanges(practice.id);
   practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
     deletePractice(e.currentTarget.dataset.practiceId);
   });
@@ -497,15 +503,74 @@ async function duplicatePractice(practiceId) {
   }
 }
 
-function practiceLifecycleActions(practice) {
+function practiceLifecycleActions(practice, def) {
   const id = escapeHtml(practice.id);
+  const version = def?.current_version;
+  const versionInfo = version ? `<span class="submission-meta">Versión ${version}</span>` : "";
   const buttons = {
     borrador: `<button type="button" data-practice-status="publicada" data-practice-id="${id}">Publicar</button>
       <button type="button" class="btn-danger" data-practice-delete data-practice-id="${id}">Eliminar</button>`,
     publicada: `<button type="button" data-practice-status="archivada" data-practice-id="${id}">Archivar</button>`,
     archivada: `<button type="button" data-practice-status="publicada" data-practice-id="${id}">Restaurar</button>`,
   };
-  return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""}</div>`;
+  const publishedActions = practice.status === "borrador" ? "" : versionInfo;
+  const tryDraft = `<button type="button" data-practice-try-draft data-practice-id="${id}">Probar el borrador</button>`;
+  return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""} ${publishedActions} ${tryDraft}</div>
+    <div id="practice-draft-changes"></div>`;
+}
+
+function draftChangesMarkup(practiceId, { version, kind, changes, submissions, version_submissions: versionSubmissions }) {
+  const id = escapeHtml(practiceId);
+  const structural = kind === "structural";
+  const list = changes.map((change) => `<li>${escapeHtml(change)}</li>`).join("");
+  const explanation = structural
+    ? `Publicar crea la versión ${version + 1}.${submissions ? ` Entregas existentes: ${submissions}; siguen con su versión.` : ""}`
+    : `Solo cambian nombres, títulos, tolerancias o el orden de la lista: publicar actualiza la versión ${version}, sin crear otra.${list && versionSubmissions ? ` Las entregas de esa versión (${versionSubmissions}) se comparan con la tolerancia nueva.` : ""}`;
+  return `
+    <div class="edit-banner draft-changes">
+      <div>
+        <strong>Cambios sin publicar</strong>
+        ${list ? `<ul>${list}</ul>` : ""}
+        <p class="submission-meta">${explanation}</p>
+      </div>
+      <button type="button" data-practice-publish-version data-practice-id="${id}">${structural ? `Publicar versión ${version + 1}` : `Actualizar versión ${version}`}</button>
+    </div>`;
+}
+
+let lastDraftChanges = null;
+let draftChangesRequest = 0;
+
+function versionUpdateMarkup({ version, last_update: update }) {
+  if (!update) return "";
+  const by = update.updated_by ? ` por ${escapeHtml(update.updated_by)}` : "";
+  return `<p class="submission-meta version-update">Versión ${version} actualizada${by} el ${escapeHtml(formatDate(update.updated_at))}.</p>`;
+}
+
+function paintDraftChanges(box, practiceId, changes) {
+  if (!changes) {
+    box.replaceChildren();
+    return;
+  }
+  const pending = changes.kind === "none" ? "" : draftChangesMarkup(practiceId, changes);
+  box.innerHTML = versionUpdateMarkup(changes) + pending;
+  box.querySelector("[data-practice-publish-version]")?.addEventListener("click", () => {
+    publishPracticeVersion(practiceId, changes.fingerprint);
+  });
+}
+
+async function renderDraftChanges(practiceId) {
+  const box = practiceWorkspace.querySelector("#practice-draft-changes");
+  if (!box) return;
+  if (lastDraftChanges?.practiceId === practiceId) paintDraftChanges(box, practiceId, lastDraftChanges.changes);
+  const request = ++draftChangesRequest;
+  try {
+    const changes = await fetchJson(`/api/practices/${practiceId}/draft-changes`);
+    if (request !== draftChangesRequest) return;
+    lastDraftChanges = { practiceId, changes };
+    paintDraftChanges(box, practiceId, changes);
+  } catch (error) {
+    box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+  }
 }
 
 function renderPracticeInfoForm(practice) {
@@ -524,7 +589,21 @@ async function setPracticeStatus(practiceId, status) {
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/status`, { status });
     await refreshPractices();
+    if (state.practiceDefinition?.practice_id === practiceId) {
+      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    }
   }, STATUS_DONE[status] ?? "Estado actualizado");
+}
+
+async function publishPracticeVersion(practiceId, fingerprint) {
+  lastDraftChanges = null;
+  await runPracticeAction(async () => {
+    const { number, new_version } = await postJson(`/api/practices/${practiceId}/versions`, { expected_fingerprint: fingerprint });
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    return new_version
+      ? `Versión ${number} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`
+      : `Versión ${number} actualizada, sin crear otra.`;
+  }, "Versión publicada");
 }
 
 async function savePracticeInfo(event) {
@@ -1005,11 +1084,14 @@ async function saveEditQuantity(event) {
 }
 
 async function deletePracticeQuantity(qid, practiceId) {
-  if (!window.confirm("¿Eliminar esta magnitud? Esta accion no se puede deshacer.")) return;
+  if (!window.confirm("¿Quitar esta magnitud del borrador? Esta accion no se puede deshacer.")) return;
   await runPracticeAction(
     async () => {
-      await deleteJson(`/api/practices/${practiceId}/quantities/${qid}`);
+      const { retired } = await deleteJson(`/api/practices/${practiceId}/quantities/${qid}`);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      return retired
+        ? "Magnitud quitada del borrador: sigue en la versión vigente hasta que publiques la siguiente."
+        : "Magnitud eliminada";
     },
     "Magnitud eliminada",
     { resetEditing: true },

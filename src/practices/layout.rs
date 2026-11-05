@@ -258,12 +258,12 @@ pub async fn set_member_section(
             return Ok(false);
         }
     }
-    let table = match member {
-        SectionMember::Quantity => "practice_quantities",
-        SectionMember::Result => "practice_results",
+    let (table, live) = match member {
+        SectionMember::Quantity => ("practice_quantities", "AND removed = 0"),
+        SectionMember::Result => ("practice_results", ""),
     };
     let changed = sqlx::query(&format!(
-        "UPDATE {table} SET section_id = ?3 WHERE id = ?2 AND practice_id = ?1"
+        "UPDATE {table} SET section_id = ?3 WHERE id = ?2 AND practice_id = ?1 {live}"
     ))
     .bind(practice_id)
     .bind(member_id)

@@ -492,6 +492,54 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
     add_column_if_missing(pool, "practice_parts", "analysis_kind", "TEXT").await?;
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "removed",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_versions (
+            id TEXT PRIMARY KEY,
+            practice_id TEXT NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
+            number INTEGER NOT NULL,
+            definition_json TEXT NOT NULL,
+            published_at TEXT NOT NULL,
+            published_by TEXT,
+            UNIQUE(practice_id, number)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS practice_version_updates (
+            id TEXT PRIMARY KEY,
+            version_id TEXT NOT NULL REFERENCES practice_versions(id) ON DELETE CASCADE,
+            updated_at TEXT NOT NULL,
+            updated_by TEXT
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    add_column_if_missing(
+        pool,
+        "practices",
+        "current_version_id",
+        "TEXT REFERENCES practice_versions(id)",
+    )
+    .await?;
+    add_column_if_missing(
+        pool,
+        "submissions",
+        "practice_version_id",
+        "TEXT REFERENCES practice_versions(id)",
+    )
+    .await?;
     for table in ["practice_quantities", "practice_results"] {
         add_column_if_missing(
             pool,
@@ -618,21 +666,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
-    for (practice_id, symbol) in [
-        ("p1-estadistica", "g"),
-        ("p3-relajacion", "tau_exp"),
-        ("fluidos-1", "mu"),
-        ("viscosidad", "mu"),
-        ("fluidos-2", "M_medio"),
-    ] {
-        sqlx::query(
-            "UPDATE practice_results SET is_final = 1 WHERE practice_id = ?1 AND symbol = ?2",
-        )
-        .bind(practice_id)
-        .bind(symbol)
-        .execute(pool)
-        .await?;
-    }
 
     add_column_if_missing(
         pool,
@@ -656,6 +689,39 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 1",
     )
     .await?;
+
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "optional",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+
+    backfill_result_flags(pool).await
+}
+
+const RESULT_FLAGS_BACKFILL: &str = "2026-11-backfill-is-final-y-has-uncertainty";
+
+async fn backfill_result_flags(pool: &SqlitePool) -> anyhow::Result<()> {
+    if migration_applied(pool, RESULT_FLAGS_BACKFILL).await? {
+        return Ok(());
+    }
+    for (practice_id, symbol) in [
+        ("p1-estadistica", "g"),
+        ("p3-relajacion", "tau_exp"),
+        ("fluidos-1", "mu"),
+        ("viscosidad", "mu"),
+        ("fluidos-2", "M_medio"),
+    ] {
+        sqlx::query(
+            "UPDATE practice_results SET is_final = 1 WHERE practice_id = ?1 AND symbol = ?2",
+        )
+        .bind(practice_id)
+        .bind(symbol)
+        .execute(pool)
+        .await?;
+    }
     for (practice_id, symbol) in [
         ("p2-cc", "P_max_e"),
         ("p2-cc", "P_max_t"),
@@ -670,15 +736,24 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
     }
+    mark_migration_applied(pool, RESULT_FLAGS_BACKFILL).await
+}
 
-    add_column_if_missing(
-        pool,
-        "practice_quantities",
-        "optional",
-        "INTEGER NOT NULL DEFAULT 0",
-    )
-    .await?;
+pub(crate) async fn migration_applied(pool: &SqlitePool, name: &str) -> anyhow::Result<bool> {
+    let (count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
+            .bind(name)
+            .fetch_one(pool)
+            .await?;
+    Ok(count > 0)
+}
 
+pub(crate) async fn mark_migration_applied(pool: &SqlitePool, name: &str) -> anyhow::Result<()> {
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(name)
+        .bind(chrono::Utc::now())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

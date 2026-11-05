@@ -131,8 +131,18 @@ async fn update_and_delete_quantity() {
         assert_eq!(q.default_value, expected, "pedido {input:?}");
     }
 
-    assert!(delete_quantity(&pool, &q.id).await.unwrap());
-    assert!(!delete_quantity(&pool, &q.id).await.unwrap());
+    assert_eq!(
+        remove_quantity(&pool, "p1-estadistica", &q.id)
+            .await
+            .unwrap(),
+        QuantityRemoval::Deleted
+    );
+    assert_eq!(
+        remove_quantity(&pool, "p1-estadistica", &q.id)
+            .await
+            .unwrap(),
+        QuantityRemoval::NotFound
+    );
 }
 
 #[tokio::test]
@@ -891,7 +901,7 @@ async fn seed_definitions_backfills_gamma_and_q_as_final() {
     .await
     .unwrap();
 
-    seed_definitions(&pool).await.unwrap();
+    seed::run_seeds(&pool).await.unwrap();
 
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     for symbol in ["gamma", "Q"] {
@@ -2464,7 +2474,7 @@ async fn the_two_old_p3_practices_become_one() {
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
     }
-    seed_definitions(&pool).await.unwrap();
+    seed::run_seeds(&pool).await.unwrap();
     assert!(definition(&pool, "p3-relajacion-desfasaje")
         .await
         .unwrap()
@@ -2515,7 +2525,7 @@ async fn an_old_p3_without_desfasaje_is_unified_too() {
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
     }
-    seed_definitions(&pool).await.unwrap();
+    seed::run_seeds(&pool).await.unwrap();
     let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
     assert_eq!(p3.analysis_kind.as_deref(), Some("regresion_lineal"));
     assert_eq!(p3.quantities.len(), 8);
@@ -2534,7 +2544,7 @@ async fn reseeding_p3_with_its_parts_still_there_does_not_fail() {
         .await
         .unwrap();
     }
-    seed_definitions(&pool).await.unwrap();
+    seed::run_seeds(&pool).await.unwrap();
     let p3 = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
     assert_eq!(p3.parts.len(), 2);
     assert_eq!(p3.quantities.len(), 8);
@@ -2587,4 +2597,820 @@ async fn seeded_expanded_formulas_become_chained() {
         }
     }
     assert_eq!(migrated, expected);
+}
+
+#[tokio::test]
+async fn a_duplicate_does_not_share_the_source_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    assert_eq!(
+        definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap()
+            .current_version,
+        Some(1)
+    );
+    let copy = duplicate_practice(&pool, "p2-cc", "Copia CC", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(current_version(&pool, &copy.id).await.unwrap().is_none());
+    let published = publish_version(&pool, &copy.id, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(published.number, 1);
+    assert_eq!(published.definition.practice_id, copy.id);
+}
+
+#[tokio::test]
+async fn seeded_submissions_are_pinned_to_their_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    crate::db::seed_users(&pool).await.unwrap();
+    crate::db::seed_academic(&pool).await.unwrap();
+    crate::db::seed_submissions(&pool).await.unwrap();
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT practice_id, practice_version_id FROM submissions")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(!rows.is_empty());
+    assert!(rows.iter().all(|(_, v)| v.is_some()), "{rows:?}");
+}
+
+#[test]
+fn an_old_snapshot_missing_fields_still_reads() {
+    let def: PracticeDefinition = serde_json::from_str(
+        r#"{"practice_id":"p","status":"publicada","quantities":[{"id":"q","symbol":"L"}],
+            "results":[{"id":"r","symbol":"g","formula":"L"}],"parts":[{"id":"a","title":"A"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(def.quantities[0].symbol, "L");
+    assert!(def.quantities[0].has_uncertainty);
+    assert!(def.results[0].has_uncertainty);
+    assert_eq!(def.results[0].tolerance, None);
+    assert!(def.quantities[0].repeated && def.quantities[0].per_point);
+    assert_eq!(def.parts[0].analysis_kind, None);
+    assert!(def.curves.is_empty());
+}
+
+#[tokio::test]
+async fn publishing_a_draft_is_one_step_and_versions_need_changes() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let copy = duplicate_practice(&pool, "p2-cc", "Copia CC", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    let none = |_: &PracticeDefinition| Vec::new();
+    assert!(matches!(
+        publish_draft(&pool, &copy.id, None, none).await.unwrap(),
+        DraftPublish::Published
+    ));
+    assert!(matches!(
+        publish_draft(&pool, &copy.id, None, none).await.unwrap(),
+        DraftPublish::NotDraft
+    ));
+    let rejected = duplicate_practice(&pool, "p2-cc", "Otra copia", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        publish_draft(&pool, &rejected.id, None, |_| vec!["falta algo".into()])
+            .await
+            .unwrap(),
+        DraftPublish::Rejected(_)
+    ));
+    assert!(current_version(&pool, &rejected.id)
+        .await
+        .unwrap()
+        .is_none());
+    let (count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM practice_versions WHERE practice_id = ?1")
+            .bind(&copy.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 1);
+    let published = published_definition(&pool, &copy.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(published.status, "publicada");
+    assert_eq!(published.current_version, Some(1));
+
+    assert!(matches!(
+        publish_checked(&pool, &copy.id, None, None, none)
+            .await
+            .unwrap(),
+        Publish::Unchanged(1)
+    ));
+    sqlx::query("UPDATE practice_results SET formula = formula || ' * 1' WHERE practice_id = ?1")
+        .bind(&copy.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        publish_checked(&pool, &copy.id, None, None, none)
+            .await
+            .unwrap(),
+        Publish::Published { number: 2 }
+    ));
+    set_practice_status(&pool, &copy.id, "archivada")
+        .await
+        .unwrap();
+    let archived = published_definition(&pool, &copy.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(archived.status, "archivada");
+    assert!(matches!(
+        publish_draft(&pool, &copy.id, None, |_| vec![
+            "borrador a medio editar".into()
+        ])
+        .await
+        .unwrap(),
+        DraftPublish::NotDraft
+    ));
+}
+
+#[tokio::test]
+async fn a_damaged_snapshot_is_an_internal_error() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = '{}' WHERE practice_id = 'p1-estadistica'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let err = current_version(&pool, "p1-estadistica").await.unwrap_err();
+    assert!(err.downcast_ref::<sqlx::Error>().is_some(), "{err}");
+}
+
+fn new_quantity(symbol: &str) -> QuantityInput {
+    QuantityInput {
+        symbol: symbol.into(),
+        name: "Nueva".into(),
+        unit: "s".into(),
+        repeated: false,
+        quantity: None,
+        is_given: false,
+        replicas_per_point: None,
+        per_point: false,
+        has_uncertainty: true,
+        optional: false,
+        default_value: None,
+        slot_count: None,
+    }
+}
+
+#[tokio::test]
+async fn a_quantity_in_a_version_is_retired_and_frees_its_symbol() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let fresh = create_quantity(&pool, practice, new_quantity("Tn"))
+        .await
+        .unwrap();
+    assert_eq!(
+        remove_quantity(&pool, practice, &fresh.id).await.unwrap(),
+        QuantityRemoval::Deleted
+    );
+
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let t2 = def
+        .quantities
+        .iter()
+        .find(|q| q.symbol == "T2")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        remove_quantity(&pool, "p2-cc", &t2.id).await.unwrap(),
+        QuantityRemoval::NotFound,
+        "una magnitud de otra práctica no se toca"
+    );
+    assert_eq!(
+        remove_quantity(&pool, practice, &t2.id).await.unwrap(),
+        QuantityRemoval::Retired
+    );
+    assert_eq!(
+        remove_quantity(&pool, practice, &t2.id).await.unwrap(),
+        QuantityRemoval::NotFound
+    );
+    assert!(update_quantity(&pool, &t2.id, new_quantity("T2"))
+        .await
+        .unwrap()
+        .is_none());
+    let any_section = definition(&pool, practice).await.unwrap().unwrap().sections[0]
+        .id
+        .clone();
+    assert!(!set_member_section(
+        &pool,
+        practice,
+        SectionMember::Quantity,
+        &t2.id,
+        Some(&any_section)
+    )
+    .await
+    .unwrap());
+
+    let draft = definition(&pool, practice).await.unwrap().unwrap();
+    assert!(draft.quantities.iter().all(|q| q.id != t2.id));
+    let version = current_version(&pool, practice).await.unwrap().unwrap();
+    assert!(version
+        .definition
+        .quantities
+        .iter()
+        .any(|q| q.id == t2.id && q.symbol == "T2"));
+    let (symbol, section): (String, Option<String>) =
+        sqlx::query_as("SELECT symbol, section_id FROM practice_quantities WHERE id = ?1")
+            .bind(&t2.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(symbol, format!("T2~{}", t2.id));
+    assert_eq!(section, None);
+
+    assert!(
+        !symbol_taken_in_practice(&pool, practice, "T2", None, None, None, None, None)
+            .await
+            .unwrap()
+    );
+    create_quantity(&pool, practice, new_quantity("T2"))
+        .await
+        .unwrap();
+
+    let copy = duplicate_practice(&pool, practice, "Copia", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    let (retired,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM practice_quantities WHERE practice_id = ?1 AND removed = 1",
+    )
+    .bind(&copy.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(retired, 0);
+    let copied = definition(&pool, &copy.id).await.unwrap().unwrap();
+    assert_eq!(
+        copied
+            .quantities
+            .iter()
+            .filter(|q| q.symbol == "T2")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn reordering_skips_retired_quantities() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let before = definition(&pool, practice).await.unwrap().unwrap();
+    let symbols = |d: &PracticeDefinition| -> Vec<String> {
+        d.quantities.iter().map(|q| q.symbol.clone()).collect()
+    };
+    let t2 = before.quantities.iter().find(|q| q.symbol == "T2").unwrap();
+    let t3 = before.quantities.iter().find(|q| q.symbol == "T3").unwrap();
+    remove_quantity(&pool, practice, &t2.id).await.unwrap();
+    assert_eq!(
+        move_item(&pool, Orderable::Quantities, practice, &t3.id, true)
+            .await
+            .unwrap(),
+        Some(true)
+    );
+    let after = definition(&pool, practice).await.unwrap().unwrap();
+    let order = symbols(&after);
+    let t1_at = order.iter().position(|s| s == "T1").unwrap();
+    let t3_at = order.iter().position(|s| s == "T3").unwrap();
+    assert!(t3_at < t1_at, "{order:?}");
+}
+
+#[tokio::test]
+async fn a_quantity_measured_without_a_version_waits_for_the_first_publish() {
+    let (pool, _dir) = setup().await;
+    let practice = create_practice(
+        &pool,
+        &NewPracticeInput {
+            name: "Heredada".into(),
+            description: "desc".into(),
+            analysis_kind: "estadistico".into(),
+        },
+        "u1",
+    )
+    .await
+    .unwrap()
+    .id;
+    let quantity = create_quantity(&pool, &practice, new_quantity("Tn"))
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at) \
+         VALUES ('s1', 'a', 'g', 'c', ?1, '', '', '{}', '2026-10-01T00:00:00Z')",
+    )
+    .bind(&practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO submission_measurements (id, submission_id, quantity_id, value) \
+         VALUES ('m1', 's1', ?1, 1.0)",
+    )
+    .bind(&quantity.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        remove_quantity(&pool, &practice, &quantity.id)
+            .await
+            .unwrap(),
+        QuantityRemoval::HasMeasurements
+    );
+    let def = definition(&pool, &practice).await.unwrap().unwrap();
+    assert!(def.quantities.iter().any(|q| q.symbol == "Tn"));
+
+    publish_version(&pool, &practice, None).await.unwrap();
+    assert_eq!(
+        remove_quantity(&pool, &practice, &quantity.id)
+            .await
+            .unwrap(),
+        QuantityRemoval::Retired
+    );
+    let def = definition(&pool, &practice).await.unwrap().unwrap();
+    assert!(def.quantities.iter().all(|q| q.symbol != "Tn"));
+    let pinned = submission_definition(&pool, "s1").await.unwrap().unwrap();
+    assert!(pinned
+        .quantities
+        .iter()
+        .any(|q| q.id == quantity.id && q.symbol == "Tn"));
+}
+
+#[tokio::test]
+async fn restarting_keeps_what_the_teacher_changed() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let rename = |practice: &'static str, from: &'static str, to: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let changed = sqlx::query(
+                "UPDATE practice_quantities SET symbol = ?3 WHERE practice_id = ?1 AND symbol = ?2",
+            )
+            .bind(practice)
+            .bind(from)
+            .bind(to)
+            .execute(&pool)
+            .await
+            .unwrap()
+            .rows_affected();
+            assert_eq!(changed, 1, "{from}");
+        }
+    };
+    rename("p1-estadistica", "T1", "Tx").await;
+    rename("p2-cc", "Vg_s", "Vfuente").await;
+    sqlx::query(
+        "UPDATE practice_results SET name = 'Editado', is_final = 0, has_uncertainty = 1 \
+         WHERE practice_id = 'p2-cc' AND symbol = 'P_max_e'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let snapshot = |d: PracticeDefinition| serde_json::to_string(&d).unwrap();
+    let before_p1 = snapshot(definition(&pool, "p1-estadistica").await.unwrap().unwrap());
+    let before_cc = snapshot(definition(&pool, "p2-cc").await.unwrap().unwrap());
+
+    db::migrate(&pool).await.unwrap();
+    seed_definitions(&pool).await.unwrap();
+
+    assert_eq!(
+        before_p1,
+        snapshot(definition(&pool, "p1-estadistica").await.unwrap().unwrap())
+    );
+    assert_eq!(
+        before_cc,
+        snapshot(definition(&pool, "p2-cc").await.unwrap().unwrap())
+    );
+}
+
+#[tokio::test]
+async fn the_power_results_have_no_uncertainty_from_the_first_start() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    for symbol in ["P_max_e", "P_max_t", "RP_max_e", "RP_max_t"] {
+        let result = cc.results.iter().find(|r| r.symbol == symbol).unwrap();
+        assert!(!result.has_uncertainty, "{symbol}");
+    }
+}
+
+#[tokio::test]
+async fn cosmetic_changes_update_the_current_version_without_a_new_one() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    let changes =
+        |pool: SqlitePool| async move { draft_changes(&pool, practice).await.unwrap().unwrap() };
+    assert_eq!(changes(pool.clone()).await.kind, DraftChangeKind::None);
+
+    sqlx::query(
+        "UPDATE practice_results SET name = 'Gravedad editada', tolerance = 3.0 \
+         WHERE practice_id = ?1 AND symbol = 'g1'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let cosmetic = changes(pool.clone()).await;
+    assert_eq!(cosmetic.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(cosmetic.changes, ["Cambia la tolerancia de g1"]);
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    assert!(matches!(
+        publish_checked(&pool, practice, None, None, no_problems)
+            .await
+            .unwrap(),
+        Publish::UpdatedCurrent { number } if number == before.number
+    ));
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(
+        (after.id.as_str(), after.number),
+        (before.id.as_str(), before.number)
+    );
+    assert_eq!(after.definition.current_version, Some(before.number));
+    let g1 = after
+        .definition
+        .results
+        .iter()
+        .find(|r| r.symbol == "g1")
+        .unwrap();
+    assert_eq!(
+        (g1.name.as_str(), g1.tolerance),
+        ("Gravedad editada", Some(3.0))
+    );
+    assert_eq!(changes(pool.clone()).await.kind, DraftChangeKind::None);
+
+    sqlx::query(
+        "UPDATE practice_results SET formula = '2*L' WHERE practice_id = ?1 AND symbol = 'g1'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let structural = changes(pool.clone()).await;
+    assert_eq!(structural.kind, DraftChangeKind::Structural);
+    assert_eq!(structural.changes, ["Cambia la fórmula de g1"]);
+    assert!(matches!(
+        publish_checked(&pool, practice, None, None, no_problems)
+            .await
+            .unwrap(),
+        Publish::Published { number } if number == before.number + 1
+    ));
+}
+
+#[tokio::test]
+async fn draft_changes_list_what_differs_and_count_submissions() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let t3 = def.quantities.iter().find(|q| q.symbol == "T3").unwrap();
+    sqlx::query("DELETE FROM practice_results WHERE practice_id = ?1 AND formula LIKE '%T3%'")
+        .bind(practice)
+        .execute(&pool)
+        .await
+        .unwrap();
+    remove_quantity(&pool, practice, &t3.id).await.unwrap();
+    create_quantity(&pool, practice, new_quantity("Tn"))
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET unit = 'ms' WHERE practice_id = ?1 AND symbol = 'T1'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at) \
+         VALUES ('s1', 'a', 'g', 'c', ?1, '', '', '{}', '2026-10-01T00:00:00Z')",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    assert_eq!(found.submissions, 1);
+    for line in [
+        "Se agrega la magnitud Tn",
+        "Se quita la magnitud T3",
+        "Cambia la magnitud T1",
+        "Se quita el mensurando g3",
+    ] {
+        assert!(
+            found.changes.iter().any(|c| c == line),
+            "{line}: {:?}",
+            found.changes
+        );
+    }
+}
+
+#[tokio::test]
+async fn reordering_updates_the_current_version_and_records_who() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    assert!(draft_changes(&pool, practice)
+        .await
+        .unwrap()
+        .unwrap()
+        .last_update
+        .is_none());
+    let moved = before.definition.quantities[1].id.clone();
+    assert_eq!(
+        move_item(&pool, Orderable::Quantities, practice, &moved, true)
+            .await
+            .unwrap(),
+        Some(true)
+    );
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    assert!(matches!(
+        publish_checked(&pool, practice, Some("docente-x"), None, no_problems)
+            .await
+            .unwrap(),
+        Publish::UpdatedCurrent { number } if number == before.number
+    ));
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(after.definition.quantities[0].id, moved);
+    let (who,): (String,) =
+        sqlx::query_as("SELECT updated_by FROM practice_version_updates WHERE version_id = ?1")
+            .bind(&after.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(who, "docente-x");
+    assert!(draft_changes(&pool, practice)
+        .await
+        .unwrap()
+        .unwrap()
+        .last_update
+        .is_some());
+}
+
+#[tokio::test]
+async fn reordering_intermediates_stays_structural() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "filtros";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    assert!(
+        def.intermediates.len() >= 2,
+        "{practice} debía tener intermedias"
+    );
+    sqlx::query("UPDATE practice_intermediates SET position = -position WHERE practice_id = ?1")
+        .bind(practice)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    assert_eq!(found.changes, ["Cambia el orden de las intermedias"]);
+}
+
+#[tokio::test]
+async fn reordering_curves_stays_structural() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "filtros";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    assert!(def.curves.len() >= 2, "{practice} debía tener curvas");
+    move_item(&pool, Orderable::Curves, practice, &def.curves[1].id, true)
+        .await
+        .unwrap()
+        .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    assert_eq!(found.changes, ["Cambia el orden de las curvas"]);
+}
+
+#[tokio::test]
+async fn a_section_move_is_listed_next_to_a_formula_change() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p2-cc";
+    sqlx::query(
+        "UPDATE practice_results SET section_id = NULL, formula = '2*Vg_s' \
+         WHERE practice_id = ?1 AND symbol = 'P_max_e'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(
+        found.changes,
+        [
+            "Cambia la fórmula de P_max_e",
+            "Cambia la organización en secciones"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn publishing_rejects_a_draft_that_changed_since_it_was_shown() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    let formula = |symbol: &'static str, formula: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                "UPDATE practice_results SET formula = ?3 WHERE practice_id = ?1 AND symbol = ?2",
+            )
+            .bind(practice)
+            .bind(symbol)
+            .bind(formula)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    formula("g1", "2*L").await;
+    let shown = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(shown.kind, DraftChangeKind::Structural);
+
+    formula("g2", "3*L").await;
+    assert!(matches!(
+        publish_checked(&pool, practice, None, Some(&shown.fingerprint), no_problems)
+            .await
+            .unwrap(),
+        Publish::DraftChanged
+    ));
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(after.number, before.number);
+
+    let shown = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert!(matches!(
+        publish_checked(&pool, practice, None, Some(&shown.fingerprint), no_problems)
+            .await
+            .unwrap(),
+        Publish::Published { .. }
+    ));
+}
+
+#[tokio::test]
+async fn renaming_a_sectioned_quantity_does_not_report_a_section_move() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p2-cc";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let symbol = def
+        .sections
+        .iter()
+        .find_map(|section| section.quantities.first())
+        .unwrap()
+        .clone();
+    sqlx::query(
+        "UPDATE practice_quantities SET symbol = 'Renombrada' WHERE practice_id = ?1 AND symbol = ?2",
+    )
+    .bind(practice)
+    .bind(&symbol)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.changes, ["Cambia la magnitud Renombrada"]);
+}
+
+#[tokio::test]
+async fn draft_changes_count_the_submissions_of_the_current_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let first = current_version(&pool, practice).await.unwrap().unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at, practice_version_id) \
+         VALUES ('s1', 'a', 'g', 'c', ?1, '', '', '{}', '2026-10-01T00:00:00Z', ?2)",
+    )
+    .bind(practice)
+    .bind(&first.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!((found.submissions, found.version_submissions), (1, 1));
+    publish_version(&pool, practice, None).await.unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!((found.submissions, found.version_submissions), (1, 0));
+}
+
+#[tokio::test]
+async fn moving_a_result_to_another_section_stays_structural() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p2-cc";
+    sqlx::query(
+        "UPDATE practice_results SET section_id = NULL WHERE practice_id = ?1 AND symbol = 'P_max_e'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    assert_eq!(found.changes, ["Cambia la organización en secciones"]);
+}
+
+#[tokio::test]
+async fn a_practice_without_a_version_has_no_draft_changes() {
+    let (pool, _dir) = setup().await;
+    let practice = create_practice(
+        &pool,
+        &NewPracticeInput {
+            name: "Nueva".into(),
+            description: "desc".into(),
+            analysis_kind: "estadistico".into(),
+        },
+        "u1",
+    )
+    .await
+    .unwrap();
+    assert!(draft_changes(&pool, &practice.id).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn renumbering_positions_with_the_same_order_is_not_a_change() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let t2 = def.quantities.iter().find(|q| q.symbol == "T2").unwrap();
+    sqlx::query("DELETE FROM practice_results WHERE practice_id = ?1 AND formula LIKE '%T2%'")
+        .bind(practice)
+        .execute(&pool)
+        .await
+        .unwrap();
+    remove_quantity(&pool, practice, &t2.id).await.unwrap();
+    publish_version(&pool, practice, None).await.unwrap();
+
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let t1 = def.quantities.iter().find(|q| q.symbol == "T1").unwrap();
+    for up in [false, true] {
+        move_item(&pool, Orderable::Quantities, practice, &t1.id, up)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::None, "{:?}", found.changes);
+}
+
+#[tokio::test]
+async fn an_unrelated_problem_does_not_block_a_cosmetic_update() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let broken = |_: &PracticeDefinition| vec!["un problema anterior".to_string()];
+    let set = |sql: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(sql)
+                .bind(practice)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    };
+
+    set("UPDATE practice_results SET name = 'Otro' WHERE practice_id = ?1 AND symbol = 'g1'").await;
+    assert!(matches!(
+        publish_checked(&pool, practice, None, None, broken)
+            .await
+            .unwrap(),
+        Publish::UpdatedCurrent { .. }
+    ));
+
+    set("UPDATE practice_results SET formula = '2*L' WHERE practice_id = ?1 AND symbol = 'g1'")
+        .await;
+    assert!(matches!(
+        publish_checked(&pool, practice, None, None, broken)
+            .await
+            .unwrap(),
+        Publish::Rejected(_)
+    ));
 }

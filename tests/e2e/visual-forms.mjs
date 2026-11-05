@@ -70,10 +70,16 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   assert(liveText.replace(",", ".").includes("25"), `celda P debía mostrar 25, mostró "${liveText}"`);
   await page.screenshot({ path: join(ARTIFACTS, "visual-cc-potencia.png"), fullPage: true });
 
-  for (const sym of ["P_max_e", "P_max_t", "RP_max_e", "RP_max_t", "VR1_s_t"]) {
+  for (const [sym, inputsU] of [
+    ["P_max_e", 0],
+    ["P_max_t", 0],
+    ["RP_max_e", 0],
+    ["RP_max_t", 0],
+    ["VR1_s_t", 1],
+  ]) {
     const row = page.locator(`#measurement-fields [data-final-result="1"][data-symbol="${sym}"]`);
     assert((await row.count()) === 1, `falta la fila de resultado final ${sym}`);
-    assert((await row.locator(".final-result-u").count()) === 1, `${sym} debía tener input U`);
+    assert((await row.locator(".final-result-u").count()) === inputsU, `${sym} debía tener ${inputsU} inputs U`);
   }
 
   await openPractice(page, "fluidos-1");

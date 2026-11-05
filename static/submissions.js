@@ -210,7 +210,7 @@ export async function openSubmissionWorkspace(id) {
   let definition = null;
   if (submission.entry_mode === "form") {
     try {
-      definition = await fetchJson(`/api/practices/${encodeURIComponent(submission.practice_id)}/definition`);
+      definition = await fetchJson(`/api/submissions/${encodeURIComponent(submission.id)}/definition`);
     } catch {
       definition = null;
     }
