@@ -245,6 +245,10 @@ lecturas ("a ciegas") y, una vez habilitado, ve la tabla de incertidumbres para 
   con sus definiciones reales confirmadas por el docente.
 - Documentar el formato de carga y las fórmulas en el README.
 - Revisión de seeds y, si corresponde, migración de datos reales del curso.
+  - ✅ (2026-11-05, #113) Cuentas y entregas de prueba fuera de producción: en una base sin usuarios
+    se crea solo el admin (`SEED_ADMIN_PASSWORD`, obligatoria con `APP_SECURE_COOKIES=true`); el
+    docente, el estudiante, su inscripción y las entregas de prueba requieren `SEED_DEMO_DATA=true`
+    (dev, E2E). Reiniciar no recrea nada.
 
 **Aceptación**: las tres prácticas del primer bloque funcionan de punta a punta.
 

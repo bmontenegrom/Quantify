@@ -32,6 +32,9 @@ async fn main() -> anyhow::Result<()> {
     let secure_cookies = env::var("APP_SECURE_COOKIES")
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
         .unwrap_or(false);
+    let demo_data = env::var("SEED_DEMO_DATA")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false);
 
     let secret_key = match configured_secret {
         Some(key) => key,
@@ -75,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("connecting to database {database_url}"))?;
 
     db::migrate(&pool).await?;
-    db::run_startup_seeds(&pool).await?;
+    db::run_startup_seeds(&pool, demo_data, secure_cookies).await?;
 
     let state = Arc::new(AppState {
         pool,

@@ -226,29 +226,43 @@ pub async fn next_position(
     Ok(position.0)
 }
 
-pub async fn run_startup_seeds(pool: &SqlitePool) -> anyhow::Result<()> {
+pub async fn run_startup_seeds(
+    pool: &SqlitePool,
+    demo_data: bool,
+    require_admin_password: bool,
+) -> anyhow::Result<()> {
     seed_practices(pool).await?;
     seed_course(pool).await?;
     crate::instruments::seed_instruments(pool, "fisica-experimental-i-2026").await?;
     crate::practices::seed_definitions(pool).await?;
-    seed_test_data(pool).await
+    seed_initial_accounts(pool, demo_data, require_admin_password).await
 }
 
-async fn seed_test_data(pool: &SqlitePool) -> anyhow::Result<()> {
+async fn seed_initial_accounts(
+    pool: &SqlitePool,
+    demo_data: bool,
+    require_admin_password: bool,
+) -> anyhow::Result<()> {
     let (has_users,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM users)")
         .fetch_one(pool)
         .await?;
     if has_users {
         return Ok(());
     }
-    let accounts = test_accounts();
+    let admin = admin_account(require_admin_password)?;
+    let demo = demo_data.then(demo_accounts);
     let mut tx = pool.begin().await?;
-    insert_test_accounts(&mut tx, &accounts).await?;
-    enroll_test_student(&mut tx).await?;
-    insert_test_submissions(&mut tx).await?;
+    insert_accounts(&mut tx, &[admin]).await?;
+    if let Some(accounts) = &demo {
+        insert_accounts(&mut tx, accounts).await?;
+        enroll_test_student(&mut tx).await?;
+        insert_test_submissions(&mut tx).await?;
+    }
     tx.commit().await?;
     Ok(())
 }
+
+type SeedAccount = (&'static str, &'static str, &'static str, String);
 
 fn seed_password(variable: &str, development_default: &str) -> String {
     env::var(variable)
@@ -256,20 +270,28 @@ fn seed_password(variable: &str, development_default: &str) -> String {
         .filter(|password| !password.is_empty())
         .unwrap_or_else(|| {
             tracing::warn!(
-                "{variable} no está definida: la cuenta de prueba usa la contraseña de desarrollo"
+                "{variable} no está definida: la cuenta inicial usa la contraseña de desarrollo"
             );
             development_default.to_string()
         })
 }
 
-fn test_accounts() -> [(&'static str, &'static str, &'static str, String); 3] {
+fn admin_account(require_password: bool) -> anyhow::Result<SeedAccount> {
+    if require_password && env::var("SEED_ADMIN_PASSWORD").map_or(true, |p| p.is_empty()) {
+        anyhow::bail!(
+            "SEED_ADMIN_PASSWORD es obligatoria para crear el admin inicial cuando              APP_SECURE_COOKIES=true."
+        );
+    }
+    Ok((
+        "admin@quantify.local",
+        "Administrador",
+        "admin",
+        hash_password(&seed_password("SEED_ADMIN_PASSWORD", "admin123")),
+    ))
+}
+
+fn demo_accounts() -> [SeedAccount; 2] {
     [
-        (
-            "admin@quantify.local",
-            "Administrador",
-            "admin",
-            hash_password(&seed_password("SEED_ADMIN_PASSWORD", "admin123")),
-        ),
         (
             "docente@quantify.local",
             "Docente de prueba",
@@ -285,9 +307,9 @@ fn test_accounts() -> [(&'static str, &'static str, &'static str, String); 3] {
     ]
 }
 
-async fn insert_test_accounts(
+async fn insert_accounts(
     conn: &mut sqlx::SqliteConnection,
-    accounts: &[(&'static str, &'static str, &'static str, String); 3],
+    accounts: &[SeedAccount],
 ) -> anyhow::Result<()> {
     for (email, display_name, role, password_hash) in accounts {
         sqlx::query(
@@ -311,9 +333,10 @@ async fn insert_test_accounts(
 
 #[cfg(test)]
 pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
-    let accounts = test_accounts();
+    let mut accounts = vec![admin_account(false)?];
+    accounts.extend(demo_accounts());
     let mut conn = pool.acquire().await?;
-    insert_test_accounts(&mut conn, &accounts).await
+    insert_accounts(&mut conn, &accounts).await
 }
 
 pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f.";
@@ -805,7 +828,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        assert!(run_startup_seeds(&pool).await.is_err());
+        assert!(run_startup_seeds(&pool, true, false).await.is_err());
         assert_eq!(
             count(accounts).await,
             0,
@@ -821,15 +844,33 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        run_startup_seeds(&pool).await.unwrap();
+        run_startup_seeds(&pool, true, false).await.unwrap();
         assert_eq!(count(accounts).await, 3);
         assert_eq!(count(submissions).await, 2);
     }
 
     #[tokio::test]
+    async fn without_demo_data_a_new_base_only_has_the_admin() {
+        let (pool, _dir) = pool().await;
+        run_startup_seeds(&pool, false, false).await.unwrap();
+        let users: Vec<(String,)> = sqlx::query_as("SELECT email FROM users")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(users, vec![("admin@quantify.local".to_string(),)]);
+        for table in ["submissions", "course_members", "group_members"] {
+            let (n,): (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(n, 0, "{table} debía quedar vacía");
+        }
+    }
+
+    #[tokio::test]
     async fn restarting_does_not_bring_back_test_accounts_or_submissions() {
         let (pool, _dir) = pool().await;
-        run_startup_seeds(&pool).await.unwrap();
+        run_startup_seeds(&pool, true, false).await.unwrap();
         let count = |sql: &'static str| {
             let pool = pool.clone();
             async move {
@@ -859,7 +900,7 @@ mod tests {
             sqlx::query(sql).execute(&pool).await.unwrap();
         }
         migrate(&pool).await.unwrap();
-        run_startup_seeds(&pool).await.unwrap();
+        run_startup_seeds(&pool, true, false).await.unwrap();
 
         assert_eq!(
             count(submissions).await,

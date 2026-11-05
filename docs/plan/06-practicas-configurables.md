@@ -718,8 +718,10 @@ borrador. Si una cambia números de una práctica publicada, tiene que crear la 
 vez (`applied_migrations`, `2026-11-definiciones-sembradas`) y los backfills de `schema.rs` también:
 después el servidor toma lo que está en la base. Un cambio futuro a una práctica sembrada ya no se
 aplica editando un `seed_*`: tiene que ser una migración de una sola vez. Esto resuelve R3 y R4 de la
-sección 2.5. Las cuentas de prueba, la inscripción del estudiante y las entregas de prueba se crean juntas, en una
-transacción, solo en una base sin usuarios (`seed_test_data`): reiniciar no las recrea. Siguen corriendo en cada arranque
+sección 2.5. En una base sin usuarios, `seed_initial_accounts` crea en una transacción el admin y, solo con
+`SEED_DEMO_DATA=true` (dev, E2E), el docente y el estudiante de prueba, la inscripción y las entregas de prueba. Producción
+arranca con el admin solo (con `APP_SECURE_COOKIES=true`, `SEED_ADMIN_PASSWORD` es obligatoria) y reiniciar no
+recrea nada. Siguen corriendo en cada arranque
 `seed_practices`, `seed_course` y `seed_instruments`, que se retiran con las siembras en F8.
 
 ### F6 — Sin casos especiales en el frontend ni en las siembras
