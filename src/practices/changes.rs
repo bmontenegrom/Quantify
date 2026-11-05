@@ -1,13 +1,15 @@
 use super::PracticeDefinition;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::SqlitePool;
+use std::collections::BTreeMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 const COSMETIC_KEYS: [&str; 3] = ["name", "title", "tolerance"];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
 const FREELY_ORDERED: [&str; 4] = ["quantities", "results", "parts", "sections"];
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DraftChangeKind {
     None,
@@ -26,6 +28,7 @@ pub struct DraftChanges {
     pub version: i64,
     pub kind: DraftChangeKind,
     pub changes: Vec<String>,
+    pub fingerprint: String,
     pub submissions: i64,
     pub version_submissions: i64,
     pub last_update: Option<VersionUpdate>,
@@ -88,18 +91,37 @@ fn structure(definition: &PracticeDefinition) -> anyhow::Result<Value> {
     Ok(ignoring_order(shape(definition, &keys)?))
 }
 
-fn order_changed(before: &[&str], after: &[&str]) -> bool {
-    let common = |list: &[&str], other: &[&str]| -> Vec<String> {
-        list.iter()
-            .filter(|id| other.contains(id))
-            .map(|id| id.to_string())
-            .collect()
-    };
-    common(before, after) != common(after, before)
+fn section_members(definition: &PracticeDefinition) -> BTreeMap<&str, (Option<&str>, Vec<&str>)> {
+    definition
+        .sections
+        .iter()
+        .map(|section| {
+            let quantities = section.quantities.iter().filter_map(|symbol| {
+                let found = definition.quantities.iter().find(|q| &q.symbol == symbol);
+                found.map(|q| q.id.as_str())
+            });
+            let results = section.results.iter().filter_map(|symbol| {
+                let found = definition.results.iter().find(|r| &r.symbol == symbol);
+                found.map(|r| r.id.as_str())
+            });
+            let mut members: Vec<&str> = quantities.chain(results).collect();
+            members.sort_unstable();
+            (section.id.as_str(), (section.part_id.as_deref(), members))
+        })
+        .collect()
+}
+
+pub fn draft_fingerprint(draft: &PracticeDefinition) -> anyhow::Result<String> {
+    let mut hasher = DefaultHasher::new();
+    shape(draft, &["status", "current_version"])?
+        .to_string()
+        .hash(&mut hasher);
+    Ok(format!("{:x}", hasher.finish()))
 }
 
 fn diff_items<T: Serialize>(
     what: &str,
+    order: Option<&str>,
     before: &[T],
     after: &[T],
     key: impl Fn(&T) -> Item,
@@ -123,6 +145,17 @@ fn diff_items<T: Serialize>(
     for (item, _) in &old {
         if !new.iter().any(|n| n.id == item.id) {
             changes.push(format!("Se quita {what} {}", item.label));
+        }
+    }
+    if let Some(list) = order {
+        let kept_old = old.iter().map(|(o, _)| o.id.as_str());
+        let kept_old: Vec<&str> = kept_old
+            .filter(|id| new.iter().any(|n| n.id == *id))
+            .collect();
+        let kept_new = new.iter().map(|n| n.id.as_str());
+        let kept_new: Vec<&str> = kept_new.filter(|id| kept_old.contains(id)).collect();
+        if kept_old != kept_new {
+            changes.push(format!("Cambia el orden de {list}"));
         }
     }
     Ok(())
@@ -152,6 +185,7 @@ fn list_changes(
     }
     diff_items(
         "la parte",
+        None,
         &published.parts,
         &draft.parts,
         |p| Item {
@@ -163,6 +197,7 @@ fn list_changes(
     )?;
     diff_items(
         "la magnitud",
+        None,
         &published.quantities,
         &draft.quantities,
         |q| Item {
@@ -174,6 +209,7 @@ fn list_changes(
     )?;
     diff_items(
         "el mensurando",
+        None,
         &published.results,
         &draft.results,
         |r| with_formula(&r.id, &r.symbol, &r.formula),
@@ -181,6 +217,7 @@ fn list_changes(
     )?;
     diff_items(
         "la intermedia",
+        Some("las intermedias"),
         &published.intermediates,
         &draft.intermediates,
         |i| with_formula(&i.id, &i.symbol, &i.formula),
@@ -188,6 +225,7 @@ fn list_changes(
     )?;
     diff_items(
         "el resultado por punto",
+        Some("los resultados por punto"),
         &published.point_results,
         &draft.point_results,
         |p| with_formula(&p.id, &p.symbol, &p.formula),
@@ -195,6 +233,7 @@ fn list_changes(
     )?;
     diff_items(
         "el agregado",
+        Some("los agregados"),
         &published.aggregates,
         &draft.aggregates,
         |a| with_formula(&a.id, &a.symbol, &a.formula),
@@ -202,6 +241,7 @@ fn list_changes(
     )?;
     diff_items(
         "la curva",
+        Some("las curvas"),
         &published.curves,
         &draft.curves,
         |c| Item {
@@ -211,45 +251,38 @@ fn list_changes(
         },
         &mut changes,
     )?;
-    let orders: [(&str, Vec<&str>, Vec<&str>); 4] = [
-        (
-            "las curvas",
-            published.curves.iter().map(|c| c.id.as_str()).collect(),
-            draft.curves.iter().map(|c| c.id.as_str()).collect(),
-        ),
-        (
-            "las intermedias",
-            published
-                .intermediates
-                .iter()
-                .map(|i| i.id.as_str())
-                .collect(),
-            draft.intermediates.iter().map(|i| i.id.as_str()).collect(),
-        ),
-        (
-            "los resultados por punto",
-            published
-                .point_results
-                .iter()
-                .map(|p| p.id.as_str())
-                .collect(),
-            draft.point_results.iter().map(|p| p.id.as_str()).collect(),
-        ),
-        (
-            "los agregados",
-            published.aggregates.iter().map(|a| a.id.as_str()).collect(),
-            draft.aggregates.iter().map(|a| a.id.as_str()).collect(),
-        ),
-    ];
-    for (what, before, after) in orders {
-        if order_changed(&before, &after) {
-            changes.push(format!("Cambia el orden de {what}"));
-        }
-    }
-    if structure(published)?["sections"] != structure(draft)?["sections"] {
+    if section_members(published) != section_members(draft) {
         changes.push("Cambia la organización en secciones".to_string());
     }
     Ok(changes)
+}
+
+fn tolerance_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -> Vec<String> {
+    draft
+        .results
+        .iter()
+        .filter(|result| {
+            let before = published.results.iter().find(|r| r.id == result.id);
+            before.is_some_and(|r| r.tolerance != result.tolerance)
+        })
+        .map(|result| format!("Cambia la tolerancia de {}", result.symbol))
+        .collect()
+}
+
+pub fn change_kind(
+    published: &PracticeDefinition,
+    draft: &PracticeDefinition,
+) -> anyhow::Result<DraftChangeKind> {
+    if structure(published)? != structure(draft)? {
+        return Ok(DraftChangeKind::Structural);
+    }
+    Ok(
+        if shape(published, &VOLATILE_KEYS)? == shape(draft, &VOLATILE_KEYS)? {
+            DraftChangeKind::None
+        } else {
+            DraftChangeKind::Cosmetic
+        },
+    )
 }
 
 /// Compara una versión publicada con el borrador. Los nombres, títulos, tolerancias y el orden de
@@ -282,21 +315,13 @@ pub fn compare_definitions(
     published: &PracticeDefinition,
     draft: &PracticeDefinition,
 ) -> anyhow::Result<DefinitionComparison> {
-    if structure(published)? != structure(draft)? {
-        return Ok(DefinitionComparison {
-            kind: DraftChangeKind::Structural,
-            changes: list_changes(published, draft)?,
-        });
-    }
-    let kind = if shape(published, &VOLATILE_KEYS)? == shape(draft, &VOLATILE_KEYS)? {
-        DraftChangeKind::None
-    } else {
-        DraftChangeKind::Cosmetic
+    let kind = change_kind(published, draft)?;
+    let changes = match kind {
+        DraftChangeKind::None => Vec::new(),
+        DraftChangeKind::Cosmetic => tolerance_changes(published, draft),
+        DraftChangeKind::Structural => list_changes(published, draft)?,
     };
-    Ok(DefinitionComparison {
-        kind,
-        changes: Vec::new(),
-    })
+    Ok(DefinitionComparison { kind, changes })
 }
 
 pub async fn draft_changes(
@@ -332,6 +357,7 @@ pub async fn draft_changes(
         version: current.number,
         kind: comparison.kind,
         changes: comparison.changes,
+        fingerprint: draft_fingerprint(&draft)?,
         submissions,
         version_submissions,
         last_update,

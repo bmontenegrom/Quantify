@@ -146,7 +146,9 @@ export async function loadSubmissionForm() {
   }
 
   const carried =
-    previewing && state.practiceForm?.definition.practice_id === practiceId ? collectMeasurements() : null;
+    previewing && state.practiceForm?.definition.practice_id === practiceId
+      ? { measurements: collectMeasurements(), finalResults: collectFinalResults() }
+      : null;
   try {
     const [definition, instruments] = await Promise.all([
       fetchJson(
@@ -165,7 +167,7 @@ export async function loadSubmissionForm() {
     renderMeasurementFields();
     applyPrefill();
     applyDraftPrefill();
-    if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried), [], "");
+    if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
   } catch (error) {
     state.practiceForm = null;

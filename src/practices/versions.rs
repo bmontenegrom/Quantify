@@ -175,7 +175,7 @@ pub enum Publish {
     Published { number: i64 },
     UpdatedCurrent { number: i64 },
     Unchanged(i64),
-    KindChanged,
+    DraftChanged,
     Rejected(Vec<String>),
     IsDraft,
     NotFound,
@@ -207,7 +207,7 @@ pub async fn publish_checked(
     pool: &SqlitePool,
     practice_id: &str,
     published_by: Option<&str>,
-    expected: Option<super::DraftChangeKind>,
+    expected_fingerprint: Option<&str>,
     problems: impl Fn(&PracticeDefinition) -> Vec<String>,
 ) -> anyhow::Result<Publish> {
     let _guard = PUBLISHING.lock().await;
@@ -219,40 +219,37 @@ pub async fn publish_checked(
     }
     if let Some(current) = current_version(pool, practice_id).await? {
         let number = current.number;
-        let kind = super::compare_definitions(&current.definition, &definition)?.kind;
+        let kind = super::change_kind(&current.definition, &definition)?;
         if kind == super::DraftChangeKind::None {
             return Ok(Publish::Unchanged(number));
         }
-        if expected.is_some_and(|expected| expected != kind) {
-            return Ok(Publish::KindChanged);
+        let fingerprint = super::draft_fingerprint(&definition)?;
+        if expected_fingerprint.is_some_and(|expected| expected != fingerprint) {
+            return Ok(Publish::DraftChanged);
         }
-        match kind {
-            super::DraftChangeKind::None => return Ok(Publish::Unchanged(number)),
-            super::DraftChangeKind::Cosmetic => {
-                let mut tx = pool.begin().await?;
-                sqlx::query(
-                    "UPDATE practice_versions \
+        if kind == super::DraftChangeKind::Cosmetic {
+            let mut tx = pool.begin().await?;
+            sqlx::query(
+                "UPDATE practice_versions \
                      SET definition_json = json_set(?1, '$.current_version', number) \
                      WHERE id = ?2",
-                )
-                .bind(snapshot(&definition)?)
-                .bind(&current.id)
-                .execute(&mut *tx)
-                .await?;
-                sqlx::query(
-                    "INSERT INTO practice_version_updates (id, version_id, updated_at, updated_by) \
+            )
+            .bind(snapshot(&definition)?)
+            .bind(&current.id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO practice_version_updates (id, version_id, updated_at, updated_by) \
                      VALUES (?1, ?2, ?3, ?4)",
-                )
-                .bind(uuid::Uuid::new_v4().to_string())
-                .bind(&current.id)
-                .bind(chrono::Utc::now())
-                .bind(published_by)
-                .execute(&mut *tx)
-                .await?;
-                tx.commit().await?;
-                return Ok(Publish::UpdatedCurrent { number });
-            }
-            super::DraftChangeKind::Structural => {}
+            )
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(&current.id)
+            .bind(chrono::Utc::now())
+            .bind(published_by)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(Publish::UpdatedCurrent { number });
         }
     }
     let found = problems(&definition);

@@ -232,7 +232,9 @@ El `id` lo genera el servidor a partir del nombre (slug único), editable solo e
   borrador no borra la fila si alguna versión publicada la referencia (se marca `removed`).
 - Cambios "cosméticos" (nombre, descripción, textos de ayuda, tolerancias, y el orden de magnitudes,
   mensurandos, partes y secciones) se pueden aplicar a la versión vigente sin crear otra, y
-  queda registrado quién y cuándo (`practice_version_updates`). Los estructurales (símbolos, fórmulas,
+  queda registrado quién y cuándo (`practice_version_updates`). Las tolerancias alcanzan enseguida a
+  las entregas de esa versión; los nombres y el orden se ven en el formulario, y una entrega ya
+  guardada los toma recién cuando se recalcula, porque su análisis queda guardado con ella. Los estructurales (símbolos, fórmulas,
   unidades, roles, partes, tipo de análisis, pertenencia a secciones, orden de las intermedias y
   agregados, que se evalúan en secuencia, y de las curvas, porque los resultados de los extremos
   salen de los puntos de la primera) siempre crean versión. La UI lo explica antes de publicar ("esto crea la versión 4; las

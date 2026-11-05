@@ -230,7 +230,7 @@ pub(super) struct PublishedVersion {
 #[derive(Debug, Deserialize)]
 pub(super) struct PublishVersionBody {
     #[serde(default)]
-    expected_kind: Option<practices::DraftChangeKind>,
+    expected_fingerprint: Option<String>,
 }
 
 pub(super) async fn publish_practice_version(
@@ -244,7 +244,7 @@ pub(super) async fn publish_practice_version(
         &state.pool,
         &id,
         Some(&user.id),
-        body.expected_kind,
+        body.expected_fingerprint.as_deref(),
         publish_problems,
     )
     .await?
@@ -257,7 +257,7 @@ pub(super) async fn publish_practice_version(
             number,
             new_version: false,
         })),
-        practices::Publish::KindChanged => Err(AppError::bad_request(
+        practices::Publish::DraftChanged => Err(AppError::bad_request(
             "El borrador cambió desde que se mostró el aviso: revisá el resumen y volvé a publicar.",
         )),
         practices::Publish::Rejected(problems) => Err(AppError::bad_request(format!(

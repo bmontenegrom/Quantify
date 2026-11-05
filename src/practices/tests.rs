@@ -3027,7 +3027,9 @@ async fn cosmetic_changes_update_the_current_version_without_a_new_one() {
     .execute(&pool)
     .await
     .unwrap();
-    assert_eq!(changes(pool.clone()).await.kind, DraftChangeKind::Cosmetic);
+    let cosmetic = changes(pool.clone()).await;
+    assert_eq!(cosmetic.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(cosmetic.changes, ["Cambia la tolerancia de g1"]);
     let before = current_version(&pool, practice).await.unwrap().unwrap();
     assert!(matches!(
         publish_checked(&pool, practice, None, None, no_problems)
@@ -3227,45 +3229,71 @@ async fn a_section_move_is_listed_next_to_a_formula_change() {
 }
 
 #[tokio::test]
-async fn publishing_rejects_a_draft_that_changed_kind_since_it_was_shown() {
+async fn publishing_rejects_a_draft_that_changed_since_it_was_shown() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
     let practice = "p1-estadistica";
     let no_problems = |_: &PracticeDefinition| Vec::new();
+    let formula = |symbol: &'static str, formula: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                "UPDATE practice_results SET formula = ?3 WHERE practice_id = ?1 AND symbol = ?2",
+            )
+            .bind(practice)
+            .bind(symbol)
+            .bind(formula)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
     let before = current_version(&pool, practice).await.unwrap().unwrap();
-    sqlx::query(
-        "UPDATE practice_results SET formula = '2*L' WHERE practice_id = ?1 AND symbol = 'g1'",
-    )
-    .bind(practice)
-    .execute(&pool)
-    .await
-    .unwrap();
+    formula("g1", "2*L").await;
+    let shown = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(shown.kind, DraftChangeKind::Structural);
+
+    formula("g2", "3*L").await;
     assert!(matches!(
-        publish_checked(
-            &pool,
-            practice,
-            None,
-            Some(DraftChangeKind::Cosmetic),
-            no_problems
-        )
-        .await
-        .unwrap(),
-        Publish::KindChanged
+        publish_checked(&pool, practice, None, Some(&shown.fingerprint), no_problems)
+            .await
+            .unwrap(),
+        Publish::DraftChanged
     ));
     let after = current_version(&pool, practice).await.unwrap().unwrap();
     assert_eq!(after.number, before.number);
+
+    let shown = draft_changes(&pool, practice).await.unwrap().unwrap();
     assert!(matches!(
-        publish_checked(
-            &pool,
-            practice,
-            None,
-            Some(DraftChangeKind::Structural),
-            no_problems
-        )
-        .await
-        .unwrap(),
+        publish_checked(&pool, practice, None, Some(&shown.fingerprint), no_problems)
+            .await
+            .unwrap(),
         Publish::Published { .. }
     ));
+}
+
+#[tokio::test]
+async fn renaming_a_sectioned_quantity_does_not_report_a_section_move() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p2-cc";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let symbol = def
+        .sections
+        .iter()
+        .find_map(|section| section.quantities.first())
+        .unwrap()
+        .clone();
+    sqlx::query(
+        "UPDATE practice_quantities SET symbol = 'Renombrada' WHERE practice_id = ?1 AND symbol = ?2",
+    )
+    .bind(practice)
+    .bind(&symbol)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.changes, ["Cambia la magnitud Renombrada"]);
 }
 
 #[tokio::test]

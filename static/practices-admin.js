@@ -301,7 +301,7 @@ export function renderPracticesPage() {
     const { openDraftPreview } = await import("./forms.js");
     await openDraftPreview(practiceId);
   });
-  renderDraftChanges(practice.id);
+  if (def?.current_version) renderDraftChanges(practice.id);
   practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
     deletePractice(e.currentTarget.dataset.practiceId);
   });
@@ -525,7 +525,7 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions, v
   const list = changes.map((change) => `<li>${escapeHtml(change)}</li>`).join("");
   const explanation = structural
     ? `Publicar crea la versión ${version + 1}.${submissions ? ` Entregas existentes: ${submissions}; siguen con su versión.` : ""}`
-    : `Solo cambian nombres, títulos, tolerancias o el orden de la lista: publicar actualiza la versión ${version}, sin crear otra. ${versionSubmissions ? ` Si cambiaste una tolerancia, las entregas de esa versión (${versionSubmissions}) se comparan con la nueva.` : ""}`;
+    : `Solo cambian nombres, títulos, tolerancias o el orden de la lista: publicar actualiza la versión ${version}, sin crear otra.${list && versionSubmissions ? ` Las entregas de esa versión (${versionSubmissions}) se comparan con la tolerancia nueva.` : ""}`;
   return `
     <div class="edit-banner draft-changes">
       <div>
@@ -538,6 +538,7 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions, v
 }
 
 let lastDraftChanges = null;
+let draftChangesRequest = 0;
 
 function versionUpdateMarkup({ version, last_update: update }) {
   if (!update) return "";
@@ -553,7 +554,7 @@ function paintDraftChanges(box, practiceId, changes) {
   const pending = changes.kind === "none" ? "" : draftChangesMarkup(practiceId, changes);
   box.innerHTML = versionUpdateMarkup(changes) + pending;
   box.querySelector("[data-practice-publish-version]")?.addEventListener("click", () => {
-    publishPracticeVersion(practiceId, changes.kind);
+    publishPracticeVersion(practiceId, changes.fingerprint);
   });
 }
 
@@ -561,8 +562,10 @@ async function renderDraftChanges(practiceId) {
   const box = practiceWorkspace.querySelector("#practice-draft-changes");
   if (!box) return;
   if (lastDraftChanges?.practiceId === practiceId) paintDraftChanges(box, practiceId, lastDraftChanges.changes);
+  const request = ++draftChangesRequest;
   try {
     const changes = await fetchJson(`/api/practices/${practiceId}/draft-changes`);
+    if (request !== draftChangesRequest) return;
     lastDraftChanges = { practiceId, changes };
     paintDraftChanges(box, practiceId, changes);
   } catch (error) {
@@ -592,9 +595,10 @@ async function setPracticeStatus(practiceId, status) {
   }, STATUS_DONE[status] ?? "Estado actualizado");
 }
 
-async function publishPracticeVersion(practiceId, expectedKind) {
+async function publishPracticeVersion(practiceId, fingerprint) {
+  lastDraftChanges = null;
   await runPracticeAction(async () => {
-    const { number, new_version } = await postJson(`/api/practices/${practiceId}/versions`, { expected_kind: expectedKind });
+    const { number, new_version } = await postJson(`/api/practices/${practiceId}/versions`, { expected_fingerprint: fingerprint });
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     return new_version
       ? `Versión ${number} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`
