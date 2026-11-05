@@ -3157,3 +3157,65 @@ async fn a_practice_without_a_version_has_no_draft_changes() {
     .unwrap();
     assert!(draft_changes(&pool, &practice.id).await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn renumbering_positions_with_the_same_order_is_not_a_change() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let t2 = def.quantities.iter().find(|q| q.symbol == "T2").unwrap();
+    sqlx::query("DELETE FROM practice_results WHERE practice_id = ?1 AND formula LIKE '%T2%'")
+        .bind(practice)
+        .execute(&pool)
+        .await
+        .unwrap();
+    remove_quantity(&pool, practice, &t2.id).await.unwrap();
+    publish_version(&pool, practice, None).await.unwrap();
+
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let t1 = def.quantities.iter().find(|q| q.symbol == "T1").unwrap();
+    for up in [false, true] {
+        move_item(&pool, Orderable::Quantities, practice, &t1.id, up)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::None, "{:?}", found.changes);
+}
+
+#[tokio::test]
+async fn an_unrelated_problem_does_not_block_a_cosmetic_update() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let broken = |_: &PracticeDefinition| vec!["un problema anterior".to_string()];
+    let set = |sql: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(sql)
+                .bind(practice)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    };
+
+    set("UPDATE practice_results SET name = 'Otro' WHERE practice_id = ?1 AND symbol = 'g1'").await;
+    assert!(matches!(
+        publish_checked(&pool, practice, None, broken)
+            .await
+            .unwrap(),
+        Publish::UpdatedCurrent { .. }
+    ));
+
+    set("UPDATE practice_results SET formula = '2*L' WHERE practice_id = ?1 AND symbol = 'g1'")
+        .await;
+    assert!(matches!(
+        publish_checked(&pool, practice, None, broken)
+            .await
+            .unwrap(),
+        Publish::Rejected(_)
+    ));
+}

@@ -200,7 +200,7 @@ pub fn compare_definitions(
     published: &PracticeDefinition,
     draft: &PracticeDefinition,
 ) -> anyhow::Result<DefinitionComparison> {
-    let volatile = ["status", "current_version"];
+    let volatile = ["status", "current_version", "position"];
     let comparable = [volatile.as_slice(), COSMETIC_KEYS.as_slice()].concat();
     let unchanged = |keys: &[&str]| -> anyhow::Result<bool> {
         Ok(shape(published, keys)? == shape(draft, keys)?)

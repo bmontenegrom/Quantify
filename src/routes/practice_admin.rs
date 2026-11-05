@@ -350,7 +350,7 @@ pub(super) async fn analyze_preview(
         require_teacher(&state, &headers).await?;
     }
     let definition = match &body.submission_id {
-        None if body.draft => load_definition(&state, &id).await?,
+        _ if body.draft => load_definition(&state, &id).await?,
         Some(submission_id) => {
             ensure_submission_access(&state, &user, submission_id).await?;
             practices::submission_definition(&state.pool, submission_id)

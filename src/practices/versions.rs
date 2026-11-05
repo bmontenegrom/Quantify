@@ -215,10 +215,6 @@ pub async fn publish_checked(
     if definition.status == "borrador" {
         return Ok(Publish::IsDraft);
     }
-    let found = problems(&definition);
-    if !found.is_empty() {
-        return Ok(Publish::Rejected(found));
-    }
     if let Some(current) = current_version(pool, practice_id).await? {
         let number = current.number;
         match super::compare_definitions(&current.definition, &definition)?.kind {
@@ -237,6 +233,10 @@ pub async fn publish_checked(
             }
             super::DraftChangeKind::Structural => {}
         }
+    }
+    let found = problems(&definition);
+    if !found.is_empty() {
+        return Ok(Publish::Rejected(found));
     }
     let mut tx = pool.begin().await?;
     let version = insert_version(&mut tx, &definition, published_by).await?;

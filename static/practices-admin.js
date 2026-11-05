@@ -525,7 +525,7 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions })
   const list = changes.map((change) => `<li>${escapeHtml(change)}</li>`).join("");
   const explanation = structural
     ? `Publicar crea la versión ${version + 1}.${submissions ? ` Entregas existentes: ${submissions}; siguen con su versión.` : ""}`
-    : `Solo cambian nombres, títulos o tolerancias: publicar actualiza la versión ${version}, sin crear otra.`;
+    : `Solo cambian nombres, títulos o tolerancias: publicar actualiza la versión ${version}, sin crear otra. Si cambiaste una tolerancia, las entregas de esa versión se comparan con la nueva.`;
   return `
     <div class="edit-banner draft-changes">
       <div>
@@ -537,21 +537,30 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions })
     </div>`;
 }
 
-async function renderDraftChanges(practiceId) {
-  const box = practiceWorkspace.querySelector("#practice-draft-changes");
-  if (!box) return;
-  let changes;
-  try {
-    changes = await fetchJson(`/api/practices/${practiceId}/draft-changes`);
-  } catch (error) {
-    box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+let lastDraftChanges = null;
+
+function paintDraftChanges(box, practiceId, changes) {
+  if (!changes || changes.kind === "none") {
+    box.replaceChildren();
     return;
   }
-  if (!changes || changes.kind === "none") return;
   box.innerHTML = draftChangesMarkup(practiceId, changes);
   box.querySelector("[data-practice-publish-version]").addEventListener("click", () => {
     publishPracticeVersion(practiceId);
   });
+}
+
+async function renderDraftChanges(practiceId) {
+  const box = practiceWorkspace.querySelector("#practice-draft-changes");
+  if (!box) return;
+  if (lastDraftChanges?.practiceId === practiceId) paintDraftChanges(box, practiceId, lastDraftChanges.changes);
+  try {
+    const changes = await fetchJson(`/api/practices/${practiceId}/draft-changes`);
+    lastDraftChanges = { practiceId, changes };
+    paintDraftChanges(box, practiceId, changes);
+  } catch (error) {
+    box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+  }
 }
 
 function renderPracticeInfoForm(practice) {

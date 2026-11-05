@@ -51,6 +51,7 @@ await withE2E({ port: PORT, dbName: "quantify-versionado.db" }, async ({ login }
   const { page: sPage } = await login(STUDENT, "estudiante");
   await sPage.click(`#practice-nav-children .nav-child:has-text("${NAME}")`);
   await sPage.waitForSelector("#measurement-fields .measure-given-value");
+  assert(!(await sPage.locator("#draft-preview-banner").isVisible()), "el estudiante no debía ver el aviso del borrador");
   await sPage.selectOption("#table-select", "1");
   await sPage.waitForLoadState("networkidle");
   const given = sPage.locator(".measurement-row--given").first();
@@ -104,6 +105,8 @@ await withE2E({ port: PORT, dbName: "quantify-versionado.db" }, async ({ login }
   step("docente: prueba el borrador sin publicar ni guardar");
   await page.click("[data-practice-try-draft]");
   await page.waitForSelector("#draft-preview-banner:not(.hidden)");
+  assert(await page.locator("#course-select").isVisible(), "el curso define los instrumentos: debía poder elegirse");
+  assert(!(await page.locator("#group-select").isVisible()), "el grupo no aplica al probar el borrador");
   const trial = page.locator(".measurement-row--given").first();
   await trial.locator(".measure-given-value").fill("5");
   await trial.locator(".measure-given-u").fill("0.1");
@@ -159,4 +162,19 @@ await withE2E({ port: PORT, dbName: "quantify-versionado.db" }, async ({ login }
   });
   const newY = await derivedY(page, created.id);
   assert(Math.abs(newY - 15) < 1e-9, `y debía dar 15 con 3*x, dio ${newY}`);
+
+  step("salir mientras se prueba el borrador no le deja el modo al siguiente usuario");
+  await page.click("[data-practice-try-draft]");
+  await page.waitForSelector("#draft-preview-banner:not(.hidden)");
+  await page.click("#logout-button");
+  await page.waitForSelector("#login-form");
+  await page.fill('#login-form [name="email"]', STUDENT.email);
+  await page.fill('#login-form [name="password"]', STUDENT.password);
+  await page.click('#login-form button[type="submit"]');
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await page.click(`#practice-nav-children .nav-child:has-text("${NAME}")`);
+  await page.waitForSelector("#practica-view.active #measurement-fields .edit-banner, #practica-view.active #measurement-fields .measure-given-value");
+  assert(!(await page.locator("#draft-preview-banner").isVisible()), "el estudiante no debía ver el aviso del borrador");
+  assert(await page.locator("#group-select").isVisible(), "el estudiante debía poder elegir su grupo");
+  assert((await page.locator("#submit-button").textContent()) === "Entregar", "el botón debía decir Entregar");
 });

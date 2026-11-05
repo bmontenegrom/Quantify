@@ -103,6 +103,8 @@ export function setupAuth(onLogin) {
     await fetch("/api/auth/logout", { method: "POST" });
     setCsrfToken(null);
     state.user = null;
+    const { exitEditMode } = await import("./forms.js");
+    exitEditMode();
     appShell.classList.add("hidden");
     loginScreen.classList.remove("hidden");
   });

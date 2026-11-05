@@ -74,6 +74,7 @@ export function updateStudentSelectors({ autoLoad = true } = {}) {
         .map((practice) => `<option value="${escapeHtml(practice.id)}">${escapeHtml(practice.name)}</option>`)
         .join("")
     : `<option value="">Sin practicas habilitadas</option>`;
+  if (state.draftPreviewPracticeId) selectDraftPreviewPractice();
   updateTableSelector();
   if (autoLoad) loadSubmissionForm();
 }
@@ -771,21 +772,30 @@ async function calculateDraftPreview(measurements) {
   }
 }
 
+function selectDraftPreviewPractice() {
+  const option = document.createElement("option");
+  option.value = state.draftPreviewPracticeId;
+  practiceSelect.replaceChildren(option);
+}
+
+function showDraftPreviewChrome(active) {
+  for (const field of [groupSelect, tableSelect, studentComment]) {
+    field?.closest("label")?.classList.toggle("hidden", active);
+  }
+  document.querySelector("#submission-form").noValidate = active;
+  document.querySelector("#draft-preview-banner").classList.toggle("hidden", !active);
+}
+
 export async function openDraftPreview(practiceId) {
   state.draftPreviewPracticeId = practiceId;
   const course = state.academic?.courses.find((c) => c.practices.some((p) => p.id === practiceId));
   if (course) courseSelect.value = course.id;
-  const option = document.createElement("option");
-  option.value = practiceId;
-  practiceSelect.replaceChildren(option);
-  courseSelect.closest(".form-grid")?.classList.add("hidden");
-  studentComment?.closest("label")?.classList.add("hidden");
-  document.querySelector("#submission-form").noValidate = true;
+  selectDraftPreviewPractice();
+  showDraftPreviewChrome(true);
   const banner = document.querySelector("#draft-preview-banner");
   banner.innerHTML = `
     <div>Estás probando el borrador. No se crea ninguna versión ni se guarda ninguna entrega.</div>
     <button type="button" id="draft-preview-back">Volver al editor</button>`;
-  banner.classList.remove("hidden");
   banner.querySelector("#draft-preview-back").addEventListener("click", async () => {
     exitEditMode();
     const { selectView } = await import("./navigation.js");
@@ -806,6 +816,7 @@ export function startEditSubmission(submission) {
 }
 
 export function exitEditMode() {
+  if (state.draftPreviewPracticeId) showDraftPreviewChrome(false);
   state.draftPreviewPracticeId = null;
   state.editingSubmissionId = null;
   state.editingPracticeId = null;
