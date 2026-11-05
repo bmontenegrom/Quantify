@@ -2888,11 +2888,21 @@ async fn reordering_skips_retired_quantities() {
 }
 
 #[tokio::test]
-async fn a_quantity_measured_without_a_version_is_not_removed() {
+async fn a_quantity_measured_without_a_version_waits_for_the_first_publish() {
     let (pool, _dir) = setup().await;
-    seed_definitions(&pool).await.unwrap();
-    let practice = "p1-estadistica";
-    let fresh = create_quantity(&pool, practice, new_quantity("Tn"))
+    let practice = create_practice(
+        &pool,
+        &NewPracticeInput {
+            name: "Heredada".into(),
+            description: "desc".into(),
+            analysis_kind: "estadistico".into(),
+        },
+        "u1",
+    )
+    .await
+    .unwrap()
+    .id;
+    let quantity = create_quantity(&pool, &practice, new_quantity("Tn"))
         .await
         .unwrap();
     sqlx::query(
@@ -2900,7 +2910,7 @@ async fn a_quantity_measured_without_a_version_is_not_removed() {
          csv_path, analysis_json, submitted_at) \
          VALUES ('s1', 'a', 'g', 'c', ?1, '', '', '{}', '2026-10-01T00:00:00Z')",
     )
-    .bind(practice)
+    .bind(&practice)
     .execute(&pool)
     .await
     .unwrap();
@@ -2908,17 +2918,34 @@ async fn a_quantity_measured_without_a_version_is_not_removed() {
         "INSERT INTO submission_measurements (id, submission_id, quantity_id, value) \
          VALUES ('m1', 's1', ?1, 1.0)",
     )
-    .bind(&fresh.id)
+    .bind(&quantity.id)
     .execute(&pool)
     .await
     .unwrap();
 
     assert_eq!(
-        remove_quantity(&pool, practice, &fresh.id).await.unwrap(),
+        remove_quantity(&pool, &practice, &quantity.id)
+            .await
+            .unwrap(),
         QuantityRemoval::HasMeasurements
     );
-    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let def = definition(&pool, &practice).await.unwrap().unwrap();
     assert!(def.quantities.iter().any(|q| q.symbol == "Tn"));
+
+    publish_version(&pool, &practice, None).await.unwrap();
+    assert_eq!(
+        remove_quantity(&pool, &practice, &quantity.id)
+            .await
+            .unwrap(),
+        QuantityRemoval::Retired
+    );
+    let def = definition(&pool, &practice).await.unwrap().unwrap();
+    assert!(def.quantities.iter().all(|q| q.symbol != "Tn"));
+    let pinned = submission_definition(&pool, "s1").await.unwrap().unwrap();
+    assert!(pinned
+        .quantities
+        .iter()
+        .any(|q| q.id == quantity.id && q.symbol == "Tn"));
 }
 
 #[tokio::test]
