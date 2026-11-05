@@ -500,11 +500,16 @@ pub(super) async fn update_quantity(
     Ok(Json(updated))
 }
 
+#[derive(Debug, Serialize)]
+pub(super) struct RemovedQuantity {
+    retired: bool,
+}
+
 pub(super) async fn delete_quantity(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path((id, qid)): Path<(String, String)>,
-) -> Result<Json<Health>, AppError> {
+) -> Result<Json<RemovedQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     let before = load_definition(&state, &id).await?;
     let mut after = before.clone();
@@ -512,16 +517,15 @@ pub(super) async fn delete_quantity(
     if after.quantities.len() == before.quantities.len() {
         return Err(AppError::not_found("magnitud no encontrada en la practica"));
     }
-    if practices::quantity_still_needed(&state.pool, &id, &qid).await? {
-        return Err(AppError::bad_request(
-            "La magnitud está en la versión vigente o tiene mediciones guardadas, así que no se puede borrar. Para sacarla ya, duplicá la práctica y editá la copia.",
-        ));
-    }
     guard_change(&before, &after, "eliminar la magnitud")?;
-    if !practices::delete_quantity(&state.pool, &qid).await? {
-        return Err(AppError::not_found("magnitud no encontrada"));
+    match practices::remove_quantity(&state.pool, &id, &qid).await? {
+        practices::QuantityRemoval::NotFound => Err(AppError::not_found("magnitud no encontrada")),
+        practices::QuantityRemoval::Retired => Ok(Json(RemovedQuantity { retired: true })),
+        practices::QuantityRemoval::HasMeasurements => Err(AppError::bad_request(
+            "La magnitud tiene mediciones guardadas en entregas sin versión, así que no se puede borrar. Publicá la práctica primero.",
+        )),
+        practices::QuantityRemoval::Deleted => Ok(Json(RemovedQuantity { retired: false })),
     }
-    Ok(Json(Health { status: "ok" }))
 }
 
 pub(super) async fn create_curve(

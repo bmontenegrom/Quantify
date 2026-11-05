@@ -678,10 +678,11 @@ Decisiones y desvíos respecto de los puntos 1–4:
      - la migración de una base con entregas;
      - golden idénticos.
 2. **`feat(practicas)`: magnitudes retiradas en vez de borradas (F5, 2/3).**
-   - **Borrar una magnitud:** si una versión la usa, se marca `removed` y se le libera el símbolo;
-     si no, se borra como hoy. Se acaba el 500.
-   - **Filtrar las retiradas** en `definition()`, en `symbol_taken_in_practice` y en
-     `duplicate_practice`.
+   - **Borrar una magnitud:** si una versión la usa, se marca `removed` y se le libera el símbolo
+     renombrándola a `{símbolo}~{id}`; si no, se borra como hoy. Se acaba el 500. Si solo la usan
+     mediciones de entregas sin versión, se rechaza con un 400 hasta publicar la práctica.
+   - **Filtrar las retiradas** en `definition()` y en `duplicate_practice`.
+     `symbol_taken_in_practice` no las filtra porque el renombre ya libera el símbolo.
    - **Tests:**
      - la entrega vieja sigue mostrando la magnitud retirada;
      - el símbolo se puede reusar;

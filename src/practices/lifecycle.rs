@@ -154,9 +154,14 @@ pub async fn duplicate_practice(
         .fetch_all(&mut *tx)
         .await?;
         let list = columns.join(", ");
+        let live = if table == "practice_quantities" {
+            "AND removed = 0"
+        } else {
+            ""
+        };
         sqlx::query(&format!(
             "INSERT INTO {table} (id, practice_id, {list}) \
-             SELECT lower(hex(randomblob(16))), ?2, {list} FROM {table} WHERE practice_id = ?1"
+             SELECT lower(hex(randomblob(16))), ?2, {list} FROM {table} WHERE practice_id = ?1 {live}"
         ))
         .bind(source_id)
         .bind(&id)
