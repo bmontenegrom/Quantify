@@ -101,10 +101,7 @@ export function setupAuth(onLogin) {
 
   logoutButton.addEventListener("click", async () => {
     await fetch("/api/auth/logout", { method: "POST" });
-    setCsrfToken(null);
-    state.user = null;
-    appShell.classList.add("hidden");
-    loginScreen.classList.remove("hidden");
+    location.reload();
   });
 
   passwordForm.addEventListener("submit", async (event) => {

@@ -151,6 +151,7 @@ async function updateRegressionPreview() {
         submission_id:
           state.editingPracticeId === practiceSelect.value ? state.editingSubmissionId : null,
         practice_version: formPracticeVersion(practiceSelect.value),
+        draft: Boolean(state.draftPreviewPracticeId),
       }
     );
     const analysis = analysisSections(full)

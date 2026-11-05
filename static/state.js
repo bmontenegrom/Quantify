@@ -31,6 +31,7 @@ export const state = {
   seriesDebug: new Map(),
   editingSubmissionId: null,
   editingPracticeId: null,
+  draftPreviewPracticeId: null,
   editPrefill: null,
   invitations: [],
   submissionFilters: { groupId: "", tableNumber: "" },

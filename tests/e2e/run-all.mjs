@@ -19,7 +19,10 @@ for (const script of scripts) {
     stdio: "inherit",
     env: process.env,
   });
-  if (result.status !== 0) failed = true;
+  if (result.status !== 0) {
+    failed = true;
+    console.error(`✗ ${script} terminó con status=${result.status} signal=${result.signal} error=${result.error?.message}`);
+  }
 }
 
 process.exitCode = failed ? 1 : 0;

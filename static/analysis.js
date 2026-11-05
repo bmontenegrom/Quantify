@@ -270,7 +270,7 @@ function aggregatesMarkup(aggregates) {
     </div>`;
 }
 
-function formAnalysisMarkup(analysis) {
+export function formAnalysisMarkup(analysis) {
   const sections = analysisSections(analysis);
   if (sections.length === 1) return singleAnalysisMarkup(analysis);
   const [shared, ...parts] = sections;

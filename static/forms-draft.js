@@ -8,7 +8,7 @@ function draftKey() {
 }
 
 export function saveDraft() {
-  if (state.editingSubmissionId || state.restoringCancelledSubmission || !state.practiceForm) return;
+  if (state.draftPreviewPracticeId || state.editingSubmissionId || state.restoringCancelledSubmission || !state.practiceForm) return;
   const draft = {
     measurements: collectMeasurements(),
     finalResults: collectFinalResults(),

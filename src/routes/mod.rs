@@ -150,6 +150,7 @@ pub fn api_router(state: SharedState) -> Router {
         )
         .route("/practices/{id}/duplicate", post(duplicate_practice))
         .route("/practices/{id}/versions", post(publish_practice_version))
+        .route("/practices/{id}/draft-changes", get(practice_draft_changes))
         .route("/practices/{id}/parts", post(create_part))
         .route(
             "/practices/{id}/parts/{pid}",

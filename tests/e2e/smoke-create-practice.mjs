@@ -101,7 +101,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   }
   await page.click('[data-practice-status="publicada"]');
   await page.waitForSelector("#practice-workspace .practice-state--publicada");
-  await page.waitForSelector('#practice-workspace [data-practice-publish-version]:has-text("Publicar versión 2")');
+  await page.waitForSelector('#practice-workspace .practice-lifecycle:has-text("Versión 1")');
 
   step("docente: duplica y elimina la copia");
   await page.click("#practice-workspace-back");

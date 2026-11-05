@@ -230,9 +230,14 @@ El `id` lo genera el servidor a partir del nombre (slug único), editable solo e
 - Los ids de magnitudes y resultados son **estables entre versiones**: una magnitud que sigue
   existiendo conserva su id, así las mediciones viejas se siguen leyendo. Quitar una magnitud del
   borrador no borra la fila si alguna versión publicada la referencia (se marca `removed`).
-- Cambios "cosméticos" (nombre, descripción, textos de ayuda, tolerancias) se pueden aplicar a la
-  versión vigente sin crear otra; los estructurales (símbolos, fórmulas, roles, partes, tipo de
-  análisis) siempre crean versión. La UI lo explica antes de publicar ("esto crea la versión 4; las
+- Cambios "cosméticos" (nombre, descripción, textos de ayuda, tolerancias, y el orden de magnitudes,
+  mensurandos, partes y secciones) se pueden aplicar a la versión vigente sin crear otra, y
+  queda registrado quién y cuándo (`practice_version_updates`). Las tolerancias alcanzan enseguida a
+  las entregas de esa versión; los nombres y el orden se ven en el formulario, y una entrega ya
+  guardada los toma recién cuando se recalcula, porque su análisis queda guardado con ella. Los estructurales (símbolos, fórmulas,
+  unidades, roles, partes, tipo de análisis, pertenencia a secciones, orden de las intermedias y
+  agregados, que se evalúan en secuencia, y de las curvas, porque los resultados de los extremos
+  salen de los puntos de la primera) siempre crean versión. La UI lo explica antes de publicar ("esto crea la versión 4; las
   12 entregas existentes siguen con la versión 3").
 - Las entregas **se quedan en su versión** (decisión 2026-11-02). Migrar entregas de la versión N
   a la N+1 queda fuera de alcance; si aparece la necesidad, va a F10.
@@ -603,7 +608,7 @@ que la fórmula expandida).
      `u` dan iguales.
    - **Doc**: F4 se marca como hecha.
 
-### F5 — Versionado
+### F5 — Versionado ✅ HECHA
 
 1. Schema: `practice_versions`, `practices.current_version_id`,
    `submissions.practice_version_id`. Migración: versión 1 de cada práctica con la definición
@@ -697,8 +702,8 @@ Decisiones y desvíos respecto de los puntos 1–4:
      vista previa con el borrador, sin crear una versión ni guardar una entrega. Hoy el formulario
      y `analyze-preview` usan siempre la versión publicada, así que la única forma de ver un cambio
      funcionando es publicarlo.
-   - **Cambios cosméticos:** si solo cambian nombres, descripción, tolerancias o títulos,
-     "Publicar" actualiza la versión vigente sin crear otra (3.3).
+   - **Cambios cosméticos:** si solo cambian nombres, descripción, tolerancias, títulos o el orden,
+     "Publicar" actualiza la versión vigente sin crear otra y registra quién y cuándo (3.3).
    - **E2E de aceptación:**
      1. el alumno entrega;
      2. el docente cambia una fórmula y publica la versión 2;
