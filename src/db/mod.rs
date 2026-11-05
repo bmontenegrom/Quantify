@@ -226,7 +226,25 @@ pub async fn next_position(
     Ok(position.0)
 }
 
-pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
+pub async fn run_startup_seeds(pool: &SqlitePool) -> anyhow::Result<()> {
+    seed_practices(pool).await?;
+    let first_start = seed_users(pool).await?;
+    seed_academic(pool).await?;
+    crate::instruments::seed_instruments(pool, "fisica-experimental-i-2026").await?;
+    crate::practices::seed_definitions(pool).await?;
+    if first_start {
+        seed_submissions(pool).await?;
+    }
+    Ok(())
+}
+
+pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<bool> {
+    let (has_users,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM users)")
+        .fetch_one(pool)
+        .await?;
+    if has_users {
+        return Ok(false);
+    }
     let users = [
         (
             "admin@quantify.local",
@@ -249,31 +267,24 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     ];
 
     for (email, display_name, role, password) in users {
-        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM users WHERE email = ?1")
-            .bind(email)
-            .fetch_optional(pool)
-            .await?;
-
-        if exists.is_none() {
-            sqlx::query(
-                r#"
-                INSERT INTO users (id, username, email, display_name, role, password_hash, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                "#,
-            )
-            .bind(Uuid::new_v4().to_string())
-            .bind(email)
-            .bind(email)
-            .bind(display_name)
-            .bind(role)
-            .bind(hash_password(&password))
-            .bind(Utc::now())
-            .execute(pool)
-            .await?;
-        }
+        sqlx::query(
+            r#"
+            INSERT INTO users (id, username, email, display_name, role, password_hash, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(email)
+        .bind(email)
+        .bind(display_name)
+        .bind(role)
+        .bind(hash_password(&password))
+        .bind(Utc::now())
+        .execute(pool)
+        .await?;
     }
 
-    Ok(())
+    Ok(true)
 }
 
 pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f.";
@@ -744,11 +755,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seed_users_creates_three_and_is_idempotent() {
+    async fn seed_users_creates_three_only_on_an_empty_base() {
         let (pool, _dir) = pool().await;
-        seed_users(&pool).await.unwrap();
-        seed_users(&pool).await.unwrap();
+        assert!(seed_users(&pool).await.unwrap());
+        assert!(!seed_users(&pool).await.unwrap());
         assert_eq!(users(&pool).await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn restarting_does_not_bring_back_test_accounts_or_submissions() {
+        let (pool, _dir) = pool().await;
+        run_startup_seeds(&pool).await.unwrap();
+        let count = |sql: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let (n,): (i64,) = sqlx::query_as(sql).fetch_one(&pool).await.unwrap();
+                n
+            }
+        };
+        let submissions = "SELECT COUNT(*) FROM submissions";
+        let teacher = "SELECT COUNT(*) FROM users WHERE email = 'docente@quantify.local'";
+        assert!(
+            count(submissions).await > 0,
+            "la base nueva trae entregas de prueba"
+        );
+        assert_eq!(count(teacher).await, 1);
+
+        for sql in [
+            "DELETE FROM submissions",
+            "DELETE FROM users WHERE email = 'docente@quantify.local'",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
+        migrate(&pool).await.unwrap();
+        run_startup_seeds(&pool).await.unwrap();
+
+        assert_eq!(
+            count(submissions).await,
+            0,
+            "volvieron las entregas de prueba"
+        );
+        assert_eq!(count(teacher).await, 0, "volvió la cuenta de prueba");
     }
 
     #[tokio::test]

@@ -77,3 +77,8 @@ export APP_SECURE_COOKIES="true"        # la cookie solo viaja por HTTPS
   durante 15 minutos. El contador se resetea con un login exitoso o al expirar el bloqueo.
 - **Cookies**: `HttpOnly` + `SameSite=Lax` siempre; `Secure` cuando `APP_SECURE_COOKIES=true`.
 - **Contraseñas**: hash Argon2.
+- **Cuentas iniciales**: en una base sin usuarios se crean `admin@quantify.local`,
+  `docente@quantify.local` y `estudiante@quantify.local`, con las contraseñas de
+  `SEED_ADMIN_PASSWORD`, `SEED_TEACHER_PASSWORD` y `SEED_STUDENT_PASSWORD` (si faltan, las de
+  desarrollo del README), además de entregas de prueba. Definí esas variables antes del primer
+  arranque. Si borrás una de estas cuentas, no vuelve al reiniciar.

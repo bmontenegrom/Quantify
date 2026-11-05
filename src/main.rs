@@ -1,7 +1,7 @@
 use anyhow::Context;
 use axum::Router;
 use quantify::db::{self, AppState};
-use quantify::{instruments, practices, routes};
+use quantify::routes;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -75,12 +75,7 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("connecting to database {database_url}"))?;
 
     db::migrate(&pool).await?;
-    db::seed_practices(&pool).await?;
-    db::seed_users(&pool).await?;
-    db::seed_academic(&pool).await?;
-    instruments::seed_instruments(&pool, "fisica-experimental-i-2026").await?;
-    practices::seed_definitions(&pool).await?;
-    db::seed_submissions(&pool).await?;
+    db::run_startup_seeds(&pool).await?;
 
     let state = Arc::new(AppState {
         pool,

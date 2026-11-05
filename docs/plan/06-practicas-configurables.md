@@ -718,8 +718,9 @@ borrador. Si una cambia números de una práctica publicada, tiene que crear la 
 vez (`applied_migrations`, `2026-11-definiciones-sembradas`) y los backfills de `schema.rs` también:
 después el servidor toma lo que está en la base. Un cambio futuro a una práctica sembrada ya no se
 aplica editando un `seed_*`: tiene que ser una migración de una sola vez. Esto resuelve R3 y R4 de la
-sección 2.5. Siguen corriendo en cada arranque `seed_practices`, `seed_users`, `seed_academic`,
-`seed_instruments` y `seed_submissions`: quedan para revisar.
+sección 2.5. `seed_users` y `seed_submissions` solo actúan en una base sin usuarios (`run_startup_seeds`):
+reiniciar no recrea cuentas de prueba ni entregas de prueba. Siguen corriendo en cada arranque
+`seed_practices`, `seed_academic` y `seed_instruments`, que se retiran con las siembras en F8.
 
 ### F6 — Sin casos especiales en el frontend ni en las siembras
 
