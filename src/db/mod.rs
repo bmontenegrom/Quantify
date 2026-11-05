@@ -266,6 +266,7 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<bool> {
         ),
     ];
 
+    let mut tx = pool.begin().await?;
     for (email, display_name, role, password) in users {
         sqlx::query(
             r#"
@@ -280,9 +281,10 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<bool> {
         .bind(role)
         .bind(hash_password(&password))
         .bind(Utc::now())
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
 
     Ok(true)
 }
@@ -759,6 +761,28 @@ mod tests {
         let (pool, _dir) = pool().await;
         assert!(seed_users(&pool).await.unwrap());
         assert!(!seed_users(&pool).await.unwrap());
+        assert_eq!(users(&pool).await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_seed_of_users_leaves_no_partial_accounts() {
+        let (pool, _dir) = pool().await;
+        sqlx::query(
+            "CREATE TRIGGER stop_seed BEFORE INSERT ON users \
+             WHEN NEW.email = 'estudiante@quantify.local' \
+             BEGIN SELECT RAISE(ABORT, 'interrumpido'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(seed_users(&pool).await.is_err());
+        assert_eq!(users(&pool).await.unwrap().len(), 0);
+
+        sqlx::query("DROP TRIGGER stop_seed")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(seed_users(&pool).await.unwrap());
         assert_eq!(users(&pool).await.unwrap().len(), 3);
     }
 
