@@ -226,24 +226,30 @@ pub async fn next_position(
     Ok(position.0)
 }
 
+const TEST_SUBMISSIONS_PENDING: &str = "entregas-de-prueba-pendientes";
+
 pub async fn run_startup_seeds(pool: &SqlitePool) -> anyhow::Result<()> {
     seed_practices(pool).await?;
-    let first_start = seed_users(pool).await?;
+    seed_users(pool).await?;
     seed_academic(pool).await?;
     crate::instruments::seed_instruments(pool, "fisica-experimental-i-2026").await?;
     crate::practices::seed_definitions(pool).await?;
-    if first_start {
+    if migration_applied(pool, TEST_SUBMISSIONS_PENDING).await? {
         seed_submissions(pool).await?;
+        sqlx::query("DELETE FROM applied_migrations WHERE name = ?1")
+            .bind(TEST_SUBMISSIONS_PENDING)
+            .execute(pool)
+            .await?;
     }
     Ok(())
 }
 
-pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<bool> {
+pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     let (has_users,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM users)")
         .fetch_one(pool)
         .await?;
     if has_users {
-        return Ok(false);
+        return Ok(());
     }
     let users = [
         (
@@ -284,9 +290,14 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<bool> {
         .execute(&mut *tx)
         .await?;
     }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(TEST_SUBMISSIONS_PENDING)
+        .bind(Utc::now())
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
 
-    Ok(true)
+    Ok(())
 }
 
 pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f.";
@@ -540,6 +551,7 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
     };
 
     let now = Utc::now();
+    let mut tx = pool.begin().await?;
 
     let submissions: &[(&str, &str, &str)] = &[
         ("p1-estadistica", "pendiente", ""),
@@ -598,7 +610,7 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(score)
         .bind(comment)
         .bind(reviewed_at)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
@@ -611,9 +623,10 @@ pub async fn seed_submissions(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(&submission_id)
         .bind(&student_id)
         .bind(now)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
 
     Ok(())
 }
@@ -759,8 +772,8 @@ mod tests {
     #[tokio::test]
     async fn seed_users_creates_three_only_on_an_empty_base() {
         let (pool, _dir) = pool().await;
-        assert!(seed_users(&pool).await.unwrap());
-        assert!(!seed_users(&pool).await.unwrap());
+        seed_users(&pool).await.unwrap();
+        seed_users(&pool).await.unwrap();
         assert_eq!(users(&pool).await.unwrap().len(), 3);
     }
 
@@ -782,8 +795,51 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        assert!(seed_users(&pool).await.unwrap());
+        seed_users(&pool).await.unwrap();
         assert_eq!(users(&pool).await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_first_start_retries_the_test_submissions() {
+        let (pool, _dir) = pool().await;
+        let submissions = || {
+            let pool = pool.clone();
+            async move {
+                let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM submissions")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                n
+            }
+        };
+        sqlx::query(
+            "CREATE TRIGGER stop_seed BEFORE INSERT ON report_members \
+             BEGIN SELECT RAISE(ABORT, 'interrumpido'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(run_startup_seeds(&pool).await.is_err());
+        assert_eq!(users(&pool).await.unwrap().len(), 3);
+        assert_eq!(submissions().await, 0, "no debían quedar entregas a medias");
+
+        sqlx::query("DROP TRIGGER stop_seed")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_startup_seeds(&pool).await.unwrap();
+        assert_eq!(submissions().await, 2);
+
+        sqlx::query("DELETE FROM submissions")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_startup_seeds(&pool).await.unwrap();
+        assert_eq!(
+            submissions().await,
+            0,
+            "el reintento debía correr una sola vez"
+        );
     }
 
     #[tokio::test]
