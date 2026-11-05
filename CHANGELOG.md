@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/bmontenegrom/Quantify/compare/v0.4.0...v0.5.0) (2026-11-05)
+
+
+### Funcionalidades
+
+* **practicas:** cambios sin publicar en el admin (F5, 3/3) ([#109](https://github.com/bmontenegrom/Quantify/issues/109)) ([58583b7](https://github.com/bmontenegrom/Quantify/commit/58583b78976f089ea5d5ac19c92aa02a3d6e32d1))
+* **practicas:** magnitudes retiradas en vez de borradas (F5, 2/3) ([#107](https://github.com/bmontenegrom/Quantify/issues/107)) ([f5ba825](https://github.com/bmontenegrom/Quantify/commit/f5ba825913d0be29adb09cd5e06b4df27d49f5a0))
+* **practicas:** versiones publicadas y entregas atadas a su versión (F5, 1/3) ([#106](https://github.com/bmontenegrom/Quantify/issues/106)) ([ffdc846](https://github.com/bmontenegrom/Quantify/commit/ffdc846f9e750f5322266692348266c9557638d7))
+
+
+### Correcciones
+
+* **practicas:** las siembras de definiciones corren una sola vez ([#108](https://github.com/bmontenegrom/Quantify/issues/108)) ([dbfe44c](https://github.com/bmontenegrom/Quantify/commit/dbfe44c9f6e54e462b07e1df3fe354d9a6be6f2a))
+
 ## [0.4.0](https://github.com/bmontenegrom/Quantify/compare/v0.3.0...v0.4.0) (2026-11-04)
 
 
