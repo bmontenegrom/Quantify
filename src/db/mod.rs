@@ -233,7 +233,7 @@ pub async fn run_startup_seeds(
 ) -> anyhow::Result<()> {
     seed_practices(pool).await?;
     seed_course(pool).await?;
-    crate::instruments::seed_instruments(pool, "fisica-experimental-i-2026").await?;
+    crate::instruments::seed_instruments(pool, TEST_COURSE_ID).await?;
     crate::practices::seed_definitions(pool).await?;
     seed_initial_accounts(pool, demo_data, require_admin_password).await
 }
@@ -247,6 +247,9 @@ async fn seed_initial_accounts(
         .fetch_one(pool)
         .await?;
     if has_users {
+        if demo_data {
+            tracing::info!("SEED_DEMO_DATA se ignora: la base ya tiene usuarios");
+        }
         return Ok(());
     }
     let admin = admin_account(require_admin_password)?;
@@ -279,7 +282,7 @@ fn seed_password(variable: &str, development_default: &str) -> String {
 fn admin_account(require_password: bool) -> anyhow::Result<SeedAccount> {
     if require_password && env::var("SEED_ADMIN_PASSWORD").map_or(true, |p| p.is_empty()) {
         anyhow::bail!(
-            "SEED_ADMIN_PASSWORD es obligatoria para crear el admin inicial cuando              APP_SECURE_COOKIES=true."
+            "SEED_ADMIN_PASSWORD es obligatoria para crear el admin inicial cuando APP_SECURE_COOKIES=true."
         );
     }
     Ok((
