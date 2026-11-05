@@ -3,7 +3,7 @@ import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
 import { escapeHtml, symbolHtml, unitHtml, format, prefixFactor, pointPower, flowRate, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
 import { SERIES_LIVE_COLUMNS } from "./constants.js";
-import { definitionParts, definitionSections, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
+import { definitionParts, definitionSections, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireRemoveReplica, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
@@ -146,7 +146,13 @@ async function updateRegressionPreview() {
   try {
     const full = await postJson(
       `/api/practices/${encodeURIComponent(practiceSelect.value)}/analyze-preview`,
-      { measurements }
+      {
+        measurements,
+        submission_id:
+          state.editingPracticeId === practiceSelect.value ? state.editingSubmissionId : null,
+        practice_version: formPracticeVersion(practiceSelect.value),
+        draft: Boolean(state.draftPreviewPracticeId),
+      }
     );
     const analysis = analysisSections(full)
       .map((s) => s.analysis)
@@ -173,8 +179,9 @@ async function updateRegressionPreview() {
     } else {
       container.innerHTML = "";
     }
-  } catch {
-    container.innerHTML = `<p class="submission-meta">No se pudo calcular la vista previa con los datos actuales.</p>`;
+  } catch (error) {
+    const stale = error.message?.includes("recargá");
+    container.innerHTML = `<p class="submission-meta">${stale ? escapeHtml(error.message) : "No se pudo calcular la vista previa con los datos actuales."}</p>`;
   }
 }
 

@@ -1,6 +1,11 @@
 import { state } from "./state.js";
 import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor } from "./lib.js";
 
+export function formPracticeVersion(practiceId) {
+  const definition = state.practiceForm?.definition;
+  return definition?.practice_id === practiceId ? definition.current_version ?? null : null;
+}
+
 export function definitionSections(definition) {
   if (!definition?.sections?.length) return null;
   const sections = definition.sections.map((s) => ({

@@ -539,30 +539,30 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "V",
                 "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
             ),
-            res_final(
+            res_no_u(res_final(
                 "RP_max_t",
                 "Resistencia de maxima transferencia teorica (Rth)",
                 "ohm",
                 "RA_c + R2*R3/(R2+R3)",
-            ),
-            res_final(
+            )),
+            res_no_u(res_final(
                 "P_max_t",
                 "Potencia maxima teorica",
                 "W",
                 "Vg_c*Vg_c/(4*(RA_c + R2*R3/(R2+R3)))",
-            ),
-            res_final(
+            )),
+            res_no_u(res_final(
                 "P_max_e",
                 "Potencia maxima experimental (de la tabla)",
                 "W",
                 "P_max",
-            ),
-            res_final(
+            )),
+            res_no_u(res_final(
                 "RP_max_e",
                 "Resistencia de maxima transferencia experimental",
                 "ohm",
                 "R_at_P_max",
-            ),
+            )),
         ],
     )
     .await?;
@@ -1564,7 +1564,17 @@ pub(super) async fn unify_p3(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+const DEFINITIONS_SEEDED: &str = "2026-11-definiciones-sembradas";
+
 pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
+    if !crate::db::migration_applied(pool, DEFINITIONS_SEEDED).await? {
+        run_seeds(pool).await?;
+        crate::db::mark_migration_applied(pool, DEFINITIONS_SEEDED).await?;
+    }
+    super::versions::ensure_versions(pool).await
+}
+
+pub(super) async fn run_seeds(pool: &SqlitePool) -> anyhow::Result<()> {
     unify_p3(pool).await?;
     seed_p1_estadistica(pool).await?;
     seed_p3_relajacion(pool).await?;

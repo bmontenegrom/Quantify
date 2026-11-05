@@ -163,24 +163,34 @@ pub async fn create_submission(
     pool: &SqlitePool,
     upload_dir: &Path,
     submission: NewSubmission,
-) -> anyhow::Result<SubmissionDetail> {
+) -> anyhow::Result<Option<SubmissionDetail>> {
+    let (versioned,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM practices WHERE id = ?1 AND current_version_id IS NOT NULL)",
+    )
+    .bind(&submission.practice_id)
+    .fetch_one(pool)
+    .await?;
+    if !versioned {
+        return Ok(None);
+    }
     let id = Uuid::new_v4().to_string();
     let submitted_at = Utc::now();
     let csv_path = upload_dir.join(format!("{id}.csv"));
     tokio::fs::write(&csv_path, submission.csv_content.as_bytes()).await?;
     let analysis_json = serde_json::to_string(&submission.analysis)?;
 
-    sqlx::query(
+    let inserted = sqlx::query(
         r#"
         INSERT INTO submissions (
             id, student_name, group_name, course, practice_id, file_name,
             csv_path, analysis_json, status, submitted_at,
-            submitted_by_user_id, course_id, group_id
+            submitted_by_user_id, course_id, group_id, practice_version_id
         )
         SELECT ?1, u.display_name, g.name, c.name, ?5, ?6, ?7, ?8,
-            'pendiente', ?9, ?10, ?11, ?12
-        FROM users u, lab_groups g, courses c
+            'pendiente', ?9, ?10, ?11, ?12, p.current_version_id
+        FROM users u, lab_groups g, courses c, practices p
         WHERE u.id = ?10 AND g.id = ?12 AND c.id = ?11
+            AND p.id = ?5 AND p.current_version_id IS NOT NULL
         "#,
     )
     .bind(&id)
@@ -196,7 +206,12 @@ pub async fn create_submission(
     .bind(&submission.course_id)
     .bind(&submission.group_id)
     .execute(pool)
-    .await?;
+    .await?
+    .rows_affected();
+    if inserted == 0 {
+        let _ = tokio::fs::remove_file(&csv_path).await;
+        anyhow::bail!("no se pudo crear la entrega {id}");
+    }
 
     sqlx::query(
         "INSERT INTO report_members (submission_id, user_id, role, status, invited_at, accepted_at) \
@@ -210,6 +225,7 @@ pub async fn create_submission(
 
     submission_detail(pool, &id)
         .await?
+        .map(Some)
         .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
 }
 
@@ -730,10 +746,17 @@ pub async fn submission_detail(
     let measurements = measurements_for(pool, &row.id).await?;
     let members = report_members_for(pool, &row.id).await?;
     let result_tolerances: HashMap<String, f64> = sqlx::query_as::<_, (String, f64)>(
-        "SELECT symbol, tolerance FROM practice_results \
-         WHERE practice_id = ?1 AND tolerance IS NOT NULL",
+        "SELECT json_extract(r.value, '$.symbol'), json_extract(r.value, '$.tolerance') \
+         FROM submissions s JOIN practice_versions v ON v.id = s.practice_version_id, \
+         json_each(v.definition_json, '$.results') r \
+         WHERE s.id = ?1 AND json_extract(r.value, '$.tolerance') IS NOT NULL \
+         UNION ALL \
+         SELECT pr.symbol, pr.tolerance FROM submissions s \
+         JOIN practice_results pr ON pr.practice_id = s.practice_id \
+         WHERE s.id = ?1 AND pr.tolerance IS NOT NULL \
+         AND NOT EXISTS (SELECT 1 FROM practice_versions v2 WHERE v2.id = s.practice_version_id)",
     )
-    .bind(&row.practice_id)
+    .bind(&row.id)
     .fetch_all(pool)
     .await?
     .into_iter()
@@ -920,6 +943,7 @@ mod tests {
     async fn seeded() -> (SqlitePool, TempDir) {
         let (pool, dir) = pool().await;
         seed_practices(&pool).await.unwrap();
+        crate::practices::seed_definitions(&pool).await.unwrap();
         seed_users(&pool).await.unwrap();
         seed_academic(&pool).await.unwrap();
         (pool, dir)
@@ -951,6 +975,7 @@ mod tests {
             },
         )
         .await
+        .unwrap()
         .unwrap()
         .id
     }
@@ -1051,6 +1076,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_csv_submission_is_pinned_to_the_current_version() {
+        let (pool, dir) = seeded().await;
+        let student = find_user(&pool, STUDENT).await;
+        let analysis = crate::analysis::analyze_csv(
+            "x,y
+1,2
+2,4
+3,6
+",
+        )
+        .unwrap();
+        let created = create_submission(
+            &pool,
+            dir.path(),
+            NewSubmission {
+                submitted_by_user_id: student.id.clone(),
+                course_id: COURSE.into(),
+                group_id: GROUP.into(),
+                practice_id: "p1-estadistica".into(),
+                file_name: "medidas.csv".into(),
+                csv_content: "x,y
+1,2
+2,4
+3,6
+"
+                .into(),
+                analysis,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let current = crate::practices::current_version(&pool, "p1-estadistica")
+            .await
+            .unwrap()
+            .unwrap();
+        let (pinned,): (Option<String>,) =
+            sqlx::query_as("SELECT practice_version_id FROM submissions WHERE id = ?1")
+                .bind(&created.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pinned, Some(current.id));
+    }
+
+    #[tokio::test]
     async fn submission_lifecycle() {
         let (pool, dir) = seeded().await;
         let student = find_user(&pool, STUDENT).await;
@@ -1070,6 +1141,7 @@ mod tests {
             },
         )
         .await
+        .unwrap()
         .unwrap();
         assert_eq!(created.status, "pendiente");
 

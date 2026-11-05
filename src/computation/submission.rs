@@ -1,4 +1,4 @@
-use super::engines::analyze;
+use super::engines::analyze_definition;
 use super::MeasurementInput;
 use crate::db::{self, AuthUser};
 use chrono::Utc;
@@ -19,6 +19,8 @@ pub struct FormSubmissionInput {
     pub student_results: Vec<crate::db::StudentResultInput>,
     #[serde(default)]
     pub student_comment: Option<String>,
+    #[serde(default)]
+    pub practice_version: Option<i64>,
 }
 
 async fn insert_measurements(
@@ -94,21 +96,6 @@ async fn insert_measurements(
     Ok(())
 }
 
-async fn is_point_based_practice(
-    pool: &sqlx::SqlitePool,
-    practice_id: &str,
-) -> anyhow::Result<bool> {
-    let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT analysis_kind FROM practices WHERE id = ?1")
-            .bind(practice_id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(matches!(
-        row.and_then(|r| r.0).as_deref(),
-        Some("regresion_lineal") | Some("curva")
-    ))
-}
-
 pub async fn create_form_submission(
     pool: &sqlx::SqlitePool,
     user: &AuthUser,
@@ -154,10 +141,18 @@ pub async fn create_form_submission(
         }
     }
 
-    validate_student_results(pool, &input.practice_id, &input.student_results).await?;
+    let version =
+        crate::practices::version_for_form(pool, &input.practice_id, input.practice_version)
+            .await?;
+    let crate::practices::PracticeVersion {
+        id: version_id,
+        definition,
+        ..
+    } = version;
+    validate_student_results(&definition, &input.student_results)?;
 
-    let analysis = analyze(pool, &input.practice_id, &input.measurements).await?;
-    let point_based = is_point_based_practice(pool, &input.practice_id).await?;
+    let analysis = analyze_definition(pool, &definition, &input.measurements).await?;
+    let point_based = crate::practices::is_point_based(definition.analysis_kind.as_deref());
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match &input.meta {
         Some(value) => Some(serde_json::to_string(value)?),
@@ -178,7 +173,8 @@ pub async fn create_form_submission(
         INSERT INTO submissions (
             id, student_name, group_name, course, practice_id, file_name, csv_path,
             analysis_json, status, submitted_at, submitted_by_user_id, course_id, group_id,
-            entry_mode, measurement_meta_json, table_number, student_comment
+            entry_mode, measurement_meta_json, table_number, student_comment,
+            practice_version_id
         )
         SELECT
             ?1,
@@ -197,9 +193,11 @@ pub async fn create_form_submission(
             'form',
             ?8,
             ?9,
-            ?10
-        FROM users u, lab_groups g, courses c
+            ?10,
+            ?11
+        FROM users u, lab_groups g, courses c, practices p
         WHERE u.id = ?2 AND g.id = ?3 AND c.id = ?4
+            AND p.id = ?5 AND p.current_version_id = ?11
         "#,
     )
     .bind(&id)
@@ -212,6 +210,7 @@ pub async fn create_form_submission(
     .bind(&meta_json)
     .bind(table_number)
     .bind(student_comment)
+    .bind(&version_id)
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -226,6 +225,17 @@ pub async fn create_form_submission(
     })?;
 
     if inserted.rows_affected() == 0 {
+        let current: Option<String> =
+            sqlx::query_scalar("SELECT current_version_id FROM practices WHERE id = ?1")
+                .bind(&input.practice_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if current.as_deref() != Some(version_id.as_str()) {
+            anyhow::bail!(
+                "La práctica se actualizó mientras entregabas: recargá la página (lo que \
+                 cargaste queda guardado como borrador)."
+            );
+        }
         anyhow::bail!("el curso o el grupo indicados no existen");
     }
 
@@ -266,18 +276,11 @@ pub async fn create_form_submission(
         .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
 }
 
-pub async fn validate_student_results(
-    pool: &sqlx::SqlitePool,
-    practice_id: &str,
+pub fn validate_student_results(
+    definition: &crate::practices::PracticeDefinition,
     results: &[db::StudentResultInput],
 ) -> anyhow::Result<()> {
-    if results.is_empty() {
-        return Ok(());
-    }
-    let definition = crate::practices::definition(pool, practice_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("practica no encontrada"))?;
-    check_student_result_symbols(&definition, results).map_err(|e| anyhow::anyhow!(e))
+    check_student_result_symbols(definition, results).map_err(|e| anyhow::anyhow!(e))
 }
 
 /// Acepta solo resultados del alumno que sean mensurandos o agregados finales, o `Re#k` por punto.
@@ -295,7 +298,7 @@ pub async fn validate_student_results(
 ///     practice_id: "p".into(), status: "publicada".into(), analysis_kind: None,
 ///     x_formula: None, y_formula: None, quantities: vec![], results: vec![g], curves: vec![],
 ///     operator_count: None, intermediates: vec![], point_results: vec![], aggregates: vec![],
-///     parts: vec![], sections: vec![],
+///     parts: vec![], sections: vec![], current_version: None,
 /// };
 /// let result = |symbol: &str| StudentResultInput { symbol: symbol.into(), value: 9.8, u_expanded: None };
 /// assert!(check_student_result_symbols(&def, &[result("g")]).is_ok());
@@ -341,18 +344,20 @@ pub fn check_student_result_symbols(
 pub async fn update_form_submission(
     pool: &sqlx::SqlitePool,
     submission_id: &str,
-    practice_id: &str,
     measurements: &[MeasurementInput],
     meta: Option<&serde_json::Value>,
     student_results: Option<&[db::StudentResultInput]>,
     student_comment: Option<&str>,
 ) -> anyhow::Result<db::SubmissionDetail> {
+    let definition = crate::practices::submission_definition(pool, submission_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("entrega no encontrada"))?;
     if let Some(results) = student_results {
-        validate_student_results(pool, practice_id, results).await?;
+        validate_student_results(&definition, results)?;
     }
 
-    let analysis = analyze(pool, practice_id, measurements).await?;
-    let point_based = is_point_based_practice(pool, practice_id).await?;
+    let analysis = analyze_definition(pool, &definition, measurements).await?;
+    let point_based = crate::practices::is_point_based(definition.analysis_kind.as_deref());
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match meta {
         Some(value) => Some(serde_json::to_string(value)?),

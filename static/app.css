@@ -1799,6 +1799,10 @@ button.back-link {
   background: var(--accent-soft);
 }
 
+.edit-banner.hidden {
+  display: none;
+}
+
 .edit-banner-actions {
   display: flex;
   gap: 8px;

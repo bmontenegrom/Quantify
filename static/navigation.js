@@ -65,13 +65,14 @@ export function renderPracticeNav() {
   });
 }
 
-export function selectPracticeFromNav(practiceId) {
+export async function selectPracticeFromNav(practiceId) {
   const course = state.academic?.courses.find((c) =>
     (c.practices ?? []).some((p) => p.id === practiceId)
   );
   if (course && course.id !== courseSelect.value) {
     courseSelect.value = course.id;
-    import("./forms.js").then(({ updateStudentSelectors }) => updateStudentSelectors());
+    const { updateStudentSelectors } = await import("./forms.js");
+    updateStudentSelectors({ autoLoad: false });
   }
   practiceSelect.value = practiceId;
   practiceSelect.dispatchEvent(new Event("change", { bubbles: true }));
