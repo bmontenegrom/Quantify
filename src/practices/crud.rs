@@ -1,7 +1,7 @@
 use super::{
     AggregateInput, CurveInput, IntermediateInput, PointResultInput, PracticeAggregate,
     PracticeCurve, PracticeDefinition, PracticeIntermediate, PracticePointResult, QuantityInput,
-    ResultInput, INPUT_WIDGETS, LABEL_MODES,
+    ResultInput, DEFAULT_INPUT_WIDGET, DEFAULT_LABEL_MODE,
 };
 use crate::db::{next_position, PracticeQuantity, PracticeResult};
 use sqlx::{SqliteConnection, SqlitePool};
@@ -110,11 +110,14 @@ fn display_symbol(input: &Option<String>) -> Option<&str> {
 }
 
 fn label_mode(input: &QuantityInput) -> &str {
-    input.label_mode.as_deref().unwrap_or(LABEL_MODES[0])
+    input.label_mode.as_deref().unwrap_or(DEFAULT_LABEL_MODE)
 }
 
 fn input_widget(input: &QuantityInput) -> &str {
-    input.input_widget.as_deref().unwrap_or(INPUT_WIDGETS[0])
+    input
+        .input_widget
+        .as_deref()
+        .unwrap_or(DEFAULT_INPUT_WIDGET)
 }
 
 async fn create_symbol_formula_row<T: SymbolFormulaRow>(

@@ -4158,6 +4158,31 @@ async fn changing_a_label_or_input_is_cosmetic_and_summarized() {
 }
 
 #[tokio::test]
+async fn renaming_a_quantity_does_not_hide_its_input_change() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET symbol = 'T_1', input_widget = 'teclado' \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 'T1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let found = draft_changes(&pool, "p1-estadistica")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        found
+            .changes
+            .contains(&"Cambia la entrada de T_1".to_string()),
+        "{:?}",
+        found.changes
+    );
+}
+
+#[tokio::test]
 async fn a_copy_keeps_label_and_input_and_a_missing_field_resets_them() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();

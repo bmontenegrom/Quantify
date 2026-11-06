@@ -289,14 +289,14 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
             published.display_symbols.get(**symbol) != draft.display_symbols.get(**symbol)
         })
         .map(|symbol| format!("Cambia cómo se muestra {symbol}"));
-    let quantities = published.quantities.iter().flat_map(|old| {
-        let new = draft.quantities.iter().find(|q| q.symbol == old.symbol);
-        let label = new
-            .filter(|q| q.label_mode != old.label_mode)
-            .map(|_| format!("Cambia el rótulo de {}", old.symbol));
-        let widget = new
-            .filter(|q| q.input_widget != old.input_widget)
-            .map(|_| format!("Cambia la entrada de {}", old.symbol));
+    let quantities = draft.quantities.iter().flat_map(|new| {
+        let old = published.quantities.iter().find(|q| q.id == new.id);
+        let label = old
+            .filter(|q| q.label_mode != new.label_mode)
+            .map(|_| format!("Cambia el rótulo de {}", new.symbol));
+        let widget = old
+            .filter(|q| q.input_widget != new.input_widget)
+            .map(|_| format!("Cambia la entrada de {}", new.symbol));
         label.into_iter().chain(widget)
     });
     symbols.chain(quantities).collect()

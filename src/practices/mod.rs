@@ -9,8 +9,10 @@ where
     Option::<T>::deserialize(de).map(Some)
 }
 
-pub const LABEL_MODES: [&str; 3] = ["nombre", "simbolo", "nombre_simbolo"];
-pub const INPUT_WIDGETS: [&str; 2] = ["teclado", "cronometro"];
+pub const LABEL_MODES: [&str; 3] = [DEFAULT_LABEL_MODE, "simbolo", "nombre_simbolo"];
+pub const INPUT_WIDGETS: [&str; 2] = [DEFAULT_INPUT_WIDGET, "cronometro"];
+const DEFAULT_LABEL_MODE: &str = "nombre";
+const DEFAULT_INPUT_WIDGET: &str = "teclado";
 
 #[derive(Debug, Default, Deserialize)]
 pub struct QuantityInput {
