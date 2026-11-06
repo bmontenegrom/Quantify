@@ -208,19 +208,26 @@ export async function openSubmissionWorkspace(id) {
   state.activeSubmission = submission;
 
   let definition = null;
+  let definitionFailed = false;
   if (submission.entry_mode === "form") {
     try {
       definition = await fetchJson(`/api/submissions/${encodeURIComponent(submission.id)}/definition`);
     } catch {
-      definition = null;
+      definitionFailed = true;
     }
   }
+  state.activeSubmissionDefinition = definition;
 
   submissionWorkspace.innerHTML = `
     <button type="button" class="back-link" id="submission-workspace-back">Volver al listado</button>
+    ${definitionFailed ? `<div class="edit-banner" id="submission-definition-error" role="alert">
+      <span>No se pudo cargar la definición de la práctica: algunos símbolos y resultados pueden verse incompletos.</span>
+      <button type="button" id="submission-definition-retry">Reintentar</button>
+    </div>` : ""}
     <div id="submission-detail-body"></div>
   `;
   submissionWorkspace.querySelector("#submission-workspace-back").addEventListener("click", closeSubmissionWorkspace);
+  submissionWorkspace.querySelector("#submission-definition-retry")?.addEventListener("click", () => openSubmissionWorkspace(id));
   const detailBody = submissionWorkspace.querySelector("#submission-detail-body");
   const { renderAnalysis } = await import("./analysis.js");
   setDisplaySymbols(definition?.display_symbols);
@@ -230,6 +237,7 @@ export async function openSubmissionWorkspace(id) {
 export function closeSubmissionWorkspace() {
   state.activeSubmissionId = null;
   state.activeSubmission = null;
+  state.activeSubmissionDefinition = null;
   renderSubmissionsPage();
 }
 
@@ -352,7 +360,9 @@ export async function saveReview(event, id) {
   const detailBody = submissionWorkspace?.querySelector("#submission-detail-body");
   if (detailBody) {
     const { renderAnalysis } = await import("./analysis.js");
-    renderAnalysis(detailBody, updated, true);
+    const definition = state.activeSubmissionDefinition;
+    setDisplaySymbols(definition?.display_symbols);
+    renderAnalysis(detailBody, updated, true, definition);
   }
   await loadSubmissions();
 }

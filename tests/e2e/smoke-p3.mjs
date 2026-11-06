@@ -1,4 +1,4 @@
-import { STUDENT, TEACHER, assert, step, withE2E } from "./lib.mjs";
+import { STUDENT, TEACHER, assert, openAddForm, step, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8171";
 
@@ -67,6 +67,55 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   assert(detail.includes("Desfasaje"), "el análisis debía tener la parte de desfasaje");
   assert(detail.includes("Ajuste lineal"), "la parte de desfasaje debía mostrar el ajuste lineal");
   assert(!detail.includes("No se pudo calcular"), "ninguna parte debía fallar");
+
+  const detailHtml = (page) => page.locator("#submission-detail-body").innerHTML();
+  const reviewSaved = (page) =>
+    Promise.all([
+      page.waitForResponse((r) => /\/review$/.test(r.url()) && r.request().method() === "POST"),
+      page.click('.review-form button[type="submit"]'),
+    ]);
+
+  step("docente: guardar la revisión conserva el resultado entregado");
+  assert(detail.includes("Resultado final entregado"), "la entrega debía mostrar el resultado final");
+  await reviewSaved(tPage);
+  await tPage.waitForFunction(() => document.querySelector("#submission-detail-body .review-form"));
+  await tPage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();
+
+  step("docente: guardar usa los símbolos de la entrega aunque otra pantalla los haya cambiado");
+  const { page: racePage } = await login(TEACHER, "docente");
+  await racePage.click('.tab.teacher-only[data-view="practices"]');
+  await racePage.click('[data-practice-open][data-practice-id="p1-estadistica"]');
+  await openAddForm(racePage, "#new-quantity-form");
+  await racePage.fill('#new-quantity-form [name="symbol"]', "Lenta");
+  await racePage.fill('#new-quantity-form [name="name"]', "Lenta");
+  const practiceSaved = racePage.waitForResponse((r) => r.url().endsWith("/p1-estadistica/definition"));
+  await racePage.route("**/api/practices/p1-estadistica/quantities", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await racePage.click('#new-quantity-form button[type="submit"]');
+  await racePage.click('.tab.teacher-only[data-view="submissions"]');
+  await racePage.click(`.submission-item[data-id="${submissionId}"]`);
+  await racePage.waitForSelector(".review-form");
+  await practiceSaved;
+  await racePage.waitForTimeout(300);
+  await reviewSaved(racePage);
+  await racePage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();
+  assert((await detailHtml(racePage)).includes("t<sub>1/2</sub>"), "tmedio debía seguir mostrándose como t_1/2");
+
+  step("docente: si falla la definición de la entrega, lo avisa y se puede reintentar");
+  const { page: failPage } = await login(TEACHER, "docente");
+  await failPage.route("**/api/submissions/*/definition", (route) =>
+    route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"x"}' }),
+  );
+  await failPage.click('.tab.teacher-only[data-view="submissions"]');
+  await failPage.click(`.submission-item[data-id="${submissionId}"]`);
+  await failPage.waitForSelector("#submission-definition-error");
+  await failPage.unroute("**/api/submissions/*/definition");
+  await failPage.click("#submission-definition-retry");
+  await failPage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();
+  assert((await failPage.locator("#submission-definition-error").count()) === 0, "el aviso debía irse al reintentar");
+  assert((await detailHtml(failPage)).includes("t<sub>1/2</sub>"), "tras reintentar debía mostrarse t_1/2");
 
   console.log("P3 unificada: dos pestañas, entrega y análisis por parte, sin errores JS.");
 });

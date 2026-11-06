@@ -6,6 +6,7 @@ export const state = {
   gradebooks: [],
   activeSubmissionId: null,
   activeSubmission: null,
+  activeSubmissionDefinition: null,
   activeStudentId: null,
   studentDetailSection: "overview",
   studentActionStatus: "",
