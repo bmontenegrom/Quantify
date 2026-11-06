@@ -50,6 +50,31 @@ await withE2E({ port: PORT, dbName: "quantify-simbolo-mostrar.db" }, async ({ lo
   saved = await definition();
   assert(saved.display_symbols.Zy === "Z_y", "la edición debía guardar el símbolo a mostrar");
 
+  step("docente: el cronómetro se rechaza si la magnitud no es de tiempo");
+  const zy = saved.quantities.find((q) => q.symbol === "Zy");
+  await page.click(`[data-edit-quantity][data-qid="${zy.id}"]`);
+  await page.selectOption('#edit-quantity-form [name="input_widget"]', "cronometro");
+  await page.click('#edit-quantity-form button[type="submit"]');
+  await statusIncludes("El cronómetro solo aplica");
+
+  step("docente: el rótulo y la entrada se guardan y se precargan al editar");
+  if (!(await page.locator("#edit-quantity-form").count())) {
+    await page.click(`[data-edit-quantity][data-qid="${zy.id}"]`);
+  }
+  await page.fill('#edit-quantity-form [name="quantity"]', "tiempo");
+  await page.selectOption('#edit-quantity-form [name="label_mode"]', "nombre_simbolo");
+  await page.selectOption('#edit-quantity-form [name="input_widget"]', "cronometro");
+  await page.click('#edit-quantity-form button[type="submit"]');
+  await page.waitForSelector("#edit-quantity-form", { state: "detached" });
+  const edited = (await definition()).quantities.find((q) => q.symbol === "Zy");
+  assert(edited.label_mode === "nombre_simbolo", `rótulo guardado: ${edited.label_mode}`);
+  assert(edited.input_widget === "cronometro", `entrada guardada: ${edited.input_widget}`);
+  await page.click(`[data-edit-quantity][data-qid="${zy.id}"]`);
+  const shownLabel = await page.locator('#edit-quantity-form [name="label_mode"]').inputValue();
+  const shownWidget = await page.locator('#edit-quantity-form [name="input_widget"]').inputValue();
+  assert(shownLabel === "nombre_simbolo" && shownWidget === "cronometro", "el formulario debía precargar lo guardado");
+  await page.click("#edit-quantity-form [data-cancel-quantity]");
+
   step("docente: un símbolo llamado como un miembro de Object no precarga basura");
   const named = await apiPost(page, `/api/practices/${PRACTICE_ID}/quantities`, {
     symbol: "constructor",

@@ -1,7 +1,6 @@
 import { state } from "./state.js";
-import { measurementFields, practiceSelect } from "./dom.js";
+import { measurementFields } from "./dom.js";
 import { seriesStats, histogram, normalCurve } from "./lib.js";
-import { PRACTICES_WITHOUT_CHRONO_HELPER } from "./constants.js";
 import { Chronometer } from "./chronometer.js";
 
 export function chronoWidgetInnerHtml() {
@@ -44,8 +43,7 @@ export function wireChronoHelpers() {
 }
 
 export function needsChronoHelper(q) {
-  if (PRACTICES_WITHOUT_CHRONO_HELPER.has(practiceSelect.value)) return false;
-  return q.quantity === "tiempo" && !q.repeated && !q.is_given;
+  return q.input_widget === "cronometro" && !q.repeated && !q.is_given;
 }
 
 export function chronoKeyFor(row) {

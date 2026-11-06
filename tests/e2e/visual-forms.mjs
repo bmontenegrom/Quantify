@@ -44,6 +44,10 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   const fieldsHtml = await page.locator("#measurement-fields").innerHTML();
   assert(fieldsHtml.includes("V<sub>G</sub>"), "Vg_s debía mostrarse como V_G (símbolo a mostrar)");
   assert(!fieldsHtml.includes("Vg<sub>S</sub>"), "Vg_s no debía mostrar el sufijo de la parte");
+  assert(
+    fieldsHtml.includes('<legend>V<sub>G</sub> <span class="submission-meta">'),
+    "Vg_s debía rotularse primero por su símbolo",
+  );
 
   const partTabs = page.locator("#practice-part-tabs .part-tab");
   assert((await partTabs.count()) === 3, "p2-cc debe tener 3 tabs de partes");
@@ -124,6 +128,28 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await openPractice(page, "fluidos-2");
   await assertInputContrast(page);
   await page.screenshot({ path: join(ARTIFACTS, "visual-fluidos2-dark.png"), fullPage: true });
+
+  const helper = page.locator("#measurement-fields .chrono-helper");
+  const fieldLegend = (text) => page.locator("#measurement-fields legend", { hasText: text }).first();
+
+  await openPractice(page, "viscosidad");
+  await helper.waitFor({ state: "attached" });
+
+  await openPractice(page, "p3-relajacion");
+  await fieldLegend("Periodo de la onda cuadrada").waitFor({ state: "attached" });
+  assert((await helper.count()) === 0, "P3 no debía mostrar el ayudante de cronómetro");
+  const p3Html = await page.locator("#measurement-fields").innerHTML();
+  assert(p3Html.includes(" T<sub>OC</sub></legend>"), "T_oc debía rotularse con su nombre y su símbolo");
+
+  await openPractice(page, "fluidos-1");
+  await helper.waitFor({ state: "attached" });
+
+  await openPractice(page, "fluidos-2");
+  await fieldLegend("Altura inicial").waitFor({ state: "attached" });
+  assert((await helper.count()) === 0, "fluidos-2 no debía mostrar el ayudante de cronómetro");
+
+  await openPractice(page, "p1-estadistica");
+  await page.locator("#measurement-fields .measurement-row--chrono").first().waitFor({ state: "attached" });
 
   console.log("Visual forms smoke OK");
 });
