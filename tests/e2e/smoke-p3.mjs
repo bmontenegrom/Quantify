@@ -126,7 +126,7 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   await offlinePage.route(`**/api/submissions/${submissionId}`, (route) => route.abort());
   await offlinePage.click(`.submission-item[data-id="${submissionId}"]`);
   await offlinePage.waitForSelector('#submission-load-error:has-text("No se pudo conectar con el servidor")');
-  await offlinePage.click("#submission-load-retry");
+  await Promise.all([offlinePage.waitForEvent("requestfailed"), offlinePage.click("#submission-load-retry")]);
   await offlinePage.waitForSelector('#submission-load-error:has-text("No se pudo conectar con el servidor")');
   assert(await offlinePage.locator("#submission-workspace-back").isVisible(), "debía poder volver al listado");
   await offlinePage.unroute(`**/api/submissions/${submissionId}`);
