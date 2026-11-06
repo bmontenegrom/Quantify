@@ -28,7 +28,12 @@ async function saveDisplaySymbol(practiceId, form) {
   const input = form.querySelector('[name="display_symbol"]');
   const display = input.value.trim();
   if (display === input.defaultValue.trim()) return;
-  await postJson(`/api/practices/${practiceId}/display-symbol`, { symbol, display_symbol: display });
+  try {
+    await postJson(`/api/practices/${practiceId}/display-symbol`, { symbol, display_symbol: display });
+  } catch (error) {
+    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`).catch(() => state.practiceDefinition);
+    throw new Error(`Se guardó ${symbol}, pero no su símbolo a mostrar: ${error.message} Editalo para reintentar.`);
+  }
 }
 
 function isEditing(kind, id) {
