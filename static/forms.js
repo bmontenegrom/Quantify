@@ -9,7 +9,7 @@ import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   compatibleInstruments, prefixFactor, validateMeasurements,
-  draftMeasurementsByQuantity, hasUncertainty,
+  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -292,6 +292,7 @@ export function renderMeasurementFields() {
   const useOperators = operatorCount >= 2;
   const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
   const legendHtml = (q) => quantityNameHtml(q);
+  const drafted = draftedQuantityIds(applicableDraft()?.measurements);
 
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
@@ -320,7 +321,7 @@ export function renderMeasurementFields() {
         </fieldset>
       `;
     }
-    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId) {
+    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && !drafted.has(q.id)) {
       const chronoOpts = compatibleInstruments(instruments, q.quantity);
       const defaultInst = chronoOpts[0];
       const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
@@ -935,9 +936,13 @@ export function applyPrefill() {
   );
 }
 
+function applicableDraft() {
+  if (state.draftPreviewPracticeId || state.editingSubmissionId || state.restoringCancelledSubmission) return null;
+  return loadDraft();
+}
+
 function applyDraftPrefill() {
-  if (state.draftPreviewPracticeId || state.editingSubmissionId || state.restoringCancelledSubmission) return;
-  const draft = loadDraft();
+  const draft = applicableDraft();
   if (!draft) return;
   applyMeasurementPrefill(
     draftMeasurementsByQuantity(draft.measurements),

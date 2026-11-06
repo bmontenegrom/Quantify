@@ -33,6 +33,7 @@ import {
   pointPower,
   flowRate,
   draftMeasurementsByQuantity,
+  draftedQuantityIds,
   SI_PREFIXES,
   prefixFactor,
   seriesStats,
@@ -517,6 +518,16 @@ test("draftMeasurementsByQuantity: fila suelta medida con réplicas e instrument
   assert.equal(e.instrument_id, "inst-1");
   assert.equal(e.scale_id, "sc-1");
   assert.equal(e.value_u, null);
+});
+
+test("draftedQuantityIds: solo las magnitudes con lecturas", () => {
+  const ids = draftedQuantityIds([
+    { quantity_id: "con", values: [1] },
+    { quantity_id: "vacia", values: [] },
+    { quantity_id: "sin" },
+  ]);
+  assert.deepEqual([...ids], ["con"]);
+  assert.equal(draftedQuantityIds(undefined).size, 0);
 });
 
 test("draftMeasurementsByQuantity: lista vacía o ausente da un Map vacío", () => {

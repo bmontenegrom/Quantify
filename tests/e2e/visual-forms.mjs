@@ -149,7 +149,38 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   assert((await helper.count()) === 0, "fluidos-2 no debía mostrar el ayudante de cronómetro");
 
   await openPractice(page, "p1-estadistica");
-  await page.locator("#measurement-fields .measurement-row--chrono").first().waitFor({ state: "attached" });
+  const chronoRow = page.locator('#measurement-fields .measurement-row--chrono').first();
+  await chronoRow.waitFor({ state: "attached" });
+
+  const draftedId = await chronoRow.getAttribute("data-quantity-id");
+  await page.fill("#student-comment", "borrador");
+  await page.waitForFunction(() =>
+    Object.keys(localStorage).some(
+      (key) => key.startsWith("quantify-draft:") && JSON.parse(localStorage.getItem(key)).comment === "borrador",
+    ),
+  );
+  await page.evaluate((id) => {
+    const key = Object.keys(localStorage).find(
+      (k) => k.startsWith("quantify-draft:") && JSON.parse(localStorage.getItem(k)).comment === "borrador",
+    );
+    const draft = JSON.parse(localStorage.getItem(key));
+    draft.measurements = [{ quantity_id: id, instrument_id: null, scale_id: null, values: [1.5, 1.6], given_u: null }];
+    localStorage.setItem(key, JSON.stringify(draft));
+  }, draftedId);
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "p1-estadistica");
+  const draftedRow = page.locator(`#measurement-fields .measurement-row[data-quantity-id="${draftedId}"]`);
+  await draftedRow.locator(".measure-value").first().waitFor({ state: "attached" });
+  assert(
+    !(await draftedRow.evaluate((row) => row.classList.contains("measurement-row--chrono"))),
+    "con lecturas en el borrador la fila debía quedar con teclado",
+  );
+  const restoredReadings = await draftedRow.locator(".measure-value").evaluateAll((inputs) => inputs.map((i) => i.value));
+  assert(
+    restoredReadings.join() === "1.5,1.6",
+    `el borrador debía conservar las lecturas (vi: ${restoredReadings.join()})`,
+  );
 
   console.log("Visual forms smoke OK");
 });

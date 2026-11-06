@@ -376,6 +376,10 @@ export function draftMeasurementsByQuantity(measurements) {
   return map;
 }
 
+export function draftedQuantityIds(measurements) {
+  return new Set((measurements ?? []).filter((m) => m.values?.length).map((m) => m.quantity_id));
+}
+
 export function analysisSections(analysis) {
   const parts = analysis?.parts ?? [];
   if (!parts.length) return [{ title: null, analysis }];
