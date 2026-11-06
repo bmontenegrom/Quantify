@@ -751,3 +751,12 @@ test("analysisSections separa lo compartido de cada parte, o devuelve el anális
   assert.equal(sections[0].analysis, withParts);
   assert.deepEqual(sections[1], { title: "Serie", analysis: serie });
 });
+
+test("symbolHtml dibuja los subíndices genéricos sin símbolo a mostrar", () => {
+  setDisplaySymbols({});
+  assert.equal(symbolHtml("h_max"), "h<sub>max</sub>");
+  assert.equal(symbolHtml("f_res"), "f<sub>res</sub>");
+  assert.equal(symbolHtml("I_teo"), "I<sub>teo</sub>");
+  assert.equal(symbolHtml("a_R"), "a<sub>R</sub>");
+  assert.equal(symbolHtml("b_R"), "b<sub>R</sub>");
+});
