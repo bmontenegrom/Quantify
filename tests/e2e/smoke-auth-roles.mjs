@@ -49,5 +49,22 @@ await withE2E({ port: PORT, dbName: "quantify-auth-roles.db" }, async ({ browser
   });
   assert(teacherTabsVisibleForTeacher, "el docente debía ver los tabs .teacher-only");
 
+  step("sin conexión: logout avisa en español y la sesión sigue a la vista");
+  await teacherPage.route("**/api/auth/logout", (route) => route.abort());
+  await teacherPage.click("#logout-button");
+  await teacherPage.waitForSelector('.toast:has-text("No se pudo conectar con el servidor")');
+  assert(await teacherPage.locator("#app-shell").isVisible(), "debía seguir en la app");
+
+  step("sin conexión: login avisa en español");
+  const offlineContext = await browser.newContext();
+  const offlinePage = await offlineContext.newPage();
+  await offlinePage.goto(base);
+  await offlinePage.route("**/api/auth/login", (route) => route.abort());
+  await offlinePage.fill('#login-form input[name="email"]', TEACHER.email);
+  await offlinePage.fill('#login-form input[name="password"]', TEACHER.password);
+  await offlinePage.click('#login-form button[type="submit"]');
+  await offlinePage.waitForSelector('#login-status:has-text("No se pudo conectar con el servidor")');
+  await offlineContext.close();
+
   console.log("login fallido, ocultamiento por rol y logout se comportan como se espera.");
 });

@@ -5,7 +5,7 @@ import {
   accountEmail, accountRole, accountStatus,
   passwordForm, passwordStatus, logoutButton,
 } from "./dom.js";
-import { postJson, setCsrfToken, errorText } from "./api.js";
+import { send, postJson, setCsrfToken, errorText } from "./api.js";
 import { escapeHtml, canReview } from "./lib.js";
 import { showToast } from "./toast.js";
 
@@ -81,7 +81,7 @@ export function setupAuth(onLogin) {
     loginStatus.textContent = "Entrando...";
     try {
       const payload = Object.fromEntries(new FormData(loginForm).entries());
-      const response = await fetch("/api/auth/login", {
+      const response = await send("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -100,8 +100,12 @@ export function setupAuth(onLogin) {
   });
 
   logoutButton.addEventListener("click", async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    location.reload();
+    try {
+      await send("/api/auth/logout", { method: "POST" });
+      location.reload();
+    } catch (error) {
+      showToast(error.message, "error");
+    }
   });
 
   passwordForm.addEventListener("submit", async (event) => {

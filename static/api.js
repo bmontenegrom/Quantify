@@ -4,7 +4,7 @@ export function setCsrfToken(token) {
   csrfToken = token ?? null;
 }
 
-async function send(url, options) {
+export async function send(url, options) {
   try {
     return await fetch(url, options);
   } catch {
