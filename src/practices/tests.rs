@@ -3912,3 +3912,56 @@ async fn a_submission_shows_the_symbols_of_its_version_never_the_draft() {
         .unwrap()
         .is_empty());
 }
+
+#[tokio::test]
+async fn a_submission_without_version_reads_the_published_version_everywhere() {
+    let (pool, _dir) = setup().await;
+    db::run_startup_seeds(&pool, true, None).await.unwrap();
+    let practice = "p1-estadistica";
+    let tolerance = |value: f64| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                "UPDATE practice_results SET tolerance = ?1 WHERE practice_id = ?2 AND symbol = 'Q'",
+            )
+            .bind(value)
+            .bind(practice)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+    tolerance(1.0).await;
+    assert!(set_display_symbol(&pool, practice, "T1", "T_publicado")
+        .await
+        .unwrap());
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, course_id, practice_id, \
+         file_name, csv_path, analysis_json, submitted_at) \
+         VALUES ('sin-version', 'a', 'g', 'c', (SELECT id FROM courses LIMIT 1), ?1, '', '', '{}', \
+         '2026-10-01T00:00:00Z')",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    tolerance(2.0).await;
+    assert!(set_display_symbol(&pool, practice, "T1", "T_borrador")
+        .await
+        .unwrap());
+
+    let definition = submission_definition(&pool, "sin-version")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(definition.display_symbols["T1"], "T_publicado");
+    let detail = db::submission_detail(&pool, "sin-version")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(detail.display_symbols["T1"], "T_publicado");
+    assert_eq!(detail.result_tolerances["Q"], 1.0);
+}

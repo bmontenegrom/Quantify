@@ -113,7 +113,7 @@ pub async fn submission_definition(
             return Ok(Some(definition));
         }
     }
-    super::definition(pool, &practice_id).await
+    published_definition(pool, &practice_id).await
 }
 
 pub async fn submission_display_symbols(
