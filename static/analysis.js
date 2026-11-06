@@ -71,7 +71,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
         )
       );
     const reviewForm = target.querySelector(".review-form");
-    if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
+    if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id, definition));
     const studentForm = target.querySelector(".student-results-form");
     if (studentForm && (isTeacher || !submission.results_visible_to_student)) {
       studentForm.addEventListener("submit", (event) => saveStudentResults(event, submission.id));

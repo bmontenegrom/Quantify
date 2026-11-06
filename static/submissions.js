@@ -5,6 +5,7 @@ import {
 } from "./dom.js";
 import { fetchJson, postJson, errorText } from "./api.js";
 import { escapeHtml, canReview, formatDate, groupBy } from "./lib.js";
+import { showToast } from "./toast.js";
 
 const filterGroupEl = () => document.querySelector("#submission-filter-group");
 const filterTableEl = () => document.querySelector("#submission-filter-table");
@@ -193,7 +194,25 @@ function submissionItemHtml(item) {
   `;
 }
 
-function renderWorkspaceShell(id, notice) {
+function reviewFormValues() {
+  const form = submissionWorkspace.querySelector(".review-form");
+  if (!form) return [];
+  return [...form.elements]
+    .filter((field) => field.name)
+    .map((field) => [field.name, field.type === "checkbox" ? field.checked : field.value]);
+}
+
+function restoreReviewForm(values) {
+  const form = submissionWorkspace.querySelector(".review-form");
+  if (!form) return;
+  for (const [name, value] of values) {
+    const field = form.elements[name];
+    if (field?.type === "checkbox") field.checked = value;
+    else if (field) field.value = value;
+  }
+}
+
+function renderWorkspaceShell(notice, retry) {
   submissionWorkspace.innerHTML = `
     <button type="button" class="back-link" id="submission-workspace-back">Volver al listado</button>
     ${notice ? `<div class="edit-banner" id="submission-load-error" role="alert">
@@ -203,7 +222,32 @@ function renderWorkspaceShell(id, notice) {
     <div id="submission-detail-body"></div>
   `;
   submissionWorkspace.querySelector("#submission-workspace-back").addEventListener("click", closeSubmissionWorkspace);
-  submissionWorkspace.querySelector("#submission-load-retry")?.addEventListener("click", () => openSubmissionWorkspace(id));
+  submissionWorkspace.querySelector("#submission-load-retry")?.addEventListener("click", retry);
+}
+
+async function renderSubmission(id, submission, definition) {
+  const definitionFailed = submission.entry_mode === "form" && !definition;
+  renderWorkspaceShell(
+    definitionFailed ? "No se pudo cargar la definición de la práctica: algunos resultados pueden verse incompletos." : null,
+    () => retryDefinition(id),
+  );
+  const detailBody = submissionWorkspace.querySelector("#submission-detail-body");
+  const { renderAnalysis } = await import("./analysis.js");
+  renderAnalysis(detailBody, submission, canReview(state.user), definition);
+}
+
+async function retryDefinition(id) {
+  let definition;
+  try {
+    definition = await fetchJson(`/api/submissions/${encodeURIComponent(id)}/definition`);
+  } catch (error) {
+    showToast(`No se pudo cargar la definición: ${error.message}`, "error");
+    return;
+  }
+  if (state.activeSubmissionId !== id) return;
+  const values = reviewFormValues();
+  await renderSubmission(id, state.activeSubmission, definition);
+  restoreReviewForm(values);
 }
 
 export async function openSubmissionWorkspace(id) {
@@ -221,37 +265,29 @@ export async function openSubmissionWorkspace(id) {
   try {
     submission = await fetchJson(`/api/submissions/${id}`);
   } catch (error) {
-    if (state.activeSubmissionId === id) renderWorkspaceShell(id, `No se pudo abrir la entrega: ${error.message}`);
+    if (state.activeSubmissionId === id) {
+      renderWorkspaceShell(`No se pudo abrir la entrega: ${error.message}`, () => openSubmissionWorkspace(id));
+    }
     return;
   }
   if (state.activeSubmissionId !== id) return;
   state.activeSubmission = submission;
 
   let definition = null;
-  let definitionFailed = false;
   if (submission.entry_mode === "form") {
     try {
       definition = await fetchJson(`/api/submissions/${encodeURIComponent(submission.id)}/definition`);
     } catch {
-      definitionFailed = true;
+      definition = null;
     }
     if (state.activeSubmissionId !== id) return;
   }
-  state.activeSubmissionDefinition = definition;
-
-  renderWorkspaceShell(
-    id,
-    definitionFailed ? "No se pudo cargar la definición de la práctica: algunos resultados pueden verse incompletos." : null,
-  );
-  const detailBody = submissionWorkspace.querySelector("#submission-detail-body");
-  const { renderAnalysis } = await import("./analysis.js");
-  renderAnalysis(detailBody, submission, canReview(state.user), definition);
+  await renderSubmission(id, submission, definition);
 }
 
 export function closeSubmissionWorkspace() {
   state.activeSubmissionId = null;
   state.activeSubmission = null;
-  state.activeSubmissionDefinition = null;
   renderSubmissionsPage();
 }
 
@@ -355,7 +391,7 @@ export function renderReviewForm(submission) {
   `;
 }
 
-export async function saveReview(event, id) {
+export async function saveReview(event, id, definition = null) {
   event.preventDefault();
   const form = event.currentTarget;
   const payload = Object.fromEntries(new FormData(form).entries());
@@ -368,6 +404,7 @@ export async function saveReview(event, id) {
   } catch (error) {
     const status = form.querySelector(".review-status");
     if (status) status.textContent = error.message;
+    showToast(`No se guardó la revisión: ${error.message}`, "error");
     return;
   }
   if (state.activeSubmissionId !== id) {
@@ -378,7 +415,7 @@ export async function saveReview(event, id) {
   const detailBody = submissionWorkspace?.querySelector("#submission-detail-body");
   if (detailBody) {
     const { renderAnalysis } = await import("./analysis.js");
-    renderAnalysis(detailBody, updated, true, state.activeSubmissionDefinition);
+    renderAnalysis(detailBody, updated, true, definition);
   }
   await loadSubmissions();
 }

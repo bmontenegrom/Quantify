@@ -114,9 +114,15 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   await failPage.waitForSelector("#submission-load-error");
   assert((await detailHtml(failPage)).includes("t<sub>1/2</sub>"), "los símbolos no debían depender de la definición");
   await failPage.screenshot({ path: join(ARTIFACTS, "p3-definicion-error.png") });
+  const typedComment = () => failPage.locator('.review-form [name="teacher_comment"]').inputValue();
+  await failPage.fill('.review-form [name="teacher_comment"]', "comentario a medio escribir");
+  await failPage.click("#submission-load-retry");
+  await failPage.waitForSelector('.toast:has-text("No se pudo cargar la definición")');
+  assert((await typedComment()) === "comentario a medio escribir", "un reintento fallido no debía borrar el comentario");
   await failPage.unroute("**/api/submissions/*/definition");
   await failPage.click("#submission-load-retry");
   await failPage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();
+  assert((await typedComment()) === "comentario a medio escribir", "reintentar no debía borrar el comentario");
   assert((await failPage.locator("#submission-load-error").count()) === 0, "el aviso debía irse al reintentar");
   assert((await detailHtml(failPage)).includes("t<sub>1/2</sub>"), "tras reintentar debía mostrarse t_1/2");
 
@@ -171,6 +177,21 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   await slowPage.click('.tab.teacher-only[data-view="submissions"]');
   await slowPage.click(`.submission-item[data-id="${otherId}"]`);
   await assertOtherStaysOpen("al abrir la entrega");
+
+  step("docente: si falla guardar la revisión tras cambiar de entrega, lo avisa");
+  await slowPage.unroute(`**/api/submissions/${submissionId}`);
+  await slowPage.click("#submission-workspace-back");
+  await slowPage.click(`.submission-item[data-id="${submissionId}"]`);
+  await slowPage.waitForSelector(".review-form");
+  await slowPage.route(`**/api/submissions/${submissionId}/review`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await route.abort();
+  });
+  await slowPage.click('.review-form button[type="submit"]');
+  await slowPage.click("#submission-workspace-back");
+  await slowPage.click(`.submission-item[data-id="${otherId}"]`);
+  await slowPage.waitForSelector('.toast:has-text("No se guardó la revisión")');
+  await slowPage.unroute(`**/api/submissions/${submissionId}/review`);
 
   console.log("P3 unificada: dos pestañas, entrega y análisis por parte, sin errores JS.");
 });
