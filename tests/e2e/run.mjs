@@ -56,12 +56,12 @@ async function studentSavesOwnResults(page) {
   step("estudiante: abre la entrega y carga sus cálculos");
   await page.click('.tab.student-only[data-view="submissions"]');
   await page.click('.submission-item:has-text("Mesa 1")');
-  await page.waitForSelector(".student-results-form");
-  await page.fill('.student-value[data-symbol="g1"]', "9.78");
-  await page.fill('.student-u[data-symbol="g1"]', "0.08");
-  await page.$eval(".student-results-form", (form) => { form.dataset.e2ePrev = "1"; });
-  await page.click('.student-results-form button[type="submit"]');
-  await page.waitForSelector(".student-results-form:not([data-e2e-prev])");
+  await page.waitForSelector("#submission-detail-body .student-results-form");
+  await page.fill('#submission-detail-body .student-value[data-symbol="g1"]', "9.78");
+  await page.fill('#submission-detail-body .student-u[data-symbol="g1"]', "0.08");
+  await page.$eval("#submission-detail-body .student-results-form", (form) => { form.dataset.e2ePrev = "1"; });
+  await page.click('#submission-detail-body .student-results-form button[type="submit"]');
+  await page.waitForSelector("#submission-detail-body .student-results-form:not([data-e2e-prev])");
 }
 
 async function teacherReviews(page) {

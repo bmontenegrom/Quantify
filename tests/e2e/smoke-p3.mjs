@@ -57,6 +57,7 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   ]);
   const { id: submissionId } = await response.json();
   await sPage.waitForSelector('#submit-status:has-text("Entrega guardada")', { timeout: 15_000 });
+  await sPage.locator("#latest-result .student-results-form").waitFor();
 
   step("docente: la entrega muestra las dos partes");
   const { page: tPage } = await login(TEACHER, "docente");
