@@ -757,6 +757,7 @@ fn validate_intermediate(
     input: &IntermediateInput,
     exclude_id: Option<&str>,
 ) -> Result<(), AppError> {
+    validate_display_symbol(&input.display_symbol)?;
     let view = def.point_view();
     let def = &view;
     let symbol = input.symbol.trim();
@@ -857,6 +858,7 @@ fn validate_point_result(
     def: &practices::PracticeDefinition,
     input: &PointResultInput,
 ) -> Result<(), AppError> {
+    validate_display_symbol(&input.display_symbol)?;
     let view = def.point_view();
     let def = &view;
     let symbol = input.symbol.trim();
@@ -962,6 +964,7 @@ fn validate_aggregate(
     input: &AggregateInput,
     exclude_id: Option<&str>,
 ) -> Result<(), AppError> {
+    validate_display_symbol(&input.display_symbol)?;
     let view = def.point_view();
     let def = &view;
     let symbol = input.symbol.trim();
@@ -1087,6 +1090,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
     };
     for r in &def.results {
         let input = ResultInput {
+            display_symbol: None,
             symbol: r.symbol.clone(),
             name: r.name.clone(),
             unit: r.unit.clone(),
@@ -1115,6 +1119,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
     if matches!(kind, Some("regresion_lineal" | "curva")) {
         for it in &def.intermediates {
             let input = IntermediateInput {
+                display_symbol: None,
                 symbol: it.symbol.clone(),
                 name: it.name.clone(),
                 unit: it.unit.clone(),
@@ -1130,6 +1135,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
     if kind == Some("regresion_lineal") {
         for pr in &def.point_results {
             let input = PointResultInput {
+                display_symbol: None,
                 symbol: pr.symbol.clone(),
                 name: pr.name.clone(),
                 unit: pr.unit.clone(),
@@ -1143,6 +1149,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
         }
         for a in &def.aggregates {
             let input = AggregateInput {
+                display_symbol: None,
                 symbol: a.symbol.clone(),
                 name: a.name.clone(),
                 unit: a.unit.clone(),
@@ -1555,7 +1562,22 @@ async fn guard_symbol(
     Ok(())
 }
 
+const MAX_DISPLAY_SYMBOL_CHARS: usize = 40;
+
+fn validate_display_symbol(display: &Option<String>) -> Result<(), AppError> {
+    if display
+        .as_deref()
+        .is_some_and(|d| d.trim().chars().count() > MAX_DISPLAY_SYMBOL_CHARS)
+    {
+        return Err(AppError::bad_request(format!(
+            "El símbolo a mostrar puede tener hasta {MAX_DISPLAY_SYMBOL_CHARS} caracteres."
+        )));
+    }
+    Ok(())
+}
+
 fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
+    validate_display_symbol(&input.display_symbol)?;
     if input.symbol.trim().is_empty() || input.name.trim().is_empty() {
         return Err(AppError::bad_request(
             "La magnitud necesita un simbolo y un nombre. La unidad puede quedar vacia (adimensional).",
@@ -1578,6 +1600,7 @@ fn validate_result(
     def: &practices::PracticeDefinition,
     input: &ResultInput,
 ) -> Result<(), AppError> {
+    validate_display_symbol(&input.display_symbol)?;
     if input.symbol.trim().is_empty()
         || input.name.trim().is_empty()
         || input.formula.trim().is_empty()
@@ -2005,9 +2028,11 @@ mod tests {
             aggregates: vec![],
             parts: vec![],
             sections: vec![],
+            display_symbols: Default::default(),
             current_version: None,
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
+            display_symbol: None,
             symbol: symbol.into(),
             name: "x".into(),
             unit: "u".into(),
@@ -2087,9 +2112,11 @@ mod tests {
             aggregates: vec![agg("a0", "Re_max", 0), agg("a1", "Re_min", 1)],
             parts: vec![],
             sections: vec![],
+            display_symbols: Default::default(),
             current_version: None,
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
+            display_symbol: None,
             symbol: symbol.into(),
             name: "x".into(),
             unit: "".into(),
@@ -2128,8 +2155,16 @@ mod tests {
     }
 
     #[test]
+    fn validate_display_symbol_limits_the_length_after_trimming() {
+        assert!(validate_display_symbol(&None).is_ok());
+        assert!(validate_display_symbol(&Some(format!(" {} ", "x".repeat(40)))).is_ok());
+        assert!(validate_display_symbol(&Some("x".repeat(41))).is_err());
+    }
+
+    #[test]
     fn validate_quantity_allows_dimensionless_unit() {
         let q = |unit: &str| QuantityInput {
+            display_symbol: None,
             symbol: "kp".into(),
             name: "Factor geometrico".into(),
             unit: unit.into(),
@@ -2188,9 +2223,11 @@ mod tests {
             aggregates: vec![],
             parts: vec![],
             sections: vec![],
+            display_symbols: Default::default(),
             current_version: None,
         };
         let r = |unit: &str| ResultInput {
+            display_symbol: None,
             symbol: "M_medio".into(),
             name: "Coeficiente medio".into(),
             unit: unit.into(),
@@ -2502,6 +2539,7 @@ mod tests {
             .unwrap();
         let i_s = cc.results.iter().find(|r| r.symbol == "I_s").unwrap();
         let input = ResultInput {
+            display_symbol: None,
             symbol: "I_serie".into(),
             name: i_s.name.clone(),
             unit: i_s.unit.clone(),
@@ -2556,6 +2594,7 @@ mod tests {
         assert!(validate_curve(&cc, &curve("R", "I*R1")).is_ok());
         assert!(validate_curve(&cc, &curve("R", "Vg_s")).is_err());
         let intermediate = |formula: &str| IntermediateInput {
+            display_symbol: None,
             symbol: "Pn".into(),
             name: "Pn".into(),
             unit: "".into(),
@@ -2969,6 +3008,7 @@ mod tests {
     async fn results_can_use_other_results() {
         let (pool, _dir) = crate::computation::tests::setup().await;
         let input = |symbol: &str, formula: &str| ResultInput {
+            display_symbol: None,
             symbol: symbol.into(),
             name: symbol.into(),
             unit: "m".into(),

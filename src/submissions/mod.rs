@@ -111,6 +111,7 @@ pub struct SubmissionDetail {
     pub table_number: Option<i64>,
     pub members: Vec<ReportMember>,
     pub result_tolerances: HashMap<String, f64>,
+    pub display_symbols: std::collections::BTreeMap<String, String>,
     pub student_comment: Option<String>,
 }
 
@@ -747,14 +748,16 @@ pub async fn submission_detail(
     let members = report_members_for(pool, &row.id).await?;
     let result_tolerances: HashMap<String, f64> = sqlx::query_as::<_, (String, f64)>(
         "SELECT json_extract(r.value, '$.symbol'), json_extract(r.value, '$.tolerance') \
-         FROM submissions s JOIN practice_versions v ON v.id = s.practice_version_id, \
+         FROM submissions s JOIN practices p ON p.id = s.practice_id \
+         JOIN practice_versions v ON v.id = COALESCE(s.practice_version_id, p.current_version_id), \
          json_each(v.definition_json, '$.results') r \
          WHERE s.id = ?1 AND json_extract(r.value, '$.tolerance') IS NOT NULL \
          UNION ALL \
          SELECT pr.symbol, pr.tolerance FROM submissions s \
+         JOIN practices p ON p.id = s.practice_id \
          JOIN practice_results pr ON pr.practice_id = s.practice_id \
          WHERE s.id = ?1 AND pr.tolerance IS NOT NULL \
-         AND NOT EXISTS (SELECT 1 FROM practice_versions v2 WHERE v2.id = s.practice_version_id)",
+         AND COALESCE(s.practice_version_id, p.current_version_id) IS NULL",
     )
     .bind(&row.id)
     .fetch_all(pool)
@@ -767,7 +770,9 @@ pub async fn submission_detail(
         && row.status == "pendiente"
         && !row.results_visible_to_student
         && Utc::now() < editable_until;
+    let display_symbols = crate::practices::submission_display_symbols(pool, &row.id).await?;
     Ok(Some(SubmissionDetail {
+        display_symbols,
         id: row.id,
         student_name: row.student_name,
         group_name: row.group_name,

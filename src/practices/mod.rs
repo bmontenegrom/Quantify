@@ -11,6 +11,8 @@ where
 
 #[derive(Debug, Deserialize)]
 pub struct QuantityInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -38,6 +40,8 @@ fn default_true() -> bool {
 
 #[derive(Debug, Deserialize)]
 pub struct ResultInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -67,6 +71,7 @@ pub struct PracticeDefinition {
     pub aggregates: Vec<PracticeAggregate>,
     pub parts: Vec<PracticePart>,
     pub sections: Vec<PracticeSection>,
+    pub display_symbols: std::collections::BTreeMap<String, String>,
     pub current_version: Option<i64>,
 }
 
@@ -141,6 +146,8 @@ pub struct PracticeIntermediate {
 
 #[derive(Debug, Deserialize)]
 pub struct IntermediateInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -161,6 +168,8 @@ pub struct PracticePointResult {
 
 #[derive(Debug, Deserialize)]
 pub struct PointResultInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -183,6 +192,8 @@ pub struct PracticeAggregate {
 
 #[derive(Debug, Deserialize)]
 pub struct AggregateInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -208,6 +219,7 @@ pub struct PracticeInfoInput {
 
 mod changes;
 mod crud;
+mod display;
 mod layout;
 mod lifecycle;
 mod parts;

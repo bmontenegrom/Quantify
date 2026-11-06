@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections } from "./lib.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -9,6 +9,7 @@ import { regressionMarkup, scatterMarkup } from "./analysis-plots.js";
 export { regressionMarkup, scatterMarkup };
 
 export function renderAnalysis(target, submission, includeReview = false, definition = null) {
+  setDisplaySymbols(submission.display_symbols);
   target.classList.remove("detail-empty");
 
   if (submission.entry_mode === "form") {
@@ -70,7 +71,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
         )
       );
     const reviewForm = target.querySelector(".review-form");
-    if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id));
+    if (reviewForm) reviewForm.addEventListener("submit", (event) => saveReview(event, submission.id, definition));
     const studentForm = target.querySelector(".student-results-form");
     if (studentForm && (isTeacher || !submission.results_visible_to_student)) {
       studentForm.addEventListener("submit", (event) => saveStudentResults(event, submission.id));

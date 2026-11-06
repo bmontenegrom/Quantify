@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
-import { escapeHtml, symbolHtml, unitHtml, format, prefixFactor, pointPower, flowRate, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, prefixFactor, pointPower, flowRate, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
 import { SERIES_LIVE_COLUMNS } from "./constants.js";
 import { definitionParts, definitionSections, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
@@ -154,6 +154,7 @@ async function updateRegressionPreview() {
         draft: Boolean(state.draftPreviewPracticeId),
       }
     );
+    setDisplaySymbols(state.practiceForm?.definition?.display_symbols);
     const analysis = analysisSections(full)
       .map((s) => s.analysis)
       .find((a) => a.regression || a.scatters?.length) ?? full;

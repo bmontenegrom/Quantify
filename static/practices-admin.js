@@ -1,13 +1,27 @@
 import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel, formatDate } from "./lib.js";
+import {
+  escapeHtml,
+  symbolHtml,
+  setDisplaySymbols,
+  inlineMathHtml,
+  unitHtml,
+  analysisKindLabel,
+  formatDate,
+} from "./lib.js";
 import { selectView } from "./navigation.js";
 
 const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
 
 function adminSymbolHtml(symbol) {
   return `<strong>${symbolHtml(symbol)}</strong> <code title="Así se escribe en las fórmulas">${escapeHtml(symbol)}</code>`;
+}
+
+function displaySymbolFieldHtml(item) {
+  const symbols = state.practiceDefinition?.display_symbols ?? {};
+  const shown = item && Object.hasOwn(symbols, item.symbol) ? symbols[item.symbol] : "";
+  return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label>`;
 }
 
 function isEditing(kind, id) {
@@ -77,6 +91,7 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${item ? `<input name="${kind.idParam}" type="hidden" value="${escapeHtml(item.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="${kind.symbolPlaceholder}" /></label>
+      ${displaySymbolFieldHtml(item)}
       <label>Nombre <input name="name" value="${v("name")}" placeholder="${kind.namePlaceholder}" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" /></label>
@@ -132,6 +147,7 @@ function symbolFormulaPayloadFromForm(form, kind) {
     name: raw.name || "",
     unit: raw.unit || "",
     formula: raw.formula,
+    display_symbol: raw.display_symbol,
   };
   if (kind.hasFinal) payload.is_final = raw.is_final === "on";
   return payload;
@@ -202,6 +218,7 @@ export function renderPracticesPage() {
   }
 
   const def = state.practiceDefinition;
+  setDisplaySymbols(def?.display_symbols);
   if (!def) {
     practiceWorkspace.innerHTML = `
       <div class="workspace-head">
@@ -810,6 +827,7 @@ function renderQuantityForm(qty, practiceId) {
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="l" /></label>
+      ${displaySymbolFieldHtml(qty)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Longitud del cordón" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm (vacío = adimensional)" /></label>
       <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" /></label>
@@ -906,6 +924,7 @@ function renderResultForm(res, practiceId, def = null) {
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${res ? `<input name="rid" type="hidden" value="${escapeHtml(res.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Q" /></label>
+      ${displaySymbolFieldHtml(res)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" /></label>
@@ -1050,6 +1069,7 @@ function quantityPayloadFromForm(form) {
     has_uncertainty: "has_uncertainty" in raw,
     optional: "optional" in raw,
     slot_count: slots,
+    display_symbol: raw.display_symbol,
     default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
   };
 }
@@ -1318,6 +1338,7 @@ async function saveNewResult(event) {
         tolerance: parseTolerance(raw.tolerance ?? ""),
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
+        display_symbol: raw.display_symbol,
         section_id: raw.section_id || null,
       });
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
@@ -1343,6 +1364,7 @@ async function saveEditResult(event) {
         tolerance: parseTolerance(raw.tolerance ?? ""),
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
+        display_symbol: raw.display_symbol,
       });
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },

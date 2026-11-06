@@ -8,7 +8,7 @@ pub struct PracticeVersion {
     pub definition: PracticeDefinition,
 }
 
-fn parse(json: &str) -> anyhow::Result<PracticeDefinition> {
+pub(super) fn parse(json: &str) -> anyhow::Result<PracticeDefinition> {
     let definition: PracticeDefinition = serde_json::from_str(json)
         .map_err(|e| anyhow::Error::new(sqlx::Error::Decode(Box::new(e))))?;
     if definition.practice_id.is_empty() {
@@ -113,7 +113,29 @@ pub async fn submission_definition(
             return Ok(Some(definition));
         }
     }
-    super::definition(pool, &practice_id).await
+    published_definition(pool, &practice_id).await
+}
+
+pub async fn submission_display_symbols(
+    pool: &SqlitePool,
+    submission_id: &str,
+) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+    let row: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT CAST(json_extract(v.definition_json, '$.display_symbols') AS TEXT) \
+         FROM submissions s JOIN practices p ON p.id = s.practice_id \
+         JOIN practice_versions v ON v.id = COALESCE(s.practice_version_id, p.current_version_id) \
+         WHERE s.id = ?1",
+    )
+    .bind(submission_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((Some(json),)) = row else {
+        return Ok(Default::default());
+    };
+    Ok(serde_json::from_str(&json).unwrap_or_else(|error| {
+        tracing::warn!(%submission_id, %error, "la versión de la entrega tiene símbolos a mostrar ilegibles");
+        Default::default()
+    }))
 }
 
 fn snapshot(definition: &PracticeDefinition) -> anyhow::Result<String> {

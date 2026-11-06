@@ -1,4 +1,5 @@
-import { STUDENT, TEACHER, assert, step, withE2E } from "./lib.mjs";
+import { join } from "node:path";
+import { ARTIFACTS, STUDENT, TEACHER, assert, openAddForm, step, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8171";
 
@@ -67,6 +68,141 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   assert(detail.includes("Desfasaje"), "el análisis debía tener la parte de desfasaje");
   assert(detail.includes("Ajuste lineal"), "la parte de desfasaje debía mostrar el ajuste lineal");
   assert(!detail.includes("No se pudo calcular"), "ninguna parte debía fallar");
+
+  const detailHtml = (page) => page.locator("#submission-detail-body").innerHTML();
+  const reviewSaved = (page) =>
+    Promise.all([
+      page.waitForResponse((r) => /\/review$/.test(r.url()) && r.request().method() === "POST"),
+      page.click('.review-form button[type="submit"]'),
+    ]);
+
+  step("docente: guardar la revisión conserva el resultado entregado");
+  assert(detail.includes("Resultado final entregado"), "la entrega debía mostrar el resultado final");
+  await reviewSaved(tPage);
+  await tPage.waitForFunction(() => document.querySelector("#submission-detail-body .review-form"));
+  await tPage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();
+
+  step("docente: guardar usa los símbolos de la entrega aunque otra pantalla los haya cambiado");
+  const { page: racePage } = await login(TEACHER, "docente");
+  await racePage.click('.tab.teacher-only[data-view="practices"]');
+  await racePage.click('[data-practice-open][data-practice-id="p1-estadistica"]');
+  await openAddForm(racePage, "#new-quantity-form");
+  await racePage.fill('#new-quantity-form [name="symbol"]', "Lenta");
+  await racePage.fill('#new-quantity-form [name="name"]', "Lenta");
+  const practiceSaved = racePage.waitForResponse((r) => r.url().endsWith("/p1-estadistica/definition"));
+  await racePage.route("**/api/practices/p1-estadistica/quantities", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await racePage.click('#new-quantity-form button[type="submit"]');
+  await racePage.click('.tab.teacher-only[data-view="submissions"]');
+  await racePage.click(`.submission-item[data-id="${submissionId}"]`);
+  await racePage.waitForSelector(".review-form");
+  await practiceSaved;
+  await racePage.waitForFunction(() =>
+    (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes("Magnitud agregada"),
+  );
+  await reviewSaved(racePage);
+  await racePage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();
+  assert((await detailHtml(racePage)).includes("t<sub>1/2</sub>"), "tmedio debía seguir mostrándose como t_1/2");
+
+  step("docente: si falla la definición de la entrega, lo avisa y se puede reintentar");
+  const { page: failPage } = await login(TEACHER, "docente");
+  await failPage.route("**/api/submissions/*/definition", (route) =>
+    route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"x"}' }),
+  );
+  await failPage.click('.tab.teacher-only[data-view="submissions"]');
+  await failPage.click(`.submission-item[data-id="${submissionId}"]`);
+  await failPage.waitForSelector("#submission-load-error");
+  assert((await detailHtml(failPage)).includes("t<sub>1/2</sub>"), "los símbolos no debían depender de la definición");
+  await failPage.screenshot({ path: join(ARTIFACTS, "p3-definicion-error.png") });
+  const typedComment = () => failPage.locator('.review-form [name="teacher_comment"]').inputValue();
+  await failPage.fill('.review-form [name="teacher_comment"]', "comentario a medio escribir");
+  await failPage.click("#submission-load-retry");
+  await failPage.waitForSelector('.toast:has-text("No se pudo cargar la definición")');
+  assert((await typedComment()) === "comentario a medio escribir", "un reintento fallido no debía borrar el comentario");
+  await failPage.unroute("**/api/submissions/*/definition");
+  await failPage.click("#submission-load-retry");
+  await failPage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();
+  assert((await typedComment()) === "comentario a medio escribir", "reintentar no debía borrar el comentario");
+  assert((await failPage.locator("#submission-load-error").count()) === 0, "el aviso debía irse al reintentar");
+  assert((await detailHtml(failPage)).includes("t<sub>1/2</sub>"), "tras reintentar debía mostrarse t_1/2");
+
+  step("docente: si no se puede abrir la entrega, lo explica y deja volver o reintentar");
+  const { page: offlinePage } = await login(TEACHER, "docente");
+  await offlinePage.click('.tab.teacher-only[data-view="submissions"]');
+  await offlinePage.route(`**/api/submissions/${submissionId}`, (route) => route.abort());
+  await offlinePage.click(`.submission-item[data-id="${submissionId}"]`);
+  await offlinePage.waitForSelector('#submission-load-error:has-text("No se pudo conectar con el servidor")');
+  await Promise.all([offlinePage.waitForEvent("requestfailed"), offlinePage.click("#submission-load-retry")]);
+  await offlinePage.waitForSelector('#submission-load-error:has-text("No se pudo conectar con el servidor")');
+  assert(await offlinePage.locator("#submission-workspace-back").isVisible(), "debía poder volver al listado");
+  await offlinePage.unroute(`**/api/submissions/${submissionId}`);
+  await offlinePage.route(`**/api/submissions/${submissionId}`, (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<html>proxy</html>" }),
+  );
+  await offlinePage.click("#submission-load-retry");
+  await offlinePage.waitForSelector('#submission-load-error:has-text("No se pudo leer la respuesta del servidor")');
+  await offlinePage.unroute(`**/api/submissions/${submissionId}`);
+  await offlinePage.click("#submission-load-retry");
+  await offlinePage.waitForSelector(".review-form");
+
+  step("docente: una respuesta lenta de otra entrega no pisa la que está abierta");
+  const { page: slowPage } = await login(TEACHER, "docente");
+  await slowPage.click('.tab.teacher-only[data-view="submissions"]');
+  await slowPage.locator(`.submission-item[data-id="${submissionId}"]`).waitFor();
+  const otherId = await slowPage
+    .locator(".submission-item")
+    .evaluateAll((items, own) => items.map((item) => item.dataset.id).find((id) => id !== own), submissionId);
+  assert(otherId, "debía haber otra entrega de prueba");
+  const delayed = async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  };
+  const assertOtherStaysOpen = async (when, answered) => {
+    await answered;
+    await slowPage.waitForTimeout(500);
+    const loaded = await slowPage.evaluate(async () => {
+      const { state } = await import("/state.js");
+      return { active: state.activeSubmissionId, loaded: state.activeSubmission?.id };
+    });
+    assert(loaded.active === otherId && loaded.loaded === otherId, `${when}: quedó ${JSON.stringify(loaded)}`);
+    const text = (await slowPage.locator("#submission-detail-body").textContent()) ?? "";
+    assert(!text.includes("Relajacion Exponencial"), `${when}: se dibujó la entrega anterior`);
+  };
+
+  await slowPage.click(`.submission-item[data-id="${submissionId}"]`);
+  await slowPage.waitForSelector(".review-form");
+  await slowPage.route(`**/api/submissions/${submissionId}/review`, delayed);
+  const reviewAnswered = slowPage.waitForResponse((r) => r.url().endsWith(`/${submissionId}/review`));
+  await slowPage.click('.review-form button[type="submit"]');
+  await slowPage.click("#submission-workspace-back");
+  await slowPage.click(`.submission-item[data-id="${otherId}"]`);
+  await assertOtherStaysOpen("al guardar la revisión", reviewAnswered);
+  await slowPage.unroute(`**/api/submissions/${submissionId}/review`);
+
+  await slowPage.click("#submission-workspace-back");
+  await slowPage.route(`**/api/submissions/${submissionId}`, delayed);
+  const openAnswered = slowPage.waitForResponse((r) => r.url().endsWith(`/api/submissions/${submissionId}`));
+  await slowPage.click(`.submission-item[data-id="${submissionId}"]`);
+  await slowPage.click('.tab.teacher-only[data-view="submissions"]');
+  await slowPage.click(`.submission-item[data-id="${otherId}"]`);
+  await assertOtherStaysOpen("al abrir la entrega", openAnswered);
+
+  step("docente: si falla guardar la revisión tras cambiar de entrega, lo avisa");
+  await slowPage.unroute(`**/api/submissions/${submissionId}`);
+  await slowPage.click("#submission-workspace-back");
+  await slowPage.click(`.submission-item[data-id="${submissionId}"]`);
+  await slowPage.waitForSelector(".review-form");
+  await slowPage.route(`**/api/submissions/${submissionId}/review`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await route.abort();
+  });
+  await slowPage.click('.review-form button[type="submit"]');
+  await slowPage.click("#submission-workspace-back");
+  await slowPage.click(`.submission-item[data-id="${otherId}"]`);
+  await slowPage.waitForSelector('.toast:has-text("No se guardó la revisión")');
+  await slowPage.unroute(`**/api/submissions/${submissionId}/review`);
 
   console.log("P3 unificada: dos pestañas, entrega y análisis por parte, sin errores JS.");
 });

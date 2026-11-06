@@ -5,7 +5,7 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 3] = ["name", "title", "tolerance"];
+const COSMETIC_KEYS: [&str; 4] = ["name", "title", "tolerance", "display_symbols"];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
 const FREELY_ORDERED: [&str; 4] = ["quantities", "results", "parts", "sections"];
 
@@ -52,7 +52,10 @@ fn strip(value: &mut Value, keys: &[&str]) {
             for key in keys {
                 object.remove(*key);
             }
-            object.values_mut().for_each(|v| strip(v, keys));
+            object
+                .iter_mut()
+                .filter(|(key, _)| key.as_str() != "display_symbols")
+                .for_each(|(_, v)| strip(v, keys));
         }
         Value::Array(items) => items.iter_mut().for_each(|v| strip(v, keys)),
         _ => {}
@@ -269,6 +272,19 @@ fn tolerance_changes(published: &PracticeDefinition, draft: &PracticeDefinition)
         .collect()
 }
 
+fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -> Vec<String> {
+    let before: std::collections::BTreeSet<&str> =
+        super::display::version_symbols(published).collect();
+    let after: std::collections::BTreeSet<&str> = super::display::version_symbols(draft).collect();
+    before
+        .intersection(&after)
+        .filter(|symbol| {
+            published.display_symbols.get(**symbol) != draft.display_symbols.get(**symbol)
+        })
+        .map(|symbol| format!("Cambia cómo se muestra {symbol}"))
+        .collect()
+}
+
 pub fn change_kind(
     published: &PracticeDefinition,
     draft: &PracticeDefinition,
@@ -317,8 +333,16 @@ pub fn compare_definitions(
     let kind = change_kind(published, draft)?;
     let changes = match kind {
         DraftChangeKind::None => Vec::new(),
-        DraftChangeKind::Cosmetic => tolerance_changes(published, draft),
-        DraftChangeKind::Structural => list_changes(published, draft)?,
+        DraftChangeKind::Cosmetic => [
+            tolerance_changes(published, draft),
+            display_changes(published, draft),
+        ]
+        .concat(),
+        DraftChangeKind::Structural => [
+            list_changes(published, draft)?,
+            display_changes(published, draft),
+        ]
+        .concat(),
     };
     Ok(DefinitionComparison { kind, changes })
 }

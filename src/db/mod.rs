@@ -17,7 +17,7 @@ pub(crate) use password::{
     digest_password, hash_password, verify_password, VerifyResult, MIN_PASSWORD_LEN,
 };
 pub use schema::migrate;
-pub(crate) use schema::{mark_migration_applied, migration_applied};
+pub(crate) use schema::{mark_migration_applied, migration_applied, DISPLAY_SYMBOL_TABLES};
 
 pub const MAX_LOGIN_ATTEMPTS: u8 = 5;
 pub const LOGIN_BLOCK_MINUTES: i64 = 15;

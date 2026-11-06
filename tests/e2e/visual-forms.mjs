@@ -41,6 +41,9 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await openPractice(page, "p2-cc");
   await assertInputContrast(page);
   await page.screenshot({ path: join(ARTIFACTS, "visual-cc-dark.png"), fullPage: true });
+  const fieldsHtml = await page.locator("#measurement-fields").innerHTML();
+  assert(fieldsHtml.includes("V<sub>G</sub>"), "Vg_s debía mostrarse como V_G (símbolo a mostrar)");
+  assert(!fieldsHtml.includes("Vg<sub>S</sub>"), "Vg_s no debía mostrar el sufijo de la parte");
 
   const partTabs = page.locator("#practice-part-tabs .part-tab");
   assert((await partTabs.count()) === 3, "p2-cc debe tener 3 tabs de partes");
