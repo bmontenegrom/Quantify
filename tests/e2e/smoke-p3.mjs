@@ -1,4 +1,5 @@
-import { STUDENT, TEACHER, assert, openAddForm, step, withE2E } from "./lib.mjs";
+import { join } from "node:path";
+import { ARTIFACTS, STUDENT, TEACHER, assert, openAddForm, step, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8171";
 
@@ -111,6 +112,8 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   await failPage.click('.tab.teacher-only[data-view="submissions"]');
   await failPage.click(`.submission-item[data-id="${submissionId}"]`);
   await failPage.waitForSelector("#submission-definition-error");
+  assert((await detailHtml(failPage)).includes("t<sub>1/2</sub>"), "los símbolos no debían depender de la definición");
+  await failPage.screenshot({ path: join(ARTIFACTS, "p3-definicion-error.png") });
   await failPage.unroute("**/api/submissions/*/definition");
   await failPage.click("#submission-definition-retry");
   await failPage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();

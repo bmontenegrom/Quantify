@@ -230,7 +230,7 @@ export async function openSubmissionWorkspace(id) {
   submissionWorkspace.querySelector("#submission-definition-retry")?.addEventListener("click", () => openSubmissionWorkspace(id));
   const detailBody = submissionWorkspace.querySelector("#submission-detail-body");
   const { renderAnalysis } = await import("./analysis.js");
-  setDisplaySymbols(definition?.display_symbols);
+  setDisplaySymbols(submission.display_symbols);
   renderAnalysis(detailBody, submission, canReview(state.user), definition);
 }
 
@@ -360,9 +360,8 @@ export async function saveReview(event, id) {
   const detailBody = submissionWorkspace?.querySelector("#submission-detail-body");
   if (detailBody) {
     const { renderAnalysis } = await import("./analysis.js");
-    const definition = state.activeSubmissionDefinition;
-    setDisplaySymbols(definition?.display_symbols);
-    renderAnalysis(detailBody, updated, true, definition);
+    setDisplaySymbols(updated.display_symbols);
+    renderAnalysis(detailBody, updated, true, state.activeSubmissionDefinition);
   }
   await loadSubmissions();
 }

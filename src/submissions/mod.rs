@@ -111,6 +111,7 @@ pub struct SubmissionDetail {
     pub table_number: Option<i64>,
     pub members: Vec<ReportMember>,
     pub result_tolerances: HashMap<String, f64>,
+    pub display_symbols: std::collections::BTreeMap<String, String>,
     pub student_comment: Option<String>,
 }
 
@@ -767,7 +768,17 @@ pub async fn submission_detail(
         && row.status == "pendiente"
         && !row.results_visible_to_student
         && Utc::now() < editable_until;
+    let display_symbols = match crate::practices::submission_definition(pool, &row.id).await {
+        Ok(definition) => definition
+            .map(|definition| definition.display_symbols)
+            .unwrap_or_default(),
+        Err(error) => {
+            tracing::warn!(submission_id = %row.id, %error, "no se pudieron leer los símbolos a mostrar");
+            Default::default()
+        }
+    };
     Ok(Some(SubmissionDetail {
+        display_symbols,
         id: row.id,
         student_name: row.student_name,
         group_name: row.group_name,
