@@ -83,6 +83,7 @@ function startServer({ port, dbName, dataDir }) {
       DATABASE_URL: `sqlite:${dbPath}`,
       APP_BIND_ADDR: `127.0.0.1:${port}`,
       UPLOAD_DIR: join(dataDir, "uploads"),
+      SEED_DEMO_DATA: "true",
     },
     stdio: ["ignore", "inherit", "inherit"],
   });

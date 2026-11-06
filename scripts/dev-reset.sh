@@ -21,4 +21,4 @@ if [ -d "$upload_dir" ]; then
   echo "Borrado: $upload_dir"
 fi
 
-echo "Listo. El proximo 'cargo run' migra y vuelve a sembrar los datos de prueba."
+echo "Listo. El proximo 'cargo run' migra y crea el admin; con SEED_DEMO_DATA=true siembra tambien los datos de prueba."

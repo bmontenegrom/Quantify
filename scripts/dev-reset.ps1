@@ -24,4 +24,4 @@ if (Test-Path $uploadDir) {
     Write-Host "Borrado: $uploadDir"
 }
 
-Write-Host "Listo. El proximo 'cargo run' migra y vuelve a sembrar los datos de prueba."
+Write-Host "Listo. El proximo 'cargo run' migra y crea el admin; con SEED_DEMO_DATA=true siembra tambien los datos de prueba."

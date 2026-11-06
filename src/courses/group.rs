@@ -52,6 +52,15 @@ pub async fn create_group(
     course_id: &str,
     input: CreateGroup,
 ) -> anyhow::Result<LabGroup> {
+    let mut conn = pool.acquire().await?;
+    insert_group(&mut conn, course_id, input).await
+}
+
+async fn insert_group(
+    conn: &mut sqlx::SqliteConnection,
+    course_id: &str,
+    input: CreateGroup,
+) -> anyhow::Result<LabGroup> {
     let id = Uuid::new_v4().to_string();
     let table_count = input.table_count.unwrap_or(4).clamp(1, 24);
     let group_type = normalize_group_type(input.group_type.as_deref());
@@ -67,14 +76,14 @@ pub async fn create_group(
     .bind(table_count)
     .bind(group_type)
     .bind(Utc::now())
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
     Ok(sqlx::query_as::<_, LabGroup>(
         "SELECT id, course_id, name, table_count, group_type FROM lab_groups WHERE id = ?1",
     )
     .bind(id)
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?)
 }
 
@@ -136,11 +145,20 @@ pub async fn enroll_course_member(
     course_id: &str,
     user_id: &str,
 ) -> anyhow::Result<()> {
+    let mut conn = pool.acquire().await?;
+    enroll_in_course(&mut conn, course_id, user_id).await
+}
+
+pub(crate) async fn enroll_in_course(
+    conn: &mut sqlx::SqliteConnection,
+    course_id: &str,
+    user_id: &str,
+) -> anyhow::Result<()> {
     let existing: Option<(String,)> =
         sqlx::query_as("SELECT user_id FROM course_members WHERE course_id = ?1 AND user_id = ?2")
             .bind(course_id)
             .bind(user_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await?;
 
     if existing.is_none() {
@@ -153,11 +171,11 @@ pub async fn enroll_course_member(
         .bind(course_id)
         .bind(user_id)
         .bind(Utc::now())
-        .execute(pool)
+        .execute(&mut *conn)
         .await?;
     }
 
-    let default_group_id = ensure_default_group(pool, course_id).await?;
+    let default_group_id = ensure_default_group(&mut *conn, course_id).await?;
     sqlx::query(
         r#"
         INSERT INTO group_members (group_id, user_id, created_at)
@@ -168,13 +186,16 @@ pub async fn enroll_course_member(
     .bind(default_group_id)
     .bind(user_id)
     .bind(Utc::now())
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
 
     Ok(())
 }
 
-async fn ensure_default_group(pool: &SqlitePool, course_id: &str) -> anyhow::Result<String> {
+async fn ensure_default_group(
+    conn: &mut sqlx::SqliteConnection,
+    course_id: &str,
+) -> anyhow::Result<String> {
     let existing = sqlx::query_as::<_, LabGroup>(
         r#"
         SELECT id, course_id, name, table_count, group_type
@@ -184,15 +205,15 @@ async fn ensure_default_group(pool: &SqlitePool, course_id: &str) -> anyhow::Res
         "#,
     )
     .bind(course_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
 
     if let Some(group) = existing {
         return Ok(group.id);
     }
 
-    let created = create_group(
-        pool,
+    let created = insert_group(
+        &mut *conn,
         course_id,
         CreateGroup {
             name: "General".into(),
