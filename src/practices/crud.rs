@@ -40,8 +40,7 @@ pub async fn definition(
     let aggregates = aggregates_for(pool, practice_id).await?;
     let parts = super::parts_for(pool, practice_id).await?;
     let sections = super::sections_for(pool, practice_id).await?;
-    let display_symbols =
-        super::display::display_symbols_for(&mut *pool.acquire().await?, practice_id).await?;
+    let display_symbols = super::display::display_symbols_for(pool, practice_id).await?;
     Ok(Some(
         PracticeDefinition {
             practice_id: practice_id.to_string(),

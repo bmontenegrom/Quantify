@@ -3573,3 +3573,42 @@ async fn display_changes_are_detected_on_symbols_named_like_volatile_keys() {
         assert!(!matches!(outcome, Publish::Unchanged(_)), "{symbol}");
     }
 }
+
+#[tokio::test]
+async fn retired_quantities_stay_out_of_the_display_symbols() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let input = QuantityInput {
+        symbol: "Zq".into(),
+        ..sample_quantity()
+    };
+    let quantity = create_quantity(&pool, practice, input).await.unwrap();
+    assert!(set_display_symbol(&pool, practice, "Zq", "Z_q")
+        .await
+        .unwrap());
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        remove_quantity(&pool, practice, &quantity.id)
+            .await
+            .unwrap(),
+        QuantityRemoval::Retired
+    );
+
+    let draft = definition(&pool, practice).await.unwrap().unwrap();
+    assert!(!draft
+        .display_symbols
+        .keys()
+        .any(|key| key.starts_with("Zq")));
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+    let published = current_version(&pool, practice).await.unwrap().unwrap();
+    assert!(!published
+        .definition
+        .display_symbols
+        .keys()
+        .any(|key| key.starts_with("Zq")));
+}

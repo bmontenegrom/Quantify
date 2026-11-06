@@ -1,26 +1,33 @@
 use super::PracticeDefinition;
 use crate::db::DISPLAY_SYMBOL_TABLES;
-use sqlx::{SqliteConnection, SqlitePool};
+use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 
 const LEGACY_DISPLAY_SYMBOLS: &str = "2026-11-simbolos-a-mostrar";
 
 pub(super) async fn display_symbols_for(
-    conn: &mut SqliteConnection,
+    pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<BTreeMap<String, String>> {
-    let mut symbols = BTreeMap::new();
-    for table in DISPLAY_SYMBOL_TABLES {
-        let rows: Vec<(String, String)> = sqlx::query_as(&format!(
-            "SELECT symbol, display_symbol FROM {table} \
-             WHERE practice_id = ?1 AND display_symbol <> ''"
-        ))
+    let selects: Vec<String> = DISPLAY_SYMBOL_TABLES
+        .iter()
+        .map(|table| {
+            let retired = if *table == "practice_quantities" {
+                " AND removed = 0"
+            } else {
+                ""
+            };
+            format!(
+                "SELECT symbol, display_symbol FROM {table} \
+                 WHERE practice_id = ?1 AND display_symbol <> ''{retired}"
+            )
+        })
+        .collect();
+    let rows: Vec<(String, String)> = sqlx::query_as(&selects.join(" UNION ALL "))
         .bind(practice_id)
-        .fetch_all(&mut *conn)
+        .fetch_all(pool)
         .await?;
-        symbols.extend(rows);
-    }
-    Ok(symbols)
+    Ok(rows.into_iter().collect())
 }
 
 pub async fn set_display_symbol(
