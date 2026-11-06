@@ -316,7 +316,7 @@ fn not_blank(value: &str, msg: &str) -> Result<(), AppError> {
 }
 
 fn validate_password(password: &str) -> Result<(), AppError> {
-    if password.len() < 8 {
+    if password.len() < db::MIN_PASSWORD_LEN {
         return Err(AppError::bad_request(
             "la contrasena debe tener al menos 8 caracteres",
         ));

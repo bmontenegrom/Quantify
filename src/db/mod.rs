@@ -13,7 +13,9 @@ mod password;
 mod schema;
 
 #[allow(unused_imports)]
-pub(crate) use password::{digest_password, hash_password, verify_password, VerifyResult};
+pub(crate) use password::{
+    digest_password, hash_password, verify_password, VerifyResult, MIN_PASSWORD_LEN,
+};
 pub use schema::migrate;
 pub(crate) use schema::{mark_migration_applied, migration_applied};
 
@@ -282,6 +284,9 @@ fn development_password(variable: &str, development_default: &str) -> String {
 
 fn admin_account(demo_data: bool, password: Option<String>) -> anyhow::Result<SeedAccount> {
     let password = match password {
+        Some(password) if password.len() < MIN_PASSWORD_LEN => {
+            anyhow::bail!("SEED_ADMIN_PASSWORD debe tener al menos {MIN_PASSWORD_LEN} caracteres.")
+        }
         Some(password) => password,
         None if demo_data => development_password("SEED_ADMIN_PASSWORD", "admin123"),
         None => anyhow::bail!(
@@ -886,7 +891,7 @@ mod tests {
     #[tokio::test]
     async fn without_demo_data_a_new_base_only_has_the_admin() {
         let (pool, _dir) = pool().await;
-        run_startup_seeds(&pool, false, Some("secreta".into()))
+        run_startup_seeds(&pool, false, Some("secreta123".into()))
             .await
             .unwrap();
         let users: Vec<(String, String)> = sqlx::query_as("SELECT email, password_hash FROM users")
@@ -896,7 +901,7 @@ mod tests {
         assert_eq!(users.len(), 1);
         assert_eq!(users[0].0, "admin@quantify.local");
         assert!(matches!(
-            verify_password("secreta", &users[0].1),
+            verify_password("secreta123", &users[0].1),
             VerifyResult::Valid
         ));
         for table in ["submissions", "course_members", "group_members"] {
@@ -912,6 +917,15 @@ mod tests {
     async fn without_demo_data_a_new_base_requires_the_admin_password() {
         let (pool, _dir) = pool().await;
         assert!(run_startup_seeds(&pool, false, None).await.is_err());
+        assert_eq!(count(&pool, "SELECT COUNT(*) FROM users").await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_short_admin_password_is_rejected() {
+        let (pool, _dir) = pool().await;
+        assert!(run_startup_seeds(&pool, false, Some("corta".into()))
+            .await
+            .is_err());
         assert_eq!(count(&pool, "SELECT COUNT(*) FROM users").await, 0);
     }
 
