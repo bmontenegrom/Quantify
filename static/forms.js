@@ -699,6 +699,7 @@ export async function submitFormSubmission() {
   if (!practiceSelect.value) return;
   if (state.draftPreviewPracticeId) latestResult.classList.add("hidden");
 
+  const formDefinition = state.practiceForm?.definition;
   const measurements = collectMeasurements();
   const analysisKind = state.practiceForm?.definition?.analysis_kind ?? "";
   const validationError = validateMeasurements(measurements, analysisKind, buildMetaMap(measurements));
@@ -752,7 +753,7 @@ export async function submitFormSubmission() {
     showToast("Entrega guardada", "success");
     clearDraft();
     const { renderAnalysis } = await import("./analysis.js");
-    renderAnalysis(latestResult, submission, false, state.practiceForm?.definition);
+    renderAnalysis(latestResult, submission, false, formDefinition);
     latestResult.classList.remove("hidden");
     await loadSubmissions();
   } catch (error) {
@@ -772,6 +773,7 @@ async function calculateDraftPreview(measurements) {
       { measurements, draft: true },
     );
     const { formAnalysisMarkup } = await import("./analysis.js");
+    setDisplaySymbols(state.practiceForm?.definition?.display_symbols);
     latestResult.innerHTML = formAnalysisMarkup(analysis);
     latestResult.classList.remove("hidden");
     submitStatus.textContent = "Calculado con el borrador: no se guardó nada.";

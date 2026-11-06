@@ -4,7 +4,7 @@ import {
   submissionsSubtitle, submissionsListTitle,
 } from "./dom.js";
 import { fetchJson, postJson, errorText } from "./api.js";
-import { escapeHtml, canReview, formatDate, groupBy, setDisplaySymbols } from "./lib.js";
+import { escapeHtml, canReview, formatDate, groupBy } from "./lib.js";
 
 const filterGroupEl = () => document.querySelector("#submission-filter-group");
 const filterTableEl = () => document.querySelector("#submission-filter-table");
@@ -232,7 +232,6 @@ export async function openSubmissionWorkspace(id) {
   submissionWorkspace.querySelector("#submission-definition-retry")?.addEventListener("click", () => openSubmissionWorkspace(id));
   const detailBody = submissionWorkspace.querySelector("#submission-detail-body");
   const { renderAnalysis } = await import("./analysis.js");
-  setDisplaySymbols(submission.display_symbols);
   renderAnalysis(detailBody, submission, canReview(state.user), definition);
 }
 
@@ -366,7 +365,6 @@ export async function saveReview(event, id) {
   const detailBody = submissionWorkspace?.querySelector("#submission-detail-body");
   if (detailBody) {
     const { renderAnalysis } = await import("./analysis.js");
-    setDisplaySymbols(updated.display_symbols);
     renderAnalysis(detailBody, updated, true, state.activeSubmissionDefinition);
   }
   await loadSubmissions();
