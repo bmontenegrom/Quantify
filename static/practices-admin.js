@@ -25,8 +25,9 @@ function displaySymbolFieldHtml(item) {
 
 async function saveDisplaySymbol(practiceId, form) {
   const symbol = form.querySelector('[name="symbol"]').value.trim();
-  const display = form.querySelector('[name="display_symbol"]').value.trim();
-  if (display === (state.practiceDefinition?.display_symbols?.[symbol] ?? "")) return;
+  const input = form.querySelector('[name="display_symbol"]');
+  const display = input.value.trim();
+  if (display === input.defaultValue.trim()) return;
   await postJson(`/api/practices/${practiceId}/display-symbol`, { symbol, display_symbol: display });
 }
 
