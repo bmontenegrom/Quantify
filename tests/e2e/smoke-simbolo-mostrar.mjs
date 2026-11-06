@@ -50,6 +50,23 @@ await withE2E({ port: PORT, dbName: "quantify-simbolo-mostrar.db" }, async ({ lo
   saved = await definition();
   assert(saved.display_symbols.Zy === "Z_y", "la edición debía guardar el símbolo a mostrar");
 
+  step("docente: un símbolo llamado como un miembro de Object no precarga basura");
+  const named = await apiPost(page, `/api/practices/${PRACTICE_ID}/quantities`, {
+    symbol: "constructor",
+    name: "Constructor",
+    unit: "",
+    repeated: true,
+    per_point: false,
+    has_uncertainty: true,
+  });
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await page.click('.tab.teacher-only[data-view="practices"]');
+  await page.click(`[data-practice-open][data-practice-id="${PRACTICE_ID}"]`);
+  await page.click(`[data-edit-quantity][data-qid="${named.id}"]`);
+  const prefilled = await page.locator('#edit-quantity-form [name="display_symbol"]').inputValue();
+  assert(prefilled === "", `el campo debía estar vacío, tenía: ${prefilled}`);
+
   step("docente: un símbolo a mostrar demasiado largo rechaza el elemento entero");
   const url = `/api/practices/${PRACTICE_ID}/quantities`;
   const body = { symbol: "Zl", name: "Larga", unit: "", repeated: true, per_point: false, has_uncertainty: true };
