@@ -52,7 +52,10 @@ fn strip(value: &mut Value, keys: &[&str]) {
             for key in keys {
                 object.remove(*key);
             }
-            object.values_mut().for_each(|v| strip(v, keys));
+            object
+                .iter_mut()
+                .filter(|(key, _)| key.as_str() != "display_symbols")
+                .for_each(|(_, v)| strip(v, keys));
         }
         Value::Array(items) => items.iter_mut().for_each(|v| strip(v, keys)),
         _ => {}

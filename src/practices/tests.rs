@@ -3538,3 +3538,38 @@ async fn an_unreadable_version_does_not_stop_the_display_symbol_migration() {
         .await
         .unwrap());
 }
+
+#[tokio::test]
+async fn display_changes_are_detected_on_symbols_named_like_volatile_keys() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    for symbol in ["position", "status", "current_version"] {
+        let input = QuantityInput {
+            symbol: symbol.into(),
+            ..sample_quantity()
+        };
+        create_quantity(&pool, practice, input).await.unwrap();
+        publish_checked(&pool, practice, None, None, |_| vec![])
+            .await
+            .unwrap();
+        let before = draft_changes(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(before.kind, DraftChangeKind::None, "{symbol}");
+
+        assert!(set_display_symbol(&pool, practice, symbol, "X_y")
+            .await
+            .unwrap());
+
+        let after = draft_changes(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(after.kind, DraftChangeKind::Cosmetic, "{symbol}");
+        assert_eq!(
+            after.changes,
+            vec![format!("Cambia cómo se muestra {symbol}")]
+        );
+        assert_ne!(before.fingerprint, after.fingerprint, "{symbol}");
+        let outcome = publish_checked(&pool, practice, None, None, |_| vec![])
+            .await
+            .unwrap();
+        assert!(!matches!(outcome, Publish::Unchanged(_)), "{symbol}");
+    }
+}
