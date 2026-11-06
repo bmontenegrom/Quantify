@@ -193,6 +193,19 @@ function submissionItemHtml(item) {
   `;
 }
 
+function renderWorkspaceShell(id, notice) {
+  submissionWorkspace.innerHTML = `
+    <button type="button" class="back-link" id="submission-workspace-back">Volver al listado</button>
+    ${notice ? `<div class="edit-banner" id="submission-load-error" role="alert">
+      <span>${escapeHtml(notice)}</span>
+      <button type="button" id="submission-load-retry">Reintentar</button>
+    </div>` : ""}
+    <div id="submission-detail-body"></div>
+  `;
+  submissionWorkspace.querySelector("#submission-workspace-back").addEventListener("click", closeSubmissionWorkspace);
+  submissionWorkspace.querySelector("#submission-load-retry")?.addEventListener("click", () => openSubmissionWorkspace(id));
+}
+
 export async function openSubmissionWorkspace(id) {
   state.activeSubmissionId = id;
   const { selectView } = await import("./navigation.js");
@@ -204,7 +217,13 @@ export async function openSubmissionWorkspace(id) {
     <span class="skeleton skeleton-line" style="width: 80%"></span>
   `;
 
-  const submission = await fetchJson(`/api/submissions/${id}`);
+  let submission;
+  try {
+    submission = await fetchJson(`/api/submissions/${id}`);
+  } catch (error) {
+    if (state.activeSubmissionId === id) renderWorkspaceShell(id, `No se pudo abrir la entrega: ${error.message}`);
+    return;
+  }
   if (state.activeSubmissionId !== id) return;
   state.activeSubmission = submission;
 
@@ -220,16 +239,10 @@ export async function openSubmissionWorkspace(id) {
   }
   state.activeSubmissionDefinition = definition;
 
-  submissionWorkspace.innerHTML = `
-    <button type="button" class="back-link" id="submission-workspace-back">Volver al listado</button>
-    ${definitionFailed ? `<div class="edit-banner" id="submission-definition-error" role="alert">
-      <span>No se pudo cargar la definición de la práctica: algunos resultados pueden verse incompletos.</span>
-      <button type="button" id="submission-definition-retry">Reintentar</button>
-    </div>` : ""}
-    <div id="submission-detail-body"></div>
-  `;
-  submissionWorkspace.querySelector("#submission-workspace-back").addEventListener("click", closeSubmissionWorkspace);
-  submissionWorkspace.querySelector("#submission-definition-retry")?.addEventListener("click", () => openSubmissionWorkspace(id));
+  renderWorkspaceShell(
+    id,
+    definitionFailed ? "No se pudo cargar la definición de la práctica: algunos resultados pueden verse incompletos." : null,
+  );
   const detailBody = submissionWorkspace.querySelector("#submission-detail-body");
   const { renderAnalysis } = await import("./analysis.js");
   renderAnalysis(detailBody, submission, canReview(state.user), definition);

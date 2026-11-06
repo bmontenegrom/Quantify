@@ -111,14 +111,27 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   );
   await failPage.click('.tab.teacher-only[data-view="submissions"]');
   await failPage.click(`.submission-item[data-id="${submissionId}"]`);
-  await failPage.waitForSelector("#submission-definition-error");
+  await failPage.waitForSelector("#submission-load-error");
   assert((await detailHtml(failPage)).includes("t<sub>1/2</sub>"), "los símbolos no debían depender de la definición");
   await failPage.screenshot({ path: join(ARTIFACTS, "p3-definicion-error.png") });
   await failPage.unroute("**/api/submissions/*/definition");
-  await failPage.click("#submission-definition-retry");
+  await failPage.click("#submission-load-retry");
   await failPage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();
-  assert((await failPage.locator("#submission-definition-error").count()) === 0, "el aviso debía irse al reintentar");
+  assert((await failPage.locator("#submission-load-error").count()) === 0, "el aviso debía irse al reintentar");
   assert((await detailHtml(failPage)).includes("t<sub>1/2</sub>"), "tras reintentar debía mostrarse t_1/2");
+
+  step("docente: si no se puede abrir la entrega, lo explica y deja volver o reintentar");
+  const { page: offlinePage } = await login(TEACHER, "docente");
+  await offlinePage.click('.tab.teacher-only[data-view="submissions"]');
+  await offlinePage.route(`**/api/submissions/${submissionId}`, (route) => route.abort());
+  await offlinePage.click(`.submission-item[data-id="${submissionId}"]`);
+  await offlinePage.waitForSelector('#submission-load-error:has-text("No se pudo conectar con el servidor")');
+  await offlinePage.click("#submission-load-retry");
+  await offlinePage.waitForSelector('#submission-load-error:has-text("No se pudo conectar con el servidor")');
+  assert(await offlinePage.locator("#submission-workspace-back").isVisible(), "debía poder volver al listado");
+  await offlinePage.unroute(`**/api/submissions/${submissionId}`);
+  await offlinePage.click("#submission-load-retry");
+  await offlinePage.waitForSelector(".review-form");
 
   step("docente: una respuesta lenta de otra entrega no pisa la que está abierta");
   const { page: slowPage } = await login(TEACHER, "docente");
