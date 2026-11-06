@@ -5,7 +5,7 @@ import {
   accountEmail, accountRole, accountStatus,
   passwordForm, passwordStatus, logoutButton,
 } from "./dom.js";
-import { send, postJson, setCsrfToken, errorText } from "./api.js";
+import { send, readJson, postJson, setCsrfToken, errorText } from "./api.js";
 import { escapeHtml, canReview } from "./lib.js";
 import { showToast } from "./toast.js";
 
@@ -87,7 +87,7 @@ export function setupAuth(onLogin) {
         body: JSON.stringify(payload),
       });
       if (!response.ok) throw new Error(await errorText(response));
-      const body = await response.json();
+      const body = await readJson(response);
       state.user = body.user;
       setCsrfToken(body.csrf_token);
       loginForm.reset();

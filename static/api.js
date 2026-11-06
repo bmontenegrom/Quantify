@@ -12,10 +12,18 @@ export async function send(url, options) {
   }
 }
 
+export async function readJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    throw new Error("No se pudo leer la respuesta del servidor. Reintentá.");
+  }
+}
+
 export async function fetchJson(url) {
   const response = await send(url);
   if (!response.ok) throw new Error(await errorText(response));
-  return response.json();
+  return readJson(response);
 }
 
 export async function postJson(url, payload) {
@@ -27,7 +35,7 @@ export async function postJson(url, payload) {
     body: JSON.stringify(payload),
   });
   if (!response.ok) throw new Error(await errorText(response));
-  return response.json();
+  return readJson(response);
 }
 
 export async function deleteJson(url) {
@@ -35,7 +43,7 @@ export async function deleteJson(url) {
   if (csrfToken) headers["x-csrf-token"] = csrfToken;
   const response = await send(url, { method: "DELETE", headers });
   if (!response.ok) throw new Error(await errorText(response));
-  return response.json();
+  return readJson(response);
 }
 
 export async function errorText(response) {

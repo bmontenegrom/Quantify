@@ -99,7 +99,9 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   await racePage.click(`.submission-item[data-id="${submissionId}"]`);
   await racePage.waitForSelector(".review-form");
   await practiceSaved;
-  await racePage.waitForTimeout(300);
+  await racePage.waitForFunction(() =>
+    (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes("Magnitud agregada"),
+  );
   await reviewSaved(racePage);
   await racePage.locator('#submission-detail-body:has-text("Resultado final entregado")').waitFor();
   assert((await detailHtml(racePage)).includes("t<sub>1/2</sub>"), "tmedio debía seguir mostrándose como t_1/2");
@@ -136,6 +138,12 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   await offlinePage.waitForSelector('#submission-load-error:has-text("No se pudo conectar con el servidor")');
   assert(await offlinePage.locator("#submission-workspace-back").isVisible(), "debía poder volver al listado");
   await offlinePage.unroute(`**/api/submissions/${submissionId}`);
+  await offlinePage.route(`**/api/submissions/${submissionId}`, (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<html>proxy</html>" }),
+  );
+  await offlinePage.click("#submission-load-retry");
+  await offlinePage.waitForSelector('#submission-load-error:has-text("No se pudo leer la respuesta del servidor")');
+  await offlinePage.unroute(`**/api/submissions/${submissionId}`);
   await offlinePage.click("#submission-load-retry");
   await offlinePage.waitForSelector(".review-form");
 
@@ -151,8 +159,9 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.continue();
   };
-  const assertOtherStaysOpen = async (when) => {
-    await slowPage.waitForTimeout(2000);
+  const assertOtherStaysOpen = async (when, answered) => {
+    await answered;
+    await slowPage.waitForTimeout(500);
     const loaded = await slowPage.evaluate(async () => {
       const { state } = await import("/state.js");
       return { active: state.activeSubmissionId, loaded: state.activeSubmission?.id };
@@ -165,18 +174,20 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   await slowPage.click(`.submission-item[data-id="${submissionId}"]`);
   await slowPage.waitForSelector(".review-form");
   await slowPage.route(`**/api/submissions/${submissionId}/review`, delayed);
+  const reviewAnswered = slowPage.waitForResponse((r) => r.url().endsWith(`/${submissionId}/review`));
   await slowPage.click('.review-form button[type="submit"]');
   await slowPage.click("#submission-workspace-back");
   await slowPage.click(`.submission-item[data-id="${otherId}"]`);
-  await assertOtherStaysOpen("al guardar la revisión");
+  await assertOtherStaysOpen("al guardar la revisión", reviewAnswered);
   await slowPage.unroute(`**/api/submissions/${submissionId}/review`);
 
   await slowPage.click("#submission-workspace-back");
   await slowPage.route(`**/api/submissions/${submissionId}`, delayed);
+  const openAnswered = slowPage.waitForResponse((r) => r.url().endsWith(`/api/submissions/${submissionId}`));
   await slowPage.click(`.submission-item[data-id="${submissionId}"]`);
   await slowPage.click('.tab.teacher-only[data-view="submissions"]');
   await slowPage.click(`.submission-item[data-id="${otherId}"]`);
-  await assertOtherStaysOpen("al abrir la entrega");
+  await assertOtherStaysOpen("al abrir la entrega", openAnswered);
 
   step("docente: si falla guardar la revisión tras cambiar de entrega, lo avisa");
   await slowPage.unroute(`**/api/submissions/${submissionId}`);
