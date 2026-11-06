@@ -3862,3 +3862,58 @@ async fn display_symbols_are_saved_with_the_element() {
         .unwrap();
     assert_eq!(shown("Ga").await.as_deref(), Some("G_b"));
 }
+
+#[tokio::test]
+async fn a_submission_shows_the_symbols_of_its_version_never_the_draft() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    assert!(set_display_symbol(&pool, practice, "T1", "T_publicado")
+        .await
+        .unwrap());
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+    let version = current_version(&pool, practice).await.unwrap().unwrap();
+    for (id, linked) in [
+        ("con-version", Some(version.id.as_str())),
+        ("sin-version", None),
+    ] {
+        sqlx::query(
+            "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+             csv_path, analysis_json, submitted_at, practice_version_id) \
+             VALUES (?1, 'a', 'g', 'c', ?2, '', '', '{}', '2026-10-01T00:00:00Z', ?3)",
+        )
+        .bind(id)
+        .bind(practice)
+        .bind(linked)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    assert!(set_display_symbol(&pool, practice, "T1", "T_borrador")
+        .await
+        .unwrap());
+
+    for id in ["con-version", "sin-version"] {
+        let symbols = submission_display_symbols(&pool, id).await.unwrap();
+        assert_eq!(symbols["T1"], "T_publicado", "{id}");
+    }
+    assert!(submission_display_symbols(&pool, "no-existe")
+        .await
+        .unwrap()
+        .is_empty());
+
+    sqlx::query(
+        "UPDATE practice_versions \
+         SET definition_json = json_set(definition_json, '$.display_symbols', 5) WHERE id = ?1",
+    )
+    .bind(&version.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(submission_display_symbols(&pool, "con-version")
+        .await
+        .unwrap()
+        .is_empty());
+}

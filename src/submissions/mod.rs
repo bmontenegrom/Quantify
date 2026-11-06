@@ -768,15 +768,7 @@ pub async fn submission_detail(
         && row.status == "pendiente"
         && !row.results_visible_to_student
         && Utc::now() < editable_until;
-    let display_symbols = match crate::practices::submission_definition(pool, &row.id).await {
-        Ok(definition) => definition
-            .map(|definition| definition.display_symbols)
-            .unwrap_or_default(),
-        Err(error) => {
-            tracing::warn!(submission_id = %row.id, %error, "no se pudieron leer los símbolos a mostrar");
-            Default::default()
-        }
-    };
+    let display_symbols = crate::practices::submission_display_symbols(pool, &row.id).await?;
     Ok(Some(SubmissionDetail {
         display_symbols,
         id: row.id,
