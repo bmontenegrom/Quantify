@@ -22,6 +22,7 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
@@ -40,6 +41,7 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
@@ -84,6 +86,7 @@ fn qty_replicas(
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
@@ -102,6 +105,7 @@ fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityI
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
@@ -1586,6 +1590,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         crate::db::mark_migration_applied(pool, DEFINITIONS_SEEDED).await?;
     }
     super::display::migrate_legacy_display_symbols(pool).await?;
+    super::display::migrate_legacy_quantity_presentation(pool).await?;
     super::versions::ensure_versions(pool).await
 }
 

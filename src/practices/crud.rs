@@ -1,7 +1,7 @@
 use super::{
     AggregateInput, CurveInput, IntermediateInput, PointResultInput, PracticeAggregate,
     PracticeCurve, PracticeDefinition, PracticeIntermediate, PracticePointResult, QuantityInput,
-    ResultInput,
+    ResultInput, INPUT_WIDGETS, LABEL_MODES,
 };
 use crate::db::{next_position, PracticeQuantity, PracticeResult};
 use sqlx::{SqliteConnection, SqlitePool};
@@ -107,6 +107,14 @@ async fn fetch_symbol_formula_row<T: SymbolFormulaRow>(
 
 fn display_symbol(input: &Option<String>) -> Option<&str> {
     input.as_deref().map(str::trim)
+}
+
+fn label_mode(input: &QuantityInput) -> &str {
+    input.label_mode.as_deref().unwrap_or(LABEL_MODES[0])
+}
+
+fn input_widget(input: &QuantityInput) -> &str {
+    input.input_widget.as_deref().unwrap_or(INPUT_WIDGETS[0])
 }
 
 async fn create_symbol_formula_row<T: SymbolFormulaRow>(
@@ -584,7 +592,7 @@ pub async fn update_quantity(
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
              replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11, \
              slot_count = ?12, default_value = CASE WHEN ?13 THEN ?14 ELSE default_value END, \
-             display_symbol = COALESCE(?15, display_symbol) \
+             display_symbol = COALESCE(?15, display_symbol), label_mode = ?16, input_widget = ?17 \
          WHERE id = ?1 AND removed = 0",
     )
     .bind(quantity_id)
@@ -602,6 +610,8 @@ pub async fn update_quantity(
     .bind(input.default_value.is_some())
     .bind(input.default_value.flatten())
     .bind(display_symbol(&input.display_symbol))
+    .bind(label_mode(&input))
+    .bind(input_widget(&input))
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -815,7 +825,8 @@ async fn quantities_for(
 ) -> anyhow::Result<Vec<PracticeQuantity>> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count \
+         replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
+         label_mode, input_widget \
          FROM practice_quantities WHERE practice_id = ?1 AND removed = 0 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -836,7 +847,8 @@ async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec
 async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQuantity> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-         replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count \
+         replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
+         label_mode, input_widget \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -865,8 +877,8 @@ pub(super) async fn insert_quantity(
         "INSERT INTO practice_quantities \
          (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
           replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-          display_symbol) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+          display_symbol, label_mode, input_widget) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -884,6 +896,8 @@ pub(super) async fn insert_quantity(
     .bind(input.default_value.flatten())
     .bind(input.slot_count)
     .bind(display_symbol(&input.display_symbol).unwrap_or(""))
+    .bind(label_mode(input))
+    .bind(input_widget(input))
     .execute(&mut *conn)
     .await?;
     Ok(id)

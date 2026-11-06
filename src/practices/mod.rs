@@ -9,7 +9,10 @@ where
     Option::<T>::deserialize(de).map(Some)
 }
 
-#[derive(Debug, Deserialize)]
+pub const LABEL_MODES: [&str; 3] = ["nombre", "simbolo", "nombre_simbolo"];
+pub const INPUT_WIDGETS: [&str; 2] = ["teclado", "cronometro"];
+
+#[derive(Debug, Default, Deserialize)]
 pub struct QuantityInput {
     #[serde(default)]
     pub display_symbol: Option<String>,
@@ -32,6 +35,10 @@ pub struct QuantityInput {
     pub default_value: Option<Option<f64>>,
     #[serde(default)]
     pub slot_count: Option<i64>,
+    #[serde(default)]
+    pub label_mode: Option<String>,
+    #[serde(default)]
+    pub input_widget: Option<String>,
 }
 
 fn default_true() -> bool {
