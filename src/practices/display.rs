@@ -82,7 +82,7 @@ fn legacy_display_symbol(symbol: &str) -> Option<String> {
         .then(|| legacy_display_symbol(base).unwrap_or_else(|| base.to_string()))
 }
 
-fn version_symbols(definition: &PracticeDefinition) -> impl Iterator<Item = &str> {
+pub(super) fn version_symbols(definition: &PracticeDefinition) -> impl Iterator<Item = &str> {
     let quantities = definition.quantities.iter().map(|q| q.symbol.as_str());
     let results = definition.results.iter().map(|r| r.symbol.as_str());
     let intermediates = definition.intermediates.iter().map(|i| i.symbol.as_str());

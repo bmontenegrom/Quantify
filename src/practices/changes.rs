@@ -273,15 +273,13 @@ fn tolerance_changes(published: &PracticeDefinition, draft: &PracticeDefinition)
 }
 
 fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -> Vec<String> {
-    let symbols: std::collections::BTreeSet<&String> = published
-        .display_symbols
-        .keys()
-        .chain(draft.display_symbols.keys())
-        .collect();
-    symbols
-        .into_iter()
+    let before: std::collections::BTreeSet<&str> =
+        super::display::version_symbols(published).collect();
+    let after: std::collections::BTreeSet<&str> = super::display::version_symbols(draft).collect();
+    before
+        .intersection(&after)
         .filter(|symbol| {
-            published.display_symbols.get(*symbol) != draft.display_symbols.get(*symbol)
+            published.display_symbols.get(**symbol) != draft.display_symbols.get(**symbol)
         })
         .map(|symbol| format!("Cambia cómo se muestra {symbol}"))
         .collect()
@@ -340,7 +338,11 @@ pub fn compare_definitions(
             display_changes(published, draft),
         ]
         .concat(),
-        DraftChangeKind::Structural => list_changes(published, draft)?,
+        DraftChangeKind::Structural => [
+            list_changes(published, draft)?,
+            display_changes(published, draft),
+        ]
+        .concat(),
     };
     Ok(DefinitionComparison { kind, changes })
 }

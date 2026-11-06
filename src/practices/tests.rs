@@ -3612,3 +3612,47 @@ async fn retired_quantities_stay_out_of_the_display_symbols() {
         .keys()
         .any(|key| key.starts_with("Zq")));
 }
+
+#[tokio::test]
+async fn the_structural_summary_mentions_display_changes_of_kept_symbols_only() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    assert!(set_display_symbol(&pool, practice, "T1", "T_uno")
+        .await
+        .unwrap());
+    assert!(set_display_symbol(&pool, practice, "T2", "T_dos")
+        .await
+        .unwrap());
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+
+    assert!(set_display_symbol(&pool, practice, "T1", "T_otro")
+        .await
+        .unwrap());
+    sqlx::query(
+        "UPDATE practice_quantities SET symbol = 'T2b' WHERE practice_id = ?1 AND symbol = 'T2'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let added = QuantityInput {
+        symbol: "Zq".into(),
+        ..sample_quantity()
+    };
+    create_quantity(&pool, practice, added).await.unwrap();
+    assert!(set_display_symbol(&pool, practice, "Zq", "Z_q")
+        .await
+        .unwrap());
+
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    let shown: Vec<&String> = found
+        .changes
+        .iter()
+        .filter(|change| change.starts_with("Cambia cómo se muestra"))
+        .collect();
+    assert_eq!(shown, ["Cambia cómo se muestra T1"], "{:?}", found.changes);
+}
