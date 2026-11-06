@@ -11,6 +11,8 @@ where
 
 #[derive(Debug, Deserialize)]
 pub struct QuantityInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -38,6 +40,8 @@ fn default_true() -> bool {
 
 #[derive(Debug, Deserialize)]
 pub struct ResultInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -142,6 +146,8 @@ pub struct PracticeIntermediate {
 
 #[derive(Debug, Deserialize)]
 pub struct IntermediateInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -162,6 +168,8 @@ pub struct PracticePointResult {
 
 #[derive(Debug, Deserialize)]
 pub struct PointResultInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -184,6 +192,8 @@ pub struct PracticeAggregate {
 
 #[derive(Debug, Deserialize)]
 pub struct AggregateInput {
+    #[serde(default)]
+    pub display_symbol: Option<String>,
     pub symbol: String,
     pub name: String,
     pub unit: String,
@@ -220,7 +230,6 @@ mod versions;
 
 pub use changes::*;
 pub use crud::*;
-pub use display::set_display_symbol;
 pub use layout::*;
 pub use lifecycle::*;
 pub use parts::is_point_based;

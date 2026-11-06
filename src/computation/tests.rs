@@ -2690,6 +2690,7 @@ fn a_cycle_skips_its_results_with_a_warning() {
 async fn curve_results_chain_and_skip_what_depends_on_series_values() {
     let (pool, _dir) = setup().await;
     let input = |symbol: &str, formula: &str| crate::practices::ResultInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: symbol.into(),
         unit: "u".into(),

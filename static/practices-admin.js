@@ -23,19 +23,6 @@ function displaySymbolFieldHtml(item) {
   return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label>`;
 }
 
-async function saveDisplaySymbol(practiceId, form) {
-  const symbol = form.querySelector('[name="symbol"]').value.trim();
-  const input = form.querySelector('[name="display_symbol"]');
-  const display = input.value.trim();
-  if (display === input.defaultValue.trim()) return;
-  try {
-    await postJson(`/api/practices/${practiceId}/display-symbol`, { symbol, display_symbol: display });
-  } catch (error) {
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`).catch(() => state.practiceDefinition);
-    throw new Error(`Se guardó ${symbol}, pero no su símbolo a mostrar: ${error.message} Editalo para reintentar.`);
-  }
-}
-
 function isEditing(kind, id) {
   return state.editing.kind === kind && state.editing.id === id;
 }
@@ -159,6 +146,7 @@ function symbolFormulaPayloadFromForm(form, kind) {
     name: raw.name || "",
     unit: raw.unit || "",
     formula: raw.formula,
+    display_symbol: raw.display_symbol,
   };
   if (kind.hasFinal) payload.is_final = raw.is_final === "on";
   return payload;
@@ -182,7 +170,6 @@ async function saveNewSymbolFormulaRow(kind, event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/${kind.urlSegment}`, symbolFormulaPayloadFromForm(form, kind));
-      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     kind.statusCreate,
@@ -198,7 +185,6 @@ async function saveEditSymbolFormulaRow(kind, event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`, symbolFormulaPayloadFromForm(form, kind));
-      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     kind.statusUpdate,
@@ -1082,6 +1068,7 @@ function quantityPayloadFromForm(form) {
     has_uncertainty: "has_uncertainty" in raw,
     optional: "optional" in raw,
     slot_count: slots,
+    display_symbol: raw.display_symbol,
     default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
   };
 }
@@ -1093,7 +1080,6 @@ async function saveNewQuantity(event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/quantities`, quantityPayloadFromForm(form));
-      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     "Magnitud agregada",
@@ -1109,7 +1095,6 @@ async function saveEditQuantity(event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/quantities/${qid}`, quantityPayloadFromForm(form));
-      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     "Magnitud actualizada",
@@ -1352,9 +1337,9 @@ async function saveNewResult(event) {
         tolerance: parseTolerance(raw.tolerance ?? ""),
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
+        display_symbol: raw.display_symbol,
         section_id: raw.section_id || null,
       });
-      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     "Mensurando agregado",
@@ -1378,8 +1363,8 @@ async function saveEditResult(event) {
         tolerance: parseTolerance(raw.tolerance ?? ""),
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
+        display_symbol: raw.display_symbol,
       });
-      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     "Mensurando actualizado",

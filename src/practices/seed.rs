@@ -9,6 +9,7 @@ use sqlx::{SqliteConnection, SqlitePool};
 
 fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -26,6 +27,7 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
 
 fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -69,6 +71,7 @@ fn qty_replicas(
     replicas: i64,
 ) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -86,6 +89,7 @@ fn qty_replicas(
 
 fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -103,6 +107,7 @@ fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityI
 
 fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -115,6 +120,7 @@ fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
 
 fn res_final(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
+        display_symbol: None,
         is_final: true,
         ..res(symbol, name, unit, formula)
     }
@@ -571,6 +577,7 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
             pool,
             "p2-cc",
             IntermediateInput {
+                display_symbol: None,
                 symbol: "P".into(),
                 name: "Potencia disipada en R".into(),
                 unit: "W".into(),
@@ -624,6 +631,7 @@ async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
             pool,
             "fluidos-1",
             IntermediateInput {
+                display_symbol: None,
                 symbol: "Q".into(),
                 name: "Caudal medio".into(),
                 unit: "m3/s".into(),
@@ -635,6 +643,7 @@ async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
             pool,
             "fluidos-1",
             PointResultInput {
+                display_symbol: None,
                 symbol: "Re".into(),
                 name: "Numero de Reynolds".into(),
                 unit: "".into(),
@@ -677,6 +686,7 @@ async fn seed_viscosidad(pool: &SqlitePool) -> anyhow::Result<()> {
             pool,
             "viscosidad",
             PointResultInput {
+                display_symbol: None,
                 symbol: "Re".into(),
                 name: "Numero de Reynolds".into(),
                 unit: "".into(),
@@ -737,6 +747,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
     if fresh_f2 {
         for input in [
             AggregateInput {
+                display_symbol: None,
                 symbol: "Re_max".into(),
                 name: "Numero de Reynolds maximo".into(),
                 unit: "".into(),
@@ -746,6 +757,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
                 is_final: true,
             },
             AggregateInput {
+                display_symbol: None,
                 symbol: "Re_min".into(),
                 name: "Numero de Reynolds minimo".into(),
                 unit: "".into(),
@@ -755,6 +767,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
                 is_final: true,
             },
             AggregateInput {
+                display_symbol: None,
                 symbol: "Re_medio".into(),
                 name: "Numero de Reynolds medio".into(),
                 unit: "".into(),
@@ -762,6 +775,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
                 is_final: true,
             },
             AggregateInput {
+                display_symbol: None,
                 symbol: "M_teorico".into(),
                 name: "Coeficiente de perdidas teorico".into(),
                 unit: "".into(),
@@ -862,6 +876,7 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
                 pool,
                 "filtros",
                 IntermediateInput {
+                    display_symbol: None,
                     symbol: sym.into(),
                     name: name.into(),
                     unit: unit.into(),

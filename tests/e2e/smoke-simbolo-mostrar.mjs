@@ -1,57 +1,62 @@
-import { TEACHER, assert, openAddForm, step, withE2E } from "./lib.mjs";
+import { TEACHER, apiPost, assert, openAddForm, step, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8172";
 const PRACTICE_ID = "p1-estadistica";
+const SAVE_URL = `**/api/practices/${PRACTICE_ID}/quantities`;
 
 await withE2E({ port: PORT, dbName: "quantify-simbolo-mostrar.db" }, async ({ login }) => {
   const { page } = await login(TEACHER, "docente");
-  const status = async () => (await page.locator("#practice-workspace .practice-status").first().textContent()) ?? "";
   const definition = () =>
     page.evaluate(async (id) => (await fetch(`/api/practices/${id}/definition`)).json(), PRACTICE_ID);
-  const failDisplaySymbol = () => page.route("**/display-symbol", (route) => route.abort());
-  const restoreDisplaySymbol = () => page.unroute("**/display-symbol");
+  const statusIncludes = (text) =>
+    page.waitForFunction(
+      (expected) =>
+        (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes(expected),
+      text,
+    );
 
   await page.click('.tab.teacher-only[data-view="practices"]');
   await page.click(`[data-practice-open][data-practice-id="${PRACTICE_ID}"]`);
 
-  step("docente: el alta se guarda aunque falle el símbolo a mostrar, y se ve");
-  await openAddForm(page, "#new-quantity-form");
-  await page.fill('#new-quantity-form [name="symbol"]', "Zz");
-  await page.fill('#new-quantity-form [name="display_symbol"]', "Z_z");
-  await page.fill('#new-quantity-form [name="name"]', "Zeta");
-  await failDisplaySymbol();
+  step("docente: si falla la conexión no se guarda nada y el error está en español");
+  const fillNew = async () => {
+    await openAddForm(page, "#new-quantity-form");
+    await page.fill('#new-quantity-form [name="symbol"]', "Zz");
+    await page.fill('#new-quantity-form [name="display_symbol"]', "Z_z");
+    await page.fill('#new-quantity-form [name="name"]', "Zeta");
+  };
+  await fillNew();
+  await page.route(SAVE_URL, (route) => route.abort());
   await page.click('#new-quantity-form button[type="submit"]');
-  await page.waitForFunction(() =>
-    (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes("símbolo a mostrar"),
-  );
-  await restoreDisplaySymbol();
-  const message = await status();
-  assert(message.includes("Se guardó Zz"), `el mensaje debía decir qué se guardó: ${message}`);
-  assert(message.includes("No se pudo conectar"), `el error debía estar en español: ${message}`);
-  const zz = (await definition()).quantities.find((q) => q.symbol === "Zz");
+  await statusIncludes("No se pudo conectar con el servidor");
+  await page.unroute(SAVE_URL);
+  assert(!(await definition()).quantities.some((q) => q.symbol === "Zz"), "no debía guardarse la magnitud");
+
+  step("docente: el alta guarda el elemento y su símbolo a mostrar juntos");
+  await fillNew();
+  await page.click('#new-quantity-form button[type="submit"]');
+  await statusIncludes("Magnitud agregada");
+  let saved = await definition();
+  const zz = saved.quantities.find((q) => q.symbol === "Zz");
   assert(zz, "la magnitud debía quedar guardada");
-  await page.locator(`[data-edit-quantity][data-qid="${zz.id}"]`).waitFor({ state: "attached" });
+  assert(saved.display_symbols.Zz === "Z_z", "el alta debía guardar el símbolo a mostrar");
 
-  step("docente: al editarla se reintenta el símbolo a mostrar");
+  step("docente: la edición renombra y cambia el símbolo a mostrar a la vez");
   await page.click(`[data-edit-quantity][data-qid="${zz.id}"]`);
-  await page.fill('#edit-quantity-form [name="display_symbol"]', "Z_z");
+  await page.fill('#edit-quantity-form [name="symbol"]', "Zy");
+  await page.fill('#edit-quantity-form [name="display_symbol"]', "Z_y");
   await page.click('#edit-quantity-form button[type="submit"]');
-  await page.waitForFunction(() =>
-    (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes("Magnitud actualizada"),
-  );
-  assert((await definition()).display_symbols.Zz === "Z_z", "el reintento debía guardar el símbolo a mostrar");
+  await statusIncludes("Magnitud actualizada");
+  saved = await definition();
+  assert(saved.display_symbols.Zy === "Z_y", "la edición debía guardar el símbolo a mostrar");
 
-  step("docente: una edición a medias muestra lo que quedó guardado");
-  await page.click(`[data-edit-quantity][data-qid="${zz.id}"]`);
-  await page.fill('#edit-quantity-form [name="name"]', "Nombre nuevo");
-  await page.fill('#edit-quantity-form [name="display_symbol"]', "Z_otro");
-  await failDisplaySymbol();
-  await page.click('#edit-quantity-form button[type="submit"]');
-  await page.waitForFunction(() =>
-    (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes("símbolo a mostrar"),
+  step("docente: un símbolo a mostrar demasiado largo rechaza el elemento entero");
+  const url = `/api/practices/${PRACTICE_ID}/quantities`;
+  const body = { symbol: "Zl", name: "Larga", unit: "", repeated: true, per_point: false, has_uncertainty: true };
+  const error = await apiPost(page, url, { ...body, display_symbol: "x".repeat(41) }).then(
+    () => null,
+    (e) => e.message,
   );
-  await restoreDisplaySymbol();
-  const shownName = await page.locator('#edit-quantity-form [name="name"]').inputValue();
-  assert(shownName === "Nombre nuevo", `el formulario debía mostrar lo guardado, mostró: ${shownName}`);
-  assert((await definition()).display_symbols.Zz === "Z_z", "el símbolo fallido no debía cambiar");
+  assert(error?.includes("hasta 40 caracteres"), `debía rechazarse con un mensaje claro: ${error}`);
+  assert(!(await definition()).quantities.some((q) => q.symbol === "Zl"), "no debía guardarse la magnitud");
 });

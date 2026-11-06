@@ -25,8 +25,30 @@ async fn setup() -> (SqlitePool, TempDir) {
     (pool, dir)
 }
 
+async fn set_display_symbol(
+    pool: &SqlitePool,
+    practice_id: &str,
+    symbol: &str,
+    display_symbol: &str,
+) -> anyhow::Result<bool> {
+    let mut updated = 0;
+    for table in db::DISPLAY_SYMBOL_TABLES {
+        updated += sqlx::query(&format!(
+            "UPDATE {table} SET display_symbol = ?1 WHERE practice_id = ?2 AND symbol = ?3"
+        ))
+        .bind(display_symbol)
+        .bind(practice_id)
+        .bind(symbol)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    }
+    Ok(updated > 0)
+}
+
 fn sample_quantity() -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: "l".into(),
         name: "Longitud".into(),
         unit: "mm".into(),
@@ -44,6 +66,7 @@ fn sample_quantity() -> QuantityInput {
 
 fn sample_result() -> ResultInput {
     ResultInput {
+        display_symbol: None,
         symbol: "Q".into(),
         name: "Area".into(),
         unit: "mm2".into(),
@@ -85,6 +108,7 @@ async fn update_and_delete_quantity() {
         &pool,
         &q.id,
         QuantityInput {
+            display_symbol: None,
             symbol: "a".into(),
             name: "Ancho".into(),
             unit: "cm".into(),
@@ -106,6 +130,7 @@ async fn update_and_delete_quantity() {
     assert!(!updated.repeated);
 
     let with_default = |default_value: Option<Option<f64>>| QuantityInput {
+        display_symbol: None,
         symbol: "a".into(),
         name: "Ancho".into(),
         unit: "cm".into(),
@@ -165,6 +190,7 @@ async fn create_and_update_result_toggles_is_final() {
         &pool,
         "p1-estadistica",
         ResultInput {
+            display_symbol: None,
             is_final: true,
             ..sample_result()
         },
@@ -178,6 +204,7 @@ async fn create_and_update_result_toggles_is_final() {
         &pool,
         &r.id,
         ResultInput {
+            display_symbol: None,
             is_final: false,
             ..sample_result()
         },
@@ -256,6 +283,7 @@ async fn symbol_taken_detects_cross_table_collision() {
         &pool,
         "p1-estadistica",
         IntermediateInput {
+            display_symbol: None,
             symbol: "Iv".into(),
             name: "Iv".into(),
             unit: "u".into(),
@@ -274,6 +302,7 @@ async fn symbol_taken_detects_cross_table_collision() {
         &pool,
         "p1-estadistica",
         PointResultInput {
+            display_symbol: None,
             symbol: "Re".into(),
             name: "Re".into(),
             unit: "".into(),
@@ -292,6 +321,7 @@ async fn symbol_taken_detects_cross_table_collision() {
         &pool,
         "p1-estadistica",
         AggregateInput {
+            display_symbol: None,
             symbol: "Ma".into(),
             name: "Ma".into(),
             unit: "".into(),
@@ -325,6 +355,7 @@ async fn symbol_taken_detects_cross_table_collision() {
 async fn aggregate_crud_roundtrip() {
     let (pool, _dir) = setup().await;
     let mk = |symbol: &str, formula: &str| AggregateInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: symbol.into(),
         unit: "".into(),
@@ -615,6 +646,7 @@ async fn intermediate_crud_roundtrip() {
         &pool,
         "p1-estadistica",
         IntermediateInput {
+            display_symbol: None,
             symbol: " Q ".into(),
             name: "Caudal".into(),
             unit: "m3/s".into(),
@@ -633,6 +665,7 @@ async fn intermediate_crud_roundtrip() {
         "p2-cc",
         &q.id,
         IntermediateInput {
+            display_symbol: None,
             symbol: "Q".into(),
             name: "x".into(),
             unit: "x".into(),
@@ -647,6 +680,7 @@ async fn intermediate_crud_roundtrip() {
         "p1-estadistica",
         &q.id,
         IntermediateInput {
+            display_symbol: None,
             symbol: "Q".into(),
             name: "Caudal".into(),
             unit: "m3/s".into(),
@@ -662,6 +696,7 @@ async fn intermediate_crud_roundtrip() {
         &pool,
         "p1-estadistica",
         IntermediateInput {
+            display_symbol: None,
             symbol: "Z".into(),
             name: "z".into(),
             unit: "".into(),
@@ -2752,6 +2787,7 @@ async fn a_damaged_snapshot_is_an_internal_error() {
 
 fn new_quantity(symbol: &str) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: "Nueva".into(),
         unit: "s".into(),
@@ -3546,6 +3582,7 @@ async fn display_changes_are_detected_on_symbols_named_like_volatile_keys() {
     let practice = "p1-estadistica";
     for symbol in ["position", "status", "current_version"] {
         let input = QuantityInput {
+            display_symbol: None,
             symbol: symbol.into(),
             ..sample_quantity()
         };
@@ -3580,6 +3617,7 @@ async fn retired_quantities_stay_out_of_the_display_symbols() {
     seed_definitions(&pool).await.unwrap();
     let practice = "p1-estadistica";
     let input = QuantityInput {
+        display_symbol: None,
         symbol: "Zq".into(),
         ..sample_quantity()
     };
@@ -3639,6 +3677,7 @@ async fn the_structural_summary_mentions_display_changes_of_kept_symbols_only() 
     .await
     .unwrap();
     let added = QuantityInput {
+        display_symbol: None,
         symbol: "Zq".into(),
         ..sample_quantity()
     };
@@ -3703,4 +3742,146 @@ async fn a_repaired_version_is_migrated_on_the_next_boot_without_reverting_publi
         .unwrap()
         .unwrap();
     assert!(cleared.definition.display_symbols.is_empty());
+}
+
+#[tokio::test]
+async fn display_symbols_are_saved_with_the_element() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let shown = |symbol: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let def = definition(&pool, practice).await.unwrap().unwrap();
+            def.display_symbols.get(symbol).cloned()
+        }
+    };
+
+    let quantity = QuantityInput {
+        symbol: "Zq".into(),
+        display_symbol: Some(" Z_q ".into()),
+        ..sample_quantity()
+    };
+    let created = create_quantity(&pool, practice, quantity).await.unwrap();
+    assert_eq!(shown("Zq").await.as_deref(), Some("Z_q"));
+
+    let untouched = QuantityInput {
+        symbol: "Zq".into(),
+        ..sample_quantity()
+    };
+    update_quantity(&pool, &created.id, untouched)
+        .await
+        .unwrap();
+    assert_eq!(shown("Zq").await.as_deref(), Some("Z_q"));
+
+    let renamed = QuantityInput {
+        symbol: "Zr".into(),
+        display_symbol: Some("Z_r".into()),
+        ..sample_quantity()
+    };
+    update_quantity(&pool, &created.id, renamed).await.unwrap();
+    assert_eq!(shown("Zr").await.as_deref(), Some("Z_r"));
+
+    let cleared = QuantityInput {
+        symbol: "Zr".into(),
+        display_symbol: Some(String::new()),
+        ..sample_quantity()
+    };
+    update_quantity(&pool, &created.id, cleared).await.unwrap();
+    assert_eq!(shown("Zr").await, None);
+
+    let result = ResultInput {
+        symbol: "Zs".into(),
+        display_symbol: Some("Z_s".into()),
+        ..sample_result()
+    };
+    let saved = create_result(&pool, practice, result, None).await.unwrap();
+    assert_eq!(shown("Zs").await.as_deref(), Some("Z_s"));
+    for tolerance in [None, Some(Some(1.0))] {
+        let edited = ResultInput {
+            symbol: "Zs".into(),
+            tolerance,
+            display_symbol: Some("Z_t".into()),
+            ..sample_result()
+        };
+        update_result(&pool, &saved.id, edited).await.unwrap();
+        assert_eq!(shown("Zs").await.as_deref(), Some("Z_t"));
+        let kept = ResultInput {
+            symbol: "Zs".into(),
+            tolerance,
+            ..sample_result()
+        };
+        update_result(&pool, &saved.id, kept).await.unwrap();
+        assert_eq!(shown("Zs").await.as_deref(), Some("Z_t"));
+        set_display_symbol(&pool, practice, "Zs", "Z_s")
+            .await
+            .unwrap();
+    }
+
+    let intermediate = IntermediateInput {
+        display_symbol: Some("I_a".into()),
+        symbol: "Ia".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+    };
+    let row = create_intermediate(&pool, practice, intermediate)
+        .await
+        .unwrap();
+    assert_eq!(shown("Ia").await.as_deref(), Some("I_a"));
+    let intermediate = IntermediateInput {
+        display_symbol: Some("I_b".into()),
+        symbol: "Ia".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+    };
+    update_intermediate(&pool, practice, &row.id, intermediate)
+        .await
+        .unwrap();
+    assert_eq!(shown("Ia").await.as_deref(), Some("I_b"));
+
+    let point = PointResultInput {
+        display_symbol: Some("P_a".into()),
+        symbol: "Pa".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+    };
+    let row = create_point_result(&pool, practice, point).await.unwrap();
+    assert_eq!(shown("Pa").await.as_deref(), Some("P_a"));
+    let point = PointResultInput {
+        display_symbol: None,
+        symbol: "Pa".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+    };
+    update_point_result(&pool, practice, &row.id, point)
+        .await
+        .unwrap();
+    assert_eq!(shown("Pa").await.as_deref(), Some("P_a"));
+
+    let aggregate = AggregateInput {
+        display_symbol: Some("G_a".into()),
+        symbol: "Ga".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+        is_final: false,
+    };
+    let row = create_aggregate(&pool, practice, aggregate).await.unwrap();
+    assert_eq!(shown("Ga").await.as_deref(), Some("G_a"));
+    let aggregate = AggregateInput {
+        display_symbol: Some("G_b".into()),
+        symbol: "Ga".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+        is_final: false,
+    };
+    update_aggregate(&pool, practice, &row.id, aggregate)
+        .await
+        .unwrap();
+    assert_eq!(shown("Ga").await.as_deref(), Some("G_b"));
 }

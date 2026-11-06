@@ -30,27 +30,6 @@ pub(super) async fn display_symbols_for(
     Ok(rows.into_iter().collect())
 }
 
-pub async fn set_display_symbol(
-    pool: &SqlitePool,
-    practice_id: &str,
-    symbol: &str,
-    display_symbol: &str,
-) -> anyhow::Result<bool> {
-    let mut updated = 0;
-    for table in DISPLAY_SYMBOL_TABLES {
-        updated += sqlx::query(&format!(
-            "UPDATE {table} SET display_symbol = ?1 WHERE practice_id = ?2 AND symbol = ?3"
-        ))
-        .bind(display_symbol)
-        .bind(practice_id)
-        .bind(symbol)
-        .execute(pool)
-        .await?
-        .rows_affected();
-    }
-    Ok(updated > 0)
-}
-
 fn legacy_display_symbol(symbol: &str) -> Option<String> {
     let fixed = match symbol {
         "tmedio" => Some("t_1/2"),

@@ -105,6 +105,10 @@ async fn fetch_symbol_formula_row<T: SymbolFormulaRow>(
         .await?)
 }
 
+fn display_symbol(input: &Option<String>) -> Option<&str> {
+    input.as_deref().map(str::trim)
+}
+
 async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     pool: &SqlitePool,
     practice_id: &str,
@@ -112,12 +116,13 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     name: &str,
     unit: &str,
     formula: &str,
+    display: Option<&str>,
 ) -> anyhow::Result<T> {
     let position = next_position(pool, T::TABLE, "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     let query = format!(
-        "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula, display_symbol) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         T::TABLE
     );
     sqlx::query(&query)
@@ -128,11 +133,13 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
         .bind(name)
         .bind(unit)
         .bind(formula)
+        .bind(display.unwrap_or(""))
         .execute(pool)
         .await?;
     fetch_symbol_formula_row::<T>(pool, &id).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn update_symbol_formula_row<T: SymbolFormulaRow>(
     pool: &SqlitePool,
     practice_id: &str,
@@ -141,9 +148,11 @@ async fn update_symbol_formula_row<T: SymbolFormulaRow>(
     name: &str,
     unit: &str,
     formula: &str,
+    display: Option<&str>,
 ) -> anyhow::Result<Option<T>> {
     let query = format!(
-        "UPDATE {} SET symbol = ?3, name = ?4, unit = ?5, formula = ?6 \
+        "UPDATE {} SET symbol = ?3, name = ?4, unit = ?5, formula = ?6, \
+         display_symbol = COALESCE(?7, display_symbol) \
          WHERE id = ?1 AND practice_id = ?2",
         T::TABLE
     );
@@ -154,6 +163,7 @@ async fn update_symbol_formula_row<T: SymbolFormulaRow>(
         .bind(name)
         .bind(unit)
         .bind(formula)
+        .bind(display)
         .execute(pool)
         .await?;
     if result.rows_affected() == 0 {
@@ -203,6 +213,7 @@ pub async fn create_point_result(
         input.name.trim(),
         input.unit.trim(),
         formula,
+        display_symbol(&input.display_symbol),
     )
     .await
 }
@@ -226,6 +237,7 @@ pub async fn update_point_result(
         input.name.trim(),
         input.unit.trim(),
         formula,
+        display_symbol(&input.display_symbol),
     )
     .await
 }
@@ -275,8 +287,8 @@ pub async fn create_aggregate(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_aggregates \
-         (id, practice_id, position, symbol, name, unit, formula, is_final) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         (id, practice_id, position, symbol, name, unit, formula, is_final, display_symbol) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -286,6 +298,7 @@ pub async fn create_aggregate(
     .bind(input.unit.trim())
     .bind(formula)
     .bind(input.is_final)
+    .bind(display_symbol(&input.display_symbol).unwrap_or(""))
     .execute(pool)
     .await?;
     fetch_aggregate(pool, &id).await
@@ -304,7 +317,8 @@ pub async fn update_aggregate(
     }
     let result = sqlx::query(
         "UPDATE practice_aggregates \
-         SET symbol = ?3, name = ?4, unit = ?5, formula = ?6, is_final = ?7 \
+         SET symbol = ?3, name = ?4, unit = ?5, formula = ?6, is_final = ?7, \
+             display_symbol = COALESCE(?8, display_symbol) \
          WHERE id = ?1 AND practice_id = ?2",
     )
     .bind(aggregate_id)
@@ -314,6 +328,7 @@ pub async fn update_aggregate(
     .bind(input.unit.trim())
     .bind(formula)
     .bind(input.is_final)
+    .bind(display_symbol(&input.display_symbol))
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -359,6 +374,7 @@ pub async fn create_intermediate(
         input.name.trim(),
         input.unit.trim(),
         formula,
+        display_symbol(&input.display_symbol),
     )
     .await
 }
@@ -382,6 +398,7 @@ pub async fn update_intermediate(
         input.name.trim(),
         input.unit.trim(),
         formula,
+        display_symbol(&input.display_symbol),
     )
     .await
 }
@@ -566,7 +583,8 @@ pub async fn update_quantity(
         "UPDATE practice_quantities \
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
              replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11, \
-             slot_count = ?12, default_value = CASE WHEN ?13 THEN ?14 ELSE default_value END \
+             slot_count = ?12, default_value = CASE WHEN ?13 THEN ?14 ELSE default_value END, \
+             display_symbol = COALESCE(?15, display_symbol) \
          WHERE id = ?1 AND removed = 0",
     )
     .bind(quantity_id)
@@ -583,6 +601,7 @@ pub async fn update_quantity(
     .bind(input.slot_count)
     .bind(input.default_value.is_some())
     .bind(input.default_value.flatten())
+    .bind(display_symbol(&input.display_symbol))
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -640,7 +659,7 @@ pub async fn update_result(
         None => sqlx::query(
             "UPDATE practice_results \
                  SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, is_final = ?6, \
-                     has_uncertainty = ?7 \
+                     has_uncertainty = ?7, display_symbol = COALESCE(?8, display_symbol) \
                  WHERE id = ?1",
         )
         .bind(result_id)
@@ -650,13 +669,14 @@ pub async fn update_result(
         .bind(input.formula.trim())
         .bind(input.is_final)
         .bind(input.has_uncertainty)
+        .bind(display_symbol(&input.display_symbol))
         .execute(pool)
         .await?
         .rows_affected(),
         Some(tol) => sqlx::query(
             "UPDATE practice_results \
                  SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6, is_final = ?7, \
-                     has_uncertainty = ?8 \
+                     has_uncertainty = ?8, display_symbol = COALESCE(?9, display_symbol) \
                  WHERE id = ?1",
         )
         .bind(result_id)
@@ -667,6 +687,7 @@ pub async fn update_result(
         .bind(tol)
         .bind(input.is_final)
         .bind(input.has_uncertainty)
+        .bind(display_symbol(&input.display_symbol))
         .execute(pool)
         .await?
         .rows_affected(),
@@ -843,8 +864,9 @@ pub(super) async fn insert_quantity(
     sqlx::query(
         "INSERT INTO practice_quantities \
          (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
-          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
+          display_symbol) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -861,6 +883,7 @@ pub(super) async fn insert_quantity(
     .bind(input.optional)
     .bind(input.default_value.flatten())
     .bind(input.slot_count)
+    .bind(display_symbol(&input.display_symbol).unwrap_or(""))
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -875,8 +898,8 @@ pub(super) async fn insert_result(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_results \
-         (id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+         (id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty, display_symbol) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -888,6 +911,7 @@ pub(super) async fn insert_result(
     .bind(input.tolerance.flatten())
     .bind(input.is_final)
     .bind(input.has_uncertainty)
+    .bind(display_symbol(&input.display_symbol).unwrap_or(""))
     .execute(&mut *conn)
     .await?;
     Ok(id)
