@@ -293,6 +293,10 @@ Detectadas con el código ya construido. Ordenadas por valor/riesgo; ninguna blo
 3. **Mensajes de error internos en inglés** ("submission not found", "submission not found")
    en `routes.rs`: normalizar a español por la convención de errores amigables (son casos
    "no debería pasar", de bajo impacto).
+- **Pendiente (2026-11-05, visto en #113): un docente puede cambiar el rol de cualquier usuario.**
+  `POST /users/{id}` (`routes/courses.rs::update_user`) solo exige `require_teacher`, así que un
+  docente puede hacerse admin o quitarle el rol a un admin. **Acción**: que solo un admin pueda
+  asignar o quitar el rol `admin` (o editar usuarios en general), con test de la ruta.
 
 ### Calidad / infra
 4. **E2E de navegador en CI (Playwright)**. Ya validamos el flujo de comparación/regresión con un
