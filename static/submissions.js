@@ -221,7 +221,7 @@ export async function openSubmissionWorkspace(id) {
   submissionWorkspace.innerHTML = `
     <button type="button" class="back-link" id="submission-workspace-back">Volver al listado</button>
     ${definitionFailed ? `<div class="edit-banner" id="submission-definition-error" role="alert">
-      <span>No se pudo cargar la definición de la práctica: algunos símbolos y resultados pueden verse incompletos.</span>
+      <span>No se pudo cargar la definición de la práctica: algunos resultados pueden verse incompletos.</span>
       <button type="button" id="submission-definition-retry">Reintentar</button>
     </div>` : ""}
     <div id="submission-detail-body"></div>
