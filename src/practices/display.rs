@@ -75,41 +75,33 @@ pub(super) fn version_symbols(definition: &PracticeDefinition) -> impl Iterator<
 }
 
 pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow::Result<()> {
-    let tables_done = crate::db::migration_applied(pool, LEGACY_DISPLAY_SYMBOLS).await?;
+    if crate::db::migration_applied(pool, LEGACY_DISPLAY_SYMBOLS).await? {
+        return Ok(());
+    }
     let mut tx = pool.begin().await?;
-    if !tables_done {
-        for table in DISPLAY_SYMBOL_TABLES {
-            let rows: Vec<(String, String)> = sqlx::query_as(&format!(
-                "SELECT id, symbol FROM {table} WHERE display_symbol = ''"
+    for table in DISPLAY_SYMBOL_TABLES {
+        let rows: Vec<(String, String)> = sqlx::query_as(&format!(
+            "SELECT id, symbol FROM {table} WHERE display_symbol = ''"
+        ))
+        .fetch_all(&mut *tx)
+        .await?;
+        for (id, symbol) in rows {
+            let Some(display) = legacy_display_symbol(&symbol) else {
+                continue;
+            };
+            sqlx::query(&format!(
+                "UPDATE {table} SET display_symbol = ?1 WHERE id = ?2"
             ))
-            .fetch_all(&mut *tx)
-            .await?;
-            for (id, symbol) in rows {
-                let Some(display) = legacy_display_symbol(&symbol) else {
-                    continue;
-                };
-                sqlx::query(&format!(
-                    "UPDATE {table} SET display_symbol = ?1 WHERE id = ?2"
-                ))
-                .bind(display)
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
-            }
-        }
-        sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
-            .bind(LEGACY_DISPLAY_SYMBOLS)
-            .bind(chrono::Utc::now())
+            .bind(display)
+            .bind(id)
             .execute(&mut *tx)
             .await?;
+        }
     }
-    let versions: Vec<(String, String)> = sqlx::query_as(
-        "SELECT id, definition_json FROM practice_versions \
-         WHERE CASE WHEN json_valid(definition_json) \
-               THEN json_type(definition_json, '$.display_symbols') IS NULL ELSE 1 END",
-    )
-    .fetch_all(&mut *tx)
-    .await?;
+    let versions: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, definition_json FROM practice_versions")
+            .fetch_all(&mut *tx)
+            .await?;
     for (id, json) in versions {
         let definition = match super::versions::parse(&json) {
             Ok(definition) => definition,
@@ -117,7 +109,7 @@ pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow:
                 tracing::warn!(
                     version_id = %id,
                     %error,
-                    "versión ilegible: se reintenta la migración de símbolos a mostrar en cada arranque"
+                    "versión ilegible: queda sin migrar a símbolos a mostrar y esta migración no se repite"
                 );
                 continue;
             }
@@ -126,6 +118,9 @@ pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow:
             .filter_map(|symbol| Some((symbol.to_string(), legacy_display_symbol(symbol)?)))
             .collect();
         symbols.extend(definition.display_symbols);
+        if symbols.is_empty() {
+            continue;
+        }
         sqlx::query(
             "UPDATE practice_versions \
              SET definition_json = json_set(definition_json, '$.display_symbols', json(?1)) \
@@ -136,6 +131,11 @@ pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow:
         .execute(&mut *tx)
         .await?;
     }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(LEGACY_DISPLAY_SYMBOLS)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }

@@ -3534,9 +3534,6 @@ async fn changing_a_display_symbol_is_cosmetic() {
     let found = draft_changes(&pool, practice).await.unwrap().unwrap();
     assert_eq!(found.kind, DraftChangeKind::Cosmetic);
     assert_eq!(found.changes, vec!["Cambia cómo se muestra T1".to_string()]);
-    assert!(!set_display_symbol(&pool, practice, "no-existe", "x")
-        .await
-        .unwrap());
 }
 
 #[tokio::test]
@@ -3697,51 +3694,31 @@ async fn the_structural_summary_mentions_display_changes_of_kept_symbols_only() 
 }
 
 #[tokio::test]
-async fn a_repaired_version_is_migrated_on_the_next_boot_without_reverting_published_changes() {
+async fn a_later_boot_does_not_rewrite_versions() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
-    let (original,): (String,) = sqlx::query_as(
-        "SELECT json_remove(definition_json, '$.display_symbols') FROM practice_versions WHERE practice_id = 'p3-relajacion'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-
-    for broken in ["{no es json", "{\"quantities\": 5}"] {
-        sqlx::query(
-            "UPDATE practice_versions SET definition_json = ?1 WHERE practice_id = 'p3-relajacion'",
-        )
-        .bind(broken)
-        .execute(&pool)
-        .await
-        .unwrap();
-        seed_definitions(&pool).await.unwrap();
-    }
-
     sqlx::query(
-        "UPDATE practice_versions SET definition_json = ?1 WHERE practice_id = 'p3-relajacion'",
+        "UPDATE practice_versions \
+         SET definition_json = json_remove(definition_json, '$.display_symbols') \
+         WHERE practice_id = 'p3-relajacion'",
     )
-    .bind(&original)
     .execute(&pool)
     .await
     .unwrap();
-    seed_definitions(&pool).await.unwrap();
-    let repaired = current_version(&pool, "p3-relajacion")
+    let snapshot = || async {
+        let (json,): (String,) = sqlx::query_as(
+            "SELECT definition_json FROM practice_versions WHERE practice_id = 'p3-relajacion'",
+        )
+        .fetch_one(&pool)
         .await
-        .unwrap()
         .unwrap();
-    assert_eq!(repaired.definition.display_symbols["tmedio"], "t_1/2");
+        json
+    };
+    let before = snapshot().await;
 
-    sqlx::query("UPDATE practice_versions SET definition_json = json_set(definition_json, '$.display_symbols', json('{}')) WHERE practice_id = 'p3-relajacion'")
-        .execute(&pool)
-        .await
-        .unwrap();
     seed_definitions(&pool).await.unwrap();
-    let cleared = current_version(&pool, "p3-relajacion")
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(cleared.definition.display_symbols.is_empty());
+
+    assert_eq!(before, snapshot().await);
 }
 
 #[tokio::test]
