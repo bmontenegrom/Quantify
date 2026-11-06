@@ -8,7 +8,7 @@ pub struct PracticeVersion {
     pub definition: PracticeDefinition,
 }
 
-fn parse(json: &str) -> anyhow::Result<PracticeDefinition> {
+pub(super) fn parse(json: &str) -> anyhow::Result<PracticeDefinition> {
     let definition: PracticeDefinition = serde_json::from_str(json)
         .map_err(|e| anyhow::Error::new(sqlx::Error::Decode(Box::new(e))))?;
     if definition.practice_id.is_empty() {

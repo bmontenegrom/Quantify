@@ -3502,3 +3502,39 @@ async fn changing_a_display_symbol_is_cosmetic() {
         .await
         .unwrap());
 }
+
+#[tokio::test]
+async fn an_unreadable_version_does_not_stop_the_display_symbol_migration() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = '{\"quantities\": 5}' \
+         WHERE practice_id = 'p1-estadistica'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE practice_versions \
+         SET definition_json = json_remove(definition_json, '$.display_symbols') \
+         WHERE practice_id = 'p3-relajacion'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-simbolos-a-mostrar'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    seed_definitions(&pool).await.unwrap();
+
+    let p3 = current_version(&pool, "p3-relajacion")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(p3.definition.display_symbols["tmedio"], "t_1/2");
+    assert!(db::migration_applied(&pool, "2026-11-simbolos-a-mostrar")
+        .await
+        .unwrap());
+}

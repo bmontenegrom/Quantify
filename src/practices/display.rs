@@ -117,7 +117,17 @@ pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow:
             .fetch_all(&mut *tx)
             .await?;
     for (id, json) in versions {
-        let definition: PracticeDefinition = serde_json::from_str(&json)?;
+        let definition = match super::versions::parse(&json) {
+            Ok(definition) => definition,
+            Err(error) => {
+                tracing::warn!(
+                    version_id = %id,
+                    %error,
+                    "versión ilegible: la migración de símbolos a mostrar la deja como está"
+                );
+                continue;
+            }
+        };
         let mut symbols: BTreeMap<String, String> = version_symbols(&definition)
             .filter_map(|symbol| Some((symbol.to_string(), legacy_display_symbol(symbol)?)))
             .collect();
