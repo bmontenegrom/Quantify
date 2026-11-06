@@ -121,5 +121,44 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
   assert((await failPage.locator("#submission-definition-error").count()) === 0, "el aviso debía irse al reintentar");
   assert((await detailHtml(failPage)).includes("t<sub>1/2</sub>"), "tras reintentar debía mostrarse t_1/2");
 
+  step("docente: una respuesta lenta de otra entrega no pisa la que está abierta");
+  const { page: slowPage } = await login(TEACHER, "docente");
+  await slowPage.click('.tab.teacher-only[data-view="submissions"]');
+  await slowPage.locator(`.submission-item[data-id="${submissionId}"]`).waitFor();
+  const otherId = await slowPage
+    .locator(".submission-item")
+    .evaluateAll((items, own) => items.map((item) => item.dataset.id).find((id) => id !== own), submissionId);
+  assert(otherId, "debía haber otra entrega de prueba");
+  const delayed = async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  };
+  const assertOtherStaysOpen = async (when) => {
+    await slowPage.waitForTimeout(2000);
+    const loaded = await slowPage.evaluate(async () => {
+      const { state } = await import("/state.js");
+      return { active: state.activeSubmissionId, loaded: state.activeSubmission?.id };
+    });
+    assert(loaded.active === otherId && loaded.loaded === otherId, `${when}: quedó ${JSON.stringify(loaded)}`);
+    const text = (await slowPage.locator("#submission-detail-body").textContent()) ?? "";
+    assert(!text.includes("Relajacion Exponencial"), `${when}: se dibujó la entrega anterior`);
+  };
+
+  await slowPage.click(`.submission-item[data-id="${submissionId}"]`);
+  await slowPage.waitForSelector(".review-form");
+  await slowPage.route(`**/api/submissions/${submissionId}/review`, delayed);
+  await slowPage.click('.review-form button[type="submit"]');
+  await slowPage.click("#submission-workspace-back");
+  await slowPage.click(`.submission-item[data-id="${otherId}"]`);
+  await assertOtherStaysOpen("al guardar la revisión");
+  await slowPage.unroute(`**/api/submissions/${submissionId}/review`);
+
+  await slowPage.click("#submission-workspace-back");
+  await slowPage.route(`**/api/submissions/${submissionId}`, delayed);
+  await slowPage.click(`.submission-item[data-id="${submissionId}"]`);
+  await slowPage.click('.tab.teacher-only[data-view="submissions"]');
+  await slowPage.click(`.submission-item[data-id="${otherId}"]`);
+  await assertOtherStaysOpen("al abrir la entrega");
+
   console.log("P3 unificada: dos pestañas, entrega y análisis por parte, sin errores JS.");
 });

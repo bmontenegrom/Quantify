@@ -205,6 +205,7 @@ export async function openSubmissionWorkspace(id) {
   `;
 
   const submission = await fetchJson(`/api/submissions/${id}`);
+  if (state.activeSubmissionId !== id) return;
   state.activeSubmission = submission;
 
   let definition = null;
@@ -215,6 +216,7 @@ export async function openSubmissionWorkspace(id) {
     } catch {
       definitionFailed = true;
     }
+    if (state.activeSubmissionId !== id) return;
   }
   state.activeSubmissionDefinition = definition;
 
@@ -354,6 +356,10 @@ export async function saveReview(event, id) {
   } catch (error) {
     const status = form.querySelector(".review-status");
     if (status) status.textContent = error.message;
+    return;
+  }
+  if (state.activeSubmissionId !== id) {
+    await loadSubmissions();
     return;
   }
   state.activeSubmission = updated;
