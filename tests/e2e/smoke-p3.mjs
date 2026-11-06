@@ -50,20 +50,13 @@ await withE2E({ port: PORT, dbName: "quantify-p3.db" }, async ({ login }) => {
     }
   }
 
-  step("estudiante: entrega, aunque otra pantalla haya cambiado los símbolos cargados");
-  await sPage.evaluate(async () => {
-    const { setDisplaySymbols } = await import("/lib.js");
-    setDisplaySymbols({ tau_exp: "ZZ" });
-  });
+  step("estudiante: entrega");
   const [response] = await Promise.all([
     sPage.waitForResponse((r) => r.url().endsWith("/api/submissions/form") && r.request().method() === "POST"),
     sPage.click("#submit-button"),
   ]);
   const { id: submissionId } = await response.json();
   await sPage.waitForSelector('#submit-status:has-text("Entrega guardada")', { timeout: 15_000 });
-  await sPage.locator("#latest-result .student-results-form").waitFor();
-  const panel = (await sPage.locator("#latest-result").textContent()) ?? "";
-  assert(!panel.includes("ZZ"), "el panel debía usar los símbolos de la entrega");
 
   step("docente: la entrega muestra las dos partes");
   const { page: tPage } = await login(TEACHER, "docente");

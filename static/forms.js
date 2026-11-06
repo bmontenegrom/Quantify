@@ -699,7 +699,6 @@ export async function submitFormSubmission() {
   if (!practiceSelect.value) return;
   if (state.draftPreviewPracticeId) latestResult.classList.add("hidden");
 
-  const formDefinition = state.practiceForm?.definition;
   const measurements = collectMeasurements();
   const analysisKind = state.practiceForm?.definition?.analysis_kind ?? "";
   const validationError = validateMeasurements(measurements, analysisKind, buildMetaMap(measurements));
@@ -753,7 +752,7 @@ export async function submitFormSubmission() {
     showToast("Entrega guardada", "success");
     clearDraft();
     const { renderAnalysis } = await import("./analysis.js");
-    renderAnalysis(latestResult, submission, false, formDefinition);
+    renderAnalysis(latestResult, submission);
     latestResult.classList.remove("hidden");
     await loadSubmissions();
   } catch (error) {
