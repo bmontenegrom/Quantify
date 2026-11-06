@@ -60,6 +60,11 @@ pub(super) async fn update_user(
     {
         return Err(AppError::bad_request("datos de usuario invalidos"));
     }
+    if input.role != "admin" && db::is_last_admin(&state.pool, &id).await? {
+        return Err(AppError::bad_request(
+            "no se puede quitar el rol al unico administrador",
+        ));
+    }
     let updated = db::update_user(&state.pool, &id, input)
         .await?
         .ok_or_else(|| AppError::not_found("usuario no encontrado"))?;

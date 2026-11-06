@@ -157,6 +157,17 @@ pub async fn update_user(
     ))
 }
 
+pub async fn is_last_admin(pool: &SqlitePool, user_id: &str) -> anyhow::Result<bool> {
+    let (last,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE id = ?1 AND role = 'admin') \
+         AND (SELECT COUNT(*) FROM users WHERE role = 'admin') = 1",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(last)
+}
+
 pub async fn change_password(
     pool: &SqlitePool,
     user_id: &str,
@@ -409,6 +420,22 @@ mod tests {
         .await
         .unwrap();
         assert!(not_found.is_none());
+    }
+
+    #[tokio::test]
+    async fn is_last_admin_only_for_the_only_admin() {
+        let (pool, _dir) = seeded().await;
+        let admin = find_user(&pool, "admin@quantify.local").await;
+        let teacher = find_user(&pool, TEACHER).await;
+        assert!(is_last_admin(&pool, &admin.id).await.unwrap());
+        assert!(!is_last_admin(&pool, &teacher.id).await.unwrap());
+
+        sqlx::query("UPDATE users SET role = 'admin' WHERE id = ?1")
+            .bind(&teacher.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(!is_last_admin(&pool, &admin.id).await.unwrap());
     }
 
     #[tokio::test]

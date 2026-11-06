@@ -285,8 +285,8 @@ fn admin_account(demo_data: bool, password: Option<String>) -> anyhow::Result<Se
         Some(password) => password,
         None if demo_data => development_password("SEED_ADMIN_PASSWORD", "admin123"),
         None => anyhow::bail!(
-            "SEED_ADMIN_PASSWORD es obligatoria para crear el admin inicial \
-             (en desarrollo, SEED_DEMO_DATA=true usa admin123)."
+            "Definí SEED_ADMIN_PASSWORD: es la contraseña del admin inicial y es obligatoria \
+             en una base nueva."
         ),
     };
     Ok((
