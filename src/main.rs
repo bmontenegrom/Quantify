@@ -98,6 +98,6 @@ async fn main() -> anyhow::Result<()> {
 
 fn env_flag(name: &str) -> bool {
     env::var(name)
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
         .unwrap_or(false)
 }

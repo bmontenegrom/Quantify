@@ -499,6 +499,7 @@ async fn ensure_lab_group_columns(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 const TEST_COURSE_ID: &str = "fisica-experimental-i-2026";
+const TEST_GROUP_ID: &str = "fisica-exp-i-grupo-1";
 
 async fn seed_course(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query(
@@ -520,7 +521,7 @@ async fn seed_course(pool: &SqlitePool) -> anyhow::Result<()> {
         ON CONFLICT DO NOTHING
         "#,
     )
-    .bind("fisica-exp-i-grupo-1")
+    .bind(TEST_GROUP_ID)
     .bind(TEST_COURSE_ID)
     .bind(Utc::now())
     .execute(pool)
@@ -570,11 +571,10 @@ async fn test_student_id(conn: &mut sqlx::SqliteConnection) -> anyhow::Result<Op
 }
 
 async fn test_group_id(conn: &mut sqlx::SqliteConnection) -> anyhow::Result<Option<String>> {
-    let group: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM lab_groups WHERE course_id = ?1 AND name = 'Grupo 1'")
-            .bind(TEST_COURSE_ID)
-            .fetch_optional(&mut *conn)
-            .await?;
+    let group: Option<(String,)> = sqlx::query_as("SELECT id FROM lab_groups WHERE id = ?1")
+        .bind(TEST_GROUP_ID)
+        .fetch_optional(&mut *conn)
+        .await?;
     Ok(group.map(|(id,)| id))
 }
 
@@ -843,6 +843,14 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn seed_users_creates_three_and_is_idempotent() {
+        let (pool, _dir) = pool().await;
+        seed_users(&pool).await.unwrap();
+        seed_users(&pool).await.unwrap();
+        assert_eq!(count(&pool, "SELECT COUNT(*) FROM users").await, 3);
+    }
+
+    #[tokio::test]
     async fn an_interrupted_first_start_retries_all_the_test_data() {
         let (pool, _dir) = pool().await;
         let accounts = "SELECT COUNT(*) FROM users";
@@ -915,12 +923,32 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("DELETE FROM users")
-            .execute(&pool)
-            .await
-            .unwrap();
+        for sql in [
+            "DELETE FROM submissions",
+            "DELETE FROM group_members",
+            "DELETE FROM users",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
         run_startup_seeds(&pool, true, None).await.unwrap();
         assert_eq!(count(&pool, "SELECT COUNT(*) FROM users").await, 3);
+        assert_eq!(
+            count(
+                &pool,
+                "SELECT COUNT(*) FROM group_members m JOIN lab_groups g ON g.id = m.group_id WHERE g.name = 'Mesa A'"
+            )
+            .await,
+            1,
+            "el estudiante debía quedar en el grupo renombrado"
+        );
+        assert_eq!(
+            count(
+                &pool,
+                "SELECT COUNT(*) FROM submissions WHERE group_name = 'Mesa A'"
+            )
+            .await,
+            2
+        );
     }
 
     #[tokio::test]
