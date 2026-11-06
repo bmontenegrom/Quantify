@@ -4,7 +4,7 @@ import {
   submissionsSubtitle, submissionsListTitle,
 } from "./dom.js";
 import { fetchJson, postJson, errorText } from "./api.js";
-import { escapeHtml, canReview, formatDate, groupBy } from "./lib.js";
+import { escapeHtml, canReview, formatDate, groupBy, setDisplaySymbols } from "./lib.js";
 
 const filterGroupEl = () => document.querySelector("#submission-filter-group");
 const filterTableEl = () => document.querySelector("#submission-filter-table");
@@ -223,6 +223,7 @@ export async function openSubmissionWorkspace(id) {
   submissionWorkspace.querySelector("#submission-workspace-back").addEventListener("click", closeSubmissionWorkspace);
   const detailBody = submissionWorkspace.querySelector("#submission-detail-body");
   const { renderAnalysis } = await import("./analysis.js");
+  setDisplaySymbols(definition?.display_symbols);
   renderAnalysis(detailBody, submission, canReview(state.user), definition);
 }
 

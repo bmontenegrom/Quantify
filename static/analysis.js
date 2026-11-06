@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections } from "./lib.js";
+import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -10,7 +10,6 @@ export { regressionMarkup, scatterMarkup };
 
 export function renderAnalysis(target, submission, includeReview = false, definition = null) {
   target.classList.remove("detail-empty");
-  if (definition) setDisplaySymbols(definition.display_symbols);
 
   if (submission.entry_mode === "form") {
     const isTeacher = canReview(state.user);
