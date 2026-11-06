@@ -120,7 +120,6 @@ fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
 
 fn res_final(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
-        display_symbol: None,
         is_final: true,
         ..res(symbol, name, unit, formula)
     }

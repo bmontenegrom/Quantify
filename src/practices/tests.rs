@@ -190,7 +190,6 @@ async fn create_and_update_result_toggles_is_final() {
         &pool,
         "p1-estadistica",
         ResultInput {
-            display_symbol: None,
             is_final: true,
             ..sample_result()
         },
@@ -204,7 +203,6 @@ async fn create_and_update_result_toggles_is_final() {
         &pool,
         &r.id,
         ResultInput {
-            display_symbol: None,
             is_final: false,
             ..sample_result()
         },
@@ -3579,7 +3577,6 @@ async fn display_changes_are_detected_on_symbols_named_like_volatile_keys() {
     let practice = "p1-estadistica";
     for symbol in ["position", "status", "current_version"] {
         let input = QuantityInput {
-            display_symbol: None,
             symbol: symbol.into(),
             ..sample_quantity()
         };
@@ -3614,7 +3611,6 @@ async fn retired_quantities_stay_out_of_the_display_symbols() {
     seed_definitions(&pool).await.unwrap();
     let practice = "p1-estadistica";
     let input = QuantityInput {
-        display_symbol: None,
         symbol: "Zq".into(),
         ..sample_quantity()
     };
@@ -3674,7 +3670,6 @@ async fn the_structural_summary_mentions_display_changes_of_kept_symbols_only() 
     .await
     .unwrap();
     let added = QuantityInput {
-        display_symbol: None,
         symbol: "Zq".into(),
         ..sample_quantity()
     };

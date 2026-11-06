@@ -2182,20 +2182,17 @@ mod tests {
         assert!(validate_quantity(&q("   ")).is_ok());
         assert!(validate_quantity(&q("m")).is_ok());
         assert!(validate_quantity(&QuantityInput {
-            display_symbol: None,
             symbol: "".into(),
             ..q("")
         })
         .is_err());
         assert!(validate_quantity(&QuantityInput {
-            display_symbol: None,
             name: "  ".into(),
             ..q("")
         })
         .is_err());
         for (n, ok) in [(0, false), (-3, false), (1, true), (9, true)] {
             let input = QuantityInput {
-                display_symbol: None,
                 slot_count: Some(n),
                 is_given: true,
                 ..q("cm")
@@ -2203,7 +2200,6 @@ mod tests {
             assert_eq!(validate_quantity(&input).is_ok(), ok, "slot_count = {n}");
         }
         assert!(validate_quantity(&QuantityInput {
-            display_symbol: None,
             slot_count: Some(9),
             ..q("cm")
         })
@@ -2246,7 +2242,6 @@ mod tests {
         assert!(validate_result(
             &def,
             &ResultInput {
-                display_symbol: None,
                 formula: "".into(),
                 ..r("")
             }
