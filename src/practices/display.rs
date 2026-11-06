@@ -1,6 +1,7 @@
+use super::PracticeDefinition;
 use crate::db::DISPLAY_SYMBOL_TABLES;
 use sqlx::{SqliteConnection, SqlitePool};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 const LEGACY_DISPLAY_SYMBOLS: &str = "2026-11-simbolos-a-mostrar";
 
@@ -74,19 +75,31 @@ fn legacy_display_symbol(symbol: &str) -> Option<String> {
         .then(|| legacy_display_symbol(base).unwrap_or_else(|| base.to_string()))
 }
 
+fn version_symbols(definition: &PracticeDefinition) -> impl Iterator<Item = &str> {
+    let quantities = definition.quantities.iter().map(|q| q.symbol.as_str());
+    let results = definition.results.iter().map(|r| r.symbol.as_str());
+    let intermediates = definition.intermediates.iter().map(|i| i.symbol.as_str());
+    let point_results = definition.point_results.iter().map(|p| p.symbol.as_str());
+    let aggregates = definition.aggregates.iter().map(|a| a.symbol.as_str());
+    quantities
+        .chain(results)
+        .chain(intermediates)
+        .chain(point_results)
+        .chain(aggregates)
+}
+
 pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow::Result<()> {
     if crate::db::migration_applied(pool, LEGACY_DISPLAY_SYMBOLS).await? {
         return Ok(());
     }
     let mut tx = pool.begin().await?;
-    let mut practices = BTreeSet::new();
     for table in DISPLAY_SYMBOL_TABLES {
-        let rows: Vec<(String, String, String)> = sqlx::query_as(&format!(
-            "SELECT id, practice_id, symbol FROM {table} WHERE display_symbol = ''"
+        let rows: Vec<(String, String)> = sqlx::query_as(&format!(
+            "SELECT id, symbol FROM {table} WHERE display_symbol = ''"
         ))
         .fetch_all(&mut *tx)
         .await?;
-        for (id, practice_id, symbol) in rows {
+        for (id, symbol) in rows {
             let Some(display) = legacy_display_symbol(&symbol) else {
                 continue;
             };
@@ -97,18 +110,28 @@ pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow:
             .bind(id)
             .execute(&mut *tx)
             .await?;
-            practices.insert(practice_id);
         }
     }
-    for practice_id in practices {
-        let symbols = display_symbols_for(&mut tx, &practice_id).await?;
+    let versions: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, definition_json FROM practice_versions")
+            .fetch_all(&mut *tx)
+            .await?;
+    for (id, json) in versions {
+        let definition: PracticeDefinition = serde_json::from_str(&json)?;
+        let mut symbols: BTreeMap<String, String> = version_symbols(&definition)
+            .filter_map(|symbol| Some((symbol.to_string(), legacy_display_symbol(symbol)?)))
+            .collect();
+        symbols.extend(definition.display_symbols);
+        if symbols.is_empty() {
+            continue;
+        }
         sqlx::query(
             "UPDATE practice_versions \
              SET definition_json = json_set(definition_json, '$.display_symbols', json(?1)) \
-             WHERE practice_id = ?2",
+             WHERE id = ?2",
         )
         .bind(serde_json::to_string(&symbols)?)
-        .bind(&practice_id)
+        .bind(id)
         .execute(&mut *tx)
         .await?;
     }

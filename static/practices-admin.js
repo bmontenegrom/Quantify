@@ -20,7 +20,7 @@ function adminSymbolHtml(symbol) {
 
 function displaySymbolFieldHtml(item) {
   const shown = item ? (state.practiceDefinition?.display_symbols?.[item.symbol] ?? "") : "";
-  return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label>`;
+  return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label>`;
 }
 
 async function saveDisplaySymbol(practiceId, form) {

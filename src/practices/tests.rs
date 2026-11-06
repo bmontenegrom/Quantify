@@ -3440,7 +3440,7 @@ async fn seeded_practices_keep_their_special_symbols_as_data() {
 }
 
 #[tokio::test]
-async fn the_display_symbol_migration_updates_published_versions_and_keeps_edits() {
+async fn the_display_symbol_migration_maps_each_version_by_its_own_symbols() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
     for table in db::DISPLAY_SYMBOL_TABLES {
@@ -3459,6 +3459,13 @@ async fn the_display_symbol_migration_updates_published_versions_and_keeps_edits
     assert!(set_display_symbol(&pool, "p2-cc", "Vg_s", "V_gen")
         .await
         .unwrap());
+    sqlx::query(
+        "UPDATE practice_quantities SET symbol = 't_half' \
+         WHERE practice_id = 'p3-relajacion' AND symbol = 'tmedio'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-simbolos-a-mostrar'")
         .execute(&pool)
         .await
@@ -3469,8 +3476,10 @@ async fn the_display_symbol_migration_updates_published_versions_and_keeps_edits
         .unwrap();
 
     let p2 = current_version(&pool, "p2-cc").await.unwrap().unwrap();
-    assert_eq!(p2.definition.display_symbols["Vg_s"], "V_gen");
+    assert_eq!(p2.definition.display_symbols["Vg_s"], "V_G");
     assert_eq!(p2.definition.display_symbols["RA_s"], "R_A");
+    let p2_draft = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(p2_draft.display_symbols["Vg_s"], "V_gen");
     let p3 = current_version(&pool, "p3-relajacion")
         .await
         .unwrap()
