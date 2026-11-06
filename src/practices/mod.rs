@@ -67,6 +67,7 @@ pub struct PracticeDefinition {
     pub aggregates: Vec<PracticeAggregate>,
     pub parts: Vec<PracticePart>,
     pub sections: Vec<PracticeSection>,
+    pub display_symbols: std::collections::BTreeMap<String, String>,
     pub current_version: Option<i64>,
 }
 
@@ -208,6 +209,7 @@ pub struct PracticeInfoInput {
 
 mod changes;
 mod crud;
+mod display;
 mod layout;
 mod lifecycle;
 mod parts;
@@ -218,6 +220,7 @@ mod versions;
 
 pub use changes::*;
 pub use crud::*;
+pub use display::set_display_symbol;
 pub use layout::*;
 pub use lifecycle::*;
 pub use parts::is_point_based;

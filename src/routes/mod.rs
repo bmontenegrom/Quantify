@@ -177,6 +177,7 @@ pub fn api_router(state: SharedState) -> Router {
         )
         .route("/practices/{id}/status", post(set_practice_status))
         .route("/practices/{id}/definition", get(practice_definition))
+        .route("/practices/{id}/display-symbol", post(set_display_symbol))
         .route("/practices/{id}/analyze-preview", post(analyze_preview))
         .route(
             "/practices/{id}/analysis-kind",

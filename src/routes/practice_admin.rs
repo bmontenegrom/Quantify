@@ -170,6 +170,33 @@ fn kind_problems(def: &practices::PracticeDefinition) -> Vec<String> {
     problems
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct DisplaySymbolBody {
+    symbol: String,
+    display_symbol: String,
+}
+
+const MAX_DISPLAY_SYMBOL_CHARS: usize = 40;
+
+pub(super) async fn set_display_symbol(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<DisplaySymbolBody>,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let display_symbol = body.display_symbol.trim();
+    if display_symbol.chars().count() > MAX_DISPLAY_SYMBOL_CHARS {
+        return Err(AppError::bad_request(format!(
+            "el simbolo a mostrar puede tener hasta {MAX_DISPLAY_SYMBOL_CHARS} caracteres"
+        )));
+    }
+    if !practices::set_display_symbol(&state.pool, &id, body.symbol.trim(), display_symbol).await? {
+        return Err(AppError::not_found("simbolo no encontrado en la practica"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
 pub(super) async fn set_practice_status(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -2005,6 +2032,7 @@ mod tests {
             aggregates: vec![],
             parts: vec![],
             sections: vec![],
+            display_symbols: Default::default(),
             current_version: None,
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
@@ -2087,6 +2115,7 @@ mod tests {
             aggregates: vec![agg("a0", "Re_max", 0), agg("a1", "Re_min", 1)],
             parts: vec![],
             sections: vec![],
+            display_symbols: Default::default(),
             current_version: None,
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
@@ -2188,6 +2217,7 @@ mod tests {
             aggregates: vec![],
             parts: vec![],
             sections: vec![],
+            display_symbols: Default::default(),
             current_version: None,
         };
         let r = |unit: &str| ResultInput {

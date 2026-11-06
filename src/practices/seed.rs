@@ -1571,6 +1571,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         run_seeds(pool).await?;
         crate::db::mark_migration_applied(pool, DEFINITIONS_SEEDED).await?;
     }
+    super::display::migrate_legacy_display_symbols(pool).await?;
     super::versions::ensure_versions(pool).await
 }
 

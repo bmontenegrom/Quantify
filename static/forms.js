@@ -7,7 +7,7 @@ import {
 import { fetchJson, postJson, deleteJson } from "./api.js";
 import { showToast } from "./toast.js";
 import {
-  escapeHtml, symbolHtml, inlineMathHtml, unitHtml, canReview, format,
+  escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview, format,
   compatibleInstruments, SI_PREFIXES, prefixFactor, pointPower, flowRate,
   seriesStats, histogram, normalCurve, validateMeasurements,
   draftMeasurementsByQuantity, hasUncertainty,
@@ -271,6 +271,7 @@ export function renderMeasurementFields() {
     return;
   }
   const { definition, instruments } = state.practiceForm;
+  setDisplaySymbols(definition.display_symbols);
   if (submitButton) submitButton.disabled = false;
   if (definition.quantities.length === 0) {
     measurementFields.innerHTML = `<p class="submission-meta">Esta practica todavia no tiene magnitudes definidas.</p>`;

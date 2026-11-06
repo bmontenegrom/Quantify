@@ -1,13 +1,33 @@
 import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel, formatDate } from "./lib.js";
+import {
+  escapeHtml,
+  symbolHtml,
+  setDisplaySymbols,
+  inlineMathHtml,
+  unitHtml,
+  analysisKindLabel,
+  formatDate,
+} from "./lib.js";
 import { selectView } from "./navigation.js";
 
 const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
 
 function adminSymbolHtml(symbol) {
   return `<strong>${symbolHtml(symbol)}</strong> <code title="Así se escribe en las fórmulas">${escapeHtml(symbol)}</code>`;
+}
+
+function displaySymbolFieldHtml(item) {
+  const shown = item ? (state.practiceDefinition?.display_symbols?.[item.symbol] ?? "") : "";
+  return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label>`;
+}
+
+async function saveDisplaySymbol(practiceId, form) {
+  const symbol = form.querySelector('[name="symbol"]').value.trim();
+  const display = form.querySelector('[name="display_symbol"]').value.trim();
+  if (display === (state.practiceDefinition?.display_symbols?.[symbol] ?? "")) return;
+  await postJson(`/api/practices/${practiceId}/display-symbol`, { symbol, display_symbol: display });
 }
 
 function isEditing(kind, id) {
@@ -77,6 +97,7 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${item ? `<input name="${kind.idParam}" type="hidden" value="${escapeHtml(item.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="${kind.symbolPlaceholder}" /></label>
+      ${displaySymbolFieldHtml(item)}
       <label>Nombre <input name="name" value="${v("name")}" placeholder="${kind.namePlaceholder}" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" /></label>
@@ -155,6 +176,7 @@ async function saveNewSymbolFormulaRow(kind, event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/${kind.urlSegment}`, symbolFormulaPayloadFromForm(form, kind));
+      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     kind.statusCreate,
@@ -170,6 +192,7 @@ async function saveEditSymbolFormulaRow(kind, event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`, symbolFormulaPayloadFromForm(form, kind));
+      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     kind.statusUpdate,
@@ -202,6 +225,7 @@ export function renderPracticesPage() {
   }
 
   const def = state.practiceDefinition;
+  setDisplaySymbols(def?.display_symbols);
   if (!def) {
     practiceWorkspace.innerHTML = `
       <div class="workspace-head">
@@ -810,6 +834,7 @@ function renderQuantityForm(qty, practiceId) {
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="l" /></label>
+      ${displaySymbolFieldHtml(qty)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Longitud del cordón" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm (vacío = adimensional)" /></label>
       <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" /></label>
@@ -906,6 +931,7 @@ function renderResultForm(res, practiceId, def = null) {
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${res ? `<input name="rid" type="hidden" value="${escapeHtml(res.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Q" /></label>
+      ${displaySymbolFieldHtml(res)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" /></label>
@@ -1061,6 +1087,7 @@ async function saveNewQuantity(event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/quantities`, quantityPayloadFromForm(form));
+      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     "Magnitud agregada",
@@ -1076,6 +1103,7 @@ async function saveEditQuantity(event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/quantities/${qid}`, quantityPayloadFromForm(form));
+      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     "Magnitud actualizada",
@@ -1320,6 +1348,7 @@ async function saveNewResult(event) {
         has_uncertainty: raw.has_uncertainty === "on",
         section_id: raw.section_id || null,
       });
+      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     "Mensurando agregado",
@@ -1344,6 +1373,7 @@ async function saveEditResult(event) {
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
       });
+      await saveDisplaySymbol(practiceId, form);
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
     "Mensurando actualizado",

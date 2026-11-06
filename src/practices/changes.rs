@@ -5,7 +5,7 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 3] = ["name", "title", "tolerance"];
+const COSMETIC_KEYS: [&str; 4] = ["name", "title", "tolerance", "display_symbols"];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
 const FREELY_ORDERED: [&str; 4] = ["quantities", "results", "parts", "sections"];
 
@@ -269,6 +269,21 @@ fn tolerance_changes(published: &PracticeDefinition, draft: &PracticeDefinition)
         .collect()
 }
 
+fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -> Vec<String> {
+    let symbols: std::collections::BTreeSet<&String> = published
+        .display_symbols
+        .keys()
+        .chain(draft.display_symbols.keys())
+        .collect();
+    symbols
+        .into_iter()
+        .filter(|symbol| {
+            published.display_symbols.get(*symbol) != draft.display_symbols.get(*symbol)
+        })
+        .map(|symbol| format!("Cambia cómo se muestra {symbol}"))
+        .collect()
+}
+
 pub fn change_kind(
     published: &PracticeDefinition,
     draft: &PracticeDefinition,
@@ -317,7 +332,11 @@ pub fn compare_definitions(
     let kind = change_kind(published, draft)?;
     let changes = match kind {
         DraftChangeKind::None => Vec::new(),
-        DraftChangeKind::Cosmetic => tolerance_changes(published, draft),
+        DraftChangeKind::Cosmetic => [
+            tolerance_changes(published, draft),
+            display_changes(published, draft),
+        ]
+        .concat(),
         DraftChangeKind::Structural => list_changes(published, draft)?,
     };
     Ok(DefinitionComparison { kind, changes })

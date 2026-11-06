@@ -3414,3 +3414,82 @@ async fn an_unrelated_problem_does_not_block_a_cosmetic_update() {
         Publish::Rejected(_)
     ));
 }
+
+#[tokio::test]
+async fn seeded_practices_keep_their_special_symbols_as_data() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for (practice, symbol, shown) in [
+        ("p3-relajacion", "tmedio", "t_1/2"),
+        ("p2-cc", "Vg_s", "V_G"),
+        ("p2-cc", "VR1_s_t", "VR1"),
+        ("ca-rlc", "VRpp", "V_R_PP"),
+        ("ca-rlc", "phiR_teo", "phi_R_teo"),
+    ] {
+        let draft = definition(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(
+            draft.display_symbols.get(symbol).map(String::as_str),
+            Some(shown),
+            "{practice} {symbol}"
+        );
+        let published = current_version(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(published.definition.display_symbols, draft.display_symbols);
+        let changes = draft_changes(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(changes.kind, DraftChangeKind::None, "{practice}");
+    }
+}
+
+#[tokio::test]
+async fn the_display_symbol_migration_updates_published_versions_and_keeps_edits() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for table in db::DISPLAY_SYMBOL_TABLES {
+        sqlx::query(&format!("UPDATE {table} SET display_symbol = ''"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query(
+        "UPDATE practice_versions \
+         SET definition_json = json_remove(definition_json, '$.display_symbols')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(set_display_symbol(&pool, "p2-cc", "Vg_s", "V_gen")
+        .await
+        .unwrap());
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-simbolos-a-mostrar'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_display_symbols(&pool)
+        .await
+        .unwrap();
+
+    let p2 = current_version(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(p2.definition.display_symbols["Vg_s"], "V_gen");
+    assert_eq!(p2.definition.display_symbols["RA_s"], "R_A");
+    let p3 = current_version(&pool, "p3-relajacion")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(p3.definition.display_symbols["tmedio"], "t_1/2");
+}
+
+#[tokio::test]
+async fn changing_a_display_symbol_is_cosmetic() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    assert!(set_display_symbol(&pool, practice, "T1", "T_1")
+        .await
+        .unwrap());
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(found.changes, vec!["Cambia cómo se muestra T1".to_string()]);
+    assert!(!set_display_symbol(&pool, practice, "no-existe", "x")
+        .await
+        .unwrap());
+}

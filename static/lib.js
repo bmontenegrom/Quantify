@@ -8,9 +8,6 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-const CC_PART_SUFFIX = /_[spc](?:_t)?$/;
-const CC_BASE_SYMBOLS = new Set(["Vg", "RA", "VR1", "VR2", "VR3", "I"]);
-
 const GREEK_NAMES = { rho: "ρ", gamma: "γ", mu: "μ", phi: "φ", tau: "τ", omega: "ω" };
 const GREEK_PREFIX = new RegExp(`^(${Object.keys(GREEK_NAMES).join("|")})(?=_|\\d|$)`);
 
@@ -26,35 +23,16 @@ function subscriptHtml(escaped, pattern) {
   });
 }
 
+let displaySymbols = new Map();
+
+export function setDisplaySymbols(symbols) {
+  displaySymbols = new Map(Object.entries(symbols ?? {}));
+}
+
 export function symbolHtml(value) {
-  const specials = {
-    tmedio: "t<sub>1/2</sub>",
-    T_oc: "T<sub>OC</sub>",
-    T_OC: "T<sub>OC</sub>",
-    Vg: "V<sub>G</sub>",
-    RA: "R<sub>A</sub>",
-    VRpp: "V<sub>R,PP</sub>",
-    VCpp: "V<sub>C,PP</sub>",
-    VLpp: "V<sub>L,PP</sub>",
-    VR_teo: "V<sub>R,teo</sub>",
-    VR_exp: "V<sub>R,exp</sub>",
-    VC_teo: "V<sub>C,teo</sub>",
-    VC_exp: "V<sub>C,exp</sub>",
-    VL_teo: "V<sub>L,teo</sub>",
-    VL_exp: "V<sub>L,exp</sub>",
-    phiR_teo: "φ<sub>R,teo</sub>",
-    phiR_exp: "φ<sub>R,exp</sub>",
-    phiC_teo: "φ<sub>C,teo</sub>",
-    phiC_exp: "φ<sub>C,exp</sub>",
-    phiL_teo: "φ<sub>L,teo</sub>",
-    phiL_exp: "φ<sub>L,exp</sub>",
-  };
   const raw = String(value);
-  if (specials[raw]) return specials[raw];
-  const base = raw.replace(CC_PART_SUFFIX, "");
-  if (base !== raw && CC_BASE_SYMBOLS.has(base)) return symbolHtml(base);
   return subscriptHtml(
-    escapeHtml(raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
+    escapeHtml(displaySymbols.get(raw) ?? raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
     SYMBOL_SUBSCRIPT,
   );
 }
