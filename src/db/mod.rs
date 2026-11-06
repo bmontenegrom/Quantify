@@ -165,6 +165,8 @@ pub struct PracticeQuantity {
     pub default_value: Option<f64>,
     #[sqlx(default)]
     pub slot_count: Option<i64>,
+    pub label_mode: String,
+    pub input_widget: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, FromRow)]

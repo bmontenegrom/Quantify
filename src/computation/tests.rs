@@ -218,6 +218,7 @@ fn quantity(symbol: &str) -> PracticeQuantity {
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 

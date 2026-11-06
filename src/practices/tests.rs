@@ -61,6 +61,7 @@ fn sample_quantity() -> QuantityInput {
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
@@ -121,6 +122,7 @@ async fn update_and_delete_quantity() {
             optional: false,
             default_value: None,
             slot_count: None,
+            ..Default::default()
         },
     )
     .await
@@ -143,6 +145,7 @@ async fn update_and_delete_quantity() {
         optional: false,
         default_value,
         slot_count: None,
+        ..Default::default()
     };
     for (input, expected) in [
         (Some(Some(12.0)), Some(12.0)),
@@ -2798,6 +2801,7 @@ fn new_quantity(symbol: &str) -> QuantityInput {
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
@@ -3964,4 +3968,253 @@ async fn a_submission_without_version_reads_the_published_version_everywhere() {
         .unwrap();
     assert_eq!(detail.display_symbols["T1"], "T_publicado");
     assert_eq!(detail.result_tolerances["Q"], 1.0);
+}
+
+fn presentation_of(definition: &PracticeDefinition, symbol: &str) -> (String, String) {
+    let q = definition
+        .quantities
+        .iter()
+        .find(|q| q.symbol == symbol)
+        .unwrap_or_else(|| panic!("falta {symbol} en {}", definition.practice_id));
+    (q.label_mode.clone(), q.input_widget.clone())
+}
+
+fn presentation(label: &str, widget: &str) -> (String, String) {
+    (label.to_string(), widget.to_string())
+}
+
+async fn assert_seeded_presentation(pool: &SqlitePool, read_version: bool) {
+    let cases = [
+        ("p1-estadistica", "T1", "nombre", "cronometro"),
+        ("p1-estadistica", "t_med", "nombre", "teclado"),
+        ("p3-relajacion", "T_oc", "nombre_simbolo", "teclado"),
+        ("p3-relajacion", "tmedio", "nombre", "teclado"),
+        ("fluidos-1", "t", "nombre", "cronometro"),
+        ("viscosidad", "t", "nombre", "cronometro"),
+        ("fluidos-2", "t", "nombre", "teclado"),
+        ("p2-cc", "Vg_s", "simbolo", "teclado"),
+        ("filtros", "VRpp", "simbolo", "teclado"),
+        ("ca-rlc", "a_R", "simbolo", "teclado"),
+    ];
+    for (practice, symbol, label, widget) in cases {
+        let found = if read_version {
+            current_version(pool, practice)
+                .await
+                .unwrap()
+                .unwrap()
+                .definition
+        } else {
+            definition(pool, practice).await.unwrap().unwrap()
+        };
+        assert_eq!(
+            presentation_of(&found, symbol),
+            presentation(label, widget),
+            "{practice}/{symbol}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn seeded_quantities_get_their_label_and_input() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+
+    assert_seeded_presentation(&pool, false).await;
+    assert_seeded_presentation(&pool, true).await;
+}
+
+#[tokio::test]
+async fn the_label_and_input_migration_updates_drafts_and_versions_once() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query("UPDATE practice_quantities SET label_mode = 'nombre', input_widget = 'teclado'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = json_set(definition_json, '$.quantities', \
+         (SELECT json_group_array(json(json_remove(value, '$.label_mode', '$.input_widget'))) \
+          FROM json_each(definition_json, '$.quantities')))",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-rotulo-y-entrada'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_quantity_presentation(&pool)
+        .await
+        .unwrap();
+
+    assert_seeded_presentation(&pool, false).await;
+    assert_seeded_presentation(&pool, true).await;
+    for practice in [
+        "p1-estadistica",
+        "p2-cc",
+        "p3-relajacion",
+        "fluidos-2",
+        "filtros",
+    ] {
+        let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(found.kind, DraftChangeKind::None, "{practice}");
+    }
+
+    sqlx::query(
+        "UPDATE practice_quantities SET label_mode = 'nombre' \
+         WHERE practice_id = 'p2-cc' AND symbol = 'Vg_s'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    display::migrate_legacy_quantity_presentation(&pool)
+        .await
+        .unwrap();
+    let draft = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(
+        presentation_of(&draft, "Vg_s"),
+        presentation("nombre", "teclado"),
+        "una migración ya aplicada no se repite"
+    );
+}
+
+#[tokio::test]
+async fn the_label_and_input_migration_keeps_what_the_teacher_chose() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET label_mode = 'nombre_simbolo', input_widget = 'cronometro' \
+         WHERE practice_id = 'p3-relajacion' AND symbol = 'tmedio'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-rotulo-y-entrada'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_quantity_presentation(&pool)
+        .await
+        .unwrap();
+
+    let draft = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+    assert_eq!(
+        presentation_of(&draft, "tmedio"),
+        presentation("nombre_simbolo", "cronometro")
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_version_does_not_stop_the_label_and_input_migration() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = '{\"quantities\": 5}' \
+         WHERE practice_id = 'p1-estadistica'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-rotulo-y-entrada'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_quantity_presentation(&pool)
+        .await
+        .unwrap();
+
+    assert!(db::migration_applied(&pool, "2026-11-rotulo-y-entrada")
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
+async fn changing_a_label_or_input_is_cosmetic_and_summarized() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET label_mode = 'simbolo', input_widget = 'teclado' \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 'T1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let found = draft_changes(&pool, "p1-estadistica")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(
+        found.changes,
+        vec![
+            "Cambia el rótulo de T1".to_string(),
+            "Cambia la entrada de T1".to_string()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn renaming_a_quantity_does_not_hide_its_input_change() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET symbol = 'T_1', input_widget = 'teclado' \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 'T1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let found = draft_changes(&pool, "p1-estadistica")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        found
+            .changes
+            .contains(&"Cambia la entrada de T_1".to_string()),
+        "{:?}",
+        found.changes
+    );
+}
+
+#[tokio::test]
+async fn a_copy_keeps_label_and_input_and_a_missing_field_resets_them() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let copy = duplicate_practice(&pool, "p1-estadistica", "Copia P1", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    let copied = definition(&pool, &copy.id).await.unwrap().unwrap();
+    assert_eq!(
+        presentation_of(&copied, "T1"),
+        presentation("nombre", "cronometro")
+    );
+
+    let created = create_quantity(
+        &pool,
+        &copy.id,
+        QuantityInput {
+            label_mode: Some("simbolo".into()),
+            input_widget: Some("cronometro".into()),
+            quantity: Some("tiempo".into()),
+            ..new_quantity("t_nuevo")
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(created.label_mode, "simbolo");
+    assert_eq!(created.input_widget, "cronometro");
+
+    let updated = update_quantity(&pool, &created.id, new_quantity("t_nuevo"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.label_mode, "nombre");
+    assert_eq!(updated.input_widget, "teclado");
 }

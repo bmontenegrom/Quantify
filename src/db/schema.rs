@@ -543,6 +543,20 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     for table in DISPLAY_SYMBOL_TABLES {
         add_column_if_missing(pool, table, "display_symbol", "TEXT NOT NULL DEFAULT ''").await?;
     }
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "label_mode",
+        "TEXT NOT NULL DEFAULT 'nombre'",
+    )
+    .await?;
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "input_widget",
+        "TEXT NOT NULL DEFAULT 'teclado'",
+    )
+    .await?;
     for table in ["practice_quantities", "practice_results"] {
         add_column_if_missing(
             pool,

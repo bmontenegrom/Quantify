@@ -796,8 +796,10 @@ Cada PR de implementación sigue el mismo patrón:
    - **`input_widget`**: `teclado` \| `cronometro`. Con `cronometro`, una magnitud con varias lecturas
      muestra el widget y una con una sola, el ayudante. En series, el ayudante aparece si alguna
      magnitud lo tiene.
-   - **Migración**: `cronometro` en las magnitudes de tiempo salvo las de P3; `simbolo` en las de
-     P2-CC y CA-RLC; `nombre_simbolo` en `T_oc`.
+   - **Migración**: traduce lo que se ve hoy, sin ids de práctica. `cronometro` en las magnitudes de
+     tiempo que no son dato dado y tienen réplicas o están en una práctica que no es de serie: P3 y
+     fluidos-2 quedan en `teclado`. `simbolo` en los símbolos de `SYMBOL_FIRST_QUANTITIES`, también en
+     filtros; `nombre_simbolo` en `T_oc`.
    - **Se borran** `PRACTICES_WITHOUT_CHRONO_HELPER`, `SYMBOL_FIRST_QUANTITIES`, la rama de `T_oc` en
      `quantityNameHtml`, la regex `/cron[oó]metro/` y los imports muertos de `forms.js`.
 3. **`feat(practicas)`: comparación medido vs teórico configurable (F6, 3/4).**
