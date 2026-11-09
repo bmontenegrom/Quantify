@@ -525,8 +525,10 @@ test("draftedQuantityIds: solo las magnitudes con lecturas", () => {
     { quantity_id: "con", values: [1] },
     { quantity_id: "vacia", values: [] },
     { quantity_id: "sin" },
+    { quantity_id: "operadores", values: [], operator_replicas: [[1.2], []] },
+    { quantity_id: "operadores_vacios", values: [], operator_replicas: [[], []] },
   ]);
-  assert.deepEqual([...ids], ["con"]);
+  assert.deepEqual([...ids], ["con", "operadores"]);
   assert.equal(draftedQuantityIds(undefined).size, 0);
 });
 

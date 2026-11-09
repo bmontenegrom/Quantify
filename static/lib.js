@@ -377,7 +377,8 @@ export function draftMeasurementsByQuantity(measurements) {
 }
 
 export function draftedQuantityIds(measurements) {
-  return new Set((measurements ?? []).filter((m) => m.values?.length).map((m) => m.quantity_id));
+  const hasReadings = (m) => m.values?.length || m.operator_replicas?.some((reps) => reps.length);
+  return new Set((measurements ?? []).filter(hasReadings).map((m) => m.quantity_id));
 }
 
 export function analysisSections(analysis) {
