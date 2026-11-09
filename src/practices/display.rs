@@ -147,6 +147,7 @@ pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow:
 
 fn legacy_quantity_presentation(
     symbol: &str,
+    name: &str,
     quantity: Option<&str>,
     repeated: bool,
     is_given: bool,
@@ -154,7 +155,7 @@ fn legacy_quantity_presentation(
 ) -> (&'static str, &'static str) {
     let label = if LEGACY_SYMBOL_FIRST.contains(&symbol) {
         "simbolo"
-    } else if symbol == "T_oc" {
+    } else if symbol == "T_oc" && !mentions_t_oc(name) {
         "nombre_simbolo"
     } else {
         "nombre"
@@ -168,21 +169,35 @@ fn legacy_quantity_presentation(
     (label, widget)
 }
 
+fn mentions_t_oc(name: &str) -> bool {
+    let name = name.to_lowercase();
+    name.contains("toc") || name.contains("t_oc")
+}
+
 pub(super) async fn migrate_legacy_quantity_presentation(pool: &SqlitePool) -> anyhow::Result<()> {
     if crate::db::migration_applied(pool, LEGACY_QUANTITY_PRESENTATION).await? {
         return Ok(());
     }
     let mut tx = pool.begin().await?;
-    type Row = (String, String, Option<String>, bool, bool, Option<String>);
+    type Row = (
+        String,
+        String,
+        String,
+        Option<String>,
+        bool,
+        bool,
+        Option<String>,
+    );
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT q.id, q.symbol, q.quantity, q.repeated, q.is_given, p.analysis_kind \
+        "SELECT q.id, q.symbol, q.name, q.quantity, q.repeated, q.is_given, p.analysis_kind \
          FROM practice_quantities q JOIN practices p ON p.id = q.practice_id",
     )
     .fetch_all(&mut *tx)
     .await?;
-    for (id, symbol, quantity, repeated, is_given, kind) in rows {
+    for (id, symbol, name, quantity, repeated, is_given, kind) in rows {
         let (label, widget) = legacy_quantity_presentation(
             &symbol,
+            &name,
             quantity.as_deref(),
             repeated,
             is_given,
@@ -219,6 +234,7 @@ pub(super) async fn migrate_legacy_quantity_presentation(pool: &SqlitePool) -> a
         for (index, q) in definition.quantities.iter().enumerate() {
             let (label, widget) = legacy_quantity_presentation(
                 &q.symbol,
+                &q.name,
                 q.quantity.as_deref(),
                 q.repeated,
                 q.is_given,
@@ -366,9 +382,16 @@ mod tests {
         ];
         for (symbol, quantity, repeated, is_given, kind, expected) in cases {
             assert_eq!(
-                legacy_quantity_presentation(symbol, quantity, repeated, is_given, kind),
+                legacy_quantity_presentation(symbol, "Tiempo", quantity, repeated, is_given, kind),
                 expected,
                 "{symbol}"
+            );
+        }
+        for name in ["T_oc medido", "Período Toc"] {
+            assert_eq!(
+                legacy_quantity_presentation("T_oc", name, Some("tiempo"), false, false, series),
+                ("nombre", "teclado"),
+                "{name}"
             );
         }
     }
