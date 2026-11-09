@@ -595,7 +595,10 @@ pub async fn update_quantity(
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
              replicas_per_point = ?8, per_point = ?9, has_uncertainty = ?10, optional = ?11, \
              slot_count = ?12, default_value = CASE WHEN ?13 THEN ?14 ELSE default_value END, \
-             display_symbol = COALESCE(?15, display_symbol), label_mode = ?16, input_widget = ?17 \
+             display_symbol = COALESCE(?15, display_symbol), \
+             label_mode = COALESCE(?16, label_mode), \
+             input_widget = CASE WHEN ?6 = 'tiempo' AND NOT ?7 \
+                 THEN COALESCE(?17, input_widget) ELSE 'teclado' END \
          WHERE id = ?1 AND removed = 0",
     )
     .bind(quantity_id)
@@ -613,8 +616,8 @@ pub async fn update_quantity(
     .bind(input.default_value.is_some())
     .bind(input.default_value.flatten())
     .bind(display_symbol(&input.display_symbol))
-    .bind(label_mode(&input))
-    .bind(input_widget(&input))
+    .bind(input.label_mode.as_deref())
+    .bind(input.input_widget.as_deref())
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {

@@ -4024,6 +4024,14 @@ async fn seeded_quantities_get_their_label_and_input() {
 }
 
 #[tokio::test]
+async fn seeding_sets_label_and_input_without_the_migration() {
+    let (pool, _dir) = setup().await;
+    super::seed::run_seeds(&pool).await.unwrap();
+
+    assert_seeded_presentation(&pool, false).await;
+}
+
+#[tokio::test]
 async fn the_label_and_input_migration_updates_drafts_and_versions_once() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
@@ -4211,10 +4219,24 @@ async fn a_copy_keeps_label_and_input_and_a_missing_field_resets_them() {
     assert_eq!(created.label_mode, "simbolo");
     assert_eq!(created.input_widget, "cronometro");
 
-    let updated = update_quantity(&pool, &created.id, new_quantity("t_nuevo"))
+    let kept = update_quantity(
+        &pool,
+        &created.id,
+        QuantityInput {
+            quantity: Some("tiempo".into()),
+            ..new_quantity("t_nuevo")
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(kept.label_mode, "simbolo");
+    assert_eq!(kept.input_widget, "cronometro");
+
+    let not_time = update_quantity(&pool, &created.id, new_quantity("t_nuevo"))
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(updated.label_mode, "nombre");
-    assert_eq!(updated.input_widget, "teclado");
+    assert_eq!(not_time.label_mode, "simbolo");
+    assert_eq!(not_time.input_widget, "teclado");
 }

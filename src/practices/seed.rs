@@ -158,8 +158,26 @@ async fn seed_practice_in(
     if count.0 > 0 {
         return Ok(false);
     }
+    let (kind,): (Option<String>,) =
+        sqlx::query_as("SELECT analysis_kind FROM practices WHERE id = ?1")
+            .bind(practice_id)
+            .fetch_one(&mut *conn)
+            .await?;
     for (pos, q) in quantities.iter().enumerate() {
-        insert_quantity(conn, practice_id, pos as i64 + 1, q).await?;
+        let (label, widget) = super::display::legacy_quantity_presentation(
+            &q.symbol,
+            &q.name,
+            q.quantity.as_deref(),
+            q.repeated,
+            q.is_given,
+            kind.as_deref(),
+        );
+        let q = QuantityInput {
+            label_mode: q.label_mode.clone().or(Some(label.into())),
+            input_widget: q.input_widget.clone().or(Some(widget.into())),
+            ..q.clone()
+        };
+        insert_quantity(conn, practice_id, pos as i64 + 1, &q).await?;
     }
     for (pos, r) in results.iter().enumerate() {
         insert_result(conn, practice_id, pos as i64 + 1, r).await?;

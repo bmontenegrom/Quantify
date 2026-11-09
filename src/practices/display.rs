@@ -145,7 +145,7 @@ pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow:
     Ok(())
 }
 
-fn legacy_quantity_presentation(
+pub(super) fn legacy_quantity_presentation(
     symbol: &str,
     name: &str,
     quantity: Option<&str>,

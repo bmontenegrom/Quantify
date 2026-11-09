@@ -14,7 +14,7 @@ pub const INPUT_WIDGETS: [&str; 2] = [DEFAULT_INPUT_WIDGET, "cronometro"];
 const DEFAULT_LABEL_MODE: &str = "nombre";
 const DEFAULT_INPUT_WIDGET: &str = "teclado";
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct QuantityInput {
     #[serde(default)]
     pub display_symbol: Option<String>,
