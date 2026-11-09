@@ -292,7 +292,7 @@ export function renderMeasurementFields() {
   const useOperators = operatorCount >= 2;
   const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
   const legendHtml = (q) => quantityNameHtml(q);
-  const drafted = draftedQuantityIds(applicableDraft()?.measurements);
+  const drafted = draftedQuantityIds(state.editPrefill ?? applicableDraft()?.measurements);
 
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
@@ -323,7 +323,7 @@ export function renderMeasurementFields() {
     }
     if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && !drafted.has(q.id)) {
       const chronoOpts = compatibleInstruments(instruments, q.quantity);
-      const defaultInst = chronoOpts[0];
+      const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
       const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
         .concat(
           chronoOpts.map(
