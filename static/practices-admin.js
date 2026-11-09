@@ -1087,7 +1087,7 @@ function quantityPayloadFromForm(form) {
     slot_count: slots,
     display_symbol: raw.display_symbol,
     label_mode: raw.label_mode,
-    input_widget: raw.input_widget,
+    input_widget: raw.quantity === "tiempo" && !("is_given" in raw) ? raw.input_widget : "teclado",
     default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
   };
 }

@@ -292,7 +292,9 @@ export function renderMeasurementFields() {
   const useOperators = operatorCount >= 2;
   const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
   const legendHtml = (q) => quantityNameHtml(q);
-  const drafted = draftedQuantityIds(state.editPrefill ?? applicableDraft()?.measurements);
+  const drafted = state.editPrefill
+    ? new Set(state.editPrefill.map((m) => m.quantity_id))
+    : draftedQuantityIds(applicableDraft()?.measurements);
 
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
