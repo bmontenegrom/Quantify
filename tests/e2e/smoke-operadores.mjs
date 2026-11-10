@@ -20,6 +20,15 @@ await withE2E({ port: PORT, dbName: "quantify-operadores.db" }, async ({ login }
     quantity: "tiempo",
     input_widget: "teclado",
   });
+  const timed = await apiPost(page, `${base}/quantities`, {
+    symbol: "T",
+    name: "Periodo",
+    unit: "s",
+    repeated: true,
+    quantity: "tiempo",
+    input_widget: "cronometro",
+    optional: true,
+  });
   await apiPost(page, `${base}/results`, { symbol: "y", name: "Salida", unit: "s", formula: "t", is_final: true });
   await apiPost(page, `${base}/operator-count`, { count: 2 });
   await apiPost(page, `${base}/status`, { status: "publicada" });
@@ -49,6 +58,13 @@ await withE2E({ port: PORT, dbName: "quantify-operadores.db" }, async ({ login }
   assert(scaleId, "el instrumento debía tener una escala");
   await group.locator(".measure-scale").selectOption(scaleId);
   await group.screenshot({ path: join(ARTIFACTS, "operadores-instrumento.png") });
+
+  step("estudiante: el cronómetro por operador preselecciona el cronómetro en el grupo, con sus escalas");
+  const timedGroup = sPage.locator(`#measurement-fields .operator-quantity[data-quantity-id="${timed.id}"]`);
+  assert((await timedGroup.locator(".measurement-row--chrono").count()) === 2, "cada operador debía tener su cronómetro");
+  assert((await timedGroup.locator(".measurement-row .measure-instrument").count()) === 0, "los cronómetros de cada operador no debían tener instrumento");
+  assert((await timedGroup.locator(".measure-instrument").inputValue()) !== "", "el grupo debía preseleccionar el cronómetro");
+  assert((await timedGroup.locator(".measure-scale option").count()) > 1, "el cronómetro preseleccionado debía traer sus escalas");
 
   step("estudiante: carga las lecturas de cada operador y el borrador conserva el instrumento");
   const rows = group.locator(".measurement-row");

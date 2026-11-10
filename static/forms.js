@@ -296,15 +296,20 @@ export function renderMeasurementFields(draft) {
     ? new Set(state.editPrefill.map((m) => m.quantity_id))
     : draftedQuantityIds(draft?.measurements);
 
-  const instrumentSelectorsHtml = (q, attrs = "") => {
+  const rendersChrono = (q, opIndex) =>
+    q.repeated &&
+    q.input_widget === "cronometro" &&
+    !state.editingSubmissionId &&
+    (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id));
+
+  const instrumentSelectorsHtml = (q, preselectChrono) => {
     const options = compatibleInstruments(instruments, q.quantity);
-    const chrono = q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId;
-    const preferred = chrono ? options.find((i) => /cron[oó]metro/i.test(i.name)) ?? options[0] : null;
+    const preferred = preselectChrono ? options.find((i) => /cron[oó]metro/i.test(i.name)) ?? options[0] : null;
     const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
       .concat(options.map((i) => `<option value="${escapeHtml(i.id)}"${preferred && i.id === preferred.id ? " selected" : ""}>${escapeHtml(i.name)}</option>`))
       .join("");
     return `
-      <div class="measure-selectors"${attrs}>
+      <div class="measure-selectors">
         <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
         <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
       </div>`;
@@ -337,12 +342,12 @@ export function renderMeasurementFields(draft) {
         </fieldset>
       `;
     }
-    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id))) {
+    if (rendersChrono(q, opIndex)) {
       return `
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
           <legend>${legendHtml(q)}</legend>
-          ${opIndex == null ? instrumentSelectorsHtml(q, ' style="margin-bottom:8px;"') : ""}
+          ${opIndex == null ? instrumentSelectorsHtml(q, true) : ""}
           ${chronoWidgetInnerHtml()}
           <div class="series-debug"></div>
         </fieldset>
@@ -352,7 +357,7 @@ export function renderMeasurementFields(draft) {
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
         <legend>${legendHtml(q)}</legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
-          ${opIndex == null ? `${instrumentSelectorsHtml(q)}<div class="measure-sep"></div>` : ""}
+          ${opIndex == null ? `${instrumentSelectorsHtml(q, false)}<div class="measure-sep"></div>` : ""}
           <div class="measure-right">
             <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
               ${renderReplicaInput(q.unit, q.default_value)}
@@ -374,7 +379,7 @@ export function renderMeasurementFields(draft) {
     return `
       <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
         <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por operador</span></h4>
-        ${instrumentSelectorsHtml(q, ' style="margin-bottom:8px;"')}
+        ${instrumentSelectorsHtml(q, Array.from({ length: operatorCount }, (_, i) => rendersChrono(q, i)).some(Boolean))}
         ${blocks}
       </div>
     `;
@@ -412,23 +417,17 @@ export function renderMeasurementFields(draft) {
   }
   wireChronoHelpers();
 
-  measurementFields.querySelectorAll(".operator-quantity").forEach((group) => {
-    group.querySelector(".measure-instrument").addEventListener("change", () => populateScaleOptions(group));
-    populateScaleOptions(group);
+  measurementFields.querySelectorAll(".measure-selectors").forEach((selectors) => {
+    selectors.querySelector(".measure-instrument").addEventListener("change", () => populateScaleOptions(selectors));
+    populateScaleOptions(selectors);
   });
 
   measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
     if (row.dataset.isChrono === "1") {
-      const chronoInstrument = row.querySelector(".measure-instrument");
-      if (chronoInstrument) {
-        chronoInstrument.addEventListener("change", () => populateScaleOptions(row));
-        populateScaleOptions(row);
-      }
       wireChronometerWidget(row, chronoKeyFor(row));
       return;
     }
     if (row.dataset.isGiven === "1") return;
-    row.querySelector(".measure-instrument")?.addEventListener("change", () => populateScaleOptions(row));
     row.querySelector(".add-replica")?.addEventListener("click", () => {
       const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
       row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(unit));
