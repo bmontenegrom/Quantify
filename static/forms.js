@@ -24,7 +24,7 @@ import {
   renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
   refreshSeries, SERIES_INITIAL_ROWS,
 } from "./forms-series.js";
-import { loadDraft, clearDraft, saveDraft, scheduleDraftSave } from "./forms-draft.js";
+import { loadDraft, clearDraft, saveDraft, scheduleDraftSave, restoreChronoDraft } from "./forms-draft.js";
 
 export function quantityNameHtml(q) {
   const base = inlineMathHtml(q.name);
@@ -156,12 +156,12 @@ export async function loadSubmissionForm() {
       courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
     ]);
     state.practiceForm = { definition, instruments };
-    state.chronometers.clear();
-    state.seriesDebug.clear();
+    const draft = applicableDraft();
+    restoreChronoDraft(draft?.chrono);
     renderPartTabs(practiceId);
-    renderMeasurementFields();
+    renderMeasurementFields(draft);
     applyPrefill();
-    applyDraftPrefill();
+    applyDraftPrefill(draft);
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
   } catch (error) {
@@ -260,7 +260,7 @@ function applyPartVisibility() {
   });
 }
 
-export function renderMeasurementFields() {
+export function renderMeasurementFields(draft) {
   if (!state.practiceForm) {
     measurementFields.innerHTML = "";
     return;
@@ -294,7 +294,7 @@ export function renderMeasurementFields() {
   const legendHtml = (q) => quantityNameHtml(q);
   const drafted = state.editPrefill
     ? new Set(state.editPrefill.map((m) => m.quantity_id))
-    : draftedQuantityIds(applicableDraft()?.measurements);
+    : draftedQuantityIds(draft?.measurements);
 
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
@@ -323,7 +323,7 @@ export function renderMeasurementFields() {
         </fieldset>
       `;
     }
-    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && !drafted.has(q.id)) {
+    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id))) {
       const chronoOpts = compatibleInstruments(instruments, q.quantity);
       const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
       const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
@@ -943,8 +943,7 @@ function applicableDraft() {
   return loadDraft();
 }
 
-function applyDraftPrefill() {
-  const draft = applicableDraft();
+function applyDraftPrefill(draft) {
   if (!draft) return;
   applyMeasurementPrefill(
     draftMeasurementsByQuantity(draft.measurements),
@@ -997,7 +996,7 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
     const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
     );
-    blocks.forEach((row, i) => fillReplicaRow(row, e, e.operatorGroups[i] ?? []));
+    blocks.forEach((row, i) => fillReplicaRow(row, e.operatorGroups[i] ?? []));
   });
 
   const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
@@ -1019,17 +1018,17 @@ function prefillStandaloneRow(row, byQ) {
     if (u && e.value_u != null) u.value = e.value_u;
     return;
   }
-  fillReplicaRow(row, e, e.values);
-}
-
-function fillReplicaRow(row, e, values) {
   const inst = row.querySelector(".measure-instrument");
-  if (inst && e.instrument_id) {
-    inst.value = e.instrument_id;
+  if (inst) {
+    inst.value = e.instrument_id ?? "";
     populateScaleOptions(row);
   }
   const scale = row.querySelector(".measure-scale");
-  if (scale && e.scale_id) scale.value = e.scale_id;
+  if (scale) scale.value = e.scale_id ?? "";
+  fillReplicaRow(row, e.values);
+}
+
+function fillReplicaRow(row, values) {
   const container = row.querySelector(".measure-values");
   if (!container) return;
   const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";

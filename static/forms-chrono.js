@@ -2,6 +2,7 @@ import { state } from "./state.js";
 import { measurementFields } from "./dom.js";
 import { seriesStats, histogram, normalCurve } from "./lib.js";
 import { Chronometer } from "./chronometer.js";
+import { saveDraft } from "./forms-draft.js";
 
 export function chronoWidgetInnerHtml() {
   return `
@@ -38,8 +39,18 @@ export function chronoHelperSectionHtml() {
 
 export function wireChronoHelpers() {
   measurementFields.querySelectorAll(".chrono-helper").forEach((el, i) => {
-    wireChronometerWidget(el, `__chrono_helper__${i}`);
+    wireChronometerWidget(el, chronoHelperKey(i));
   });
+}
+
+export function chronoHelperKey(index) {
+  return `__chrono_helper__${index}`;
+}
+
+const startedOrder = [];
+
+function spaceTarget() {
+  return startedOrder.findLast((key) => state.chronometers.get(key)?.state === "running");
 }
 
 export function needsChronoHelper(q) {
@@ -75,6 +86,7 @@ export function wireChronometerWidget(row, quantityId) {
   const resetBtn = row.querySelector(".chrono-reset");
   const modeSelect = row.querySelector(".chrono-mode");
   const preview = row.querySelector(".chrono-readings-preview");
+  modeSelect.value = state.chronoModes.get(quantityId) ?? modeSelect.value;
 
   let rafId = null;
 
@@ -126,16 +138,20 @@ export function wireChronometerWidget(row, quantityId) {
 
   startBtn.addEventListener("click", () => {
     chrono.start();
+    startedOrder.splice(0, startedOrder.length, ...startedOrder.filter((key) => key !== quantityId), quantityId);
+    saveDraft();
     updateButtons();
     if (debugContainer) debugContainer.innerHTML = "";
     rafId = requestAnimationFrame(tick);
   });
   markBtn.addEventListener("click", () => {
     chrono.mark();
+    saveDraft();
     updatePreview();
   });
   stopBtn.addEventListener("click", () => {
     chrono.stop();
+    saveDraft();
     stopRaf();
     display.textContent = formatElapsed(chrono.elapsed);
     updateButtons();
@@ -144,6 +160,7 @@ export function wireChronometerWidget(row, quantityId) {
   });
   resetBtn.addEventListener("click", () => {
     chrono.reset();
+    saveDraft();
     stopRaf();
     display.textContent = formatElapsed(0);
     updateButtons();
@@ -152,26 +169,32 @@ export function wireChronometerWidget(row, quantityId) {
     if (debugContainer) debugContainer.innerHTML = "";
   });
   modeSelect.addEventListener("change", () => {
+    state.chronoModes.set(quantityId, modeSelect.value);
     state.seriesDebug.delete(quantityId);
+    saveDraft();
     updatePreview();
     if (chrono.state !== "running") refreshDebug();
   });
 
   row._chronoKeyHandler = (e) => {
-    if (e.code === "Space" && e.target.tagName !== "BUTTON" && e.target.tagName !== "SELECT") {
+    const typing = e.target.isContentEditable || ["BUTTON", "SELECT", "INPUT", "TEXTAREA"].includes(e.target.tagName);
+    if (e.code === "Space" && !typing && spaceTarget() === quantityId) {
       e.preventDefault();
       chrono.mark();
+      saveDraft();
       updatePreview();
     }
   };
   document.addEventListener("keydown", row._chronoKeyHandler);
 
-  new MutationObserver(() => {
+  const observer = new MutationObserver(() => {
     if (!document.contains(row)) {
       document.removeEventListener("keydown", row._chronoKeyHandler);
       stopRaf();
+      observer.disconnect();
     }
-  }).observe(measurementFields, { childList: true, subtree: false });
+  });
+  observer.observe(measurementFields, { childList: true, subtree: false });
 }
 
 function renderSeriesDebug(row, quantityId, readings) {
@@ -224,6 +247,7 @@ function renderSeriesDebug(row, quantityId, readings) {
   container.querySelector(".hist-bins")?.addEventListener("change", (e) => {
     const n = Math.round(Number(e.target.value));
     dbg.bins = Number.isFinite(n) && n >= 1 ? n : 0;
+    saveDraft();
     renderSeriesDebug(row, quantityId, readings);
   });
   container.querySelectorAll(".series-point-toggle").forEach((btn) => {
@@ -231,6 +255,7 @@ function renderSeriesDebug(row, quantityId, readings) {
       const i = Number(btn.dataset.index);
       if (dbg.discarded.has(i)) dbg.discarded.delete(i);
       else dbg.discarded.add(i);
+      saveDraft();
       renderSeriesDebug(row, quantityId, readings);
     });
   });
