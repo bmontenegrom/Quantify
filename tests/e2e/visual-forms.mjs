@@ -182,5 +182,43 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
     `el borrador debía conservar las lecturas (vi: ${restoredReadings.join()})`,
   );
 
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("quantify-draft:")).forEach((k) => localStorage.removeItem(k)));
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "p1-estadistica");
+  const timedRow = page.locator(`#measurement-fields .measurement-row--chrono[data-quantity-id="${draftedId}"]`).first();
+  await timedRow.locator(".chrono-start").click();
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(60);
+    await timedRow.locator(".chrono-mark").click();
+  }
+  await timedRow.locator(".chrono-stop").click();
+  await timedRow.locator(".chrono-mode").selectOption("consecutivo");
+  await timedRow.locator(".series-point-toggle").first().click();
+  const savedChrono = () =>
+    page.evaluate((id) => {
+      const key = Object.keys(localStorage).find((k) => k.startsWith("quantify-draft:"));
+      const chrono = key ? JSON.parse(localStorage.getItem(key)).chrono ?? {} : {};
+      return Object.entries(chrono).find(([k]) => k === id || k.startsWith(`${id}#`))?.[1] ?? null;
+    }, draftedId);
+  await page.waitForFunction(
+    (id) =>
+      Object.keys(localStorage).some((k) => {
+        const chrono = k.startsWith("quantify-draft:") ? JSON.parse(localStorage.getItem(k)).chrono ?? {} : {};
+        return Object.entries(chrono).some(([key, c]) => (key === id || key.startsWith(`${id}#`)) && c.discarded.length === 1);
+      }),
+    draftedId,
+  );
+  const before = await savedChrono();
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "p1-estadistica");
+  await timedRow.waitFor({ state: "attached" });
+  const countText = await timedRow.locator(".chrono-count").textContent();
+  assert(/6 marcas → 5 lecturas/.test(countText ?? ""), `el cronómetro debía volver con sus marcas (vi: "${countText}")`);
+  assert((await timedRow.locator(".chrono-mode").inputValue()) === "consecutivo", "el modo del cronómetro debía conservarse");
+  assert((await timedRow.locator(".series-point.discarded").count()) === 1, "la lectura descartada debía seguir descartada");
+  assert(JSON.stringify(await savedChrono()) === JSON.stringify(before), "volver a abrir no debía cambiar el cronómetro guardado");
+
   console.log("Visual forms smoke OK");
 });

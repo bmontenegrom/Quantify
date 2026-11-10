@@ -24,7 +24,7 @@ import {
   renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
   refreshSeries, SERIES_INITIAL_ROWS,
 } from "./forms-series.js";
-import { loadDraft, clearDraft, saveDraft, scheduleDraftSave } from "./forms-draft.js";
+import { loadDraft, clearDraft, saveDraft, scheduleDraftSave, restoreChronoDraft } from "./forms-draft.js";
 
 export function quantityNameHtml(q) {
   const base = inlineMathHtml(q.name);
@@ -156,8 +156,7 @@ export async function loadSubmissionForm() {
       courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
     ]);
     state.practiceForm = { definition, instruments };
-    state.chronometers.clear();
-    state.seriesDebug.clear();
+    restoreChronoDraft(applicableDraft()?.chrono);
     renderPartTabs(practiceId);
     renderMeasurementFields();
     applyPrefill();
@@ -323,7 +322,8 @@ export function renderMeasurementFields() {
         </fieldset>
       `;
     }
-    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && !drafted.has(q.id)) {
+    const restoredChrono = [...state.chronometers.keys()].some((key) => key === q.id || key.startsWith(`${q.id}#`));
+    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && (!drafted.has(q.id) || restoredChrono)) {
       const chronoOpts = compatibleInstruments(instruments, q.quantity);
       const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
       const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
@@ -1048,6 +1048,7 @@ submissionForm.addEventListener("submit", (event) => {
 });
 measurementFields.addEventListener("input", scheduleDraftSave);
 measurementFields.addEventListener("change", scheduleDraftSave);
+measurementFields.addEventListener("click", scheduleDraftSave);
 studentComment?.addEventListener("input", scheduleDraftSave);
 courseSelect.addEventListener("change", updateStudentSelectors);
 groupSelect.addEventListener("change", updateTableSelector);

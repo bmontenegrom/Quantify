@@ -151,3 +151,27 @@ test("Chronometer: readings vacío sin marcas ni inicio", () => {
   assert.deepEqual(c.readings("pares"), []);
   assert.deepEqual(c.readings("periodo"), []);
 });
+
+test("Chronometer: toJSON/fromJSON conserva las lecturas en todos los modos", () => {
+  const c = new Chronometer(clock([0, 1000, 2100, 3000, 4200, 5000, 6300]));
+  c.start();
+  for (let i = 0; i < 5; i++) c.mark();
+  c.stop();
+  const restored = Chronometer.fromJSON(JSON.parse(JSON.stringify(c)));
+  assert.equal(restored.state, "stopped");
+  assert.equal(restored.elapsed, c.elapsed);
+  for (const mode of ["absoluto", "consecutivo", "pares", "periodo"]) {
+    assert.deepEqual(restored.readings(mode), c.readings(mode), mode);
+  }
+});
+
+test("Chronometer: uno restaurado en marcha sigue marcando", () => {
+  const c = new Chronometer(clock([0, 1000]));
+  c.start();
+  c.mark();
+  const restored = Chronometer.fromJSON(c.toJSON(), clock([2500, 2500]));
+  assert.equal(restored.state, "running");
+  restored.mark();
+  assert.deepEqual(restored.readings("consecutivo"), [1.5]);
+  assert.equal(restored.elapsed, 2.5);
+});

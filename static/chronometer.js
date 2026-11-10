@@ -10,6 +10,19 @@ export class Chronometer {
     this.#clockFn = clockFn;
   }
 
+  static fromJSON(data, clockFn) {
+    const c = new Chronometer(clockFn);
+    c.#state = data?.state ?? "idle";
+    c.#marks = [...(data?.marks ?? [])];
+    c.#startedAt = data?.startedAt ?? null;
+    c.#stoppedAt = data?.stoppedAt ?? null;
+    return c;
+  }
+
+  toJSON() {
+    return { state: this.#state, marks: [...this.#marks], startedAt: this.#startedAt, stoppedAt: this.#stoppedAt };
+  }
+
   get state() {
     return this.#state;
   }

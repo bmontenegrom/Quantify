@@ -75,6 +75,7 @@ export function wireChronometerWidget(row, quantityId) {
   const resetBtn = row.querySelector(".chrono-reset");
   const modeSelect = row.querySelector(".chrono-mode");
   const preview = row.querySelector(".chrono-readings-preview");
+  modeSelect.value = state.chronoModes.get(quantityId) ?? modeSelect.value;
 
   let rafId = null;
 
@@ -152,6 +153,7 @@ export function wireChronometerWidget(row, quantityId) {
     if (debugContainer) debugContainer.innerHTML = "";
   });
   modeSelect.addEventListener("change", () => {
+    state.chronoModes.set(quantityId, modeSelect.value);
     state.seriesDebug.delete(quantityId);
     updatePreview();
     if (chrono.state !== "running") refreshDebug();
@@ -162,6 +164,7 @@ export function wireChronometerWidget(row, quantityId) {
       e.preventDefault();
       chrono.mark();
       updatePreview();
+      row.dispatchEvent(new Event("change", { bubbles: true }));
     }
   };
   document.addEventListener("keydown", row._chronoKeyHandler);
