@@ -836,9 +836,11 @@ textarea {
   padding: 3px 8px;
 }
 
-.measurement-row--chrono .measure-selectors {
+.measurement-row--chrono .measure-selectors,
+.operator-quantity > .measure-selectors {
   grid-template-columns: minmax(150px, 220px) minmax(110px, 160px);
   width: fit-content;
+  margin-bottom: 8px;
 }
 
 .chrono-mode-label {
@@ -1507,7 +1509,8 @@ button.back-link {
     max-width: none;
   }
 
-  .measurement-row--chrono .measure-selectors {
+  .measurement-row--chrono .measure-selectors,
+  .operator-quantity > .measure-selectors {
     grid-template-columns: 1fr;
     width: 100%;
   }

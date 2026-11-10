@@ -296,7 +296,26 @@ export function renderMeasurementFields(draft) {
     ? new Set(state.editPrefill.map((m) => m.quantity_id))
     : draftedQuantityIds(draft?.measurements);
 
-  const measurementRowHtml = (q, opIndex) => {
+  const rendersChrono = (q, opIndex) =>
+    q.repeated &&
+    q.input_widget === "cronometro" &&
+    !state.editingSubmissionId &&
+    (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id));
+
+  const instrumentSelectorsHtml = (q, preselectChrono) => {
+    const options = compatibleInstruments(instruments, q.quantity);
+    const preferred = preselectChrono ? options.find((i) => /cron[oó]metro/i.test(i.name)) ?? options[0] : null;
+    const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
+      .concat(options.map((i) => `<option value="${escapeHtml(i.id)}"${preferred && i.id === preferred.id ? " selected" : ""}>${escapeHtml(i.name)}</option>`))
+      .join("");
+    return `
+      <div class="measure-selectors">
+        <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
+        <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
+      </div>`;
+  };
+
+  const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
     if (q.is_given) {
       const uField = !hasUncertainty(q)
@@ -323,43 +342,22 @@ export function renderMeasurementFields(draft) {
         </fieldset>
       `;
     }
-    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id))) {
-      const chronoOpts = compatibleInstruments(instruments, q.quantity);
-      const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
-      const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
-        .concat(
-          chronoOpts.map(
-            (i) =>
-              `<option value="${escapeHtml(i.id)}" ${defaultInst && i.id === defaultInst.id ? "selected" : ""}>${escapeHtml(i.name)}</option>`
-          )
-        )
-        .join("");
+    if (chrono) {
       return `
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
           <legend>${legendHtml(q)}</legend>
-          <div class="measure-selectors" style="margin-bottom:8px;">
-            <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${chronoInstrumentOptions}</select>
-            <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
-          </div>
+          ${opIndex == null ? instrumentSelectorsHtml(q, true) : ""}
           ${chronoWidgetInnerHtml()}
           <div class="series-debug"></div>
         </fieldset>
       `;
     }
-    const options = compatibleInstruments(instruments, q.quantity);
-    const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
-      .concat(options.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`))
-      .join("");
     return `
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
         <legend>${legendHtml(q)}</legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
-          <div class="measure-selectors">
-            <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
-            <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
-          </div>
-          <div class="measure-sep"></div>
+          ${opIndex == null ? `${instrumentSelectorsHtml(q, false)}<div class="measure-sep"></div>` : ""}
           <div class="measure-right">
             <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
               ${renderReplicaInput(q.unit, q.default_value)}
@@ -373,14 +371,14 @@ export function renderMeasurementFields(draft) {
 
   const quantityRowHtml = (q) => {
     if (!isPerOperator(q)) return measurementRowHtml(q, null);
-    const blocks = Array.from(
-      { length: operatorCount },
-      (_, i) =>
-        `<div class="operator-block"><h5 class="operator-label">Operador ${i + 1}</h5>${measurementRowHtml(q, i)}</div>`
-    ).join("");
+    const chrono = Array.from({ length: operatorCount }, (_, i) => rendersChrono(q, i));
+    const blocks = chrono
+      .map((isChrono, i) => `<div class="operator-block"><h5 class="operator-label">Operador ${i + 1}</h5>${measurementRowHtml(q, i, isChrono)}</div>`)
+      .join("");
     return `
       <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
         <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por operador</span></h4>
+        ${instrumentSelectorsHtml(q, chrono.some(Boolean))}
         ${blocks}
       </div>
     `;
@@ -418,19 +416,17 @@ export function renderMeasurementFields(draft) {
   }
   wireChronoHelpers();
 
+  measurementFields.querySelectorAll(".measure-selectors").forEach((selectors) => {
+    selectors.querySelector(".measure-instrument").addEventListener("change", () => populateScaleOptions(selectors));
+    populateScaleOptions(selectors);
+  });
+
   measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
     if (row.dataset.isChrono === "1") {
-      const chronoInstrument = row.querySelector(".measure-instrument");
-      if (chronoInstrument) {
-        chronoInstrument.addEventListener("change", () => populateScaleOptions(row));
-        populateScaleOptions(row);
-      }
       wireChronometerWidget(row, chronoKeyFor(row));
       return;
     }
     if (row.dataset.isGiven === "1") return;
-    const instrumentSelect = row.querySelector(".measure-instrument");
-    instrumentSelect.addEventListener("change", () => populateScaleOptions(row));
     row.querySelector(".add-replica")?.addEventListener("click", () => {
       const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
       row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(unit));
@@ -593,8 +589,8 @@ export function collectMeasurements() {
     );
     return {
       quantity_id: container.dataset.quantityId,
-      instrument_id: null,
-      scale_id: null,
+      instrument_id: container.querySelector(".measure-instrument")?.value || null,
+      scale_id: container.querySelector(".measure-scale")?.value || null,
       values: [],
       given_u: null,
       operator_replicas: rows.map(rowSeriesValues),
@@ -993,6 +989,7 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
   measurementFields.querySelectorAll(".operator-quantity").forEach((groupEl) => {
     const e = byQ.get(groupEl.dataset.quantityId);
     if (!e) return;
+    fillInstrument(groupEl, e);
     const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
     );
@@ -1018,14 +1015,16 @@ function prefillStandaloneRow(row, byQ) {
     if (u && e.value_u != null) u.value = e.value_u;
     return;
   }
-  const inst = row.querySelector(".measure-instrument");
-  if (inst) {
-    inst.value = e.instrument_id ?? "";
-    populateScaleOptions(row);
-  }
-  const scale = row.querySelector(".measure-scale");
-  if (scale) scale.value = e.scale_id ?? "";
+  fillInstrument(row, e);
   fillReplicaRow(row, e.values);
+}
+
+function fillInstrument(el, e) {
+  const inst = el.querySelector(".measure-instrument");
+  if (!inst) return;
+  inst.value = e.instrument_id ?? "";
+  populateScaleOptions(el);
+  el.querySelector(".measure-scale").value = e.scale_id ?? "";
 }
 
 function fillReplicaRow(row, values) {
