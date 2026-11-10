@@ -147,6 +147,7 @@ fn compute_quantities(
 ///     id: "g".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
 ///     unit: "m/s2".into(), formula: "4*pi^2*L/T^2".into(), position: 0, tolerance: None,
 ///     is_final: false, has_uncertainty: true,
+///     ..Default::default()
 /// };
 /// let analysis = compute(
 ///     &[q("L", true), q("T", false)],

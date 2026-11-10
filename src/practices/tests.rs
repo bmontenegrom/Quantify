@@ -68,6 +68,7 @@ fn sample_quantity() -> QuantityInput {
 fn sample_result() -> ResultInput {
     ResultInput {
         display_symbol: None,
+        compare_with: None,
         symbol: "Q".into(),
         name: "Area".into(),
         unit: "mm2".into(),
@@ -4239,4 +4240,114 @@ async fn a_copy_keeps_label_and_input_and_a_missing_field_resets_them() {
         .unwrap();
     assert_eq!(not_time.label_mode, "simbolo");
     assert_eq!(not_time.input_widget, "teclado");
+}
+
+async fn compare_with_of(
+    pool: &SqlitePool,
+    practice: &str,
+    symbol: &str,
+    in_version: bool,
+) -> String {
+    let sql = if in_version {
+        "SELECT COALESCE(json_extract(r.value, '$.compare_with'), '') \
+         FROM practices p JOIN practice_versions v ON v.id = p.current_version_id, \
+         json_each(v.definition_json, '$.results') r \
+         WHERE p.id = ?1 AND json_extract(r.value, '$.symbol') = ?2"
+    } else {
+        "SELECT compare_with FROM practice_results WHERE practice_id = ?1 AND symbol = ?2"
+    };
+    let (value,): (String,) = sqlx::query_as(sql)
+        .bind(practice)
+        .bind(symbol)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    value
+}
+
+async fn assert_seeded_comparisons(pool: &SqlitePool, in_version: bool) {
+    for (result, quantity) in [
+        ("VR1_s_t", "VR1_s"),
+        ("VR3_s_t", "VR3_s"),
+        ("VR2_p_t", "VR2_p"),
+        ("P_max_t", ""),
+        ("RP_max_t", ""),
+        ("I_s", ""),
+    ] {
+        assert_eq!(
+            compare_with_of(pool, "p2-cc", result, in_version).await,
+            quantity,
+            "{result} (versión: {in_version})"
+        );
+    }
+}
+
+#[tokio::test]
+async fn seeding_sets_what_each_theoretical_result_compares_with() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+
+    assert_seeded_comparisons(&pool, false).await;
+    assert_seeded_comparisons(&pool, true).await;
+}
+
+#[tokio::test]
+async fn the_compare_with_migration_updates_drafts_and_versions_once() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query("UPDATE practice_results SET compare_with = ''")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = json_set(definition_json, '$.results', \
+         (SELECT json_group_array(json(json_remove(value, '$.compare_with'))) \
+          FROM json_each(definition_json, '$.results')))",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-comparar-con'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_compare_with(&pool).await.unwrap();
+
+    assert_seeded_comparisons(&pool, false).await;
+    assert_seeded_comparisons(&pool, true).await;
+    let found = draft_changes(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::None);
+
+    sqlx::query("UPDATE practice_results SET compare_with = '' WHERE symbol = 'VR1_s_t'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    display::migrate_legacy_compare_with(&pool).await.unwrap();
+    assert_eq!(compare_with_of(&pool, "p2-cc", "VR1_s_t", false).await, "");
+}
+
+#[tokio::test]
+async fn renaming_or_removing_the_quantity_carries_its_comparison() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let q = create_quantity(&pool, practice, new_quantity("Qa"))
+        .await
+        .unwrap();
+    let result = ResultInput {
+        compare_with: Some("Qa".into()),
+        symbol: "Qa_t".into(),
+        ..sample_result()
+    };
+    create_result(&pool, practice, result, None).await.unwrap();
+
+    update_quantity(&pool, &q.id, new_quantity("Qb"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(compare_with_of(&pool, practice, "Qa_t", false).await, "Qb");
+
+    remove_quantity(&pool, practice, &q.id).await.unwrap();
+    assert_eq!(compare_with_of(&pool, practice, "Qa_t", false).await, "");
 }

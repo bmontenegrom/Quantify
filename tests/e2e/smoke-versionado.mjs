@@ -37,6 +37,7 @@ await withE2E({ port: PORT, dbName: "quantify-versionado.db" }, async ({ login }
     unit: "m",
     formula: "2*x",
     is_final: true,
+    compare_with: "x",
   });
   await apiPost(page, `${base}/status`, { status: "publicada" });
   await page.reload();
@@ -66,6 +67,14 @@ await withE2E({ port: PORT, dbName: "quantify-versionado.db" }, async ({ login }
   assert(old, "la entrega del estudiante debía estar en la lista del docente");
   const oldY = await derivedY(page, old.id);
   assert(Math.abs(oldY - 10) < 1e-9, `y debía dar 10 con 2*x, dio ${oldY}`);
+
+  step("docente: la entrega compara y con x en medido vs teórico");
+  await page.click('.tab.teacher-only[data-view="submissions"]');
+  await page.click(`.submission-item:has-text("${NAME}")`);
+  const compareRows = page.locator("#submission-detail-body .compare-table tbody tr");
+  await compareRows.first().waitFor();
+  assert((await compareRows.count()) === 1, "medido vs teórico debía tener una fila");
+  assert((await compareRows.first().textContent()).includes("x"), "la fila debía ser la de x");
 
   step("docente: recién publicada no hay cambios sin publicar");
   await page.click('.tab.teacher-only[data-view="practices"]');

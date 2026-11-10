@@ -164,6 +164,7 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
             tolerance: None,
             is_final: true,
             has_uncertainty: true,
+            ..Default::default()
         }],
         curves: vec![],
         operator_count: None,
@@ -319,6 +320,7 @@ fn compute_propagates_q_l_a_b() {
         tolerance: None,
         is_final: false,
         has_uncertainty: true,
+        ..Default::default()
     }];
     let measurements = vec![
         measurement("l", &[2.0]),
@@ -350,6 +352,7 @@ fn compute_propagates_uncertainty_to_measurand() {
         tolerance: None,
         is_final: false,
         has_uncertainty: true,
+        ..Default::default()
     }];
     let measurements = vec![
         measurement("l", &[9.0, 11.0]),
@@ -390,6 +393,7 @@ fn compute_with_operators_derives_per_operator() {
         tolerance: None,
         is_final: false,
         has_uncertainty: true,
+        ..Default::default()
     }];
     let measurements = vec![
         MeasurementInput {
@@ -1404,6 +1408,7 @@ fn result(symbol: &str, formula: &str) -> PracticeResult {
         tolerance: None,
         is_final: false,
         has_uncertainty: true,
+        ..Default::default()
     }
 }
 
@@ -2692,6 +2697,7 @@ async fn curve_results_chain_and_skip_what_depends_on_series_values() {
     let (pool, _dir) = setup().await;
     let input = |symbol: &str, formula: &str| crate::practices::ResultInput {
         display_symbol: None,
+        compare_with: None,
         symbol: symbol.into(),
         name: symbol.into(),
         unit: "u".into(),

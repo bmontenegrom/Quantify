@@ -590,6 +590,17 @@ pub async fn update_quantity(
     quantity_id: &str,
     input: QuantityInput,
 ) -> anyhow::Result<Option<PracticeQuantity>> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "UPDATE practice_results SET compare_with = ?2 \
+         WHERE EXISTS (SELECT 1 FROM practice_quantities q WHERE q.id = ?1 AND q.removed = 0 \
+             AND q.practice_id = practice_results.practice_id \
+             AND q.symbol = practice_results.compare_with)",
+    )
+    .bind(quantity_id)
+    .bind(input.symbol.trim())
+    .execute(&mut *tx)
+    .await?;
     let result = sqlx::query(
         "UPDATE practice_quantities \
          SET symbol = ?2, name = ?3, unit = ?4, repeated = ?5, quantity = ?6, is_given = ?7, \
@@ -618,11 +629,12 @@ pub async fn update_quantity(
     .bind(display_symbol(&input.display_symbol))
     .bind(input.label_mode.as_deref())
     .bind(input.input_widget.as_deref())
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
         return Ok(None);
     }
+    tx.commit().await?;
     Ok(Some(fetch_quantity(pool, quantity_id).await?))
 }
 
@@ -675,7 +687,8 @@ pub async fn update_result(
         None => sqlx::query(
             "UPDATE practice_results \
                  SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, is_final = ?6, \
-                     has_uncertainty = ?7, display_symbol = COALESCE(?8, display_symbol) \
+                     has_uncertainty = ?7, display_symbol = COALESCE(?8, display_symbol), \
+                     compare_with = COALESCE(?9, compare_with) \
                  WHERE id = ?1",
         )
         .bind(result_id)
@@ -686,13 +699,15 @@ pub async fn update_result(
         .bind(input.is_final)
         .bind(input.has_uncertainty)
         .bind(display_symbol(&input.display_symbol))
+        .bind(display_symbol(&input.compare_with))
         .execute(pool)
         .await?
         .rows_affected(),
         Some(tol) => sqlx::query(
             "UPDATE practice_results \
                  SET symbol = ?2, name = ?3, unit = ?4, formula = ?5, tolerance = ?6, is_final = ?7, \
-                     has_uncertainty = ?8, display_symbol = COALESCE(?9, display_symbol) \
+                     has_uncertainty = ?8, display_symbol = COALESCE(?9, display_symbol), \
+                     compare_with = COALESCE(?10, compare_with) \
                  WHERE id = ?1",
         )
         .bind(result_id)
@@ -704,6 +719,7 @@ pub async fn update_result(
         .bind(input.is_final)
         .bind(input.has_uncertainty)
         .bind(display_symbol(&input.display_symbol))
+        .bind(display_symbol(&input.compare_with))
         .execute(pool)
         .await?
         .rows_affected(),
@@ -842,8 +858,8 @@ async fn quantities_for(
 
 async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticeResult>> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty \
-         FROM practice_results WHERE practice_id = ?1 ORDER BY position, symbol",
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty, \
+         compare_with FROM practice_results WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
     .fetch_all(pool)
@@ -864,8 +880,8 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
 
 async fn fetch_result(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeResult> {
     Ok(sqlx::query_as::<_, PracticeResult>(
-        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty \
-         FROM practice_results WHERE id = ?1",
+        "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty, \
+         compare_with FROM practice_results WHERE id = ?1",
     )
     .bind(id)
     .fetch_one(pool)
@@ -918,8 +934,9 @@ pub(super) async fn insert_result(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_results \
-         (id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty, display_symbol) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         (id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty, \
+          display_symbol, compare_with) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -932,6 +949,7 @@ pub(super) async fn insert_result(
     .bind(input.is_final)
     .bind(input.has_uncertainty)
     .bind(display_symbol(&input.display_symbol).unwrap_or(""))
+    .bind(display_symbol(&input.compare_with).unwrap_or(""))
     .execute(&mut *conn)
     .await?;
     Ok(id)

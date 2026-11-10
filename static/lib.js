@@ -390,11 +390,14 @@ export function analysisSections(analysis) {
   ];
 }
 
-export function compareMeasuredVsTheoretical(quantities, derived) {
+export function comparisonPairs(definition) {
+  return new Map((definition?.results ?? []).filter((r) => r.compare_with).map((r) => [r.symbol, r.compare_with]));
+}
+
+export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Map()) {
   const byQuantity = new Map((quantities ?? []).map((q) => [q.symbol, q]));
   return (derived ?? []).reduce((rows, d) => {
-    if (!d.symbol.endsWith("_t")) return rows;
-    const q = byQuantity.get(d.symbol.slice(0, -2));
+    const q = byQuantity.get(pairs.get(d.symbol));
     if (!q) return rows;
     const ev = q.result?.mean ?? null;
     const eu = q.result?.u_expanded ?? null;

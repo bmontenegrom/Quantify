@@ -534,6 +534,11 @@ pub(super) async fn update_quantity(
             }
         }
     }
+    for result in &mut after.results {
+        if result.compare_with == old_symbol {
+            result.compare_with.clone_from(&new_symbol);
+        }
+    }
     guard_change(&before, &after, "guardar la magnitud")?;
     let updated = practices::update_quantity(&state.pool, &qid, input)
         .await?
@@ -1091,6 +1096,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
     for r in &def.results {
         let input = ResultInput {
             display_symbol: None,
+            compare_with: None,
             symbol: r.symbol.clone(),
             name: r.name.clone(),
             unit: r.unit.clone(),
@@ -1342,6 +1348,12 @@ fn with_new_result(
         tolerance: input.tolerance.flatten(),
         is_final: input.is_final,
         has_uncertainty: input.has_uncertainty,
+        compare_with: input
+            .compare_with
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_string(),
     });
     if let Some(section) = after
         .sections
@@ -1362,6 +1374,9 @@ fn with_updated_result(
     let item = after.results.iter_mut().find(|x| x.id == result_id)?;
     let old_symbol = std::mem::replace(&mut item.symbol, input.symbol.trim().to_string());
     item.formula = input.formula.trim().to_string();
+    if let Some(compare_with) = &input.compare_with {
+        item.compare_with = compare_with.trim().to_string();
+    }
     let new_symbol = item.symbol.clone();
     for symbol in after.sections.iter_mut().flat_map(|s| s.results.iter_mut()) {
         if *symbol == old_symbol {
@@ -1638,6 +1653,12 @@ fn validate_result(
         if t < 0.0 {
             return Err(AppError::bad_request("tolerancia no puede ser negativa"));
         }
+    }
+    let compare_with = input.compare_with.as_deref().map(str::trim).unwrap_or("");
+    if !compare_with.is_empty() && !def.quantities.iter().any(|q| q.symbol == compare_with) {
+        return Err(AppError::bad_request(
+            "\"Comparar con\" tiene que ser el símbolo de una magnitud de la práctica.",
+        ));
     }
     computation::check_formula(input.formula.trim(), &result_scope(def))
         .map_err(|e| AppError::bad_request(e.to_string()))
@@ -2123,6 +2144,7 @@ mod tests {
                 tolerance: None,
                 is_final: false,
                 has_uncertainty: true,
+                ..Default::default()
             }],
             curves: vec![],
             operator_count: None,
@@ -2290,6 +2312,7 @@ mod tests {
         };
         let r = |unit: &str| ResultInput {
             display_symbol: None,
+            compare_with: None,
             symbol: "M_medio".into(),
             name: "Coeficiente medio".into(),
             unit: unit.into(),
@@ -2309,6 +2332,32 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn validate_result_compares_only_with_a_quantity_of_the_practice() {
+        let def = practices::PracticeDefinition {
+            quantities: vec![db::PracticeQuantity {
+                symbol: "V".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let r = |compare_with: Option<&str>| ResultInput {
+            display_symbol: None,
+            compare_with: compare_with.map(Into::into),
+            symbol: "V_t".into(),
+            name: "Teórico".into(),
+            unit: "V".into(),
+            formula: "2*V".into(),
+            tolerance: None,
+            is_final: false,
+            has_uncertainty: true,
+        };
+        assert!(validate_result(&def, &r(None)).is_ok());
+        assert!(validate_result(&def, &r(Some(""))).is_ok());
+        assert!(validate_result(&def, &r(Some(" V "))).is_ok());
+        assert!(validate_result(&def, &r(Some("W"))).is_err());
     }
 
     #[tokio::test]
@@ -2602,6 +2651,7 @@ mod tests {
         let i_s = cc.results.iter().find(|r| r.symbol == "I_s").unwrap();
         let input = ResultInput {
             display_symbol: None,
+            compare_with: None,
             symbol: "I_serie".into(),
             name: i_s.name.clone(),
             unit: i_s.unit.clone(),
@@ -3071,6 +3121,7 @@ mod tests {
         let (pool, _dir) = crate::computation::tests::setup().await;
         let input = |symbol: &str, formula: &str| ResultInput {
             display_symbol: None,
+            compare_with: None,
             symbol: symbol.into(),
             name: symbol.into(),
             unit: "m".into(),

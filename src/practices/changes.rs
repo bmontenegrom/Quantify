@@ -5,13 +5,14 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 6] = [
+const COSMETIC_KEYS: [&str; 7] = [
     "name",
     "title",
     "tolerance",
     "display_symbols",
     "label_mode",
     "input_widget",
+    "compare_with",
 ];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
 const FREELY_ORDERED: [&str; 4] = ["quantities", "results", "parts", "sections"];
@@ -299,7 +300,12 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
             .map(|_| format!("Cambia la entrada de {}", new.symbol));
         label.into_iter().chain(widget)
     });
-    symbols.chain(quantities).collect()
+    let comparisons = draft.results.iter().filter_map(|new| {
+        let old = published.results.iter().find(|r| r.id == new.id)?;
+        (old.compare_with != new.compare_with)
+            .then(|| format!("Cambia con qué se compara {}", new.symbol))
+    });
+    symbols.chain(quantities).chain(comparisons).collect()
 }
 
 pub fn change_kind(
@@ -328,12 +334,15 @@ pub fn change_kind(
 ///     id: "r".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
 ///     unit: "m/s2".into(), formula: "2*L".into(), position: 0, tolerance: None,
 ///     is_final: true, has_uncertainty: true,
+///     ..Default::default()
 /// };
 /// let published = PracticeDefinition { results: vec![result.clone()], ..Default::default() };
 /// let kind = |draft: &PracticeDefinition| compare_definitions(&published, draft).unwrap().kind;
 /// assert_eq!(kind(&published), DraftChangeKind::None);
 ///
-/// let renamed = PracticeResult { name: "Gravedad".into(), tolerance: Some(1.0), ..result.clone() };
+/// let renamed = PracticeResult {
+///     name: "Gravedad".into(), tolerance: Some(1.0), compare_with: "L".into(), ..result.clone()
+/// };
 /// let draft = PracticeDefinition { results: vec![renamed], ..Default::default() };
 /// assert_eq!(kind(&draft), DraftChangeKind::Cosmetic);
 ///

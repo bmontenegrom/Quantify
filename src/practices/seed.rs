@@ -112,6 +112,7 @@ fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityI
 fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
         display_symbol: None,
+        compare_with: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -127,6 +128,11 @@ fn res_final(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput
         is_final: true,
         ..res(symbol, name, unit, formula)
     }
+}
+
+fn compares(mut r: ResultInput, quantity: &str) -> ResultInput {
+    r.compare_with = Some(quantity.into());
+    r
 }
 
 fn res_no_u(mut r: ResultInput) -> ResultInput {
@@ -527,23 +533,32 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "A",
                 "Vg_s / (R1 + R2 + R3 + RA_s)",
             ),
-            res_final(
-                "VR1_s_t",
-                "Voltaje teorico en R1",
-                "V",
-                "Vg_s * R1 / (R1 + R2 + R3 + RA_s)",
+            compares(
+                res_final(
+                    "VR1_s_t",
+                    "Voltaje teorico en R1",
+                    "V",
+                    "Vg_s * R1 / (R1 + R2 + R3 + RA_s)",
+                ),
+                "VR1_s",
             ),
-            res_final(
-                "VR2_s_t",
-                "Voltaje teorico en R2",
-                "V",
-                "Vg_s * R2 / (R1 + R2 + R3 + RA_s)",
+            compares(
+                res_final(
+                    "VR2_s_t",
+                    "Voltaje teorico en R2",
+                    "V",
+                    "Vg_s * R2 / (R1 + R2 + R3 + RA_s)",
+                ),
+                "VR2_s",
             ),
-            res_final(
-                "VR3_s_t",
-                "Voltaje teorico en R3",
-                "V",
-                "Vg_s * R3 / (R1 + R2 + R3 + RA_s)",
+            compares(
+                res_final(
+                    "VR3_s_t",
+                    "Voltaje teorico en R3",
+                    "V",
+                    "Vg_s * R3 / (R1 + R2 + R3 + RA_s)",
+                ),
+                "VR3_s",
             ),
             res(
                 "Req",
@@ -557,23 +572,32 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "A",
                 "Vg_p / (R1 + RA_p + R2*R3/(R2+R3))",
             ),
-            res_final(
-                "VR1_p_t",
-                "Voltaje teorico en R1",
-                "V",
-                "Vg_p * R1 / (R1 + RA_p + R2*R3/(R2+R3))",
+            compares(
+                res_final(
+                    "VR1_p_t",
+                    "Voltaje teorico en R1",
+                    "V",
+                    "Vg_p * R1 / (R1 + RA_p + R2*R3/(R2+R3))",
+                ),
+                "VR1_p",
             ),
-            res_final(
-                "VR2_p_t",
-                "Voltaje teorico en R2",
-                "V",
-                "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+            compares(
+                res_final(
+                    "VR2_p_t",
+                    "Voltaje teorico en R2",
+                    "V",
+                    "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+                ),
+                "VR2_p",
             ),
-            res_final(
-                "VR3_p_t",
-                "Voltaje teorico en R3",
-                "V",
-                "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+            compares(
+                res_final(
+                    "VR3_p_t",
+                    "Voltaje teorico en R3",
+                    "V",
+                    "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+                ),
+                "VR3_p",
             ),
             res_no_u(res_final(
                 "RP_max_t",
@@ -1618,6 +1642,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     }
     super::display::migrate_legacy_display_symbols(pool).await?;
     super::display::migrate_legacy_quantity_presentation(pool).await?;
+    super::display::migrate_legacy_compare_with(pool).await?;
     super::versions::ensure_versions(pool).await
 }
 

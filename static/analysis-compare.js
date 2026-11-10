@@ -1,7 +1,7 @@
 import { escapeHtml, symbolHtml, unitHtml, measureText, format, num, pct, compareResults, compareMeasuredVsTheoretical } from "./lib.js";
 
-export function measuredVsTheoreticalMarkup(quantities, derived) {
-  const rows = compareMeasuredVsTheoretical(quantities, derived);
+export function measuredVsTheoreticalMarkup(quantities, derived, pairs) {
+  const rows = compareMeasuredVsTheoretical(quantities, derived, pairs);
   if (!rows.length) return "";
   return `
     <h3>Medido vs teórico (automático)</h3>

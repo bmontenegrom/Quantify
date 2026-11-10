@@ -9,7 +9,7 @@ import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   compatibleInstruments, prefixFactor, validateMeasurements,
-  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty,
+  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -746,7 +746,7 @@ export async function submitFormSubmission() {
     showToast("Entrega guardada", "success");
     clearDraft();
     const { renderAnalysis } = await import("./analysis.js");
-    renderAnalysis(latestResult, submission);
+    renderAnalysis(latestResult, submission, false, null, comparisonPairs(state.practiceForm?.definition));
     latestResult.classList.remove("hidden");
     await loadSubmissions();
   } catch (error) {
@@ -767,7 +767,7 @@ async function calculateDraftPreview(measurements) {
     );
     const { formAnalysisMarkup } = await import("./analysis.js");
     setDisplaySymbols(state.practiceForm?.definition?.display_symbols);
-    latestResult.innerHTML = formAnalysisMarkup(analysis);
+    latestResult.innerHTML = formAnalysisMarkup(analysis, comparisonPairs(state.practiceForm?.definition));
     latestResult.classList.remove("hidden");
     submitStatus.textContent = "Calculado con el borrador: no se guardó nada.";
   } catch (error) {

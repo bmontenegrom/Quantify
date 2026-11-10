@@ -89,6 +89,8 @@ pub struct ResultInput {
     pub is_final: bool,
     #[serde(default = "default_true")]
     pub has_uncertainty: bool,
+    #[serde(default)]
+    pub compare_with: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

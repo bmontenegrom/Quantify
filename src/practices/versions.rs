@@ -366,12 +366,23 @@ pub async fn remove_quantity(
     } else {
         "DELETE FROM practice_quantities WHERE id = ?1 AND practice_id = ?2 AND removed = 0"
     };
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "UPDATE practice_results SET compare_with = '' \
+         WHERE practice_id = ?2 AND compare_with = \
+             (SELECT symbol FROM practice_quantities WHERE id = ?1 AND practice_id = ?2 AND removed = 0)",
+    )
+    .bind(quantity_id)
+    .bind(practice_id)
+    .execute(&mut *tx)
+    .await?;
     let changed = sqlx::query(sql)
         .bind(quantity_id)
         .bind(practice_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
+    tx.commit().await?;
     Ok(match (changed, in_version) {
         (0, _) => QuantityRemoval::NotFound,
         (_, true) => QuantityRemoval::Retired,

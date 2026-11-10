@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 const LEGACY_DISPLAY_SYMBOLS: &str = "2026-11-simbolos-a-mostrar";
 const LEGACY_QUANTITY_PRESENTATION: &str = "2026-11-rotulo-y-entrada";
+const LEGACY_COMPARE_WITH: &str = "2026-11-comparar-con";
 const LEGACY_SYMBOL_FIRST: [&str; 22] = [
     "Vg_s", "RA_s", "VR1_s", "VR2_s", "VR3_s", "Vg_p", "RA_p", "VR1_p", "VR2_p", "VR3_p", "Vg_c",
     "RA_c", "Vg", "VRpp", "VCpp", "VLpp", "a_R", "b_R", "a_C", "b_C", "a_L", "b_L",
@@ -273,9 +274,112 @@ pub(super) async fn migrate_legacy_quantity_presentation(pool: &SqlitePool) -> a
     Ok(())
 }
 
+fn legacy_compare_with<'a>(result: &str, quantities: &[&'a str]) -> Option<&'a str> {
+    let base = result.strip_suffix("_t")?;
+    quantities.iter().copied().find(|q| *q == base)
+}
+
+pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Result<()> {
+    if crate::db::migration_applied(pool, LEGACY_COMPARE_WITH).await? {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
+    let quantities: Vec<(String, String)> =
+        sqlx::query_as("SELECT practice_id, symbol FROM practice_quantities WHERE removed = 0")
+            .fetch_all(&mut *tx)
+            .await?;
+    let mut by_practice: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (practice_id, symbol) in &quantities {
+        by_practice.entry(practice_id).or_default().push(symbol);
+    }
+    let results: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT id, practice_id, symbol FROM practice_results WHERE compare_with = ''",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for (id, practice_id, symbol) in results {
+        let symbols = by_practice
+            .get(practice_id.as_str())
+            .map_or(&[][..], Vec::as_slice);
+        let Some(target) = legacy_compare_with(&symbol, symbols) else {
+            continue;
+        };
+        sqlx::query("UPDATE practice_results SET compare_with = ?1 WHERE id = ?2")
+            .bind(target)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let versions: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, definition_json FROM practice_versions")
+            .fetch_all(&mut *tx)
+            .await?;
+    for (id, json) in versions {
+        let mut definition = match super::versions::parse(&json) {
+            Ok(definition) => definition,
+            Err(error) => {
+                tracing::warn!(
+                    version_id = %id,
+                    %error,
+                    "versión ilegible: queda sin migrar a comparar con y esta migración no se repite"
+                );
+                continue;
+            }
+        };
+        let symbols: Vec<&str> = definition
+            .quantities
+            .iter()
+            .map(|q| q.symbol.as_str())
+            .collect();
+        let targets: Vec<Option<String>> = definition
+            .results
+            .iter()
+            .map(|r| {
+                r.compare_with
+                    .is_empty()
+                    .then(|| legacy_compare_with(&r.symbol, &symbols).map(str::to_string))
+                    .flatten()
+            })
+            .collect();
+        if targets.iter().all(Option::is_none) {
+            continue;
+        }
+        for (result, target) in definition.results.iter_mut().zip(targets) {
+            if let Some(target) = target {
+                result.compare_with = target;
+            }
+        }
+        sqlx::query(
+            "UPDATE practice_versions \
+             SET definition_json = json_set(definition_json, '$.results', json(?1)) \
+             WHERE id = ?2",
+        )
+        .bind(serde_json::to_string(&definition.results)?)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(LEGACY_COMPARE_WITH)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{legacy_display_symbol, legacy_quantity_presentation};
+    use super::{legacy_compare_with, legacy_display_symbol, legacy_quantity_presentation};
+
+    #[test]
+    fn legacy_compare_with_pairs_x_t_with_quantity_x() {
+        let quantities = ["VR1_s", "VR2_s", "R1"];
+        assert_eq!(legacy_compare_with("VR1_s_t", &quantities), Some("VR1_s"));
+        assert_eq!(legacy_compare_with("P_max_t", &quantities), None);
+        assert_eq!(legacy_compare_with("VR1_s", &quantities), None);
+        assert_eq!(legacy_compare_with("R1_teo", &quantities), None);
+    }
 
     #[test]
     fn legacy_quantity_presentation_matches_the_old_frontend_rules() {

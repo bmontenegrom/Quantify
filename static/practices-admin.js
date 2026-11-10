@@ -963,6 +963,10 @@ function renderResultForm(res, practiceId, def = null) {
         <input name="has_uncertainty" type="checkbox" ${res ? (res.has_uncertainty ? "checked" : "") : "checked"} />
         Tiene incertidumbre (desmarcá para mostrarlo siempre sin ±U)
       </label>
+      ${selectFieldHtml("Comparar con (medido vs teórico)", "compare_with", [
+        ["", "— sin comparación —"],
+        ...(def?.quantities ?? []).map((q) => [escapeHtml(q.symbol), escapeHtml(q.symbol)]),
+      ], escapeHtml(res?.compare_with ?? ""))}
       <div class="detail-actions">
         <button type="submit">${res ? "Guardar" : "Agregar"}</button>
         ${res ? `<button type="button" data-cancel-result>Cancelar</button>` : ""}
@@ -995,7 +999,7 @@ function renderResultsList(def, practiceId) {
         </td>
       </tr>`;
     const editRow = editing
-      ? `<tr><td colspan="8" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
+      ? `<tr><td colspan="8" class="scale-edit-cell">${renderResultForm(r, practiceId, def)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
@@ -1367,6 +1371,7 @@ async function saveNewResult(event) {
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
         display_symbol: raw.display_symbol,
+        compare_with: raw.compare_with ?? "",
         section_id: raw.section_id || null,
       });
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
@@ -1393,6 +1398,7 @@ async function saveEditResult(event) {
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
         display_symbol: raw.display_symbol,
+        compare_with: raw.compare_with ?? "",
       });
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },
