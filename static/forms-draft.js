@@ -11,6 +11,7 @@ function draftKey() {
 
 export function saveDraft() {
   if (state.draftPreviewPracticeId || state.editingSubmissionId || state.restoringCancelledSubmission || !state.practiceForm) return;
+  if (state.practiceForm.definition.practice_id !== practiceSelect.value) return;
   const draft = {
     measurements: collectMeasurements(),
     finalResults: collectFinalResults(),

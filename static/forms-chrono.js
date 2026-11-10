@@ -47,11 +47,11 @@ export function chronoHelperKey(index) {
   return `__chrono_helper__${index}`;
 }
 
-export function chronoQuantityId(key) {
-  return key.split("#")[0];
-}
+const startedOrder = [];
 
-let spaceChronoKey = null;
+function spaceTarget() {
+  return startedOrder.findLast((key) => state.chronometers.get(key)?.state === "running");
+}
 
 export function needsChronoHelper(q) {
   return q.input_widget === "cronometro" && !q.repeated && !q.is_given;
@@ -138,7 +138,7 @@ export function wireChronometerWidget(row, quantityId) {
 
   startBtn.addEventListener("click", () => {
     chrono.start();
-    spaceChronoKey = quantityId;
+    startedOrder.splice(0, startedOrder.length, ...startedOrder.filter((key) => key !== quantityId), quantityId);
     saveDraft();
     updateButtons();
     if (debugContainer) debugContainer.innerHTML = "";
@@ -171,13 +171,14 @@ export function wireChronometerWidget(row, quantityId) {
   modeSelect.addEventListener("change", () => {
     state.chronoModes.set(quantityId, modeSelect.value);
     state.seriesDebug.delete(quantityId);
+    saveDraft();
     updatePreview();
     if (chrono.state !== "running") refreshDebug();
   });
 
   row._chronoKeyHandler = (e) => {
     const typing = e.target.isContentEditable || ["BUTTON", "SELECT", "INPUT", "TEXTAREA"].includes(e.target.tagName);
-    if (e.code === "Space" && !typing && chrono.state === "running" && spaceChronoKey === quantityId) {
+    if (e.code === "Space" && !typing && spaceTarget() === quantityId) {
       e.preventDefault();
       chrono.mark();
       saveDraft();
@@ -246,6 +247,7 @@ function renderSeriesDebug(row, quantityId, readings) {
   container.querySelector(".hist-bins")?.addEventListener("change", (e) => {
     const n = Math.round(Number(e.target.value));
     dbg.bins = Number.isFinite(n) && n >= 1 ? n : 0;
+    saveDraft();
     renderSeriesDebug(row, quantityId, readings);
   });
   container.querySelectorAll(".series-point-toggle").forEach((btn) => {

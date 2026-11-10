@@ -18,7 +18,7 @@ import {
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
-  wireChronometerWidget, chronoWidgetInnerHtml, chronoQuantityId,
+  wireChronometerWidget, chronoWidgetInnerHtml,
 } from "./forms-chrono.js";
 import {
   renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
@@ -295,7 +295,6 @@ export function renderMeasurementFields(draft) {
   const drafted = state.editPrefill
     ? new Set(state.editPrefill.map((m) => m.quantity_id))
     : draftedQuantityIds(draft?.measurements);
-  const restoredChronos = new Set([...state.chronometers.keys()].map(chronoQuantityId));
 
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
@@ -324,7 +323,7 @@ export function renderMeasurementFields(draft) {
         </fieldset>
       `;
     }
-    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && (!drafted.has(q.id) || restoredChronos.has(q.id))) {
+    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id))) {
       const chronoOpts = compatibleInstruments(instruments, q.quantity);
       const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
       const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
