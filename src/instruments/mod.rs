@@ -78,7 +78,7 @@ pub async fn list_instruments(
     course_id: &str,
 ) -> anyhow::Result<Vec<InstrumentWithScales>> {
     let instruments = sqlx::query_as::<_, Instrument>(&format!(
-        "SELECT {INSTRUMENT_COLS} FROM instruments WHERE course_id = ?1 ORDER BY name"
+        "SELECT {INSTRUMENT_COLS} FROM instruments WHERE course_id = ?1 ORDER BY name COLLATE NOCASE"
     ))
     .bind(course_id)
     .fetch_all(pool)
@@ -344,6 +344,25 @@ mod tests {
             u_cal_fixed: None,
             unit: "A".into(),
         }
+    }
+
+    #[tokio::test]
+    async fn instruments_are_listed_ignoring_case() {
+        let (pool, _dir, course_id) = setup().await;
+        for name in ["Osciloscopio", "cronómetro de mano"] {
+            create_instrument(
+                &pool,
+                CreateInstrument {
+                    name: name.into(),
+                    ..sample_instrument(&course_id)
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let listed = list_instruments(&pool, &course_id).await.unwrap();
+        assert_eq!(listed[0].instrument.name, "cronómetro de mano");
     }
 
     #[tokio::test]

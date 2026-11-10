@@ -7,15 +7,10 @@ import {
 import { fetchJson, postJson, deleteJson } from "./api.js";
 import { showToast } from "./toast.js";
 import {
-  escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview, format,
-  compatibleInstruments, SI_PREFIXES, prefixFactor, pointPower, flowRate,
-  seriesStats, histogram, normalCurve, validateMeasurements,
-  draftMeasurementsByQuantity, hasUncertainty,
+  escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
+  compatibleInstruments, prefixFactor, validateMeasurements,
+  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty,
 } from "./lib.js";
-import {
-  SERIES_LIVE_COLUMNS,
-  SYMBOL_FIRST_QUANTITIES, PRACTICES_WITHOUT_CHRONO_HELPER,
-} from "./constants.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
@@ -33,10 +28,10 @@ import { loadDraft, clearDraft, saveDraft, scheduleDraftSave } from "./forms-dra
 
 export function quantityNameHtml(q) {
   const base = inlineMathHtml(q.name);
-  if (SYMBOL_FIRST_QUANTITIES.has(q.symbol)) {
+  if (q.label_mode === "simbolo") {
     return `${symbolHtml(q.symbol)} <span class="submission-meta">${base}</span>`;
   }
-  if (q.symbol === "T_oc" && !/T_?oc/i.test(q.name)) {
+  if (q.label_mode === "nombre_simbolo") {
     return `${base} ${symbolHtml(q.symbol)}`;
   }
   return base;
@@ -297,6 +292,9 @@ export function renderMeasurementFields() {
   const useOperators = operatorCount >= 2;
   const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
   const legendHtml = (q) => quantityNameHtml(q);
+  const drafted = state.editPrefill
+    ? new Set(state.editPrefill.map((m) => m.quantity_id))
+    : draftedQuantityIds(applicableDraft()?.measurements);
 
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
@@ -325,7 +323,7 @@ export function renderMeasurementFields() {
         </fieldset>
       `;
     }
-    if (q.repeated && q.quantity === "tiempo" && !state.editingSubmissionId) {
+    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && !drafted.has(q.id)) {
       const chronoOpts = compatibleInstruments(instruments, q.quantity);
       const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
       const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
@@ -940,9 +938,13 @@ export function applyPrefill() {
   );
 }
 
+function applicableDraft() {
+  if (state.draftPreviewPracticeId || state.editingSubmissionId || state.restoringCancelledSubmission) return null;
+  return loadDraft();
+}
+
 function applyDraftPrefill() {
-  if (state.draftPreviewPracticeId || state.editingSubmissionId || state.restoringCancelledSubmission) return;
-  const draft = loadDraft();
+  const draft = applicableDraft();
   if (!draft) return;
   applyMeasurementPrefill(
     draftMeasurementsByQuantity(draft.measurements),

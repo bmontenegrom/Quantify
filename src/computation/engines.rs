@@ -137,7 +137,7 @@ fn compute_quantities(
 /// #     id: symbol.into(), practice_id: "p".into(), symbol: symbol.into(), name: symbol.into(),
 /// #     unit: String::new(), repeated: !is_given, quantity: None, position: 0, is_given,
 /// #     replicas_per_point: None, per_point: false, has_uncertainty: true, optional: false,
-/// #     default_value: None, slot_count: None,
+/// #     default_value: None, slot_count: None, ..Default::default()
 /// # };
 /// # let m = |id: &str, values: Vec<f64>, given_u: Option<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u,
@@ -499,7 +499,7 @@ fn point_intermediate(
 /// #     id: symbol.into(), practice_id: "p".into(), symbol: symbol.into(), name: symbol.into(),
 /// #     unit: String::new(), repeated: false, quantity: None, position: 0, is_given: false,
 /// #     replicas_per_point: None, per_point: true, has_uncertainty: true, optional: false,
-/// #     default_value: None, slot_count: None,
+/// #     default_value: None, slot_count: None, ..Default::default()
 /// # };
 /// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,
@@ -717,7 +717,7 @@ pub fn compute_regresion(
 /// #     id: symbol.into(), practice_id: "p".into(), symbol: symbol.into(), name: symbol.into(),
 /// #     unit: String::new(), repeated: false, quantity: None, position: 0, is_given: false,
 /// #     replicas_per_point: None, per_point: true, has_uncertainty: true, optional: false,
-/// #     default_value: None, slot_count: None,
+/// #     default_value: None, slot_count: None, ..Default::default()
 /// # };
 /// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,

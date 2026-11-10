@@ -9,7 +9,12 @@ where
     Option::<T>::deserialize(de).map(Some)
 }
 
-#[derive(Debug, Deserialize)]
+pub const LABEL_MODES: [&str; 3] = [DEFAULT_LABEL_MODE, "simbolo", "nombre_simbolo"];
+pub const INPUT_WIDGETS: [&str; 2] = [DEFAULT_INPUT_WIDGET, "cronometro"];
+const DEFAULT_LABEL_MODE: &str = "nombre";
+const DEFAULT_INPUT_WIDGET: &str = "teclado";
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct QuantityInput {
     #[serde(default)]
     pub display_symbol: Option<String>,
@@ -32,6 +37,38 @@ pub struct QuantityInput {
     pub default_value: Option<Option<f64>>,
     #[serde(default)]
     pub slot_count: Option<i64>,
+    #[serde(default)]
+    pub label_mode: Option<String>,
+    #[serde(default)]
+    pub input_widget: Option<String>,
+}
+
+impl Default for QuantityInput {
+    /// Igual que el JSON sin esos campos: `per_point` y `has_uncertainty` arrancan en `true`.
+    ///
+    /// ```
+    /// let q = quantify::practices::QuantityInput::default();
+    /// assert!(q.per_point && q.has_uncertainty && !q.is_given);
+    /// ```
+    fn default() -> Self {
+        Self {
+            display_symbol: None,
+            symbol: String::new(),
+            name: String::new(),
+            unit: String::new(),
+            repeated: false,
+            quantity: None,
+            is_given: false,
+            replicas_per_point: None,
+            per_point: true,
+            has_uncertainty: true,
+            optional: false,
+            default_value: None,
+            slot_count: None,
+            label_mode: None,
+            input_widget: None,
+        }
+    }
 }
 
 fn default_true() -> bool {

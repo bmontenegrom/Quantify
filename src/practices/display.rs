@@ -4,6 +4,11 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 
 const LEGACY_DISPLAY_SYMBOLS: &str = "2026-11-simbolos-a-mostrar";
+const LEGACY_QUANTITY_PRESENTATION: &str = "2026-11-rotulo-y-entrada";
+const LEGACY_SYMBOL_FIRST: [&str; 22] = [
+    "Vg_s", "RA_s", "VR1_s", "VR2_s", "VR3_s", "Vg_p", "RA_p", "VR1_p", "VR2_p", "VR3_p", "Vg_c",
+    "RA_c", "Vg", "VRpp", "VCpp", "VLpp", "a_R", "b_R", "a_C", "b_C", "a_L", "b_L",
+];
 
 pub(super) async fn display_symbols_for(
     pool: &SqlitePool,
@@ -140,9 +145,256 @@ pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow:
     Ok(())
 }
 
+pub(super) fn legacy_quantity_presentation(
+    symbol: &str,
+    name: &str,
+    quantity: Option<&str>,
+    repeated: bool,
+    is_given: bool,
+    analysis_kind: Option<&str>,
+) -> (&'static str, &'static str) {
+    let label = if LEGACY_SYMBOL_FIRST.contains(&symbol) {
+        "simbolo"
+    } else if symbol == "T_oc" && !mentions_t_oc(name) {
+        "nombre_simbolo"
+    } else {
+        "nombre"
+    };
+    let series = matches!(analysis_kind, Some("regresion_lineal" | "curva"));
+    let widget = if quantity == Some("tiempo") && !is_given && (repeated || !series) {
+        "cronometro"
+    } else {
+        "teclado"
+    };
+    (label, widget)
+}
+
+fn mentions_t_oc(name: &str) -> bool {
+    let name = name.to_lowercase();
+    name.contains("toc") || name.contains("t_oc")
+}
+
+pub(super) async fn migrate_legacy_quantity_presentation(pool: &SqlitePool) -> anyhow::Result<()> {
+    if crate::db::migration_applied(pool, LEGACY_QUANTITY_PRESENTATION).await? {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
+    type Row = (
+        String,
+        String,
+        String,
+        Option<String>,
+        bool,
+        bool,
+        Option<String>,
+    );
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT q.id, q.symbol, q.name, q.quantity, q.repeated, q.is_given, p.analysis_kind \
+         FROM practice_quantities q JOIN practices p ON p.id = q.practice_id",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for (id, symbol, name, quantity, repeated, is_given, kind) in rows {
+        let (label, widget) = legacy_quantity_presentation(
+            &symbol,
+            &name,
+            quantity.as_deref(),
+            repeated,
+            is_given,
+            kind.as_deref(),
+        );
+        sqlx::query(
+            "UPDATE practice_quantities \
+             SET label_mode = CASE label_mode WHEN 'nombre' THEN ?1 ELSE label_mode END, \
+                 input_widget = CASE input_widget WHEN 'teclado' THEN ?2 ELSE input_widget END \
+             WHERE id = ?3",
+        )
+        .bind(label)
+        .bind(widget)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let versions: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, definition_json FROM practice_versions")
+            .fetch_all(&mut *tx)
+            .await?;
+    for (id, json) in versions {
+        let definition = match super::versions::parse(&json) {
+            Ok(definition) => definition,
+            Err(error) => {
+                tracing::warn!(
+                    version_id = %id,
+                    %error,
+                    "versión ilegible: queda sin migrar a rótulo y entrada y esta migración no se repite"
+                );
+                continue;
+            }
+        };
+        for (index, q) in definition.quantities.iter().enumerate() {
+            let (label, widget) = legacy_quantity_presentation(
+                &q.symbol,
+                &q.name,
+                q.quantity.as_deref(),
+                q.repeated,
+                q.is_given,
+                definition.analysis_kind.as_deref(),
+            );
+            let label = if q.label_mode.is_empty() {
+                label
+            } else {
+                &q.label_mode
+            };
+            let widget = if q.input_widget.is_empty() {
+                widget
+            } else {
+                &q.input_widget
+            };
+            sqlx::query(&format!(
+                "UPDATE practice_versions \
+                 SET definition_json = json_set(definition_json, \
+                     '$.quantities[{index}].label_mode', ?1, \
+                     '$.quantities[{index}].input_widget', ?2) \
+                 WHERE id = ?3"
+            ))
+            .bind(label)
+            .bind(widget)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(LEGACY_QUANTITY_PRESENTATION)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::legacy_display_symbol;
+    use super::{legacy_display_symbol, legacy_quantity_presentation};
+
+    #[test]
+    fn legacy_quantity_presentation_matches_the_old_frontend_rules() {
+        let series = Some("regresion_lineal");
+        let single = Some("estadistico");
+        let cases = [
+            (
+                "T1",
+                Some("tiempo"),
+                true,
+                false,
+                single,
+                ("nombre", "cronometro"),
+            ),
+            (
+                "t_med",
+                Some("tiempo"),
+                false,
+                true,
+                single,
+                ("nombre", "teclado"),
+            ),
+            (
+                "t_x",
+                Some("tiempo"),
+                false,
+                false,
+                single,
+                ("nombre", "cronometro"),
+            ),
+            (
+                "t_y",
+                Some("tiempo"),
+                false,
+                false,
+                None,
+                ("nombre", "cronometro"),
+            ),
+            (
+                "t",
+                Some("tiempo"),
+                true,
+                false,
+                series,
+                ("nombre", "cronometro"),
+            ),
+            (
+                "t",
+                Some("tiempo"),
+                false,
+                false,
+                series,
+                ("nombre", "teclado"),
+            ),
+            (
+                "t",
+                Some("tiempo"),
+                false,
+                false,
+                Some("curva"),
+                ("nombre", "teclado"),
+            ),
+            (
+                "T_oc",
+                Some("tiempo"),
+                false,
+                false,
+                series,
+                ("nombre_simbolo", "teclado"),
+            ),
+            (
+                "tmedio",
+                Some("tiempo"),
+                false,
+                false,
+                series,
+                ("nombre", "teclado"),
+            ),
+            (
+                "VRpp",
+                Some("voltaje"),
+                true,
+                false,
+                Some("curva"),
+                ("simbolo", "teclado"),
+            ),
+            (
+                "Vg_s",
+                Some("voltaje"),
+                true,
+                false,
+                single,
+                ("simbolo", "teclado"),
+            ),
+            (
+                "R_s",
+                Some("resistencia"),
+                true,
+                false,
+                single,
+                ("nombre", "teclado"),
+            ),
+            ("x", None, true, false, single, ("nombre", "teclado")),
+        ];
+        for (symbol, quantity, repeated, is_given, kind, expected) in cases {
+            assert_eq!(
+                legacy_quantity_presentation(symbol, "Tiempo", quantity, repeated, is_given, kind),
+                expected,
+                "{symbol}"
+            );
+        }
+        for name in ["T_oc medido", "Período Toc"] {
+            assert_eq!(
+                legacy_quantity_presentation("T_oc", name, Some("tiempo"), false, false, series),
+                ("nombre", "teclado"),
+                "{name}"
+            );
+        }
+    }
 
     #[test]
     fn legacy_display_symbol_matches_the_old_frontend_specials() {

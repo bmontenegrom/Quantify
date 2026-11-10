@@ -52,8 +52,8 @@ export function renderSeriesTable(definition) {
   const partsNote = definitionParts(definition).length
     ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
     : "";
-  const hasReplicatedTime = [...cols, ...shared].some((q) => q.repeated && q.quantity === "tiempo");
-  const chronoHelper = hasReplicatedTime ? chronoHelperSectionHtml() : "";
+  const hasChrono = definition.quantities.some((q) => q.input_widget === "cronometro");
+  const chronoHelper = hasChrono ? chronoHelperSectionHtml() : "";
   measurementFields.innerHTML = `
     ${partsNote}
     ${sharedSection}

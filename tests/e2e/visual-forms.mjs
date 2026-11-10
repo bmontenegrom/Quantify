@@ -44,6 +44,10 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   const fieldsHtml = await page.locator("#measurement-fields").innerHTML();
   assert(fieldsHtml.includes("V<sub>G</sub>"), "Vg_s debía mostrarse como V_G (símbolo a mostrar)");
   assert(!fieldsHtml.includes("Vg<sub>S</sub>"), "Vg_s no debía mostrar el sufijo de la parte");
+  assert(
+    fieldsHtml.includes('<legend>V<sub>G</sub> <span class="submission-meta">'),
+    "Vg_s debía rotularse primero por su símbolo",
+  );
 
   const partTabs = page.locator("#practice-part-tabs .part-tab");
   assert((await partTabs.count()) === 3, "p2-cc debe tener 3 tabs de partes");
@@ -124,6 +128,59 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await openPractice(page, "fluidos-2");
   await assertInputContrast(page);
   await page.screenshot({ path: join(ARTIFACTS, "visual-fluidos2-dark.png"), fullPage: true });
+
+  const helper = page.locator("#measurement-fields .chrono-helper");
+  const fieldLegend = (text) => page.locator("#measurement-fields legend", { hasText: text }).first();
+
+  await openPractice(page, "viscosidad");
+  await helper.waitFor({ state: "attached" });
+
+  await openPractice(page, "p3-relajacion");
+  await fieldLegend("Periodo de la onda cuadrada").waitFor({ state: "attached" });
+  assert((await helper.count()) === 0, "P3 no debía mostrar el ayudante de cronómetro");
+  const p3Html = await page.locator("#measurement-fields").innerHTML();
+  assert(p3Html.includes(" T<sub>OC</sub></legend>"), "T_oc debía rotularse con su nombre y su símbolo");
+
+  await openPractice(page, "fluidos-1");
+  await helper.waitFor({ state: "attached" });
+
+  await openPractice(page, "fluidos-2");
+  await fieldLegend("Altura inicial").waitFor({ state: "attached" });
+  assert((await helper.count()) === 0, "fluidos-2 no debía mostrar el ayudante de cronómetro");
+
+  await openPractice(page, "p1-estadistica");
+  const chronoRow = page.locator('#measurement-fields .measurement-row--chrono').first();
+  await chronoRow.waitFor({ state: "attached" });
+
+  const draftedId = await chronoRow.getAttribute("data-quantity-id");
+  await page.fill("#student-comment", "borrador");
+  await page.waitForFunction(() =>
+    Object.keys(localStorage).some(
+      (key) => key.startsWith("quantify-draft:") && JSON.parse(localStorage.getItem(key)).comment === "borrador",
+    ),
+  );
+  await page.evaluate((id) => {
+    const key = Object.keys(localStorage).find(
+      (k) => k.startsWith("quantify-draft:") && JSON.parse(localStorage.getItem(k)).comment === "borrador",
+    );
+    const draft = JSON.parse(localStorage.getItem(key));
+    draft.measurements = [{ quantity_id: id, instrument_id: null, scale_id: null, values: [1.5, 1.6], given_u: null }];
+    localStorage.setItem(key, JSON.stringify(draft));
+  }, draftedId);
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "p1-estadistica");
+  const draftedRow = page.locator(`#measurement-fields .measurement-row[data-quantity-id="${draftedId}"]`);
+  await draftedRow.locator(".measure-value").first().waitFor({ state: "attached" });
+  assert(
+    !(await draftedRow.evaluate((row) => row.classList.contains("measurement-row--chrono"))),
+    "con lecturas en el borrador la fila debía quedar con teclado",
+  );
+  const restoredReadings = await draftedRow.locator(".measure-value").evaluateAll((inputs) => inputs.map((i) => i.value));
+  assert(
+    restoredReadings.join() === "1.5,1.6",
+    `el borrador debía conservar las lecturas (vi: ${restoredReadings.join()})`,
+  );
 
   console.log("Visual forms smoke OK");
 });

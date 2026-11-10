@@ -5,7 +5,14 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 4] = ["name", "title", "tolerance", "display_symbols"];
+const COSMETIC_KEYS: [&str; 6] = [
+    "name",
+    "title",
+    "tolerance",
+    "display_symbols",
+    "label_mode",
+    "input_widget",
+];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
 const FREELY_ORDERED: [&str; 4] = ["quantities", "results", "parts", "sections"];
 
@@ -276,13 +283,23 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
     let before: std::collections::BTreeSet<&str> =
         super::display::version_symbols(published).collect();
     let after: std::collections::BTreeSet<&str> = super::display::version_symbols(draft).collect();
-    before
+    let symbols = before
         .intersection(&after)
         .filter(|symbol| {
             published.display_symbols.get(**symbol) != draft.display_symbols.get(**symbol)
         })
-        .map(|symbol| format!("Cambia cómo se muestra {symbol}"))
-        .collect()
+        .map(|symbol| format!("Cambia cómo se muestra {symbol}"));
+    let quantities = draft.quantities.iter().flat_map(|new| {
+        let old = published.quantities.iter().find(|q| q.id == new.id);
+        let label = old
+            .filter(|q| q.label_mode != new.label_mode)
+            .map(|_| format!("Cambia el rótulo de {}", new.symbol));
+        let widget = old
+            .filter(|q| q.input_widget != new.input_widget)
+            .map(|_| format!("Cambia la entrada de {}", new.symbol));
+        label.into_iter().chain(widget)
+    });
+    symbols.chain(quantities).collect()
 }
 
 pub fn change_kind(

@@ -1593,6 +1593,31 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
             "Las ranuras solo aplican a un dato dado (marca \"Dato dado\" o deja las ranuras vacias).",
         ));
     }
+    if input
+        .label_mode
+        .as_deref()
+        .is_some_and(|mode| !practices::LABEL_MODES.contains(&mode))
+    {
+        return Err(AppError::bad_request(
+            "El rótulo de la magnitud tiene que ser nombre, símbolo o nombre y símbolo.",
+        ));
+    }
+    if input
+        .input_widget
+        .as_deref()
+        .is_some_and(|widget| !practices::INPUT_WIDGETS.contains(&widget))
+    {
+        return Err(AppError::bad_request(
+            "La entrada de la magnitud tiene que ser teclado o cronómetro.",
+        ));
+    }
+    if input.input_widget.as_deref() == Some("cronometro")
+        && (input.is_given || input.quantity.as_deref() != Some("tiempo"))
+    {
+        return Err(AppError::bad_request(
+            "El cronómetro solo aplica a una magnitud física \"tiempo\" que no sea un dato dado.",
+        ));
+    }
     Ok(())
 }
 
@@ -2004,6 +2029,7 @@ mod tests {
             optional: false,
             default_value: None,
             slot_count: None,
+            ..Default::default()
         };
         let def = practices::PracticeDefinition {
             practice_id: "p".into(),
@@ -2063,6 +2089,7 @@ mod tests {
             optional: false,
             default_value: None,
             slot_count: None,
+            ..Default::default()
         };
         let mut c = h.clone();
         c.id = "q-c".into();
@@ -2162,6 +2189,40 @@ mod tests {
     }
 
     #[test]
+    fn validate_quantity_checks_label_and_input() {
+        let timed = |is_given: bool, quantity: &str, widget: &str| QuantityInput {
+            symbol: "t".into(),
+            name: "Tiempo".into(),
+            quantity: Some(quantity.into()),
+            is_given,
+            input_widget: Some(widget.into()),
+            ..Default::default()
+        };
+        assert!(validate_quantity(&timed(false, "tiempo", "cronometro")).is_ok());
+        assert!(validate_quantity(&timed(false, "longitud", "teclado")).is_ok());
+        assert!(validate_quantity(&timed(false, "longitud", "cronometro")).is_err());
+        assert!(validate_quantity(&timed(true, "tiempo", "cronometro")).is_err());
+        assert!(validate_quantity(&timed(false, "tiempo", "ranura")).is_err());
+        assert!(validate_quantity(&QuantityInput {
+            input_widget: None,
+            ..timed(false, "longitud", "teclado")
+        })
+        .is_ok());
+        for mode in practices::LABEL_MODES {
+            assert!(validate_quantity(&QuantityInput {
+                label_mode: Some(mode.into()),
+                ..timed(false, "tiempo", "teclado")
+            })
+            .is_ok());
+        }
+        assert!(validate_quantity(&QuantityInput {
+            label_mode: Some("otro".into()),
+            ..timed(false, "tiempo", "teclado")
+        })
+        .is_err());
+    }
+
+    #[test]
     fn validate_quantity_allows_dimensionless_unit() {
         let q = |unit: &str| QuantityInput {
             display_symbol: None,
@@ -2177,6 +2238,7 @@ mod tests {
             optional: false,
             default_value: None,
             slot_count: None,
+            ..Default::default()
         };
         assert!(validate_quantity(&q("")).is_ok());
         assert!(validate_quantity(&q("   ")).is_ok());

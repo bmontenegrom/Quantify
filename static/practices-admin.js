@@ -24,6 +24,13 @@ function displaySymbolFieldHtml(item) {
   return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label>`;
 }
 
+function selectFieldHtml(label, name, options, current) {
+  const items = options
+    .map(([value, text]) => `<option value="${value}"${value === current ? " selected" : ""}>${text}</option>`)
+    .join("");
+  return `<label>${label} <select name="${name}">${items}</select></label>`;
+}
+
 function isEditing(kind, id) {
   return state.editing.kind === kind && state.editing.id === id;
 }
@@ -398,6 +405,10 @@ export function renderPracticesPage() {
   });
   practiceWorkspace.querySelectorAll("[data-edit-quantity-form]").forEach((form) => {
     form.addEventListener("submit", saveEditQuantity);
+  });
+  practiceWorkspace.querySelectorAll("#new-quantity-form, [data-edit-quantity-form]").forEach((form) => {
+    syncStopwatchOption(form);
+    form.addEventListener("input", () => syncStopwatchOption(form));
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -860,6 +871,15 @@ function renderQuantityForm(qty, practiceId) {
       <label>Ranuras del instrumento (el valor es un entero de 1 a N, en la unidad de arriba)
         <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" />
       </label>
+      ${selectFieldHtml("Rótulo en el formulario", "label_mode", [
+        ["nombre", "Nombre"],
+        ["simbolo", "Símbolo"],
+        ["nombre_simbolo", "Nombre y símbolo"],
+      ], qty?.label_mode)}
+      ${selectFieldHtml("Entrada del valor", "input_widget", [
+        ["teclado", "Teclado"],
+        ["cronometro", "Cronómetro (solo magnitud física tiempo)"],
+      ], qty?.input_widget)}
       <div class="detail-actions">
         <button type="submit">${qty ? "Guardar" : "Agregar"}</button>
         ${qty ? `<button type="button" data-cancel-quantity>Cancelar</button>` : ""}
@@ -1049,6 +1069,12 @@ async function savePracticeRegressionFormulas(event) {
   }, "Fórmulas de ajuste guardadas");
 }
 
+function syncStopwatchOption(form) {
+  const option = form.elements.input_widget.querySelector('option[value="cronometro"]');
+  option.disabled = form.elements.quantity.value !== "tiempo" || form.elements.is_given.checked;
+  if (option.disabled && option.selected) form.elements.input_widget.value = "teclado";
+}
+
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
   const repeated = "repeated" in raw;
@@ -1070,6 +1096,8 @@ function quantityPayloadFromForm(form) {
     optional: "optional" in raw,
     slot_count: slots,
     display_symbol: raw.display_symbol,
+    label_mode: raw.label_mode,
+    input_widget: raw.input_widget,
     default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
   };
 }
