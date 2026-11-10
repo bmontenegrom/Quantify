@@ -165,13 +165,24 @@ test("Chronometer: toJSON/fromJSON conserva las lecturas en todos los modos", ()
   }
 });
 
-test("Chronometer: uno restaurado en marcha sigue marcando", () => {
-  const c = new Chronometer(clock([0, 1000]));
+test("Chronometer: uno guardado en marcha vuelve detenido en su última marca", () => {
+  const c = new Chronometer(clock([0, 1000, 2000]));
   c.start();
   c.mark();
-  const restored = Chronometer.fromJSON(c.toJSON(), clock([2500, 2500]));
-  assert.equal(restored.state, "running");
+  c.mark();
+  const restored = Chronometer.fromJSON(c.toJSON(), clock([600000]));
+  assert.equal(restored.state, "stopped");
+  assert.equal(restored.elapsed, 2);
   restored.mark();
-  assert.deepEqual(restored.readings("consecutivo"), [1.5]);
-  assert.equal(restored.elapsed, 2.5);
+  assert.deepEqual(restored.readings("consecutivo"), [1]);
+});
+
+test("Chronometer: en marcha sin marcas, o con datos rotos, vuelve en cero", () => {
+  const running = new Chronometer(clock([0]));
+  running.start();
+  for (const data of [running.toJSON(), null, { state: "stopped", marks: 5, startedAt: 0 }, { state: "x", marks: [1], startedAt: 0 }]) {
+    const c = Chronometer.fromJSON(data);
+    assert.equal(c.state, "idle");
+    assert.equal(c.count, 0);
+  }
 });

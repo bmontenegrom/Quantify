@@ -12,10 +12,13 @@ export class Chronometer {
 
   static fromJSON(data, clockFn) {
     const c = new Chronometer(clockFn);
-    c.#state = data?.state ?? "idle";
-    c.#marks = [...(data?.marks ?? [])];
-    c.#startedAt = data?.startedAt ?? null;
-    c.#stoppedAt = data?.stoppedAt ?? null;
+    const marks = Array.isArray(data?.marks) ? data.marks.filter(Number.isFinite) : [];
+    const startedAt = Number.isFinite(data?.startedAt) ? data.startedAt : null;
+    if (startedAt === null || !marks.length || !["running", "stopped"].includes(data.state)) return c;
+    c.#marks = marks;
+    c.#startedAt = startedAt;
+    c.#state = "stopped";
+    c.#stoppedAt = data.state === "stopped" && Number.isFinite(data.stoppedAt) ? data.stoppedAt : marks.at(-1);
     return c;
   }
 

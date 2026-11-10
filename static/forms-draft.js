@@ -1,7 +1,10 @@
 import { state } from "./state.js";
-import { courseSelect, groupSelect, practiceSelect, studentComment } from "./dom.js";
+import { courseSelect, groupSelect, measurementFields, practiceSelect, studentComment } from "./dom.js";
 import { collectMeasurements, collectFinalResults } from "./forms.js";
 import { Chronometer } from "./chronometer.js";
+import { chronoKeyFor } from "./forms-chrono.js";
+
+const CHRONO_MODES = ["periodo", "consecutivo", "pares", "absoluto"];
 
 function draftKey() {
   const uid = state.user?.id ?? "anon";
@@ -23,13 +26,20 @@ export function saveDraft() {
   }
 }
 
+function renderedChronoKeys() {
+  const rows = [...measurementFields.querySelectorAll('.measurement-row[data-is-chrono="1"]')].map(chronoKeyFor);
+  const helpers = [...measurementFields.querySelectorAll(".chrono-helper")].map((_, i) => `__chrono_helper__${i}`);
+  return [...rows, ...helpers];
+}
+
 function chronoDraft() {
   const out = {};
-  for (const [key, chrono] of state.chronometers) {
-    if (!chrono.count) continue;
+  for (const key of renderedChronoKeys()) {
+    const chrono = state.chronometers.get(key);
+    if (!chrono?.count && !state.chronoModes.has(key)) continue;
     const dbg = state.seriesDebug.get(key);
     out[key] = {
-      ...chrono.toJSON(),
+      ...(chrono ?? new Chronometer()).toJSON(),
       mode: state.chronoModes.get(key) ?? null,
       discarded: dbg ? [...dbg.discarded] : [],
       bins: dbg?.bins ?? 0,
@@ -42,11 +52,15 @@ export function restoreChronoDraft(chrono) {
   state.chronometers.clear();
   state.seriesDebug.clear();
   state.chronoModes.clear();
-  for (const [key, saved] of Object.entries(chrono ?? {})) {
-    state.chronometers.set(key, Chronometer.fromJSON(saved));
-    if (saved.mode) state.chronoModes.set(key, saved.mode);
-    if (saved.discarded?.length || saved.bins) {
-      state.seriesDebug.set(key, { discarded: new Set(saved.discarded ?? []), bins: saved.bins ?? 0 });
+  for (const [key, saved] of Object.entries(chrono && typeof chrono === "object" ? chrono : {})) {
+    if (!saved || typeof saved !== "object") continue;
+    const restored = Chronometer.fromJSON(saved);
+    if (restored.count) state.chronometers.set(key, restored);
+    if (CHRONO_MODES.includes(saved.mode)) state.chronoModes.set(key, saved.mode);
+    const discarded = Array.isArray(saved.discarded) ? saved.discarded.filter(Number.isInteger) : [];
+    const bins = Number.isInteger(saved.bins) && saved.bins > 0 ? saved.bins : 0;
+    if (restored.count && (discarded.length || bins)) {
+      state.seriesDebug.set(key, { discarded: new Set(discarded), bins });
     }
   }
 }

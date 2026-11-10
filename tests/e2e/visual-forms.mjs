@@ -187,6 +187,7 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "p1-estadistica");
   const timedRow = page.locator(`#measurement-fields .measurement-row--chrono[data-quantity-id="${draftedId}"]`).first();
+  await timedRow.locator(".measure-instrument").selectOption("");
   await timedRow.locator(".chrono-start").click();
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(60);
@@ -219,6 +220,33 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   assert((await timedRow.locator(".chrono-mode").inputValue()) === "consecutivo", "el modo del cronómetro debía conservarse");
   assert((await timedRow.locator(".series-point.discarded").count()) === 1, "la lectura descartada debía seguir descartada");
   assert(JSON.stringify(await savedChrono()) === JSON.stringify(before), "volver a abrir no debía cambiar el cronómetro guardado");
+  assert((await timedRow.locator(".measure-instrument").inputValue()) === "", "el borrador sin instrumento debía seguir sin instrumento");
+
+  await page.fill("#student-comment", "");
+  await page.locator("#student-comment").pressSequentially("con espacios");
+  assert((await page.inputValue("#student-comment")) === "con espacios", "la barra espaciadora debía escribir en el comentario");
+  assert(/6 marcas/.test((await timedRow.locator(".chrono-count").textContent()) ?? ""), "escribir no debía marcar el cronómetro");
+
+  await timedRow.locator(".chrono-reset").click();
+  await timedRow.locator(".chrono-start").click();
+  await page.waitForTimeout(60);
+  await timedRow.locator(".chrono-mark").click();
+  await page.waitForTimeout(60);
+  await timedRow.locator(".chrono-mark").click();
+  await page.waitForFunction(
+    (id) =>
+      Object.keys(localStorage).some((k) => {
+        const chrono = k.startsWith("quantify-draft:") ? JSON.parse(localStorage.getItem(k)).chrono ?? {} : {};
+        return Object.entries(chrono).some(([key, c]) => (key === id || key.startsWith(`${id}#`)) && c.state === "running" && c.marks.length === 2);
+      }),
+    draftedId,
+  );
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "p1-estadistica");
+  await timedRow.waitFor({ state: "attached" });
+  assert(/2 marcas/.test((await timedRow.locator(".chrono-count").textContent()) ?? ""), "las marcas en marcha debían volver");
+  assert(await timedRow.locator(".chrono-mark").isDisabled(), "el cronómetro en marcha debía volver detenido");
 
   console.log("Visual forms smoke OK");
 });

@@ -156,11 +156,12 @@ export async function loadSubmissionForm() {
       courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
     ]);
     state.practiceForm = { definition, instruments };
-    restoreChronoDraft(applicableDraft()?.chrono);
+    const draft = applicableDraft();
+    restoreChronoDraft(draft?.chrono);
     renderPartTabs(practiceId);
-    renderMeasurementFields();
+    renderMeasurementFields(draft);
     applyPrefill();
-    applyDraftPrefill();
+    applyDraftPrefill(draft);
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
   } catch (error) {
@@ -259,7 +260,7 @@ function applyPartVisibility() {
   });
 }
 
-export function renderMeasurementFields() {
+export function renderMeasurementFields(draft) {
   if (!state.practiceForm) {
     measurementFields.innerHTML = "";
     return;
@@ -293,7 +294,8 @@ export function renderMeasurementFields() {
   const legendHtml = (q) => quantityNameHtml(q);
   const drafted = state.editPrefill
     ? new Set(state.editPrefill.map((m) => m.quantity_id))
-    : draftedQuantityIds(applicableDraft()?.measurements);
+    : draftedQuantityIds(draft?.measurements);
+  const restoredChronos = new Set([...state.chronometers.keys()].map((key) => key.split("#")[0]));
 
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
@@ -322,8 +324,7 @@ export function renderMeasurementFields() {
         </fieldset>
       `;
     }
-    const restoredChrono = [...state.chronometers.keys()].some((key) => key === q.id || key.startsWith(`${q.id}#`));
-    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && (!drafted.has(q.id) || restoredChrono)) {
+    if (q.repeated && q.input_widget === "cronometro" && !state.editingSubmissionId && (!drafted.has(q.id) || restoredChronos.has(q.id))) {
       const chronoOpts = compatibleInstruments(instruments, q.quantity);
       const defaultInst = chronoOpts.find((i) => /cron[oó]metro/i.test(i.name)) ?? chronoOpts[0];
       const chronoInstrumentOptions = [`<option value="">— sin instrumento —</option>`]
@@ -943,8 +944,7 @@ function applicableDraft() {
   return loadDraft();
 }
 
-function applyDraftPrefill() {
-  const draft = applicableDraft();
+function applyDraftPrefill(draft) {
   if (!draft) return;
   applyMeasurementPrefill(
     draftMeasurementsByQuantity(draft.measurements),
@@ -1024,12 +1024,12 @@ function prefillStandaloneRow(row, byQ) {
 
 function fillReplicaRow(row, e, values) {
   const inst = row.querySelector(".measure-instrument");
-  if (inst && e.instrument_id) {
-    inst.value = e.instrument_id;
+  if (inst) {
+    inst.value = e.instrument_id ?? "";
     populateScaleOptions(row);
   }
   const scale = row.querySelector(".measure-scale");
-  if (scale && e.scale_id) scale.value = e.scale_id;
+  if (scale) scale.value = e.scale_id ?? "";
   const container = row.querySelector(".measure-values");
   if (!container) return;
   const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
@@ -1048,7 +1048,6 @@ submissionForm.addEventListener("submit", (event) => {
 });
 measurementFields.addEventListener("input", scheduleDraftSave);
 measurementFields.addEventListener("change", scheduleDraftSave);
-measurementFields.addEventListener("click", scheduleDraftSave);
 studentComment?.addEventListener("input", scheduleDraftSave);
 courseSelect.addEventListener("change", updateStudentSelectors);
 groupSelect.addEventListener("change", updateTableSelector);

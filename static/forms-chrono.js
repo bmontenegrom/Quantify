@@ -2,6 +2,7 @@ import { state } from "./state.js";
 import { measurementFields } from "./dom.js";
 import { seriesStats, histogram, normalCurve } from "./lib.js";
 import { Chronometer } from "./chronometer.js";
+import { scheduleDraftSave } from "./forms-draft.js";
 
 export function chronoWidgetInnerHtml() {
   return `
@@ -127,16 +128,19 @@ export function wireChronometerWidget(row, quantityId) {
 
   startBtn.addEventListener("click", () => {
     chrono.start();
+    scheduleDraftSave();
     updateButtons();
     if (debugContainer) debugContainer.innerHTML = "";
     rafId = requestAnimationFrame(tick);
   });
   markBtn.addEventListener("click", () => {
     chrono.mark();
+    scheduleDraftSave();
     updatePreview();
   });
   stopBtn.addEventListener("click", () => {
     chrono.stop();
+    scheduleDraftSave();
     stopRaf();
     display.textContent = formatElapsed(chrono.elapsed);
     updateButtons();
@@ -145,6 +149,7 @@ export function wireChronometerWidget(row, quantityId) {
   });
   resetBtn.addEventListener("click", () => {
     chrono.reset();
+    scheduleDraftSave();
     stopRaf();
     display.textContent = formatElapsed(0);
     updateButtons();
@@ -160,11 +165,12 @@ export function wireChronometerWidget(row, quantityId) {
   });
 
   row._chronoKeyHandler = (e) => {
-    if (e.code === "Space" && e.target.tagName !== "BUTTON" && e.target.tagName !== "SELECT") {
+    const typing = e.target.isContentEditable || ["BUTTON", "SELECT", "INPUT", "TEXTAREA"].includes(e.target.tagName);
+    if (e.code === "Space" && !typing && chrono.state === "running") {
       e.preventDefault();
       chrono.mark();
+      scheduleDraftSave();
       updatePreview();
-      row.dispatchEvent(new Event("change", { bubbles: true }));
     }
   };
   document.addEventListener("keydown", row._chronoKeyHandler);
@@ -234,6 +240,7 @@ function renderSeriesDebug(row, quantityId, readings) {
       const i = Number(btn.dataset.index);
       if (dbg.discarded.has(i)) dbg.discarded.delete(i);
       else dbg.discarded.add(i);
+      scheduleDraftSave();
       renderSeriesDebug(row, quantityId, readings);
     });
   });
