@@ -801,7 +801,8 @@ Cada PR de implementación sigue el mismo patrón:
      fluidos-2 quedan en `teclado`. `simbolo` en los símbolos de `SYMBOL_FIRST_QUANTITIES`, también en
      filtros; `nombre_simbolo` en `T_oc`.
    - **Se borran** `PRACTICES_WITHOUT_CHRONO_HELPER`, `SYMBOL_FIRST_QUANTITIES`, la rama de `T_oc` en
-     `quantityNameHtml`, la regex `/cron[oó]metro/` y los imports muertos de `forms.js`.
+     `quantityNameHtml` y los imports muertos de `forms.js`. La regex `/cron[oó]metro/` ya no decide si
+     aparece el cronómetro; queda solo para preseleccionar el instrumento por defecto del widget.
 3. **`feat(practicas)`: comparación medido vs teórico configurable (F6, 3/4).**
    - **`compare_with`** en resultados: el símbolo de una magnitud de la práctica, validado. Renombrar
      la magnitud actualiza la referencia.

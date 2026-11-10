@@ -50,17 +50,13 @@ await withE2E({ port: PORT, dbName: "quantify-simbolo-mostrar.db" }, async ({ lo
   saved = await definition();
   assert(saved.display_symbols.Zy === "Z_y", "la edición debía guardar el símbolo a mostrar");
 
-  step("docente: el cronómetro se rechaza si la magnitud no es de tiempo");
+  step("docente: el cronómetro solo se puede elegir si la magnitud es de tiempo");
   const zy = saved.quantities.find((q) => q.symbol === "Zy");
   await page.click(`[data-edit-quantity][data-qid="${zy.id}"]`);
-  await page.selectOption('#edit-quantity-form [name="input_widget"]', "cronometro");
-  await page.click('#edit-quantity-form button[type="submit"]');
-  await statusIncludes("El cronómetro solo aplica");
+  const stopwatch = page.locator('#edit-quantity-form [name="input_widget"] option[value="cronometro"]');
+  assert(await stopwatch.evaluate((o) => o.disabled), "el cronómetro debía estar deshabilitado sin magnitud tiempo");
 
   step("docente: el rótulo y la entrada se guardan y se precargan al editar");
-  if (!(await page.locator("#edit-quantity-form").count())) {
-    await page.click(`[data-edit-quantity][data-qid="${zy.id}"]`);
-  }
   await page.fill('#edit-quantity-form [name="quantity"]', "tiempo");
   await page.selectOption('#edit-quantity-form [name="label_mode"]', "nombre_simbolo");
   await page.selectOption('#edit-quantity-form [name="input_widget"]', "cronometro");

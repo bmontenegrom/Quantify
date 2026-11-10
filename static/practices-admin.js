@@ -406,6 +406,10 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("[data-edit-quantity-form]").forEach((form) => {
     form.addEventListener("submit", saveEditQuantity);
   });
+  practiceWorkspace.querySelectorAll("#new-quantity-form, [data-edit-quantity-form]").forEach((form) => {
+    syncStopwatchOption(form);
+    form.addEventListener("input", () => syncStopwatchOption(form));
+  });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = btn.dataset.rid;
@@ -1065,9 +1069,10 @@ async function savePracticeRegressionFormulas(event) {
   }, "Fórmulas de ajuste guardadas");
 }
 
-function inheritedStopwatchDropped(form, raw) {
-  const applies = raw.quantity === "tiempo" && !("is_given" in raw);
-  return !applies && form.elements.input_widget.selectedOptions[0]?.defaultSelected === true && raw.input_widget === "cronometro";
+function syncStopwatchOption(form) {
+  const option = form.elements.input_widget.querySelector('option[value="cronometro"]');
+  option.disabled = form.elements.quantity.value !== "tiempo" || form.elements.is_given.checked;
+  if (option.disabled && option.selected) form.elements.input_widget.value = "teclado";
 }
 
 function quantityPayloadFromForm(form) {
@@ -1092,7 +1097,7 @@ function quantityPayloadFromForm(form) {
     slot_count: slots,
     display_symbol: raw.display_symbol,
     label_mode: raw.label_mode,
-    input_widget: inheritedStopwatchDropped(form, raw) ? "teclado" : raw.input_widget,
+    input_widget: raw.input_widget,
     default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
   };
 }
