@@ -48,18 +48,26 @@ export async function apiPost(page, url, body) {
 }
 
 export async function waitForDraft(page, expected) {
-  await page.waitForFunction(
-    ({ quantityId, count, result, value }) =>
-      Object.keys(localStorage)
-        .filter((key) => key.startsWith("quantify-draft:"))
-        .some((key) => {
-          const draft = JSON.parse(localStorage.getItem(key));
-          if (result) return draft.finalResults?.some((r) => r.symbol === result && r.value === value);
-          return draft.measurements?.some((m) => m.quantity_id === quantityId && m.values?.length === count);
-        }),
+  const found = await page.waitForFunction(
+    ({ quantityId, count, result, value, chronoOf, marks, discarded }) => {
+      for (const key of Object.keys(localStorage).filter((k) => k.startsWith("quantify-draft:"))) {
+        const draft = JSON.parse(localStorage.getItem(key));
+        if (chronoOf) {
+          const entry = Object.entries(draft.chrono ?? {}).find(([k]) => k.split("#")[0] === chronoOf)?.[1];
+          const ok = entry && (marks == null || entry.marks?.length === marks) && (discarded == null || entry.discarded?.length === discarded);
+          if (ok) return entry;
+        } else if (result) {
+          if (draft.finalResults?.some((r) => r.symbol === result && r.value === value)) return true;
+        } else if (draft.measurements?.some((m) => m.quantity_id === quantityId && m.values?.length === count)) {
+          return true;
+        }
+      }
+      return null;
+    },
     expected,
     { timeout: 10_000 },
   );
+  return found.jsonValue();
 }
 
 export function symbolText(symbol) {

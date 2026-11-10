@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import { measurementFields } from "./dom.js";
 import { seriesStats, histogram, normalCurve } from "./lib.js";
 import { Chronometer } from "./chronometer.js";
-import { scheduleDraftSave } from "./forms-draft.js";
+import { saveDraft } from "./forms-draft.js";
 
 export function chronoWidgetInnerHtml() {
   return `
@@ -39,9 +39,19 @@ export function chronoHelperSectionHtml() {
 
 export function wireChronoHelpers() {
   measurementFields.querySelectorAll(".chrono-helper").forEach((el, i) => {
-    wireChronometerWidget(el, `__chrono_helper__${i}`);
+    wireChronometerWidget(el, chronoHelperKey(i));
   });
 }
+
+export function chronoHelperKey(index) {
+  return `__chrono_helper__${index}`;
+}
+
+export function chronoQuantityId(key) {
+  return key.split("#")[0];
+}
+
+let spaceChronoKey = null;
 
 export function needsChronoHelper(q) {
   return q.input_widget === "cronometro" && !q.repeated && !q.is_given;
@@ -128,19 +138,20 @@ export function wireChronometerWidget(row, quantityId) {
 
   startBtn.addEventListener("click", () => {
     chrono.start();
-    scheduleDraftSave();
+    spaceChronoKey = quantityId;
+    saveDraft();
     updateButtons();
     if (debugContainer) debugContainer.innerHTML = "";
     rafId = requestAnimationFrame(tick);
   });
   markBtn.addEventListener("click", () => {
     chrono.mark();
-    scheduleDraftSave();
+    saveDraft();
     updatePreview();
   });
   stopBtn.addEventListener("click", () => {
     chrono.stop();
-    scheduleDraftSave();
+    saveDraft();
     stopRaf();
     display.textContent = formatElapsed(chrono.elapsed);
     updateButtons();
@@ -149,7 +160,7 @@ export function wireChronometerWidget(row, quantityId) {
   });
   resetBtn.addEventListener("click", () => {
     chrono.reset();
-    scheduleDraftSave();
+    saveDraft();
     stopRaf();
     display.textContent = formatElapsed(0);
     updateButtons();
@@ -166,21 +177,23 @@ export function wireChronometerWidget(row, quantityId) {
 
   row._chronoKeyHandler = (e) => {
     const typing = e.target.isContentEditable || ["BUTTON", "SELECT", "INPUT", "TEXTAREA"].includes(e.target.tagName);
-    if (e.code === "Space" && !typing && chrono.state === "running") {
+    if (e.code === "Space" && !typing && chrono.state === "running" && spaceChronoKey === quantityId) {
       e.preventDefault();
       chrono.mark();
-      scheduleDraftSave();
+      saveDraft();
       updatePreview();
     }
   };
   document.addEventListener("keydown", row._chronoKeyHandler);
 
-  new MutationObserver(() => {
+  const observer = new MutationObserver(() => {
     if (!document.contains(row)) {
       document.removeEventListener("keydown", row._chronoKeyHandler);
       stopRaf();
+      observer.disconnect();
     }
-  }).observe(measurementFields, { childList: true, subtree: false });
+  });
+  observer.observe(measurementFields, { childList: true, subtree: false });
 }
 
 function renderSeriesDebug(row, quantityId, readings) {
@@ -240,7 +253,7 @@ function renderSeriesDebug(row, quantityId, readings) {
       const i = Number(btn.dataset.index);
       if (dbg.discarded.has(i)) dbg.discarded.delete(i);
       else dbg.discarded.add(i);
-      scheduleDraftSave();
+      saveDraft();
       renderSeriesDebug(row, quantityId, readings);
     });
   });

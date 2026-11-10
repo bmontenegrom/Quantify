@@ -196,21 +196,8 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await timedRow.locator(".chrono-stop").click();
   await timedRow.locator(".chrono-mode").selectOption("consecutivo");
   await timedRow.locator(".series-point-toggle").first().click();
-  const savedChrono = () =>
-    page.evaluate((id) => {
-      const key = Object.keys(localStorage).find((k) => k.startsWith("quantify-draft:"));
-      const chrono = key ? JSON.parse(localStorage.getItem(key)).chrono ?? {} : {};
-      return Object.entries(chrono).find(([k]) => k === id || k.startsWith(`${id}#`))?.[1] ?? null;
-    }, draftedId);
-  await page.waitForFunction(
-    (id) =>
-      Object.keys(localStorage).some((k) => {
-        const chrono = k.startsWith("quantify-draft:") ? JSON.parse(localStorage.getItem(k)).chrono ?? {} : {};
-        return Object.entries(chrono).some(([key, c]) => (key === id || key.startsWith(`${id}#`)) && c.discarded.length === 1);
-      }),
-    draftedId,
-  );
-  const before = await savedChrono();
+  const savedChrono = () => waitForDraft(page, { chronoOf: draftedId });
+  const before = await waitForDraft(page, { chronoOf: draftedId, marks: 6, discarded: 1 });
   await page.reload();
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "p1-estadistica");
@@ -222,25 +209,18 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   assert(JSON.stringify(await savedChrono()) === JSON.stringify(before), "volver a abrir no debía cambiar el cronómetro guardado");
   assert((await timedRow.locator(".measure-instrument").inputValue()) === "", "el borrador sin instrumento debía seguir sin instrumento");
 
+  await timedRow.locator(".chrono-reset").click();
+  await timedRow.locator(".chrono-start").click();
   await page.fill("#student-comment", "");
   await page.locator("#student-comment").pressSequentially("con espacios");
   assert((await page.inputValue("#student-comment")) === "con espacios", "la barra espaciadora debía escribir en el comentario");
-  assert(/6 marcas/.test((await timedRow.locator(".chrono-count").textContent()) ?? ""), "escribir no debía marcar el cronómetro");
+  assert(/^0 marcas/.test((await timedRow.locator(".chrono-count").textContent()) ?? ""), "escribir no debía marcar el cronómetro en marcha");
 
-  await timedRow.locator(".chrono-reset").click();
-  await timedRow.locator(".chrono-start").click();
   await page.waitForTimeout(60);
   await timedRow.locator(".chrono-mark").click();
   await page.waitForTimeout(60);
   await timedRow.locator(".chrono-mark").click();
-  await page.waitForFunction(
-    (id) =>
-      Object.keys(localStorage).some((k) => {
-        const chrono = k.startsWith("quantify-draft:") ? JSON.parse(localStorage.getItem(k)).chrono ?? {} : {};
-        return Object.entries(chrono).some(([key, c]) => (key === id || key.startsWith(`${id}#`)) && c.state === "running" && c.marks.length === 2);
-      }),
-    draftedId,
-  );
+  await waitForDraft(page, { chronoOf: draftedId, marks: 2 });
   await page.reload();
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "p1-estadistica");

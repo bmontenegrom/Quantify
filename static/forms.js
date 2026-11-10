@@ -18,7 +18,7 @@ import {
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
-  wireChronometerWidget, chronoWidgetInnerHtml,
+  wireChronometerWidget, chronoWidgetInnerHtml, chronoQuantityId,
 } from "./forms-chrono.js";
 import {
   renderSeriesTable, collectSeriesPointResults, seriesRowHtml, seriesRowComplete, wireSeriesRemove,
@@ -295,7 +295,7 @@ export function renderMeasurementFields(draft) {
   const drafted = state.editPrefill
     ? new Set(state.editPrefill.map((m) => m.quantity_id))
     : draftedQuantityIds(draft?.measurements);
-  const restoredChronos = new Set([...state.chronometers.keys()].map((key) => key.split("#")[0]));
+  const restoredChronos = new Set([...state.chronometers.keys()].map(chronoQuantityId));
 
   const measurementRowHtml = (q, opIndex) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
@@ -997,7 +997,7 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
     const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
     );
-    blocks.forEach((row, i) => fillReplicaRow(row, e, e.operatorGroups[i] ?? []));
+    blocks.forEach((row, i) => fillReplicaRow(row, e.operatorGroups[i] ?? []));
   });
 
   const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
@@ -1019,10 +1019,6 @@ function prefillStandaloneRow(row, byQ) {
     if (u && e.value_u != null) u.value = e.value_u;
     return;
   }
-  fillReplicaRow(row, e, e.values);
-}
-
-function fillReplicaRow(row, e, values) {
   const inst = row.querySelector(".measure-instrument");
   if (inst) {
     inst.value = e.instrument_id ?? "";
@@ -1030,6 +1026,10 @@ function fillReplicaRow(row, e, values) {
   }
   const scale = row.querySelector(".measure-scale");
   if (scale) scale.value = e.scale_id ?? "";
+  fillReplicaRow(row, e.values);
+}
+
+function fillReplicaRow(row, values) {
   const container = row.querySelector(".measure-values");
   if (!container) return;
   const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";

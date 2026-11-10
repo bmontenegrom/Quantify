@@ -180,7 +180,7 @@ test("Chronometer: uno guardado en marcha vuelve detenido en su última marca", 
 test("Chronometer: en marcha sin marcas, o con datos rotos, vuelve en cero", () => {
   const running = new Chronometer(clock([0]));
   running.start();
-  for (const data of [running.toJSON(), null, { state: "stopped", marks: 5, startedAt: 0 }, { state: "x", marks: [1], startedAt: 0 }]) {
+  for (const data of [running.toJSON(), null, { marks: 5, startedAt: 0 }, { marks: [1] }, { marks: ["a"], startedAt: 0 }]) {
     const c = Chronometer.fromJSON(data);
     assert.equal(c.state, "idle");
     assert.equal(c.count, 0);
