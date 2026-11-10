@@ -75,6 +75,14 @@ await withE2E({ port: PORT, dbName: "quantify-simbolo-mostrar.db" }, async ({ lo
   assert(shownLabel === "nombre_simbolo" && shownWidget === "cronometro", "el formulario debía precargar lo guardado");
   await page.click("#edit-quantity-form [data-cancel-quantity]");
 
+  step("docente: si la magnitud deja de ser tiempo, el cronómetro que tenía pasa a teclado");
+  await page.click(`[data-edit-quantity][data-qid="${zy.id}"]`);
+  await page.fill('#edit-quantity-form [name="quantity"]', "longitud");
+  await page.click('#edit-quantity-form button[type="submit"]');
+  await page.waitForSelector("#edit-quantity-form", { state: "detached" });
+  const untimed = (await definition()).quantities.find((q) => q.symbol === "Zy");
+  assert(untimed.input_widget === "teclado", `entrada tras dejar de ser tiempo: ${untimed.input_widget}`);
+
   step("docente: un símbolo llamado como un miembro de Object no precarga basura");
   const named = await apiPost(page, `/api/practices/${PRACTICE_ID}/quantities`, {
     symbol: "constructor",

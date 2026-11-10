@@ -1065,6 +1065,11 @@ async function savePracticeRegressionFormulas(event) {
   }, "Fórmulas de ajuste guardadas");
 }
 
+function inheritedStopwatchDropped(form, raw) {
+  const applies = raw.quantity === "tiempo" && !("is_given" in raw);
+  return !applies && form.elements.input_widget.selectedOptions[0]?.defaultSelected === true && raw.input_widget === "cronometro";
+}
+
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
   const repeated = "repeated" in raw;
@@ -1087,7 +1092,7 @@ function quantityPayloadFromForm(form) {
     slot_count: slots,
     display_symbol: raw.display_symbol,
     label_mode: raw.label_mode,
-    input_widget: raw.quantity === "tiempo" && !("is_given" in raw) ? raw.input_widget : "teclado",
+    input_widget: inheritedStopwatchDropped(form, raw) ? "teclado" : raw.input_widget,
     default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
   };
 }
