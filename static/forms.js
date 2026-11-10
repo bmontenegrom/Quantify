@@ -315,7 +315,7 @@ export function renderMeasurementFields(draft) {
       </div>`;
   };
 
-  const measurementRowHtml = (q, opIndex) => {
+  const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
     if (q.is_given) {
       const uField = !hasUncertainty(q)
@@ -342,7 +342,7 @@ export function renderMeasurementFields(draft) {
         </fieldset>
       `;
     }
-    if (rendersChrono(q, opIndex)) {
+    if (chrono) {
       return `
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
@@ -371,15 +371,14 @@ export function renderMeasurementFields(draft) {
 
   const quantityRowHtml = (q) => {
     if (!isPerOperator(q)) return measurementRowHtml(q, null);
-    const blocks = Array.from(
-      { length: operatorCount },
-      (_, i) =>
-        `<div class="operator-block"><h5 class="operator-label">Operador ${i + 1}</h5>${measurementRowHtml(q, i)}</div>`
-    ).join("");
+    const chrono = Array.from({ length: operatorCount }, (_, i) => rendersChrono(q, i));
+    const blocks = chrono
+      .map((isChrono, i) => `<div class="operator-block"><h5 class="operator-label">Operador ${i + 1}</h5>${measurementRowHtml(q, i, isChrono)}</div>`)
+      .join("");
     return `
       <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
         <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por operador</span></h4>
-        ${instrumentSelectorsHtml(q, Array.from({ length: operatorCount }, (_, i) => rendersChrono(q, i)).some(Boolean))}
+        ${instrumentSelectorsHtml(q, chrono.some(Boolean))}
         ${blocks}
       </div>
     `;
