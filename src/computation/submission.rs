@@ -293,13 +293,9 @@ pub fn validate_student_results(
 ///     id: "r".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
 ///     unit: "m/s2".into(), formula: "L".into(), position: 0, tolerance: None,
 ///     is_final: true, has_uncertainty: true,
+///     ..Default::default()
 /// };
-/// let def = PracticeDefinition {
-///     practice_id: "p".into(), status: "publicada".into(), analysis_kind: None,
-///     x_formula: None, y_formula: None, quantities: vec![], results: vec![g], curves: vec![],
-///     operator_count: None, intermediates: vec![], point_results: vec![], aggregates: vec![],
-///     parts: vec![], sections: vec![], current_version: None,
-/// };
+/// let def = PracticeDefinition { results: vec![g], ..Default::default() };
 /// let result = |symbol: &str| StudentResultInput { symbol: symbol.into(), value: 9.8, u_expanded: None };
 /// assert!(check_student_result_symbols(&def, &[result("g")]).is_ok());
 /// assert!(check_student_result_symbols(&def, &[result("h")]).is_err());

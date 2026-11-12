@@ -5,6 +5,7 @@ import {
   analysisSections,
   escapeHtml,
   symbolHtml,
+  setDisplaySymbols,
   inlineMathHtml,
   unitHtml,
   cssEscape,
@@ -29,9 +30,10 @@ import {
   scatterPlot,
   compareResults,
   compareMeasuredVsTheoretical,
-  pointPower,
-  flowRate,
+  comparisonPairs,
+  compareOptionGroups,
   draftMeasurementsByQuantity,
+  draftedQuantityIds,
   SI_PREFIXES,
   prefixFactor,
   seriesStats,
@@ -100,7 +102,6 @@ test("escapeHtml escapa todos los caracteres especiales", () => {
 test("symbolHtml escapa HTML y convierte dígitos pegados a letras en subíndices", () => {
   assert.equal(symbolHtml("R1"), "R<sub>1</sub>");
   assert.equal(symbolHtml("C12"), "C<sub>12</sub>");
-  assert.equal(symbolHtml("tmedio"), "t<sub>1/2</sub>");
   assert.equal(symbolHtml("T_oc"), "T<sub>OC</sub>");
   assert.equal(symbolHtml("R_cap"), "R<sub>cap</sub>");
   assert.equal(symbolHtml("E_medio"), "E<sub>medio</sub>");
@@ -131,35 +132,32 @@ test("symbolHtml no anida subíndices y inlineMathHtml usa la misma regla", () =
   assert.equal(inlineMathHtml("Tiempo T_oc"), "Tiempo T<sub>OC</sub>");
 });
 
-test("symbolHtml oculta el sufijo de parte de p2-cc (_s/_p/_c y su _t teórico)", () => {
-  assert.equal(symbolHtml("Vg_s"), "V<sub>G</sub>");
-  assert.equal(symbolHtml("Vg_p"), "V<sub>G</sub>");
-  assert.equal(symbolHtml("Vg_c"), "V<sub>G</sub>");
-  assert.equal(symbolHtml("RA_s"), "R<sub>A</sub>");
-  assert.equal(symbolHtml("VR1_s"), symbolHtml("VR1"));
-  assert.equal(symbolHtml("VR2_p"), symbolHtml("VR2"));
-  assert.equal(symbolHtml("VR1_s_t"), "VR<sub>1</sub>");
-  assert.equal(symbolHtml("VR3_p_t"), "VR<sub>3</sub>");
-  assert.equal(symbolHtml("I_s"), "I");
-  assert.equal(symbolHtml("I_p"), "I");
-  assert.equal(symbolHtml("h_max"), "h<sub>max</sub>");
-});
-
-test("symbolHtml renderiza los símbolos de CA (RLC): voltajes pp, teo/exp y phi", () => {
-  assert.equal(symbolHtml("f_res"), "f<sub>res</sub>");
-  assert.equal(symbolHtml("f_res_exp"), "f<sub>res,exp</sub>");
-  assert.equal(symbolHtml("VRpp"), "V<sub>R,PP</sub>");
-  assert.equal(symbolHtml("VCpp"), "V<sub>C,PP</sub>");
-  assert.equal(symbolHtml("VLpp"), "V<sub>L,PP</sub>");
-  assert.equal(symbolHtml("VR_teo"), "V<sub>R,teo</sub>");
-  assert.equal(symbolHtml("VR_exp"), "V<sub>R,exp</sub>");
-  assert.equal(symbolHtml("I_teo"), "I<sub>teo</sub>");
-  assert.equal(symbolHtml("a_R"), "a<sub>R</sub>");
-  assert.equal(symbolHtml("b_R"), "b<sub>R</sub>");
-  assert.equal(symbolHtml("phiR_teo"), "φ<sub>R,teo</sub>");
-  assert.equal(symbolHtml("phiR_exp"), "φ<sub>R,exp</sub>");
-  assert.equal(symbolHtml("phiC_teo"), "φ<sub>C,teo</sub>");
-  assert.equal(symbolHtml("phiL_exp"), "φ<sub>L,exp</sub>");
+test("symbolHtml usa el símbolo a mostrar de la definición cargada", () => {
+  setDisplaySymbols({
+    tmedio: "t_1/2",
+    Vg_s: "V_G",
+    VR1_s_t: "VR1",
+    I_p: "I",
+    VRpp: "V_R_PP",
+    VR_teo: "V_R_teo",
+    phiR_teo: "phi_R_teo",
+    trampa: "<b>",
+  });
+  try {
+    assert.equal(symbolHtml("tmedio"), "t<sub>1/2</sub>");
+    assert.equal(symbolHtml("Vg_s"), "V<sub>G</sub>");
+    assert.equal(symbolHtml("VR1_s_t"), "VR<sub>1</sub>");
+    assert.equal(symbolHtml("I_p"), "I");
+    assert.equal(symbolHtml("VRpp"), "V<sub>R,PP</sub>");
+    assert.equal(symbolHtml("VR_teo"), "V<sub>R,teo</sub>");
+    assert.equal(symbolHtml("phiR_teo"), "φ<sub>R,teo</sub>");
+    assert.equal(symbolHtml("trampa"), "&lt;b&gt;");
+    assert.equal(symbolHtml("f_res_exp"), "f<sub>res,exp</sub>");
+  } finally {
+    setDisplaySymbols(null);
+  }
+  assert.equal(symbolHtml("tmedio"), "tmedio");
+  assert.equal(symbolHtml("Vg_s"), "Vg<sub>S</sub>");
 });
 
 test("inlineMathHtml y unitHtml formatean subíndices y superíndices visibles", () => {
@@ -447,19 +445,6 @@ test("compareResults: verdict pass/fail según tolerancia", () => {
   assert.equal(fail.verdict, "fail");
 });
 
-test("pointPower calcula P = I²·R", () => {
-  assert.equal(pointPower(100, 0.5), 25);
-  assert.equal(pointPower(0, 3), 0);
-  assert.equal(pointPower(200, 0), 0);
-  assert.equal(pointPower(100, -0.5), 25);
-});
-
-test("flowRate calcula Q = V/t", () => {
-  assert.equal(flowRate(1e-3, 10), 1e-4);
-  assert.equal(flowRate(0, 10), 0);
-  assert.equal(flowRate(1e-3, 0), Infinity);
-});
-
 test("draftMeasurementsByQuantity: columna de un valor por punto", () => {
   const map = draftMeasurementsByQuantity([
     { quantity_id: "q1", instrument_id: null, scale_id: null, values: [1, 2, 3], given_u: null },
@@ -522,12 +507,24 @@ test("draftMeasurementsByQuantity: fila suelta medida con réplicas e instrument
   assert.equal(e.value_u, null);
 });
 
+test("draftedQuantityIds: solo las magnitudes con lecturas", () => {
+  const ids = draftedQuantityIds([
+    { quantity_id: "con", values: [1] },
+    { quantity_id: "vacia", values: [] },
+    { quantity_id: "sin" },
+    { quantity_id: "operadores", values: [], operator_replicas: [[1.2], []] },
+    { quantity_id: "operadores_vacios", values: [], operator_replicas: [[], []] },
+  ]);
+  assert.deepEqual([...ids], ["con", "operadores"]);
+  assert.equal(draftedQuantityIds(undefined).size, 0);
+});
+
 test("draftMeasurementsByQuantity: lista vacía o ausente da un Map vacío", () => {
   assert.equal(draftMeasurementsByQuantity([]).size, 0);
   assert.equal(draftMeasurementsByQuantity(undefined).size, 0);
 });
 
-test("compareMeasuredVsTheoretical empareja X con X_t y calcula deltas", () => {
+test("compareMeasuredVsTheoretical empareja cada resultado con su compare_with y calcula deltas", () => {
   const quantities = [
     { symbol: "VR1_s", name: "Voltaje en R1", unit: "V", result: { mean: 1.5, u_expanded: 0.1 } },
     { symbol: "Vg_s", name: "Fuente", unit: "V", result: { mean: 8, u_expanded: 0.2 } },
@@ -536,7 +533,7 @@ test("compareMeasuredVsTheoretical empareja X con X_t y calcula deltas", () => {
     { symbol: "VR1_s_t", name: "Teorica R1", unit: "V", value: 1.6, u_expanded: 0.08 },
     { symbol: "I_s", name: "Corriente", unit: "A", value: 0.015, u_expanded: 0.001 },
   ];
-  const rows = compareMeasuredVsTheoretical(quantities, derived);
+  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["VR1_s_t", "VR1_s"]]));
   assert.equal(rows.length, 1);
   const [row] = rows;
   assert.equal(row.symbol, "VR1_s");
@@ -554,11 +551,37 @@ test("compareMeasuredVsTheoretical: deltas null con teórico 0 o U faltante", ()
     { symbol: "X", name: "X", unit: "u", result: { mean: 2, u_expanded: null } },
   ];
   const derived = [{ symbol: "X_t", name: "X teorica", unit: "u", value: 0, u_expanded: 0.1 }];
-  const [row] = compareMeasuredVsTheoretical(quantities, derived);
+  const [row] = compareMeasuredVsTheoretical(quantities, derived, new Map([["X_t", "X"]]));
   assert.ok(Math.abs(row.dValue - 2) < 1e-9);
   assert.equal(row.dValuePct, null);
   assert.equal(row.dU, null);
   assert.equal(row.dUPct, null);
+});
+
+test("compareMeasuredVsTheoretical ya no empareja por el sufijo _t sino por los pares", () => {
+  const quantities = [
+    { symbol: "X", name: "X", unit: "u", result: { mean: 2, u_expanded: 0.1 } },
+    { symbol: "Y", name: "Y", unit: "u", result: { mean: 3, u_expanded: 0.1 } },
+  ];
+  const derived = [
+    { symbol: "X_t", name: "X teórica", unit: "u", value: 2.1, u_expanded: 0.1 },
+    { symbol: "Y_calc", name: "Y calculada", unit: "u", value: 3.2, u_expanded: 0.1 },
+  ];
+  assert.deepEqual(compareMeasuredVsTheoretical(quantities, derived).map((r) => r.symbol), []);
+  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["Y_calc", "Y"]]));
+  assert.deepEqual(rows.map((r) => [r.symbol, r.theoreticalSymbol]), [["Y", "Y_calc"]]);
+});
+
+test("comparisonPairs arma los pares desde los resultados con compare_with", () => {
+  const definition = {
+    results: [
+      { symbol: "VR1_s_t", compare_with: "VR1_s" },
+      { symbol: "I_s", compare_with: "" },
+      { symbol: "P_max_t" },
+    ],
+  };
+  assert.deepEqual([...comparisonPairs(definition)], [["VR1_s_t", "VR1_s"]]);
+  assert.equal(comparisonPairs(null).size, 0);
 });
 
 test("SI_PREFIXES es un array con entradas para 'm', 'k' y ''", () => {
@@ -753,4 +776,39 @@ test("analysisSections separa lo compartido de cada parte, o devuelve el anális
   assert.equal(sections.length, 2);
   assert.equal(sections[0].analysis, withParts);
   assert.deepEqual(sections[1], { title: "Serie", analysis: serie });
+});
+
+test("symbolHtml dibuja los subíndices genéricos sin símbolo a mostrar", () => {
+  setDisplaySymbols({});
+  assert.equal(symbolHtml("h_max"), "h<sub>max</sub>");
+  assert.equal(symbolHtml("f_res"), "f<sub>res</sub>");
+  assert.equal(symbolHtml("I_teo"), "I<sub>teo</sub>");
+  assert.equal(symbolHtml("a_R"), "a<sub>R</sub>");
+  assert.equal(symbolHtml("b_R"), "b<sub>R</sub>");
+});
+
+test("compareOptionGroups usa las opciones del servidor y no pierde la comparación guardada", () => {
+  const definition = {
+    parts: [{ id: "serie", title: "Serie" }, { id: "paralelo", title: "Paralelo" }],
+    quantities: [{ symbol: "R1" }, { symbol: "VR1_s" }, { symbol: "VR1_p" }],
+    compare_options: {
+      results: { VR1_s_t: ["R1", "VR1_s"] },
+      parts: { serie: ["R1", "VR1_s"], paralelo: ["R1", "VR1_p"] },
+      shared: ["R1"],
+    },
+  };
+  assert.deepEqual(compareOptionGroups(definition, { result: "VR1_s_t" }, "VR1_s"), [[null, ["R1", "VR1_s"]]]);
+  assert.deepEqual(compareOptionGroups(definition, { section: { part_id: "paralelo" } }), [[null, ["R1", "VR1_p"]]]);
+  assert.deepEqual(compareOptionGroups(definition, { section: { part_id: null } }), [[null, ["R1"]]]);
+  assert.deepEqual(compareOptionGroups(definition), [[null, ["R1"]], ["Serie", ["VR1_s"]], ["Paralelo", ["VR1_p"]]]);
+  assert.deepEqual(compareOptionGroups(definition, { result: "VR1_s_t" }, "VR1_p"), [
+    ["Guardada (fuera de alcance)", ["VR1_p"]],
+    [null, ["R1", "VR1_s"]],
+  ]);
+  assert.deepEqual(compareOptionGroups({ quantities: [{ symbol: "x" }] }), [[null, ["x"]]]);
+  assert.deepEqual(
+    compareOptionGroups(definition, { section: { part_id: "paralelo" } }, "VR1_s"),
+    [[null, ["R1", "VR1_p"]]],
+    "en un mensurando nuevo una elección fuera de alcance no se presenta como guardada",
+  );
 });

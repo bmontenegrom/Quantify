@@ -77,3 +77,10 @@ export APP_SECURE_COOKIES="true"        # la cookie solo viaja por HTTPS
   durante 15 minutos. El contador se resetea con un login exitoso o al expirar el bloqueo.
 - **Cookies**: `HttpOnly` + `SameSite=Lax` siempre; `Secure` cuando `APP_SECURE_COOKIES=true`.
 - **Contraseñas**: hash Argon2.
+- **Cuenta inicial**: en una base sin usuarios se crea solo `admin@quantify.local`, con la
+  contraseña de `SEED_ADMIN_PASSWORD`. Es obligatoria en el primer arranque: sin ella (o con solo
+  espacios, o con menos de 8 caracteres) el server no arranca. Solo con `SEED_DEMO_DATA=true` se usa `admin123` si falta. El resto de las cuentas se crean desde la UI. Si dejás la tabla de
+  usuarios vacía, el próximo arranque vuelve a crear el admin.
+- **Datos de prueba**: `SEED_DEMO_DATA=true` agrega en una base nueva `docente@quantify.local`,
+  `estudiante@quantify.local` (con `SEED_TEACHER_PASSWORD` y `SEED_STUDENT_PASSWORD`), la inscripción
+  del estudiante y entregas de prueba. Viene apagada: no la definas en producción.

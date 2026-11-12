@@ -1,4 +1,6 @@
 
+export const CHRONO_MODES = ["periodo", "consecutivo", "pares", "absoluto"];
+
 export class Chronometer {
   #state = "idle";
   #marks = [];
@@ -8,6 +10,23 @@ export class Chronometer {
 
   constructor(clockFn = () => Date.now()) {
     this.#clockFn = clockFn;
+  }
+
+  static fromJSON(data, clockFn) {
+    const c = new Chronometer(clockFn);
+    const marks = Array.isArray(data?.marks) ? data.marks.filter(Number.isFinite) : [];
+    const startedAt = Number.isFinite(data?.startedAt) ? data.startedAt : null;
+    if (startedAt === null || !marks.length) return c;
+    c.#marks = marks;
+    c.#startedAt = startedAt;
+    c.#state = "stopped";
+    c.#stoppedAt = Number.isFinite(data.stoppedAt) ? data.stoppedAt : marks.at(-1);
+    return c;
+  }
+
+  toJSON() {
+    const stoppedAt = this.#state === "stopped" ? this.#stoppedAt : this.#marks.at(-1) ?? null;
+    return { marks: [...this.#marks], startedAt: this.#startedAt, stoppedAt };
   }
 
   get state() {

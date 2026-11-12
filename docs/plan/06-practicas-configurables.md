@@ -318,13 +318,16 @@ expandidas enormes. Objetivo:
 | Propiedad | Dónde | Reemplaza |
 |-----------|-------|-----------|
 | `display_symbol` (texto con `_` para subíndice, como hoy `symbolHtml`, o vacío = derivado del símbolo) | toda definición con símbolo | J5 (`symbolHtml` especiales, `CC_PART_SUFFIX`) |
-| `label_mode`: `nombre` \| `simbolo` | magnitud | J4 (`SYMBOL_FIRST_QUANTITIES`, `T_oc`) |
-| `input_widget`: `auto` \| `cronometro` \| `ranura` \| `ninguno` | magnitud | J3, J7 (`PRACTICES_WITHOUT_CHRONO_HELPER`, detección por `quantity === "tiempo"`) |
-| `default_instrument_id` | magnitud | J7 (regex `/cron[oó]metro/`) |
-| `compare_with` (id de magnitud medida) | resultado | J6 (convención `X` ↔ `X_t`) |
-| `show_live` | intermedia / por punto | J2 (`SERIES_LIVE_COLUMNS` por id); el cálculo en vivo usa `analyze-preview` |
-| `help_text` | toda definición, parte y sección | textos de ayuda hoy fijos en la técnica |
-| `section_id` | magnitud, resultado | J1 (`PRACTICE_SECTIONS`) |
+| `label_mode`: `nombre` \| `simbolo` \| `nombre_simbolo` | magnitud | J4 (`SYMBOL_FIRST_QUANTITIES`, `T_oc`) |
+| `input_widget`: `teclado` \| `cronometro` | magnitud | J3, J7 (`PRACTICES_WITHOUT_CHRONO_HELPER`, detección por `quantity === "tiempo"`) |
+| `compare_with` (símbolo de la magnitud medida) | resultado | J6 (convención `X` ↔ `X_t`) |
+| `show_live` | intermedia | J2 (`SERIES_LIVE_COLUMNS` por id); el cálculo en vivo lo hace el backend por fila |
+| `help_text` (pasa a F7) | toda definición, parte y sección | textos de ayuda hoy fijos en la técnica |
+| `section_id` (ya existe) | magnitud, resultado | J1 (`PRACTICE_SECTIONS`) |
+
+Descartadas en F6: `input_widget: ranura` (ya lo cubre `slot_count`) y `default_instrument_id` (los
+instrumentos son de cada curso y las prácticas son globales: el cronómetro preselecciona el primer
+instrumento de tiempo del curso).
 
 Secciones: `practice_sections(id, practice_id, part_id NULL, title, position)`. Una sección con
 `part_id = NULL` se muestra en todas las pestañas (reemplaza "sección sin `id`").
@@ -718,22 +721,130 @@ borrador. Si una cambia números de una práctica publicada, tiene que crear la 
 vez (`applied_migrations`, `2026-11-definiciones-sembradas`) y los backfills de `schema.rs` también:
 después el servidor toma lo que está en la base. Un cambio futuro a una práctica sembrada ya no se
 aplica editando un `seed_*`: tiene que ser una migración de una sola vez. Esto resuelve R3 y R4 de la
-sección 2.5. Siguen corriendo en cada arranque `seed_practices`, `seed_users`, `seed_academic`,
-`seed_instruments` y `seed_submissions`: quedan para revisar.
+sección 2.5. En una base sin usuarios, `seed_initial_accounts` crea en una transacción el admin y, solo con
+`SEED_DEMO_DATA=true` (dev, E2E), el docente y el estudiante de prueba, la inscripción y las entregas de prueba. Producción
+arranca con el admin solo (`SEED_ADMIN_PASSWORD` es obligatoria salvo con `SEED_DEMO_DATA=true`) y reiniciar no
+recrea nada. Siguen corriendo en cada arranque
+`seed_practices`, `seed_course` y `seed_instruments`, que se retiran con las siembras en F8.
 
-### F6 — Sin casos especiales en el frontend ni en las siembras
+### F6 — Sin casos especiales en el frontend ni en las siembras ✅ HECHA
+
+**Estado (2026-11-12)**: hecho en #115, #116, #119 y la PR de columnas en vivo. Cambios respecto
+de lo planeado:
+- **La columna en vivo calcula exactamente lo mismo que el ajuste**: el promedio que se ve es el
+  valor que usa el análisis. Un intermedio que usa otro anterior recibe su promedio, como en el
+  ajuste, así que muestra un solo valor.
+- **Intermedios "sobre los promedios"** (`on_means`, estructural). Por defecto un intermedio se
+  evalúa réplica por réplica y después se promedia: promedio(f(x_k)). Con `on_means` se evalúa una
+  sola vez sobre las magnitudes ya promediadas del punto: f(promedio(x)). Para fórmulas no lineales
+  no da lo mismo.
+- **Viscosidad conserva su eje y en `dx/t`** y gana `v = dx/t` sobre los promedios, que da
+  exactamente el valor del eje: dx/promedio(t), como pide la técnica. La migración agrega `v` al
+  borrador y al JSON de las versiones sin crear la versión 2, y los golden no cambian, porque los
+  intermedios no salen en el análisis.
+- **Una columna por intermedio.** La celda muestra cada réplica y el promedio (antes fluidos-1
+  tenía tres columnas: Q_1, Q_2 y Q_medio).
+- **La columna en vivo se llena cuando la fila está completa**, porque se mandan las mismas
+  mediciones que a la vista previa. Antes, en fluidos-1, Q aparecía aunque faltara h.
+- `POST /practices/{id}/live-values` resuelve la definición igual que `analyze-preview` (borrador,
+  entrega, versión o publicada) y no necesita dos puntos. Se borró `static/constants.js`.
 
 1. Propiedades de presentación (3.8) en schema, API y admin.
 2. Migración de una sola vez que traduce cada caso especial a datos: J2 (`show_live`), J3/J7
-   (`input_widget`, `default_instrument_id`), J4 (`label_mode`), J5 (`display_symbol`), J6
-   (`compare_with`).
+   (`input_widget`), J4 (`label_mode`), J5 (`display_symbol`), J6 (`compare_with`).
 3. Borrar `SERIES_LIVE_COLUMNS`, `PRACTICES_WITHOUT_CHRONO_HELPER`, `SYMBOL_FIRST_QUANTITIES`,
    `CC_PART_SUFFIX`/`CC_BASE_SYMBOLS` y los casos especiales de `symbolHtml`, y la rama por id de
-   `updateSeriesLive` (el cálculo en vivo pasa a `analyze-preview`).
-4. R3: los backfills por id de `schema.rs` se convierten en migraciones de una sola vez.
+   `updateSeriesLive` (el cálculo en vivo pasa al backend).
+4. ✅ R3: los backfills por id de `schema.rs` se convierten en migraciones de una sola vez. Ya está
+   hecho: `backfill_result_flags` corre una sola vez.
 
 **Aceptación**: `grep` de ids de práctica en `static/` y en `src/` (fuera de siembras/migraciones)
 devuelve vacío; capturas de `visual-forms.mjs` y `visual-teacher.mjs` sin cambios visibles.
+
+**Plan de PRs**
+
+Lo que se relevó en el código (2026-11-05):
+- **J2–J7 siguen como los describe la sección 2.5.** En Rust no quedan ids de práctica fuera de
+  siembras, migraciones y tests: todo lo que falta está en `static/`.
+- **`help_text` no reemplaza ningún caso especial**: pasa a F7. `section_id` ya existe.
+- **Las vistas de alumnos y de entregas viejas leen el JSON de su versión**
+  (`practice_versions.definition_json`), no el borrador. Si una migración solo toca el borrador, al
+  borrar el JS se pierde la presentación en las versiones publicadas.
+- **`run_seeds` solo corre en bases nuevas.** Una migración agregada ahí nunca corre en una base
+  existente.
+- **`analyze-preview` no sirve para las columnas en vivo**: necesita al menos dos filas completas y
+  no devuelve los valores de los intermedios por punto.
+- **No hay comparación de capturas contra una referencia**: `tests/e2e/artifacts/` está ignorado y
+  los E2E solo comprueban el DOM.
+
+Decisiones:
+- **Todas las propiedades nuevas son de presentación**: van a `COSMETIC_KEYS`
+  (`src/practices/changes.rs`). Cambiarlas actualiza la versión vigente sin crear otra.
+- **Cada migración actualiza el borrador y el JSON de las versiones**, para que la práctica no quede
+  con "Cambios sin publicar". Va en `seed_definitions` (`src/practices/seed.rs`), después del bloque
+  de `2026-11-definiciones-sembradas` y antes de `ensure_versions`, en una transacción, y solo toca
+  filas en estado sembrado.
+- **Columnas en vivo desde los intermedios.** El motor ya evalúa cada intermedio réplica por réplica
+  y después promedia (`point_intermediate`, `src/computation/engines.rs`). Se expone ese cálculo:
+  fluidos-1 sigue mostrando Q_1, Q_2 y Q_medio, ahora desde el intermedio `Q = V/t`.
+- **Viscosidad gana el intermedio `v = dx/t`** y el eje y pasa a usarlo. Es un cambio estructural:
+  viscosidad queda en la versión 2, con los mismos números.
+- **Cronómetro**: el widget no cambia. Cuándo aparece lo decide `input_widget` de cada magnitud en vez
+  de la regla fija. El instrumento preseleccionado es el primero de tiempo del curso.
+- **`compare_with` guarda el símbolo de la magnitud, no su id**, porque duplicar una práctica
+  regenera los ids.
+
+Cada PR de implementación sigue el mismo patrón:
+- columna nueva con `add_column_if_missing` y campo con `#[serde(default)]`, para que los JSON de las
+  versiones viejas sigan leyéndose;
+- validación en `practice_admin.rs` y campo en el formulario de `practices-admin.js`;
+- los literales de los structs que haya que tocar pasan a `..Default::default()`;
+- test de la migración que borra su fila de `applied_migrations` y la vuelve a correr;
+- golden idénticos, aserciones nuevas en los E2E y capturas de antes y después comparadas a ojo.
+
+1. **`feat(practicas)`: símbolo a mostrar configurable (F6, 1/4).**
+   - **`display_symbol`** en magnitudes, resultados, intermedios, resultados por punto y agregados.
+     Vacío = se deriva del símbolo con la regla genérica de `symbolHtml`.
+   - **Migración**: traduce los especiales de `symbolHtml` (`tmedio`, `T_oc`, `Vg`, `RA`, `*pp`,
+     `*_teo`/`*_exp`, `phi*`) y los sufijos `_s`/`_p`/`_c` de P2-CC.
+   - **Frontend**: al cargar una definición se arma un mapa símbolo → `display_symbol` que usa
+     `symbolHtml`, así no cambian sus ~35 llamados. Se borran los especiales, `CC_PART_SUFFIX` y
+     `CC_BASE_SYMBOLS` de `static/lib.js`.
+   - **Tests**: los de `symbolHtml` en `tests/lib.test.js` pasan a cubrir el mapa.
+2. **`feat(practicas)`: rótulo y entrada de cada magnitud (F6, 2/4).**
+   - **`label_mode`**: `nombre` \| `simbolo` \| `nombre_simbolo` (este último es el caso de `T_oc`).
+   - **`input_widget`**: `teclado` \| `cronometro`. Con `cronometro`, una magnitud con varias lecturas
+     muestra el widget y una con una sola, el ayudante. En series, el ayudante aparece si alguna
+     magnitud lo tiene.
+   - **Migración**: traduce lo que se ve hoy, sin ids de práctica. `cronometro` en las magnitudes de
+     tiempo que no son dato dado y tienen réplicas o están en una práctica que no es de serie: P3 y
+     fluidos-2 quedan en `teclado`. `simbolo` en los símbolos de `SYMBOL_FIRST_QUANTITIES`, también en
+     filtros; `nombre_simbolo` en `T_oc`.
+   - **Se borran** `PRACTICES_WITHOUT_CHRONO_HELPER`, `SYMBOL_FIRST_QUANTITIES`, la rama de `T_oc` en
+     `quantityNameHtml` y los imports muertos de `forms.js`. La regex `/cron[oó]metro/` ya no decide si
+     aparece el cronómetro; queda solo para preseleccionar el instrumento por defecto del widget.
+3. **`feat(practicas)`: comparación medido vs teórico configurable (F6, 3/4).**
+   - **`compare_with`** en resultados: el símbolo de una magnitud de la práctica, validado. Renombrar
+     la magnitud actualiza la referencia; quitarla (retirarla o borrarla) la deja vacía.
+   - **Migración**: traduce la regla vieja sin ids de práctica (`X_t` con magnitud `X` en la misma
+     práctica): hoy solo los `VR*_t` de P2-CC, que apuntan a su `VR*`. `RP_max_t` y `P_max_t` no
+     tienen magnitud homónima y siguen sin comparación. La siembra los marca explícitamente.
+   - **Frontend**: `compareMeasuredVsTheoretical` empareja por `compare_with` en vez del sufijo `_t`.
+     Los pares salen de la definición (la de la versión de la entrega), no del análisis guardado, así
+     las entregas viejas también se comparan.
+4. **`feat(practicas)`: columnas en vivo desde la definición (F6, 4/4).**
+   - **`show_live`** en intermedios.
+   - **`POST /practices/{id}/live-values`**, con los mismos permisos que `analyze-preview`. Evalúa
+     cada fila por separado, sin ajuste, así que anda desde la primera fila. Devuelve, por fila, el
+     valor de cada intermedio con `show_live` en cada réplica y su promedio; una fila incompleta
+     vuelve vacía.
+   - **Migración**: `show_live` en `P` (P2-CC) y `Q` (fluidos-1). En viscosidad agrega `v = dx/t`, pasa
+     el eje y a `v`, la marca y publica la versión 2.
+   - **Frontend**: `updateSeriesLive` llama al endpoint con debounce. Se borran `SERIES_LIVE_COLUMNS`,
+     las ramas por id, `fluidosCaudalLiveValue`, `viscosidadVelocityLiveValue`, y `pointPower` y
+     `flowRate` si quedan sin uso.
+   - **E2E**: la potencia sigue dando 25 y fluidos-1 muestra Q_1, Q_2 y Q_medio.
+   - **Doc**: F6 queda marcada como hecha.
 
 ### F7 — Editor completo en la UI
 
@@ -748,6 +859,7 @@ Sobre la ficha actual (bloques apilados de `practices-admin.js`, #69):
 4. **Vista previa "ver como alumno"**: el formulario real del alumno sobre el borrador, con datos de
    prueba y resultados vía `analyze-preview`; botón "rellenar con datos de ejemplo".
 5. Ordenar por arrastre (o subir/bajar) partes, secciones, magnitudes y resultados.
+6. **`help_text`** (3.8) en la definición, las partes y las secciones, con su campo en el asistente.
 
 **Aceptación**: crear desde la UI, sin ayuda, una réplica funcional de Fluidos I (regresión con
 réplicas por punto, intermedia, derivada por punto) y de Hidrostática (dos partes, compartidos);

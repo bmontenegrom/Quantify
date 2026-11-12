@@ -21,6 +21,16 @@ async function openPractice(page, practiceId) {
   await page.waitForSelector("#measurement-fields .measurement-row, #measurement-fields .series-table");
 }
 
+async function liveText(row, expected) {
+  const cell = row.locator(".series-live-value").first();
+  for (let i = 0; i < 50; i += 1) {
+    const text = (await cell.innerText()).replace(/,/g, ".");
+    if (text.includes(expected)) return text;
+    await row.page().waitForTimeout(200);
+  }
+  return (await cell.innerText()).replace(/,/g, ".");
+}
+
 async function assertInputContrast(page) {
   const handle = await page.waitForFunction(() => {
     const el = document.querySelector("#measurement-fields input");
@@ -41,6 +51,13 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await openPractice(page, "p2-cc");
   await assertInputContrast(page);
   await page.screenshot({ path: join(ARTIFACTS, "visual-cc-dark.png"), fullPage: true });
+  const fieldsHtml = await page.locator("#measurement-fields").innerHTML();
+  assert(fieldsHtml.includes("V<sub>G</sub>"), "Vg_s debía mostrarse como V_G (símbolo a mostrar)");
+  assert(!fieldsHtml.includes("Vg<sub>S</sub>"), "Vg_s no debía mostrar el sufijo de la parte");
+  assert(
+    fieldsHtml.includes('<legend>V<sub>G</sub> <span class="submission-meta">'),
+    "Vg_s debía rotularse primero por su símbolo",
+  );
 
   const partTabs = page.locator("#practice-part-tabs .part-tab");
   assert((await partTabs.count()) === 3, "p2-cc debe tener 3 tabs de partes");
@@ -66,8 +83,8 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   const firstRow = page.locator("#measurement-fields .series-row").first();
   await firstRow.locator(".series-value").nth(0).fill("100");
   await firstRow.locator(".series-value").nth(1).fill("0.5");
-  const liveText = await firstRow.locator(".series-live-value").innerText();
-  assert(liveText.replace(",", ".").includes("25"), `celda P debía mostrar 25, mostró "${liveText}"`);
+  const power = await liveText(firstRow, "25");
+  assert(power.includes("25"), `celda P debía mostrar 25, mostró "${power}"`);
   await page.screenshot({ path: join(ARTIFACTS, "visual-cc-potencia.png"), fullPage: true });
 
   for (const [sym, inputsU] of [
@@ -88,6 +105,12 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
 
   const row = page.locator("#measurement-fields .series-row").first();
   for (const input of await row.locator(".series-value, .series-replica").all()) await input.fill("2");
+  await row.locator(".series-replica").last().fill("4");
+  const flow = await liveText(row, "0.75");
+  assert(
+    flow.split("\n").length === 3 && flow.includes("0.5") && flow.includes("0.75"),
+    `Q debía mostrar Q_1, Q_2 y su promedio 0.75, mostró "${flow}"`,
+  );
   await row.locator(".series-point-result").first().fill("1234");
   await waitForDraft(page, { result: "Re#0", value: 1234 });
   await page.reload();
@@ -121,6 +144,105 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await openPractice(page, "fluidos-2");
   await assertInputContrast(page);
   await page.screenshot({ path: join(ARTIFACTS, "visual-fluidos2-dark.png"), fullPage: true });
+
+  const helper = page.locator("#measurement-fields .chrono-helper");
+  const fieldLegend = (text) => page.locator("#measurement-fields legend", { hasText: text }).first();
+
+  await openPractice(page, "viscosidad");
+  await helper.waitFor({ state: "attached" });
+
+  await openPractice(page, "p3-relajacion");
+  await fieldLegend("Periodo de la onda cuadrada").waitFor({ state: "attached" });
+  assert((await helper.count()) === 0, "P3 no debía mostrar el ayudante de cronómetro");
+  const p3Html = await page.locator("#measurement-fields").innerHTML();
+  assert(p3Html.includes(" T<sub>OC</sub></legend>"), "T_oc debía rotularse con su nombre y su símbolo");
+
+  await openPractice(page, "fluidos-1");
+  await helper.waitFor({ state: "attached" });
+
+  await openPractice(page, "fluidos-2");
+  await fieldLegend("Altura inicial").waitFor({ state: "attached" });
+  assert((await helper.count()) === 0, "fluidos-2 no debía mostrar el ayudante de cronómetro");
+
+  await openPractice(page, "p1-estadistica");
+  const chronoRow = page.locator('#measurement-fields .measurement-row--chrono').first();
+  await chronoRow.waitFor({ state: "attached" });
+
+  const draftedId = await chronoRow.getAttribute("data-quantity-id");
+  await page.fill("#student-comment", "borrador");
+  await page.waitForFunction(() =>
+    Object.keys(localStorage).some(
+      (key) => key.startsWith("quantify-draft:") && JSON.parse(localStorage.getItem(key)).comment === "borrador",
+    ),
+  );
+  await page.evaluate((id) => {
+    const key = Object.keys(localStorage).find(
+      (k) => k.startsWith("quantify-draft:") && JSON.parse(localStorage.getItem(k)).comment === "borrador",
+    );
+    const draft = JSON.parse(localStorage.getItem(key));
+    draft.measurements = [{ quantity_id: id, instrument_id: null, scale_id: null, values: [1.5, 1.6], given_u: null }];
+    localStorage.setItem(key, JSON.stringify(draft));
+  }, draftedId);
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "p1-estadistica");
+  const draftedRow = page.locator(`#measurement-fields .measurement-row[data-quantity-id="${draftedId}"]`);
+  await draftedRow.locator(".measure-value").first().waitFor({ state: "attached" });
+  assert(
+    !(await draftedRow.evaluate((row) => row.classList.contains("measurement-row--chrono"))),
+    "con lecturas en el borrador la fila debía quedar con teclado",
+  );
+  const restoredReadings = await draftedRow.locator(".measure-value").evaluateAll((inputs) => inputs.map((i) => i.value));
+  assert(
+    restoredReadings.join() === "1.5,1.6",
+    `el borrador debía conservar las lecturas (vi: ${restoredReadings.join()})`,
+  );
+
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("quantify-draft:")).forEach((k) => localStorage.removeItem(k)));
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "p1-estadistica");
+  const timedRow = page.locator(`#measurement-fields .measurement-row--chrono[data-quantity-id="${draftedId}"]`).first();
+  await timedRow.locator(".measure-instrument").selectOption("");
+  await timedRow.locator(".chrono-start").click();
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(60);
+    await timedRow.locator(".chrono-mark").click();
+  }
+  await timedRow.locator(".chrono-stop").click();
+  await timedRow.locator(".chrono-mode").selectOption("consecutivo");
+  await timedRow.locator(".series-point-toggle").first().click();
+  const savedChrono = () => waitForDraft(page, { chronoOf: draftedId });
+  const before = await waitForDraft(page, { chronoOf: draftedId, marks: 6, discarded: 1 });
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "p1-estadistica");
+  await timedRow.waitFor({ state: "attached" });
+  const countText = await timedRow.locator(".chrono-count").textContent();
+  assert(/6 marcas → 5 lecturas/.test(countText ?? ""), `el cronómetro debía volver con sus marcas (vi: "${countText}")`);
+  assert((await timedRow.locator(".chrono-mode").inputValue()) === "consecutivo", "el modo del cronómetro debía conservarse");
+  assert((await timedRow.locator(".series-point.discarded").count()) === 1, "la lectura descartada debía seguir descartada");
+  assert(JSON.stringify(await savedChrono()) === JSON.stringify(before), "volver a abrir no debía cambiar el cronómetro guardado");
+  assert((await timedRow.locator(".measure-instrument").inputValue()) === "", "el borrador sin instrumento debía seguir sin instrumento");
+
+  await timedRow.locator(".chrono-reset").click();
+  await timedRow.locator(".chrono-start").click();
+  await page.fill("#student-comment", "");
+  await page.locator("#student-comment").pressSequentially("con espacios");
+  assert((await page.inputValue("#student-comment")) === "con espacios", "la barra espaciadora debía escribir en el comentario");
+  assert(/^0 marcas/.test((await timedRow.locator(".chrono-count").textContent()) ?? ""), "escribir no debía marcar el cronómetro en marcha");
+
+  await page.waitForTimeout(60);
+  await timedRow.locator(".chrono-mark").click();
+  await page.waitForTimeout(60);
+  await timedRow.locator(".chrono-mark").click();
+  await waitForDraft(page, { chronoOf: draftedId, marks: 2 });
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await openPractice(page, "p1-estadistica");
+  await timedRow.waitFor({ state: "attached" });
+  assert(/2 marcas/.test((await timedRow.locator(".chrono-count").textContent()) ?? ""), "las marcas en marcha debían volver");
+  assert(await timedRow.locator(".chrono-mark").isDisabled(), "el cronómetro en marcha debía volver detenido");
 
   console.log("Visual forms smoke OK");
 });

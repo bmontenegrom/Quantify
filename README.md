@@ -30,6 +30,7 @@ Requisitos:
 Ejecutar:
 
 ```powershell
+$env:SEED_DEMO_DATA="true"
 cargo run
 ```
 
@@ -43,7 +44,9 @@ Abrir:
 http://localhost:8080
 ```
 
-Usuarios iniciales de desarrollo:
+Usuarios iniciales de desarrollo. En una base sin usuarios se crea siempre el admin; el docente, el
+estudiante, su inscripción y las entregas de prueba se crean solo con `SEED_DEMO_DATA=true`. Sin
+esa variable, el primer arranque exige `SEED_ADMIN_PASSWORD`:
 
 ```text
 admin@quantify.local       / admin123
@@ -57,6 +60,7 @@ Variables útiles:
 $env:APP_BIND_ADDR="127.0.0.1:8080"
 $env:DATABASE_URL="sqlite:data/quantify.db"
 $env:UPLOAD_DIR="data/uploads"
+$env:SEED_DEMO_DATA="true"            # cuentas y entregas de prueba
 $env:SEED_ADMIN_PASSWORD="cambiar-esto"
 $env:SEED_TEACHER_PASSWORD="cambiar-esto"
 $env:SEED_STUDENT_PASSWORD="cambiar-esto"
@@ -70,7 +74,7 @@ Para **empezar de cero** (regenerar los datos sembrados), detené el server y co
 ```
 
 El script borra la base (`data\quantify.db*`) y los uploads (`data\uploads`), respetando
-`DATABASE_URL`/`UPLOAD_DIR` si están definidas; el próximo `cargo run` vuelve a sembrar todo.
+`DATABASE_URL`/`UPLOAD_DIR` si están definidas; el próximo `cargo run` vuelve a sembrar todo (los datos de prueba, con `SEED_DEMO_DATA=true`).
 
 ## Cómo se carga una entrega
 
@@ -167,7 +171,7 @@ Potencia:  RP_max_t = RA_c + R2·R3 / (R2 + R3)                  (Rth)
 ```
 
 `P_max_e`, `P_max_t`, `RP_max_e` y `RP_max_t` se entregan y muestran **sin incertidumbre**
-(`RESULTS_WITHOUT_U` en `static/constants.js`). Los alias de extremos (`{S}_max`,
+(el mensurando tiene `has_uncertainty = 0`). Los alias de extremos (`{S}_max`,
 `{T}_at_{S}_max`) los inyecta el camino `curva` del motor con U = 0; como `check_formula` de la
 UI admin no los conoce, las fórmulas de `P_max_e`/`RP_max_e` no son editables desde la pestaña
 Prácticas.
@@ -348,9 +352,3 @@ Los datos persistentes quedan en `./data`. Ver `deploy/ubuntu.md` para más deta
 - **Entregas**: `GET /submissions`, `POST /submissions` (CSV heredado),
   `POST /submissions/form` (formulario), `GET /submissions/{id}`,
   `POST /submissions/{id}/review`, `POST /submissions/{id}/student-results`
-
-## Documentación adicional
-
-El plan de fases y la referencia de Física 103 están en `docs/plan/`.
-</content>
-</invoke>

@@ -1,13 +1,35 @@
 import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
-import { escapeHtml, symbolHtml, inlineMathHtml, unitHtml, analysisKindLabel, formatDate } from "./lib.js";
+import {
+  escapeHtml,
+  symbolHtml,
+  setDisplaySymbols,
+  inlineMathHtml,
+  unitHtml,
+  analysisKindLabel,
+  formatDate,
+  compareOptionGroups,
+} from "./lib.js";
 import { selectView } from "./navigation.js";
 
 const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
 
 function adminSymbolHtml(symbol) {
   return `<strong>${symbolHtml(symbol)}</strong> <code title="Así se escribe en las fórmulas">${escapeHtml(symbol)}</code>`;
+}
+
+function displaySymbolFieldHtml(item) {
+  const symbols = state.practiceDefinition?.display_symbols ?? {};
+  const shown = item && Object.hasOwn(symbols, item.symbol) ? symbols[item.symbol] : "";
+  return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label>`;
+}
+
+function selectFieldHtml(label, name, options, current) {
+  const items = options
+    .map(([value, text]) => `<option value="${value}"${value === current ? " selected" : ""}>${text}</option>`)
+    .join("");
+  return `<label>${label} <select name="${name}">${items}</select></label>`;
 }
 
 function isEditing(kind, id) {
@@ -51,7 +73,7 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "(Re_max + Re_min) / 2",
     ...statusStrings("Mensurando agregado", false),
     confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
-    hasFinal: true,
+    flags: [{ field: "is_final", column: "Final", label: "Resultado final (comparable, sin incertidumbre)" }],
   },
   intermediate: {
     kind: "intermediate",
@@ -65,6 +87,10 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "V / t",
     ...statusStrings("Intermedia", true),
     confirmDelete: "¿Eliminar esta magnitud intermedia? Esta accion no se puede deshacer.",
+    flags: [
+      { field: "on_means", column: "Sobre promedios", label: "Calcular sobre los promedios del punto (en vez de por réplica y después promediar)" },
+      { field: "show_live", column: "En vivo", label: "Mostrar en vivo en la tabla del alumno" },
+    ],
   },
 };
 
@@ -77,13 +103,14 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${item ? `<input name="${kind.idParam}" type="hidden" value="${escapeHtml(item.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="${kind.symbolPlaceholder}" /></label>
+      ${displaySymbolFieldHtml(item)}
       <label>Nombre <input name="name" value="${v("name")}" placeholder="${kind.namePlaceholder}" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" /></label>
       ${
-        kind.hasFinal
-          ? `<label class="checkbox-field"><input name="is_final" type="checkbox" ${item?.is_final ? "checked" : ""} /> Resultado final (comparable, sin incertidumbre)</label>`
-          : ""
+        (kind.flags ?? [])
+          .map((f) => `<label class="checkbox-field"><input name="${f.field}" type="checkbox" ${item?.[f.field] ? "checked" : ""} /> ${f.label}</label>`)
+          .join("")
       }
       <div class="detail-actions">
         <button type="submit">${item ? "Guardar" : "Agregar"}</button>
@@ -96,10 +123,11 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
 function renderSymbolFormulaList(kind, def, practiceId) {
   const items = kind.listOf(def);
   if (items.length === 0) return `<p class="submission-meta">${kind.emptyText}</p>`;
-  const colspan = kind.hasFinal ? 4 : 3;
+  const flags = kind.flags ?? [];
+  const colspan = 3 + flags.length;
   const rows = items.flatMap((item) => {
     const editing = isEditing(kind.kind, item.id);
-    const finalCell = kind.hasFinal ? `<td>${item.is_final ? "Sí" : "—"}</td>` : "";
+    const finalCell = flags.map((f) => `<td>${item[f.field] ? "Sí" : "—"}</td>`).join("");
     const baseRow = `
       <tr>
         <td class="directory-primary">${adminSymbolHtml(item.symbol)} <span class="submission-meta">${inlineMathHtml(item.name)}${item.unit ? ` (${unitHtml(item.unit)})` : " (adimensional)"}</span></td>
@@ -118,7 +146,7 @@ function renderSymbolFormulaList(kind, def, practiceId) {
   return `
     <div class="data-table-wrap">
       <table class="data-table">
-        <thead><tr><th>Símbolo</th><th>Fórmula</th>${kind.hasFinal ? "<th>Final</th>" : ""}<th>Acciones</th></tr></thead>
+        <thead><tr><th>Símbolo</th><th>Fórmula</th>${flags.map((f) => `<th>${f.column}</th>`).join("")}<th>Acciones</th></tr></thead>
         <tbody>${rows.join("")}</tbody>
       </table>
     </div>
@@ -132,8 +160,9 @@ function symbolFormulaPayloadFromForm(form, kind) {
     name: raw.name || "",
     unit: raw.unit || "",
     formula: raw.formula,
+    display_symbol: raw.display_symbol,
   };
-  if (kind.hasFinal) payload.is_final = raw.is_final === "on";
+  for (const f of kind.flags ?? []) payload[f.field] = raw[f.field] === "on";
   return payload;
 }
 
@@ -202,6 +231,7 @@ export function renderPracticesPage() {
   }
 
   const def = state.practiceDefinition;
+  setDisplaySymbols(def?.display_symbols);
   if (!def) {
     practiceWorkspace.innerHTML = `
       <div class="workspace-head">
@@ -310,6 +340,11 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("#practice-operators-form")?.addEventListener("submit", savePracticeOperatorCount);
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
+  practiceWorkspace.querySelector('#new-result-form [name="section_id"]')?.addEventListener("change", (e) => {
+    const section = def?.sections?.find((s) => s.id === e.target.value) ?? null;
+    const select = e.target.form.elements.compare_with;
+    select.innerHTML = compareOptionsHtml(compareOptionGroups(def, { section }, select.value), select.value);
+  });
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
 
   for (const kind of Object.values(SYMBOL_FORMULA_KINDS)) {
@@ -381,6 +416,10 @@ export function renderPracticesPage() {
   });
   practiceWorkspace.querySelectorAll("[data-edit-quantity-form]").forEach((form) => {
     form.addEventListener("submit", saveEditQuantity);
+  });
+  practiceWorkspace.querySelectorAll("#new-quantity-form, [data-edit-quantity-form]").forEach((form) => {
+    syncStopwatchOption(form);
+    form.addEventListener("input", () => syncStopwatchOption(form));
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -726,7 +765,7 @@ function renderAggregatesSection(practice, def) {
 function renderIntermediatesSection(practice, def) {
   return symbolFormulaSection("intermediate", practice, def, {
     title: "Magnitudes intermedias por punto",
-    help: "Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio). El símbolo queda disponible en las fórmulas de eje.",
+    help: "Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio), o, con \"Calcular sobre los promedios\", una sola vez con las magnitudes ya promediadas (p. ej. v = dx/t con el tiempo medio). Una intermedia que usa otra anterior recibe su promedio. El símbolo queda disponible en las fórmulas de eje.",
     addLabel: "Nueva intermedia",
   });
 }
@@ -810,6 +849,7 @@ function renderQuantityForm(qty, practiceId) {
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="l" /></label>
+      ${displaySymbolFieldHtml(qty)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Longitud del cordón" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm (vacío = adimensional)" /></label>
       <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" /></label>
@@ -842,6 +882,15 @@ function renderQuantityForm(qty, practiceId) {
       <label>Ranuras del instrumento (el valor es un entero de 1 a N, en la unidad de arriba)
         <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" />
       </label>
+      ${selectFieldHtml("Rótulo en el formulario", "label_mode", [
+        ["nombre", "Nombre"],
+        ["simbolo", "Símbolo"],
+        ["nombre_simbolo", "Nombre y símbolo"],
+      ], qty?.label_mode)}
+      ${selectFieldHtml("Entrada del valor", "input_widget", [
+        ["teclado", "Teclado"],
+        ["cronometro", "Cronómetro (solo magnitud física tiempo)"],
+      ], qty?.input_widget)}
       <div class="detail-actions">
         <button type="submit">${qty ? "Guardar" : "Agregar"}</button>
         ${qty ? `<button type="button" data-cancel-quantity>Cancelar</button>` : ""}
@@ -897,6 +946,17 @@ function newResultSectionHtml(def) {
   return `<label>Sección <select name="section_id">${options}</select></label>`;
 }
 
+function compareOptionsHtml(groups, current) {
+  const option = (value, text = value) =>
+    `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(text)}</option>`;
+  return option("", "— sin comparación —") + groups
+    .map(([label, symbols]) => {
+      const items = symbols.map((s) => option(s)).join("");
+      return label == null ? items : `<optgroup label="${escapeHtml(label)}">${items}</optgroup>`;
+    })
+    .join("");
+}
+
 function renderResultForm(res, practiceId, def = null) {
   const v = (f) => res ? escapeHtml(String(res[f] ?? "")) : "";
   const formId = res ? "edit-result-form" : "new-result-form";
@@ -906,6 +966,7 @@ function renderResultForm(res, practiceId, def = null) {
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${res ? `<input name="rid" type="hidden" value="${escapeHtml(res.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="Q" /></label>
+      ${displaySymbolFieldHtml(res)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" /></label>
@@ -923,6 +984,9 @@ function renderResultForm(res, practiceId, def = null) {
       <label>
         <input name="has_uncertainty" type="checkbox" ${res ? (res.has_uncertainty ? "checked" : "") : "checked"} />
         Tiene incertidumbre (desmarcá para mostrarlo siempre sin ±U)
+      </label>
+      <label>Comparar con (medido vs teórico)
+        <select name="compare_with">${compareOptionsHtml(compareOptionGroups(def, { result: res?.symbol }, res?.compare_with ?? ""), res?.compare_with ?? "")}</select>
       </label>
       <div class="detail-actions">
         <button type="submit">${res ? "Guardar" : "Agregar"}</button>
@@ -956,7 +1020,7 @@ function renderResultsList(def, practiceId) {
         </td>
       </tr>`;
     const editRow = editing
-      ? `<tr><td colspan="8" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
+      ? `<tr><td colspan="8" class="scale-edit-cell">${renderResultForm(r, practiceId, def)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
@@ -1030,6 +1094,12 @@ async function savePracticeRegressionFormulas(event) {
   }, "Fórmulas de ajuste guardadas");
 }
 
+function syncStopwatchOption(form) {
+  const option = form.elements.input_widget.querySelector('option[value="cronometro"]');
+  option.disabled = form.elements.quantity.value !== "tiempo" || form.elements.is_given.checked;
+  if (option.disabled && option.selected) form.elements.input_widget.value = "teclado";
+}
+
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
   const repeated = "repeated" in raw;
@@ -1050,6 +1120,9 @@ function quantityPayloadFromForm(form) {
     has_uncertainty: "has_uncertainty" in raw,
     optional: "optional" in raw,
     slot_count: slots,
+    display_symbol: raw.display_symbol,
+    label_mode: raw.label_mode,
+    input_widget: raw.input_widget,
     default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
   };
 }
@@ -1318,6 +1391,8 @@ async function saveNewResult(event) {
         tolerance: parseTolerance(raw.tolerance ?? ""),
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
+        display_symbol: raw.display_symbol,
+        compare_with: raw.compare_with ?? "",
         section_id: raw.section_id || null,
       });
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
@@ -1343,6 +1418,8 @@ async function saveEditResult(event) {
         tolerance: parseTolerance(raw.tolerance ?? ""),
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
+        display_symbol: raw.display_symbol,
+        compare_with: raw.compare_with ?? "",
       });
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },

@@ -178,6 +178,7 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/practices/{id}/status", post(set_practice_status))
         .route("/practices/{id}/definition", get(practice_definition))
         .route("/practices/{id}/analyze-preview", post(analyze_preview))
+        .route("/practices/{id}/live-values", post(live_values))
         .route(
             "/practices/{id}/analysis-kind",
             post(set_practice_analysis_kind),
@@ -316,7 +317,7 @@ fn not_blank(value: &str, msg: &str) -> Result<(), AppError> {
 }
 
 fn validate_password(password: &str) -> Result<(), AppError> {
-    if password.len() < 8 {
+    if password.len() < db::MIN_PASSWORD_LEN {
         return Err(AppError::bad_request(
             "la contrasena debe tener al menos 8 caracteres",
         ));

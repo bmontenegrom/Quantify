@@ -151,3 +151,38 @@ test("Chronometer: readings vacío sin marcas ni inicio", () => {
   assert.deepEqual(c.readings("pares"), []);
   assert.deepEqual(c.readings("periodo"), []);
 });
+
+test("Chronometer: toJSON/fromJSON conserva las lecturas en todos los modos", () => {
+  const c = new Chronometer(clock([0, 1000, 2100, 3000, 4200, 5000, 6300]));
+  c.start();
+  for (let i = 0; i < 5; i++) c.mark();
+  c.stop();
+  const restored = Chronometer.fromJSON(JSON.parse(JSON.stringify(c)));
+  assert.equal(restored.state, "stopped");
+  assert.equal(restored.elapsed, c.elapsed);
+  for (const mode of ["absoluto", "consecutivo", "pares", "periodo"]) {
+    assert.deepEqual(restored.readings(mode), c.readings(mode), mode);
+  }
+});
+
+test("Chronometer: uno guardado en marcha vuelve detenido en su última marca", () => {
+  const c = new Chronometer(clock([0, 1000, 2000]));
+  c.start();
+  c.mark();
+  c.mark();
+  const restored = Chronometer.fromJSON(c.toJSON(), clock([600000]));
+  assert.equal(restored.state, "stopped");
+  assert.equal(restored.elapsed, 2);
+  restored.mark();
+  assert.deepEqual(restored.readings("consecutivo"), [1]);
+});
+
+test("Chronometer: en marcha sin marcas, o con datos rotos, vuelve en cero", () => {
+  const running = new Chronometer(clock([0]));
+  running.start();
+  for (const data of [running.toJSON(), null, { marks: 5, startedAt: 0 }, { marks: [1] }, { marks: ["a"], startedAt: 0 }]) {
+    const c = Chronometer.fromJSON(data);
+    assert.equal(c.state, "idle");
+    assert.equal(c.count, 0);
+  }
+});

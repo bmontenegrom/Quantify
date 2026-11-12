@@ -540,6 +540,44 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "TEXT REFERENCES practice_versions(id)",
     )
     .await?;
+    for table in DISPLAY_SYMBOL_TABLES {
+        add_column_if_missing(pool, table, "display_symbol", "TEXT NOT NULL DEFAULT ''").await?;
+    }
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "label_mode",
+        "TEXT NOT NULL DEFAULT 'nombre'",
+    )
+    .await?;
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "input_widget",
+        "TEXT NOT NULL DEFAULT 'teclado'",
+    )
+    .await?;
+    add_column_if_missing(
+        pool,
+        "practice_results",
+        "compare_with",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
+    add_column_if_missing(
+        pool,
+        "practice_intermediates",
+        "show_live",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+    add_column_if_missing(
+        pool,
+        "practice_intermediates",
+        "on_means",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
     for table in ["practice_quantities", "practice_results"] {
         add_column_if_missing(
             pool,
@@ -756,6 +794,14 @@ pub(crate) async fn mark_migration_applied(pool: &SqlitePool, name: &str) -> any
         .await?;
     Ok(())
 }
+
+pub(crate) const DISPLAY_SYMBOL_TABLES: [&str; 5] = [
+    "practice_quantities",
+    "practice_results",
+    "practice_intermediates",
+    "practice_point_results",
+    "practice_aggregates",
+];
 
 async fn add_column_if_missing(
     pool: &SqlitePool,
