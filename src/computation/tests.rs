@@ -3211,7 +3211,7 @@ fn live_values_show_each_replica_and_their_mean_from_a_single_point() {
 }
 
 #[test]
-fn chained_intermediates_use_each_replica_in_the_fit() {
+fn chained_intermediates_use_the_mean_of_the_earlier_one_in_the_fit() {
     let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
     let intermediate = |symbol: &str, formula: &str| PracticeIntermediate {
         symbol: symbol.into(),
@@ -3227,6 +3227,6 @@ fn chained_intermediates_use_each_replica_in_the_fit() {
     let a = reg(&quantities, &intermediates, &[], "Qsq", "py", &measurements).unwrap();
     assert_eq!(
         a.regression.unwrap().points,
-        vec![(62.5, 100.0), (250.0, 200.0)]
+        vec![(56.25, 100.0), (225.0, 200.0)]
     );
 }

@@ -441,9 +441,8 @@ pub(crate) fn build_points(
             .collect();
         let mut intermediate_values: HashMap<&str, Vec<f64>> = HashMap::new();
         for (it, tree) in &compiled_intermediates {
-            let replicas = point_intermediate(tree, &inputs, &intermediate_values, i);
-            let value = mean(&replicas);
-            intermediate_values.insert(it.symbol.as_str(), replicas);
+            let value = mean(&point_intermediate(tree, &inputs, &intermediate_values, i));
+            intermediate_values.insert(it.symbol.as_str(), vec![value]);
             context.insert(it.symbol.clone(), value);
         }
 
