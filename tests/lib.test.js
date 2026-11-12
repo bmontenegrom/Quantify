@@ -31,7 +31,7 @@ import {
   compareResults,
   compareMeasuredVsTheoretical,
   comparisonPairs,
-  comparableQuantities,
+  compareOptionGroups,
   pointPower,
   flowRate,
   draftMeasurementsByQuantity,
@@ -802,17 +802,23 @@ test("symbolHtml dibuja los subíndices genéricos sin símbolo a mostrar", () =
   assert.equal(symbolHtml("b_R"), "b<sub>R</sub>");
 });
 
-test("comparableQuantities ofrece las magnitudes compartidas y las de la parte del resultado", () => {
+test("compareOptionGroups usa las opciones del servidor y no pierde la comparación guardada", () => {
   const definition = {
-    parts: [{ id: "serie" }, { id: "paralelo" }],
-    sections: [
-      { id: "s", part_id: "serie", quantities: ["VR1_s"] },
-      { id: "p", part_id: "paralelo", quantities: ["VR1_p"] },
-      { id: "c", part_id: null, quantities: ["R1"] },
-    ],
-    quantities: [{ symbol: "VR1_s" }, { symbol: "VR1_p" }, { symbol: "R1" }, { symbol: "Vg" }],
+    parts: [{ id: "serie", title: "Serie" }, { id: "paralelo", title: "Paralelo" }],
+    quantities: [{ symbol: "R1" }, { symbol: "VR1_s" }, { symbol: "VR1_p" }],
+    compare_options: {
+      results: { VR1_s_t: ["R1", "VR1_s"] },
+      parts: { serie: ["R1", "VR1_s"], paralelo: ["R1", "VR1_p"] },
+      shared: ["R1"],
+    },
   };
-  assert.deepEqual(comparableQuantities(definition, "serie"), ["VR1_s", "R1", "Vg"]);
-  assert.deepEqual(comparableQuantities(definition), ["R1", "Vg"]);
-  assert.deepEqual(comparableQuantities({ quantities: [{ symbol: "x" }] }), ["x"]);
+  assert.deepEqual(compareOptionGroups(definition, { result: "VR1_s_t" }, "VR1_s"), [[null, ["R1", "VR1_s"]]]);
+  assert.deepEqual(compareOptionGroups(definition, { section: { part_id: "paralelo" } }), [[null, ["R1", "VR1_p"]]]);
+  assert.deepEqual(compareOptionGroups(definition, { section: { part_id: null } }), [[null, ["R1"]]]);
+  assert.deepEqual(compareOptionGroups(definition), [[null, ["R1"]], ["Serie", ["VR1_s"]], ["Paralelo", ["VR1_p"]]]);
+  assert.deepEqual(compareOptionGroups(definition, { result: "VR1_s_t" }, "VR1_p"), [
+    ["Guardada (fuera de alcance)", ["VR1_p"]],
+    [null, ["R1", "VR1_s"]],
+  ]);
+  assert.deepEqual(compareOptionGroups({ quantities: [{ symbol: "x" }] }), [[null, ["x"]]]);
 });

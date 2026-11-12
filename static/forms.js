@@ -746,7 +746,7 @@ export async function submitFormSubmission() {
     showToast("Entrega guardada", "success");
     clearDraft();
     const { renderAnalysis } = await import("./analysis.js");
-    renderAnalysis(latestResult, submission, false, null, comparisonPairs(state.practiceForm?.definition));
+    renderAnalysis(latestResult, submission);
     latestResult.classList.remove("hidden");
     await loadSubmissions();
   } catch (error) {

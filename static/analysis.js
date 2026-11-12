@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections, comparisonPairs } from "./lib.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -8,10 +8,8 @@ import { membersEditorMarkup, wireMembersEditor } from "./analysis-members.js";
 import { regressionMarkup, scatterMarkup } from "./analysis-plots.js";
 export { regressionMarkup, scatterMarkup };
 
-export function renderAnalysis(
-  target, submission, includeReview = false, definition = null,
-  pairs = definition ? comparisonPairs(definition) : new Map(Object.entries(submission.comparisons ?? {})),
-) {
+export function renderAnalysis(target, submission, includeReview = false, definition = null) {
+  const pairs = new Map(Object.entries(submission.comparisons ?? {}));
   setDisplaySymbols(submission.display_symbols);
   target.classList.remove("detail-empty");
 

@@ -1,5 +1,22 @@
 use super::{PracticeDefinition, PracticePart};
 
+#[derive(Debug, Default, serde::Serialize)]
+pub struct CompareOptions {
+    pub results: std::collections::BTreeMap<String, Vec<String>>,
+    pub parts: std::collections::BTreeMap<String, Vec<String>>,
+    pub shared: Vec<String>,
+}
+
+fn common_quantities<'a>(views: impl Iterator<Item = &'a PracticeDefinition>) -> Vec<String> {
+    views
+        .map(|v| v.quantities.iter().map(|q| q.symbol.clone()).collect())
+        .reduce(|mut all: Vec<String>, here: Vec<String>| {
+            all.retain(|s| here.contains(s));
+            all
+        })
+        .unwrap_or_default()
+}
+
 pub fn is_point_based(kind: Option<&str>) -> bool {
     matches!(kind, Some("regresion_lineal" | "curva"))
 }
@@ -132,13 +149,37 @@ impl PracticeDefinition {
         self
     }
 
-    pub fn with_result_parts(mut self) -> PracticeDefinition {
-        self.result_parts = self
-            .results
-            .iter()
-            .filter_map(|r| Some((r.symbol.clone(), self.result_part(&r.symbol)?.to_string())))
-            .collect();
-        self
+    fn views(&self) -> Vec<PracticeDefinition> {
+        if self.parts.is_empty() {
+            return vec![self.clone()];
+        }
+        std::iter::once(self.shared_view())
+            .chain(self.parts.iter().map(|p| self.part_view(p)))
+            .collect()
+    }
+
+    pub fn comparable_quantities(&self, result: &str) -> Vec<String> {
+        common_quantities(
+            self.views()
+                .iter()
+                .filter(|v| v.results.iter().any(|r| r.symbol == result)),
+        )
+    }
+
+    pub fn compare_options(&self) -> CompareOptions {
+        CompareOptions {
+            results: self
+                .results
+                .iter()
+                .map(|r| (r.symbol.clone(), self.comparable_quantities(&r.symbol)))
+                .collect(),
+            parts: self
+                .parts
+                .iter()
+                .map(|p| (p.id.clone(), common_quantities([self.part_view(p)].iter())))
+                .collect(),
+            shared: common_quantities(self.views().iter()),
+        }
     }
 
     pub fn with_mirrored_kind(mut self) -> PracticeDefinition {

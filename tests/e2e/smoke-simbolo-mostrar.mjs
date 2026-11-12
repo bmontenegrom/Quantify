@@ -97,7 +97,17 @@ await withE2E({ port: PORT, dbName: "quantify-simbolo-mostrar.db" }, async ({ lo
   assert(prefilled === "", `el campo debía estar vacío, tenía: ${prefilled}`);
 
   step("docente: un mensurando elige con qué magnitud se compara y se precarga al editar");
-  const target = (await definition()).results.find((r) => r.symbol === "g1");
+  const target = await apiPost(page, `/api/practices/${PRACTICE_ID}/results`, {
+    symbol: "T_teo",
+    name: "Periodo teórico",
+    unit: "s",
+    formula: "2*pi*sqrt(L/9.8)",
+    section_id: (await definition()).sections.find((s) => s.part_id === "p1-estadistica-op1").id,
+  });
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await page.click('.tab.teacher-only[data-view="practices"]');
+  await page.click(`[data-practice-open][data-practice-id="${PRACTICE_ID}"]`);
   await page.click(`[data-edit-result][data-rid="${target.id}"]`);
   await page.selectOption('#edit-result-form [name="compare_with"]', "T1");
   await page.click('#edit-result-form button[type="submit"]');

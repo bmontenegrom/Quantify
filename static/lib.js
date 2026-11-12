@@ -390,17 +390,21 @@ export function analysisSections(analysis) {
   ];
 }
 
-export function comparableQuantities(definition, part = null) {
-  const partIds = new Set((definition?.parts ?? []).map((p) => p.id));
-  const partOf = new Map();
-  for (const s of definition?.sections ?? []) {
-    for (const q of s.quantities ?? []) {
-      if (!partOf.has(q)) partOf.set(q, partIds.has(s.part_id) ? s.part_id : null);
-    }
+export function compareOptionGroups(definition, { result = null, section = null } = {}, current = "") {
+  const options = definition?.compare_options;
+  const shared = options?.shared ?? (definition?.quantities ?? []).map((q) => q.symbol);
+  const ofPart = (id) => options?.parts?.[id] ?? shared;
+  let groups;
+  if (result) groups = [[null, options?.results?.[result] ?? shared]];
+  else if (section) groups = [[null, section.part_id ? ofPart(section.part_id) : shared]];
+  else {
+    groups = [[null, shared]].concat(
+      (definition?.parts ?? []).map((p) => [p.title, ofPart(p.id).filter((s) => !shared.includes(s))]),
+    );
   }
-  return (definition?.quantities ?? [])
-    .map((q) => q.symbol)
-    .filter((symbol) => [null, part].includes(partOf.get(symbol) ?? null));
+  groups = groups.filter(([label, symbols]) => label == null || symbols.length);
+  const offered = groups.some(([, symbols]) => symbols.includes(current));
+  return current && !offered ? [["Guardada (fuera de alcance)", [current]], ...groups] : groups;
 }
 
 export function comparisonPairs(definition) {

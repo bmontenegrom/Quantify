@@ -58,7 +58,6 @@ pub async fn definition(
             parts,
             sections,
             display_symbols,
-            result_parts: Default::default(),
             current_version: row.current_version,
         }
         .with_effective_kinds(),

@@ -312,15 +312,28 @@ pub(super) async fn practice_definition(
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(query): Query<DefinitionQuery>,
-) -> Result<Json<practices::PracticeDefinition>, AppError> {
+) -> Result<Json<DefinitionView>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
     if matches!(user.role.as_str(), "docente" | "admin") && !query.published {
-        return Ok(Json(
-            load_definition(&state, &id).await?.with_result_parts(),
-        ));
+        let definition = load_definition(&state, &id).await?;
+        return Ok(Json(DefinitionView {
+            compare_options: Some(definition.compare_options()),
+            definition,
+        }));
     }
-    Ok(Json(published_definition(&state, &id).await?))
+    Ok(Json(DefinitionView {
+        definition: published_definition(&state, &id).await?,
+        compare_options: None,
+    }))
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct DefinitionView {
+    #[serde(flatten)]
+    definition: practices::PracticeDefinition,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compare_options: Option<practices::CompareOptions>,
 }
 
 async fn published_definition(
@@ -1420,11 +1433,9 @@ pub(super) async fn create_result(
         None,
     )
     .await?;
-    guard_change(
-        &def,
-        &with_new_result(&def, &input, section_id.as_deref()),
-        "guardar el mensurando",
-    )?;
+    let after = with_new_result(&def, &input, section_id.as_deref());
+    guard_compare_scope(&after, &input)?;
+    guard_change(&def, &after, "guardar el mensurando")?;
     Ok(Json(
         practices::create_result(&state.pool, &id, input, section_id.as_deref()).await?,
     ))
@@ -1452,6 +1463,7 @@ pub(super) async fn update_result(
     .await?;
     let after = with_updated_result(&def, &rid, &input)
         .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
+    guard_compare_scope(&after, &input)?;
     guard_change(&def, &after, "guardar el mensurando")?;
     let updated = practices::update_result(&state.pool, &rid, input)
         .await?
@@ -1640,6 +1652,27 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     Ok(())
 }
 
+const COMPARE_SCOPE: &str =
+    "\"Comparar con\" tiene que ser el símbolo de una magnitud de la práctica, \
+     de la misma parte que el mensurando o de los datos compartidos.";
+
+fn guard_compare_scope(
+    after: &practices::PracticeDefinition,
+    input: &ResultInput,
+) -> Result<(), AppError> {
+    match input.compare_with().filter(|s| !s.is_empty()) {
+        Some(target)
+            if !after
+                .comparable_quantities(input.symbol.trim())
+                .iter()
+                .any(|s| s == target) =>
+        {
+            Err(AppError::bad_request(COMPARE_SCOPE))
+        }
+        _ => Ok(()),
+    }
+}
+
 fn validate_result(
     def: &practices::PracticeDefinition,
     input: &ResultInput,
@@ -1658,12 +1691,19 @@ fn validate_result(
             return Err(AppError::bad_request("tolerancia no puede ser negativa"));
         }
     }
-    let compare_with = input.compare_with().unwrap_or("");
-    if !compare_with.is_empty() && !def.quantities.iter().any(|q| q.symbol == compare_with) {
-        return Err(AppError::bad_request(
-            "\"Comparar con\" tiene que ser el símbolo de una magnitud de la práctica, \
-             de la misma parte que el mensurando o de los datos compartidos.",
-        ));
+    if let Some(target) = input.compare_with().filter(|s| !s.is_empty()) {
+        let quantity = def
+            .quantities
+            .iter()
+            .find(|q| q.symbol == target)
+            .ok_or_else(|| AppError::bad_request(COMPARE_SCOPE))?;
+        let (unit, target_unit) = (input.unit.trim(), quantity.unit.trim());
+        if unit != target_unit {
+            return Err(AppError::bad_request(format!(
+                "\"Comparar con\" necesita la misma unidad: el mensurando está en \"{unit}\" \
+                 y {target} en \"{target_unit}\"."
+            )));
+        }
     }
     computation::check_formula(input.formula.trim(), &result_scope(def))
         .map_err(|e| AppError::bad_request(e.to_string()))
@@ -2081,7 +2121,6 @@ mod tests {
             parts: vec![],
             sections: vec![],
             display_symbols: Default::default(),
-            result_parts: Default::default(),
             current_version: None,
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
@@ -2168,7 +2207,6 @@ mod tests {
             parts: vec![],
             sections: vec![],
             display_symbols: Default::default(),
-            result_parts: Default::default(),
             current_version: None,
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
@@ -2315,7 +2353,6 @@ mod tests {
             parts: vec![],
             sections: vec![],
             display_symbols: Default::default(),
-            result_parts: Default::default(),
             current_version: None,
         };
         let r = |unit: &str| ResultInput {
@@ -2347,6 +2384,7 @@ mod tests {
         let def = practices::PracticeDefinition {
             quantities: vec![db::PracticeQuantity {
                 symbol: "V".into(),
+                unit: "V".into(),
                 ..Default::default()
             }],
             ..Default::default()
@@ -2366,6 +2404,16 @@ mod tests {
         assert!(validate_result(&def, &r(Some(""))).is_ok());
         assert!(validate_result(&def, &r(Some(" V "))).is_ok());
         assert!(validate_result(&def, &r(Some("W"))).is_err());
+        let in_mv = ResultInput {
+            unit: "mV".into(),
+            ..r(Some("V"))
+        };
+        let error = validate_result(&def, &in_mv).unwrap_err();
+        assert!(
+            error.message().contains("misma unidad"),
+            "{}",
+            error.message()
+        );
     }
 
     #[tokio::test]
@@ -2567,22 +2615,50 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let with = |compare_with: &str| {
+        let with = |compare_with: &str, unit: &str| {
             let mut def = cc.clone();
             let r = def.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
-            r.unwrap().compare_with = compare_with.into();
+            let r = r.unwrap();
+            r.compare_with = compare_with.into();
+            r.unit = unit.into();
             formula_problems(&def)
         };
-        assert!(with("VR1_s").is_empty());
-        assert!(with("R1").is_empty(), "una magnitud compartida vale");
-        assert!(!with("VR1_p").is_empty(), "una magnitud de otra parte no");
-        assert!(!with("nada").is_empty());
+        assert!(with("VR1_s", "V").is_empty());
+        assert!(with("R1", "ohm").is_empty(), "una magnitud compartida vale");
+        assert!(!with("R1", "V").is_empty(), "con otra unidad no");
+        assert!(
+            !with("VR1_p", "V").is_empty(),
+            "una magnitud de otra parte no"
+        );
+        assert!(!with("nada", "V").is_empty());
 
-        let json = serde_json::to_value(&cc).unwrap();
-        assert!(json.get("result_parts").is_none(), "no entra en versiones");
-        let parts = cc.with_result_parts().result_parts;
-        assert_eq!(parts["VR1_s_t"], "p2-cc-serie");
-        assert_eq!(parts["Req"], "p2-cc-paralelo");
+        let options = cc.compare_options();
+        let vr1_s_t = &options.results["VR1_s_t"];
+        assert!(vr1_s_t.contains(&"VR1_s".into()) && vr1_s_t.contains(&"R1".into()));
+        assert!(!vr1_s_t.contains(&"VR1_p".into()));
+        assert!(
+            options.results["Req"].contains(&"VR1_p".into()),
+            "parte inferida"
+        );
+        assert!(options.parts["p2-cc-paralelo"].contains(&"VR1_p".into()));
+        assert!(options.shared.contains(&"R1".into()));
+        assert!(!options.shared.contains(&"VR1_s".into()));
+
+        let input = |symbol: &str, formula: &str, compare_with: &str| ResultInput {
+            display_symbol: None,
+            compare_with: Some(compare_with.into()),
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "V".into(),
+            formula: formula.into(),
+            tolerance: None,
+            is_final: false,
+            has_uncertainty: true,
+        };
+        let new = input("VR1_s_t2", "Vg_s * R1 / (R1 + R2 + R3 + RA_s)", "VR1_s");
+        assert!(guard_compare_scope(&with_new_result(&cc, &new, None), &new).is_ok());
+        let crossed = input("VR1_s_t2", "Vg_s * R1 / (R1 + R2 + R3 + RA_s)", "VR1_p");
+        assert!(guard_compare_scope(&with_new_result(&cc, &crossed, None), &crossed).is_err());
     }
 
     #[tokio::test]

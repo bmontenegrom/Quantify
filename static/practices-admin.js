@@ -9,7 +9,7 @@ import {
   unitHtml,
   analysisKindLabel,
   formatDate,
-  comparableQuantities,
+  compareOptionGroups,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -336,9 +336,9 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
   practiceWorkspace.querySelector('#new-result-form [name="section_id"]')?.addEventListener("change", (e) => {
-    const part = def?.sections?.find((s) => s.id === e.target.value)?.part_id ?? null;
+    const section = def?.sections?.find((s) => s.id === e.target.value) ?? null;
     const select = e.target.form.elements.compare_with;
-    select.innerHTML = compareOptionsHtml(def, part, select.value);
+    select.innerHTML = compareOptionsHtml(compareOptionGroups(def, { section }, select.value), select.value);
   });
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
 
@@ -941,9 +941,14 @@ function newResultSectionHtml(def) {
   return `<label>Sección <select name="section_id">${options}</select></label>`;
 }
 
-function compareOptionsHtml(def, part, current) {
-  return [["", "— sin comparación —"], ...comparableQuantities(def, part).map((s) => [s, s])]
-    .map(([value, text]) => `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(text)}</option>`)
+function compareOptionsHtml(groups, current) {
+  const option = (value, text = value) =>
+    `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(text)}</option>`;
+  return option("", "— sin comparación —") + groups
+    .map(([label, symbols]) => {
+      const items = symbols.map((s) => option(s)).join("");
+      return label == null ? items : `<optgroup label="${escapeHtml(label)}">${items}</optgroup>`;
+    })
     .join("");
 }
 
@@ -976,7 +981,7 @@ function renderResultForm(res, practiceId, def = null) {
         Tiene incertidumbre (desmarcá para mostrarlo siempre sin ±U)
       </label>
       <label>Comparar con (medido vs teórico)
-        <select name="compare_with">${compareOptionsHtml(def, res ? def?.result_parts?.[res.symbol] ?? null : null, res?.compare_with ?? "")}</select>
+        <select name="compare_with">${compareOptionsHtml(compareOptionGroups(def, { result: res?.symbol }, res?.compare_with ?? ""), res?.compare_with ?? "")}</select>
       </label>
       <div class="detail-actions">
         <button type="submit">${res ? "Guardar" : "Agregar"}</button>

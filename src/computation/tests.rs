@@ -182,7 +182,6 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
         parts: vec![],
         sections: vec![],
         display_symbols: Default::default(),
-        result_parts: Default::default(),
         current_version: None,
     };
     let sr = |symbol: &str| db::StudentResultInput {
