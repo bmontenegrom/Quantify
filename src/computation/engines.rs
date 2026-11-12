@@ -1,6 +1,6 @@
 use super::formula::{compile_formula, eval_compiled, CONSTANTS};
 use super::{
-    AggregateComputation, CurveSpec, DerivedComputation, FormAnalysis, MeasurementInput,
+    AggregateComputation, CurveSpec, DerivedComputation, FormAnalysis, LiveValue, MeasurementInput,
     OperatorComputation, PartAnalysis, PointResultComputation, QuantityComputation,
     RegressionResult, ScatterResult,
 };
@@ -137,7 +137,7 @@ fn compute_quantities(
 /// #     id: symbol.into(), practice_id: "p".into(), symbol: symbol.into(), name: symbol.into(),
 /// #     unit: String::new(), repeated: !is_given, quantity: None, position: 0, is_given,
 /// #     replicas_per_point: None, per_point: false, has_uncertainty: true, optional: false,
-/// #     default_value: None, slot_count: None,
+/// #     default_value: None, slot_count: None, ..Default::default()
 /// # };
 /// # let m = |id: &str, values: Vec<f64>, given_u: Option<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u,
@@ -147,6 +147,7 @@ fn compute_quantities(
 ///     id: "g".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
 ///     unit: "m/s2".into(), formula: "4*pi^2*L/T^2".into(), position: 0, tolerance: None,
 ///     is_final: false, has_uncertainty: true,
+///     ..Default::default()
 /// };
 /// let analysis = compute(
 ///     &[q("L", true), q("T", false)],
@@ -266,6 +267,87 @@ fn per_point_quantity_symbols(quantities: &[PracticeQuantity]) -> impl Iterator<
         .map(|q| q.symbol.as_str())
 }
 
+struct PointInputs<'a> {
+    point_values: HashMap<&'a str, Vec<f64>>,
+    point_matrix: HashMap<&'a str, Vec<Vec<f64>>>,
+    broadcastable: std::collections::HashSet<&'a str>,
+    symbol_to_id: HashMap<&'a str, &'a str>,
+}
+
+impl<'a> PointInputs<'a> {
+    fn new(quantities: &'a [PracticeQuantity], measurements: &'a [MeasurementInput]) -> Self {
+        let given_ids: std::collections::HashSet<&str> = quantities
+            .iter()
+            .filter(|q| q.is_given)
+            .map(|q| q.id.as_str())
+            .collect();
+        let shared_ids: std::collections::HashSet<&str> = quantities
+            .iter()
+            .filter(|q| !q.per_point || q.is_given)
+            .map(|q| q.id.as_str())
+            .collect();
+        let shared_repr = |m: &MeasurementInput| -> f64 {
+            if given_ids.contains(m.quantity_id.as_str()) {
+                m.values.first().copied().unwrap_or(f64::NAN)
+            } else {
+                mean(&m.point_values())
+            }
+        };
+
+        let point_values: HashMap<&str, Vec<f64>> = measurements
+            .iter()
+            .map(|m| {
+                let vals = if shared_ids.contains(m.quantity_id.as_str()) {
+                    vec![shared_repr(m)]
+                } else {
+                    m.point_values()
+                };
+                (m.quantity_id.as_str(), vals)
+            })
+            .collect();
+        let point_matrix: HashMap<&str, Vec<Vec<f64>>> = measurements
+            .iter()
+            .map(|m| {
+                let mat = if shared_ids.contains(m.quantity_id.as_str()) {
+                    vec![vec![shared_repr(m)]]
+                } else {
+                    m.point_replica_matrix()
+                };
+                (m.quantity_id.as_str(), mat)
+            })
+            .collect();
+        let broadcastable: std::collections::HashSet<&str> = measurements
+            .iter()
+            .filter(|m| m.point_replicas.is_none() || shared_ids.contains(m.quantity_id.as_str()))
+            .map(|m| m.quantity_id.as_str())
+            .collect();
+        let symbol_to_id: HashMap<&str, &str> = quantities
+            .iter()
+            .map(|q| (q.symbol.as_str(), q.id.as_str()))
+            .collect();
+        Self {
+            point_values,
+            point_matrix,
+            broadcastable,
+            symbol_to_id,
+        }
+    }
+}
+
+type CompiledIntermediates<'a> = Vec<(&'a PracticeIntermediate, Node)>;
+
+fn compile_intermediates(
+    mut allowed: Vec<String>,
+    intermediates: &[PracticeIntermediate],
+) -> anyhow::Result<(CompiledIntermediates<'_>, Vec<String>)> {
+    let mut compiled = Vec::with_capacity(intermediates.len());
+    for it in intermediates {
+        compiled.push((it, compile_formula(&it.formula, &allowed)?));
+        allowed.push(it.symbol.clone());
+    }
+    Ok((compiled, allowed))
+}
+
 pub(crate) fn build_points(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
@@ -277,71 +359,17 @@ pub(crate) fn build_points(
     let mut warnings = Vec::new();
     let magnitude_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
 
-    let given_ids: std::collections::HashSet<&str> = quantities
-        .iter()
-        .filter(|q| q.is_given)
-        .map(|q| q.id.as_str())
-        .collect();
-    let shared_ids: std::collections::HashSet<&str> = quantities
-        .iter()
-        .filter(|q| !q.per_point || q.is_given)
-        .map(|q| q.id.as_str())
-        .collect();
-    let shared_repr = |m: &MeasurementInput| -> f64 {
-        if given_ids.contains(m.quantity_id.as_str()) {
-            m.values.first().copied().unwrap_or(f64::NAN)
-        } else {
-            let xs = m.point_values();
-            if xs.is_empty() {
-                f64::NAN
-            } else {
-                xs.iter().sum::<f64>() / xs.len() as f64
-            }
-        }
-    };
-
-    let point_values: HashMap<&str, Vec<f64>> = measurements
-        .iter()
-        .map(|m| {
-            let vals = if shared_ids.contains(m.quantity_id.as_str()) {
-                vec![shared_repr(m)]
-            } else {
-                m.point_values()
-            };
-            (m.quantity_id.as_str(), vals)
-        })
-        .collect();
-    let point_matrix: HashMap<&str, Vec<Vec<f64>>> = measurements
-        .iter()
-        .map(|m| {
-            let mat = if shared_ids.contains(m.quantity_id.as_str()) {
-                vec![vec![shared_repr(m)]]
-            } else {
-                m.point_replica_matrix()
-            };
-            (m.quantity_id.as_str(), mat)
-        })
-        .collect();
-    let broadcastable: std::collections::HashSet<&str> = measurements
-        .iter()
-        .filter(|m| m.point_replicas.is_none() || shared_ids.contains(m.quantity_id.as_str()))
-        .map(|m| m.quantity_id.as_str())
-        .collect();
-    let symbol_to_id: HashMap<&str, &str> = quantities
-        .iter()
-        .map(|q| (q.symbol.as_str(), q.id.as_str()))
-        .collect();
+    let inputs = PointInputs::new(quantities, measurements);
+    let PointInputs {
+        point_values,
+        symbol_to_id,
+        ..
+    } = &inputs;
     let per_point_syms: std::collections::HashSet<&str> =
         per_point_quantity_symbols(quantities).collect();
 
-    let mut allowed = magnitude_symbols.clone();
-    let mut compiled_intermediates: Vec<(&PracticeIntermediate, Node)> = Vec::new();
-    for it in intermediates {
-        let tree = compile_formula(&it.formula, &allowed)?;
-        allowed.push(it.symbol.clone());
-        compiled_intermediates.push((it, tree));
-    }
-    let axis_symbols = allowed;
+    let (compiled_intermediates, axis_symbols) =
+        compile_intermediates(magnitude_symbols, intermediates)?;
     let x_tree = compile_formula(x_formula, &axis_symbols)?;
     let y_tree = compile_formula(y_formula, &axis_symbols)?;
     let intermediate_symbols: std::collections::HashSet<&str> = compiled_intermediates
@@ -416,14 +444,13 @@ pub(crate) fn build_points(
             .collect();
         let mut intermediate_values: HashMap<&str, f64> = HashMap::new();
         for (it, tree) in &compiled_intermediates {
-            let value = point_intermediate(
+            let value = mean(&point_intermediate(
+                it,
                 tree,
-                &point_matrix,
-                &symbol_to_id,
-                &broadcastable,
+                &inputs,
                 &intermediate_values,
                 i,
-            );
+            ));
             intermediate_values.insert(it.symbol.as_str(), value);
             context.insert(it.symbol.clone(), value);
         }
@@ -442,14 +469,23 @@ pub(crate) fn build_points(
     Ok((points, warnings, contexts))
 }
 
+fn mean(values: &[f64]) -> f64 {
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
 fn point_intermediate(
+    it: &PracticeIntermediate,
     tree: &Node,
-    point_matrix: &HashMap<&str, Vec<Vec<f64>>>,
-    symbol_to_id: &HashMap<&str, &str>,
-    broadcastable: &std::collections::HashSet<&str>,
+    inputs: &PointInputs,
     earlier: &HashMap<&str, f64>,
     i: usize,
-) -> f64 {
+) -> Vec<f64> {
+    let PointInputs {
+        point_values,
+        point_matrix,
+        broadcastable,
+        symbol_to_id,
+    } = inputs;
     let id_of = |sym: &str| symbol_to_id.get(sym).copied();
     let reps_at = |sym: &str| -> &[f64] {
         id_of(sym)
@@ -457,36 +493,101 @@ fn point_intermediate(
             .and_then(|m| m.get(i).or_else(|| m.last()))
             .map_or(&[][..], |v| v.as_slice())
     };
+    let mean_at = |sym: &str| {
+        id_of(sym)
+            .and_then(|id| point_values.get(id))
+            .and_then(|v| v.get(i).or_else(|| v.last()))
+            .copied()
+            .unwrap_or(f64::NAN)
+    };
     let is_broadcastable = |sym: &str| id_of(sym).is_some_and(|id| broadcastable.contains(id));
-    let n_reps = tree
-        .iter_variable_identifiers()
-        .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
-        .map(|v| reps_at(v).len())
-        .max()
-        .unwrap_or(0)
-        .max(1);
-    let mut sum = 0.0;
-    for r in 0..n_reps {
-        let bound: HashMap<&str, f64> = tree
-            .iter_variable_identifiers()
-            .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
-            .map(|v| {
-                if symbol_to_id.contains_key(v) {
-                    let reps = reps_at(v);
-                    let value = if is_broadcastable(v) {
-                        reps.first().copied().unwrap_or(f64::NAN)
+    let n_reps = if it.on_means {
+        1
+    } else {
+        tree.iter_variable_identifiers()
+            .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
+            .map(|v| reps_at(v).len())
+            .max()
+            .unwrap_or(0)
+            .max(1)
+    };
+    (0..n_reps)
+        .map(|r| {
+            let bound: HashMap<&str, f64> = tree
+                .iter_variable_identifiers()
+                .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
+                .map(|v| {
+                    let value = if !symbol_to_id.contains_key(v) {
+                        earlier.get(v).copied().unwrap_or(f64::NAN)
+                    } else if it.on_means {
+                        mean_at(v)
+                    } else if is_broadcastable(v) {
+                        reps_at(v).first().copied().unwrap_or(f64::NAN)
                     } else {
-                        reps.get(r).copied().unwrap_or(f64::NAN)
+                        reps_at(v).get(r).copied().unwrap_or(f64::NAN)
                     };
                     (v, value)
-                } else {
-                    (v, earlier.get(v).copied().unwrap_or(f64::NAN))
+                })
+                .collect();
+            eval_compiled(tree, &bound)
+        })
+        .collect()
+}
+
+/// Valores por réplica y promedio de los intermedios con `show_live`, calculados como en el ajuste.
+///
+/// ```
+/// # use quantify::computation::{live_values, MeasurementInput};
+/// # use quantify::db::PracticeQuantity;
+/// # use quantify::practices::PracticeIntermediate;
+/// # let q = |symbol: &str| PracticeQuantity {
+/// #     id: symbol.into(), symbol: symbol.into(), per_point: true, has_uncertainty: true,
+/// #     ..Default::default()
+/// # };
+/// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
+/// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,
+/// #     point_replicas: None, operator_replicas: None,
+/// # };
+/// let p = PracticeIntermediate {
+///     symbol: "P".into(), formula: "I*I*R".into(), show_live: true, ..Default::default()
+/// };
+/// let rows = live_values(&[q("R"), q("I")], &[p], &[m("R", vec![100.0]), m("I", vec![0.5])]).unwrap();
+/// assert_eq!(rows[0][0].mean, Some(25.0));
+/// ```
+pub fn live_values(
+    quantities: &[PracticeQuantity],
+    intermediates: &[PracticeIntermediate],
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<Vec<Vec<LiveValue>>> {
+    let inputs = PointInputs::new(quantities, measurements);
+    let magnitude_symbols = quantities.iter().map(|q| q.symbol.clone()).collect();
+    let (compiled, _) = compile_intermediates(magnitude_symbols, intermediates)?;
+    let n_points = per_point_quantity_symbols(quantities)
+        .filter_map(|sym| inputs.symbol_to_id.get(sym))
+        .filter_map(|id| inputs.point_values.get(id))
+        .map(|values| values.len())
+        .min()
+        .unwrap_or(0);
+    let finite = |v: f64| v.is_finite().then_some(v);
+    Ok((0..n_points)
+        .map(|i| {
+            let mut earlier: HashMap<&str, f64> = HashMap::new();
+            let mut row = Vec::new();
+            for (it, tree) in &compiled {
+                let replicas = point_intermediate(it, tree, &inputs, &earlier, i);
+                let value = mean(&replicas);
+                earlier.insert(it.symbol.as_str(), value);
+                if it.show_live {
+                    row.push(LiveValue {
+                        symbol: it.symbol.clone(),
+                        replicas: replicas.into_iter().map(finite).collect(),
+                        mean: finite(value),
+                    });
                 }
-            })
-            .collect();
-        sum += eval_compiled(tree, &bound);
-    }
-    sum / n_reps as f64
+            }
+            row
+        })
+        .collect())
 }
 
 /// Regresión lineal sobre los puntos que dan las fórmulas de eje, con mensurandos y agregados.
@@ -499,7 +600,7 @@ fn point_intermediate(
 /// #     id: symbol.into(), practice_id: "p".into(), symbol: symbol.into(), name: symbol.into(),
 /// #     unit: String::new(), repeated: false, quantity: None, position: 0, is_given: false,
 /// #     replicas_per_point: None, per_point: true, has_uncertainty: true, optional: false,
-/// #     default_value: None, slot_count: None,
+/// #     default_value: None, slot_count: None, ..Default::default()
 /// # };
 /// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,
@@ -717,7 +818,7 @@ pub fn compute_regresion(
 /// #     id: symbol.into(), practice_id: "p".into(), symbol: symbol.into(), name: symbol.into(),
 /// #     unit: String::new(), repeated: false, quantity: None, position: 0, is_given: false,
 /// #     replicas_per_point: None, per_point: true, has_uncertainty: true, optional: false,
-/// #     default_value: None, slot_count: None,
+/// #     default_value: None, slot_count: None, ..Default::default()
 /// # };
 /// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,

@@ -9,6 +9,7 @@ use sqlx::{SqliteConnection, SqlitePool};
 
 fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -21,11 +22,13 @@ fn qty(symbol: &str, name: &str, unit: &str, repeated: bool, quantity: &str) -> 
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
 fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -38,6 +41,7 @@ fn qty_given(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityIn
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
@@ -69,6 +73,7 @@ fn qty_replicas(
     replicas: i64,
 ) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -81,11 +86,13 @@ fn qty_replicas(
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
 fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -98,11 +105,14 @@ fn qty_shared(symbol: &str, name: &str, unit: &str, quantity: &str) -> QuantityI
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
 fn res(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput {
     ResultInput {
+        display_symbol: None,
+        compare_with: None,
         symbol: symbol.into(),
         name: name.into(),
         unit: unit.into(),
@@ -120,6 +130,11 @@ fn res_final(symbol: &str, name: &str, unit: &str, formula: &str) -> ResultInput
     }
 }
 
+fn compares(mut r: ResultInput, quantity: &str) -> ResultInput {
+    r.compare_with = Some(quantity.into());
+    r
+}
+
 fn res_no_u(mut r: ResultInput) -> ResultInput {
     r.has_uncertainty = false;
     r
@@ -133,6 +148,33 @@ async fn seed_practice(
 ) -> anyhow::Result<bool> {
     let mut conn = pool.acquire().await?;
     seed_practice_in(&mut conn, practice_id, quantities, results).await
+}
+
+async fn insert_seed_quantity(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+    position: i64,
+    q: &QuantityInput,
+) -> anyhow::Result<String> {
+    let (kind,): (Option<String>,) =
+        sqlx::query_as("SELECT analysis_kind FROM practices WHERE id = ?1")
+            .bind(practice_id)
+            .fetch_one(&mut *conn)
+            .await?;
+    let (label, widget) = super::display::legacy_quantity_presentation(
+        &q.symbol,
+        &q.name,
+        q.quantity.as_deref(),
+        q.repeated,
+        q.is_given,
+        kind.as_deref(),
+    );
+    let q = QuantityInput {
+        label_mode: q.label_mode.clone().or(Some(label.into())),
+        input_widget: q.input_widget.clone().or(Some(widget.into())),
+        ..q.clone()
+    };
+    insert_quantity(conn, practice_id, position, &q).await
 }
 
 async fn seed_practice_in(
@@ -150,7 +192,7 @@ async fn seed_practice_in(
         return Ok(false);
     }
     for (pos, q) in quantities.iter().enumerate() {
-        insert_quantity(conn, practice_id, pos as i64 + 1, q).await?;
+        insert_seed_quantity(conn, practice_id, pos as i64 + 1, q).await?;
     }
     for (pos, r) in results.iter().enumerate() {
         insert_result(conn, practice_id, pos as i64 + 1, r).await?;
@@ -292,7 +334,7 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
         .iter()
         .enumerate()
         {
-            insert_quantity(&mut tx, "p1-estadistica", base_pos.0 + i as i64 + 1, q).await?;
+            insert_seed_quantity(&mut tx, "p1-estadistica", base_pos.0 + i as i64 + 1, q).await?;
         }
         sqlx::query(
             "UPDATE practice_quantities SET has_uncertainty = 0 \
@@ -491,23 +533,32 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "A",
                 "Vg_s / (R1 + R2 + R3 + RA_s)",
             ),
-            res_final(
-                "VR1_s_t",
-                "Voltaje teorico en R1",
-                "V",
-                "Vg_s * R1 / (R1 + R2 + R3 + RA_s)",
+            compares(
+                res_final(
+                    "VR1_s_t",
+                    "Voltaje teorico en R1",
+                    "V",
+                    "Vg_s * R1 / (R1 + R2 + R3 + RA_s)",
+                ),
+                "VR1_s",
             ),
-            res_final(
-                "VR2_s_t",
-                "Voltaje teorico en R2",
-                "V",
-                "Vg_s * R2 / (R1 + R2 + R3 + RA_s)",
+            compares(
+                res_final(
+                    "VR2_s_t",
+                    "Voltaje teorico en R2",
+                    "V",
+                    "Vg_s * R2 / (R1 + R2 + R3 + RA_s)",
+                ),
+                "VR2_s",
             ),
-            res_final(
-                "VR3_s_t",
-                "Voltaje teorico en R3",
-                "V",
-                "Vg_s * R3 / (R1 + R2 + R3 + RA_s)",
+            compares(
+                res_final(
+                    "VR3_s_t",
+                    "Voltaje teorico en R3",
+                    "V",
+                    "Vg_s * R3 / (R1 + R2 + R3 + RA_s)",
+                ),
+                "VR3_s",
             ),
             res(
                 "Req",
@@ -521,23 +572,32 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
                 "A",
                 "Vg_p / (R1 + RA_p + R2*R3/(R2+R3))",
             ),
-            res_final(
-                "VR1_p_t",
-                "Voltaje teorico en R1",
-                "V",
-                "Vg_p * R1 / (R1 + RA_p + R2*R3/(R2+R3))",
+            compares(
+                res_final(
+                    "VR1_p_t",
+                    "Voltaje teorico en R1",
+                    "V",
+                    "Vg_p * R1 / (R1 + RA_p + R2*R3/(R2+R3))",
+                ),
+                "VR1_p",
             ),
-            res_final(
-                "VR2_p_t",
-                "Voltaje teorico en R2",
-                "V",
-                "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+            compares(
+                res_final(
+                    "VR2_p_t",
+                    "Voltaje teorico en R2",
+                    "V",
+                    "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+                ),
+                "VR2_p",
             ),
-            res_final(
-                "VR3_p_t",
-                "Voltaje teorico en R3",
-                "V",
-                "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+            compares(
+                res_final(
+                    "VR3_p_t",
+                    "Voltaje teorico en R3",
+                    "V",
+                    "Vg_p * (R2*R3/(R2+R3)) / (R1 + RA_p + R2*R3/(R2+R3))",
+                ),
+                "VR3_p",
             ),
             res_no_u(res_final(
                 "RP_max_t",
@@ -571,10 +631,13 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
             pool,
             "p2-cc",
             IntermediateInput {
+                display_symbol: None,
                 symbol: "P".into(),
                 name: "Potencia disipada en R".into(),
                 unit: "W".into(),
                 formula: "I*I*R".into(),
+                show_live: true,
+                on_means: false,
             },
         )
         .await?;
@@ -624,10 +687,13 @@ async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
             pool,
             "fluidos-1",
             IntermediateInput {
+                display_symbol: None,
                 symbol: "Q".into(),
                 name: "Caudal medio".into(),
                 unit: "m3/s".into(),
                 formula: "V/t".into(),
+                show_live: true,
+                on_means: false,
             },
         )
         .await?;
@@ -635,6 +701,7 @@ async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
             pool,
             "fluidos-1",
             PointResultInput {
+                display_symbol: None,
                 symbol: "Re".into(),
                 name: "Numero de Reynolds".into(),
                 unit: "".into(),
@@ -677,10 +744,25 @@ async fn seed_viscosidad(pool: &SqlitePool) -> anyhow::Result<()> {
             pool,
             "viscosidad",
             PointResultInput {
+                display_symbol: None,
                 symbol: "Re".into(),
                 name: "Numero de Reynolds".into(),
                 unit: "".into(),
                 formula: "rho_f*(dx/t)*2*R/mu".into(),
+            },
+        )
+        .await?;
+        create_intermediate(
+            pool,
+            "viscosidad",
+            IntermediateInput {
+                display_symbol: None,
+                symbol: "v".into(),
+                name: "Velocidad limite".into(),
+                unit: "m/s".into(),
+                formula: "dx/t".into(),
+                show_live: true,
+                on_means: true,
             },
         )
         .await?;
@@ -737,6 +819,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
     if fresh_f2 {
         for input in [
             AggregateInput {
+                display_symbol: None,
                 symbol: "Re_max".into(),
                 name: "Numero de Reynolds maximo".into(),
                 unit: "".into(),
@@ -746,6 +829,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
                 is_final: true,
             },
             AggregateInput {
+                display_symbol: None,
                 symbol: "Re_min".into(),
                 name: "Numero de Reynolds minimo".into(),
                 unit: "".into(),
@@ -755,6 +839,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
                 is_final: true,
             },
             AggregateInput {
+                display_symbol: None,
                 symbol: "Re_medio".into(),
                 name: "Numero de Reynolds medio".into(),
                 unit: "".into(),
@@ -762,6 +847,7 @@ async fn seed_fluidos2(pool: &SqlitePool) -> anyhow::Result<()> {
                 is_final: true,
             },
             AggregateInput {
+                display_symbol: None,
                 symbol: "M_teorico".into(),
                 name: "Coeficiente de perdidas teorico".into(),
                 unit: "".into(),
@@ -862,10 +948,13 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
                 pool,
                 "filtros",
                 IntermediateInput {
+                    display_symbol: None,
                     symbol: sym.into(),
                     name: name.into(),
                     unit: unit.into(),
                     formula: formula.into(),
+                    show_live: false,
+                    on_means: false,
                 },
             )
             .await?;
@@ -1330,7 +1419,7 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(f_trabajo_pos.0)
         .execute(&mut *tx)
         .await?;
-        insert_quantity(
+        insert_seed_quantity(
             &mut tx,
             "ca-rlc",
             f_trabajo_pos.0,
@@ -1571,6 +1660,10 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
         run_seeds(pool).await?;
         crate::db::mark_migration_applied(pool, DEFINITIONS_SEEDED).await?;
     }
+    super::display::migrate_legacy_display_symbols(pool).await?;
+    super::display::migrate_legacy_quantity_presentation(pool).await?;
+    super::display::migrate_legacy_compare_with(pool).await?;
+    super::display::migrate_legacy_live_columns(pool).await?;
     super::versions::ensure_versions(pool).await
 }
 

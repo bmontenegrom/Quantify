@@ -64,6 +64,24 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "T", name: "Periodo", unit: "s" });
   await waitForStatus(page, "Magnitud agregada");
 
+  step("docente: renombrar una magnitud y vaciar su símbolo a mostrar lo borra");
+  const row = (symbol) => `#practice-workspace tr:has(code:text-is("${symbol}"))`;
+  await page.waitForSelector(row("T"));
+  await openAddForm(page, "#new-quantity-form");
+  await fillAndSubmit(page, "#new-quantity-form", { symbol: "D", display_symbol: "D_x", name: "Prueba", unit: "m" });
+  await page.waitForSelector(row("D"));
+  const displaySymbols = () =>
+    page.evaluate(async (id) => (await (await fetch(`/api/practices/${id}/definition`)).json()).display_symbols, ID);
+  const created = await displaySymbols();
+  assert(created?.D === "D_x", `D debía guardar su símbolo a mostrar: ${JSON.stringify(created)}`);
+  await page.locator(`${row("D")} [data-edit-quantity]`).click();
+  await fillAndSubmit(page, "#edit-quantity-form", { symbol: "E", display_symbol: "" });
+  await page.waitForSelector(row("E"));
+  const afterRename = await displaySymbols();
+  assert(!afterRename.D && !afterRename.E, `el símbolo a mostrar debía borrarse: ${JSON.stringify(afterRename)}`);
+  await page.locator(`${row("E")} [data-delete-quantity]`).click();
+  await page.waitForSelector(row("E"), { state: "detached" });
+
   step("docente: dos partes con sus secciones; L sin sección (compartida) y T en la segunda");
   for (const title of ["Parte A", "Parte B"]) {
     await openAddForm(page, "#new-part-form");

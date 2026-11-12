@@ -23,7 +23,8 @@
 # Cómo probar
 
 <!-- Pasos para probarlo a mano: usuario con el que entrar, vista, qué hacer y qué se espera ver.
-     Usuarios de prueba: docente@quantify.local / docente123, estudiante@quantify.local / estudiante123. -->
+     Usuarios de prueba (con SEED_DEMO_DATA=true): docente@quantify.local / docente123,
+     estudiante@quantify.local / estudiante123. -->
 
 1.
 

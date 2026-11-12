@@ -5,6 +5,8 @@ use argon2::{
 use rand_core::OsRng;
 use sha2::{Digest, Sha256};
 
+pub(crate) const MIN_PASSWORD_LEN: usize = 8;
+
 pub(crate) enum VerifyResult {
     Invalid,
     Valid,

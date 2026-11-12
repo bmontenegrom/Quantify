@@ -13,8 +13,12 @@
 git clone <repo> /opt/quantify
 cd /opt/quantify
 cp .env.example .env
+nano .env
 docker compose up -d --build
 ```
+
+En `.env`, definí `SEED_ADMIN_PASSWORD` antes del primer arranque: sin ella el server no arranca. Es la
+contraseña de `admin@quantify.local`, la única cuenta que se crea; las demás se crean desde la UI.
 
 Abrir desde otra maquina de la red:
 

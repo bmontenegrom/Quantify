@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 pub use engines::analyze;
 pub use engines::{
-    analyze_definition, compute, compute_curva, compute_regresion, scale_spec, PointContext,
+    analyze_definition, compute, compute_curva, compute_regresion, live_values, scale_spec,
+    PointContext,
 };
 pub use formula::check_formula;
 pub(crate) use formula::{chain_order, formula_symbols};
@@ -119,6 +120,13 @@ pub struct AggregateComputation {
     pub name: String,
     pub unit: String,
     pub value: f64,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct LiveValue {
+    pub symbol: String,
+    pub replicas: Vec<Option<f64>>,
+    pub mean: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]

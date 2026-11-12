@@ -25,8 +25,30 @@ async fn setup() -> (SqlitePool, TempDir) {
     (pool, dir)
 }
 
+async fn set_display_symbol(
+    pool: &SqlitePool,
+    practice_id: &str,
+    symbol: &str,
+    display_symbol: &str,
+) -> anyhow::Result<bool> {
+    let mut updated = 0;
+    for table in db::DISPLAY_SYMBOL_TABLES {
+        updated += sqlx::query(&format!(
+            "UPDATE {table} SET display_symbol = ?1 WHERE practice_id = ?2 AND symbol = ?3"
+        ))
+        .bind(display_symbol)
+        .bind(practice_id)
+        .bind(symbol)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    }
+    Ok(updated > 0)
+}
+
 fn sample_quantity() -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: "l".into(),
         name: "Longitud".into(),
         unit: "mm".into(),
@@ -39,11 +61,14 @@ fn sample_quantity() -> QuantityInput {
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
 fn sample_result() -> ResultInput {
     ResultInput {
+        display_symbol: None,
+        compare_with: None,
         symbol: "Q".into(),
         name: "Area".into(),
         unit: "mm2".into(),
@@ -85,6 +110,7 @@ async fn update_and_delete_quantity() {
         &pool,
         &q.id,
         QuantityInput {
+            display_symbol: None,
             symbol: "a".into(),
             name: "Ancho".into(),
             unit: "cm".into(),
@@ -97,6 +123,7 @@ async fn update_and_delete_quantity() {
             optional: false,
             default_value: None,
             slot_count: None,
+            ..Default::default()
         },
     )
     .await
@@ -106,6 +133,7 @@ async fn update_and_delete_quantity() {
     assert!(!updated.repeated);
 
     let with_default = |default_value: Option<Option<f64>>| QuantityInput {
+        display_symbol: None,
         symbol: "a".into(),
         name: "Ancho".into(),
         unit: "cm".into(),
@@ -118,6 +146,7 @@ async fn update_and_delete_quantity() {
         optional: false,
         default_value,
         slot_count: None,
+        ..Default::default()
     };
     for (input, expected) in [
         (Some(Some(12.0)), Some(12.0)),
@@ -256,10 +285,13 @@ async fn symbol_taken_detects_cross_table_collision() {
         &pool,
         "p1-estadistica",
         IntermediateInput {
+            display_symbol: None,
             symbol: "Iv".into(),
             name: "Iv".into(),
             unit: "u".into(),
             formula: "l".into(),
+            show_live: false,
+            on_means: false,
         },
     )
     .await
@@ -274,6 +306,7 @@ async fn symbol_taken_detects_cross_table_collision() {
         &pool,
         "p1-estadistica",
         PointResultInput {
+            display_symbol: None,
             symbol: "Re".into(),
             name: "Re".into(),
             unit: "".into(),
@@ -292,6 +325,7 @@ async fn symbol_taken_detects_cross_table_collision() {
         &pool,
         "p1-estadistica",
         AggregateInput {
+            display_symbol: None,
             symbol: "Ma".into(),
             name: "Ma".into(),
             unit: "".into(),
@@ -325,6 +359,7 @@ async fn symbol_taken_detects_cross_table_collision() {
 async fn aggregate_crud_roundtrip() {
     let (pool, _dir) = setup().await;
     let mk = |symbol: &str, formula: &str| AggregateInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: symbol.into(),
         unit: "".into(),
@@ -615,15 +650,19 @@ async fn intermediate_crud_roundtrip() {
         &pool,
         "p1-estadistica",
         IntermediateInput {
+            display_symbol: None,
             symbol: " Q ".into(),
             name: "Caudal".into(),
             unit: "m3/s".into(),
             formula: "V/t".into(),
+            show_live: true,
+            on_means: false,
         },
     )
     .await
     .unwrap();
     assert_eq!(q.symbol, "Q");
+    assert!(q.show_live && !q.on_means);
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     assert_eq!(def.intermediates.len(), 1);
     assert_eq!(def.intermediates[0].formula, "V/t");
@@ -633,10 +672,13 @@ async fn intermediate_crud_roundtrip() {
         "p2-cc",
         &q.id,
         IntermediateInput {
+            display_symbol: None,
             symbol: "Q".into(),
             name: "x".into(),
             unit: "x".into(),
             formula: "V*t".into(),
+            show_live: false,
+            on_means: false,
         },
     )
     .await
@@ -647,25 +689,34 @@ async fn intermediate_crud_roundtrip() {
         "p1-estadistica",
         &q.id,
         IntermediateInput {
+            display_symbol: None,
             symbol: "Q".into(),
             name: "Caudal".into(),
             unit: "m3/s".into(),
             formula: "V*t".into(),
+            show_live: false,
+            on_means: true,
         },
     )
     .await
     .unwrap()
     .unwrap();
     assert_eq!(updated.formula, "V*t");
+    assert!(!updated.show_live && updated.on_means);
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    assert!(!def.intermediates[0].show_live && def.intermediates[0].on_means);
 
     assert!(create_intermediate(
         &pool,
         "p1-estadistica",
         IntermediateInput {
+            display_symbol: None,
             symbol: "Z".into(),
             name: "z".into(),
             unit: "".into(),
             formula: "   ".into(),
+            show_live: false,
+            on_means: false,
         },
     )
     .await
@@ -2752,6 +2803,7 @@ async fn a_damaged_snapshot_is_an_internal_error() {
 
 fn new_quantity(symbol: &str) -> QuantityInput {
     QuantityInput {
+        display_symbol: None,
         symbol: symbol.into(),
         name: "Nueva".into(),
         unit: "s".into(),
@@ -2764,6 +2816,7 @@ fn new_quantity(symbol: &str) -> QuantityInput {
         optional: false,
         default_value: None,
         slot_count: None,
+        ..Default::default()
     }
 }
 
@@ -3413,4 +3466,999 @@ async fn an_unrelated_problem_does_not_block_a_cosmetic_update() {
             .unwrap(),
         Publish::Rejected(_)
     ));
+}
+
+#[tokio::test]
+async fn seeded_practices_keep_their_special_symbols_as_data() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for (practice, symbol, shown) in [
+        ("p3-relajacion", "tmedio", "t_1/2"),
+        ("p2-cc", "Vg_s", "V_G"),
+        ("p2-cc", "VR1_s_t", "VR1"),
+        ("ca-rlc", "VRpp", "V_R_PP"),
+        ("ca-rlc", "phiR_teo", "phi_R_teo"),
+    ] {
+        let draft = definition(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(
+            draft.display_symbols.get(symbol).map(String::as_str),
+            Some(shown),
+            "{practice} {symbol}"
+        );
+        let published = current_version(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(published.definition.display_symbols, draft.display_symbols);
+        let changes = draft_changes(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(changes.kind, DraftChangeKind::None, "{practice}");
+    }
+}
+
+#[tokio::test]
+async fn the_display_symbol_migration_maps_each_version_by_its_own_symbols() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for table in db::DISPLAY_SYMBOL_TABLES {
+        sqlx::query(&format!("UPDATE {table} SET display_symbol = ''"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query(
+        "UPDATE practice_versions \
+         SET definition_json = json_remove(definition_json, '$.display_symbols')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(set_display_symbol(&pool, "p2-cc", "Vg_s", "V_gen")
+        .await
+        .unwrap());
+    sqlx::query(
+        "UPDATE practice_quantities SET symbol = 't_half' \
+         WHERE practice_id = 'p3-relajacion' AND symbol = 'tmedio'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-simbolos-a-mostrar'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_display_symbols(&pool)
+        .await
+        .unwrap();
+
+    let p2 = current_version(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(p2.definition.display_symbols["Vg_s"], "V_G");
+    assert_eq!(p2.definition.display_symbols["RA_s"], "R_A");
+    let p2_draft = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(p2_draft.display_symbols["Vg_s"], "V_gen");
+    let p3 = current_version(&pool, "p3-relajacion")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(p3.definition.display_symbols["tmedio"], "t_1/2");
+}
+
+#[tokio::test]
+async fn changing_a_display_symbol_is_cosmetic() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    assert!(set_display_symbol(&pool, practice, "T1", "T_1")
+        .await
+        .unwrap());
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(found.changes, vec!["Cambia cómo se muestra T1".to_string()]);
+}
+
+#[tokio::test]
+async fn an_unreadable_version_does_not_stop_the_display_symbol_migration() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = '{\"quantities\": 5}' \
+         WHERE practice_id = 'p1-estadistica'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE practice_versions \
+         SET definition_json = json_remove(definition_json, '$.display_symbols') \
+         WHERE practice_id = 'p3-relajacion'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-simbolos-a-mostrar'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    seed_definitions(&pool).await.unwrap();
+
+    let p3 = current_version(&pool, "p3-relajacion")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(p3.definition.display_symbols["tmedio"], "t_1/2");
+    assert!(db::migration_applied(&pool, "2026-11-simbolos-a-mostrar")
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
+async fn display_changes_are_detected_on_symbols_named_like_volatile_keys() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    for symbol in ["position", "status", "current_version"] {
+        let input = QuantityInput {
+            symbol: symbol.into(),
+            ..sample_quantity()
+        };
+        create_quantity(&pool, practice, input).await.unwrap();
+        publish_checked(&pool, practice, None, None, |_| vec![])
+            .await
+            .unwrap();
+        let before = draft_changes(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(before.kind, DraftChangeKind::None, "{symbol}");
+
+        assert!(set_display_symbol(&pool, practice, symbol, "X_y")
+            .await
+            .unwrap());
+
+        let after = draft_changes(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(after.kind, DraftChangeKind::Cosmetic, "{symbol}");
+        assert_eq!(
+            after.changes,
+            vec![format!("Cambia cómo se muestra {symbol}")]
+        );
+        assert_ne!(before.fingerprint, after.fingerprint, "{symbol}");
+        let outcome = publish_checked(&pool, practice, None, None, |_| vec![])
+            .await
+            .unwrap();
+        assert!(!matches!(outcome, Publish::Unchanged(_)), "{symbol}");
+    }
+}
+
+#[tokio::test]
+async fn retired_quantities_stay_out_of_the_display_symbols() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let input = QuantityInput {
+        symbol: "Zq".into(),
+        ..sample_quantity()
+    };
+    let quantity = create_quantity(&pool, practice, input).await.unwrap();
+    assert!(set_display_symbol(&pool, practice, "Zq", "Z_q")
+        .await
+        .unwrap());
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        remove_quantity(&pool, practice, &quantity.id)
+            .await
+            .unwrap(),
+        QuantityRemoval::Retired
+    );
+
+    let draft = definition(&pool, practice).await.unwrap().unwrap();
+    assert!(!draft
+        .display_symbols
+        .keys()
+        .any(|key| key.starts_with("Zq")));
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+    let published = current_version(&pool, practice).await.unwrap().unwrap();
+    assert!(!published
+        .definition
+        .display_symbols
+        .keys()
+        .any(|key| key.starts_with("Zq")));
+}
+
+#[tokio::test]
+async fn the_structural_summary_mentions_display_changes_of_kept_symbols_only() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    assert!(set_display_symbol(&pool, practice, "T1", "T_uno")
+        .await
+        .unwrap());
+    assert!(set_display_symbol(&pool, practice, "T2", "T_dos")
+        .await
+        .unwrap());
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+
+    assert!(set_display_symbol(&pool, practice, "T1", "T_otro")
+        .await
+        .unwrap());
+    sqlx::query(
+        "UPDATE practice_quantities SET symbol = 'T2b' WHERE practice_id = ?1 AND symbol = 'T2'",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let added = QuantityInput {
+        symbol: "Zq".into(),
+        ..sample_quantity()
+    };
+    create_quantity(&pool, practice, added).await.unwrap();
+    assert!(set_display_symbol(&pool, practice, "Zq", "Z_q")
+        .await
+        .unwrap());
+
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Structural);
+    let shown: Vec<&String> = found
+        .changes
+        .iter()
+        .filter(|change| change.starts_with("Cambia cómo se muestra"))
+        .collect();
+    assert_eq!(shown, ["Cambia cómo se muestra T1"], "{:?}", found.changes);
+}
+
+#[tokio::test]
+async fn a_later_boot_does_not_rewrite_versions() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_versions \
+         SET definition_json = json_remove(definition_json, '$.display_symbols') \
+         WHERE practice_id = 'p3-relajacion'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let snapshot = || async {
+        let (json,): (String,) = sqlx::query_as(
+            "SELECT definition_json FROM practice_versions WHERE practice_id = 'p3-relajacion'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        json
+    };
+    let before = snapshot().await;
+
+    seed_definitions(&pool).await.unwrap();
+
+    assert_eq!(before, snapshot().await);
+}
+
+#[tokio::test]
+async fn display_symbols_are_saved_with_the_element() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let shown = |symbol: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let def = definition(&pool, practice).await.unwrap().unwrap();
+            def.display_symbols.get(symbol).cloned()
+        }
+    };
+
+    let quantity = QuantityInput {
+        symbol: "Zq".into(),
+        display_symbol: Some(" Z_q ".into()),
+        ..sample_quantity()
+    };
+    let created = create_quantity(&pool, practice, quantity).await.unwrap();
+    assert_eq!(shown("Zq").await.as_deref(), Some("Z_q"));
+
+    let untouched = QuantityInput {
+        symbol: "Zq".into(),
+        ..sample_quantity()
+    };
+    update_quantity(&pool, &created.id, untouched)
+        .await
+        .unwrap();
+    assert_eq!(shown("Zq").await.as_deref(), Some("Z_q"));
+
+    let renamed = QuantityInput {
+        symbol: "Zr".into(),
+        display_symbol: Some("Z_r".into()),
+        ..sample_quantity()
+    };
+    update_quantity(&pool, &created.id, renamed).await.unwrap();
+    assert_eq!(shown("Zr").await.as_deref(), Some("Z_r"));
+
+    let cleared = QuantityInput {
+        symbol: "Zr".into(),
+        display_symbol: Some(String::new()),
+        ..sample_quantity()
+    };
+    update_quantity(&pool, &created.id, cleared).await.unwrap();
+    assert_eq!(shown("Zr").await, None);
+
+    let result = ResultInput {
+        symbol: "Zs".into(),
+        display_symbol: Some("Z_s".into()),
+        ..sample_result()
+    };
+    let saved = create_result(&pool, practice, result, None).await.unwrap();
+    assert_eq!(shown("Zs").await.as_deref(), Some("Z_s"));
+    for tolerance in [None, Some(Some(1.0))] {
+        let edited = ResultInput {
+            symbol: "Zs".into(),
+            tolerance,
+            display_symbol: Some("Z_t".into()),
+            ..sample_result()
+        };
+        update_result(&pool, &saved.id, edited).await.unwrap();
+        assert_eq!(shown("Zs").await.as_deref(), Some("Z_t"));
+        let kept = ResultInput {
+            symbol: "Zs".into(),
+            tolerance,
+            ..sample_result()
+        };
+        update_result(&pool, &saved.id, kept).await.unwrap();
+        assert_eq!(shown("Zs").await.as_deref(), Some("Z_t"));
+        set_display_symbol(&pool, practice, "Zs", "Z_s")
+            .await
+            .unwrap();
+    }
+
+    let intermediate = IntermediateInput {
+        display_symbol: Some("I_a".into()),
+        symbol: "Ia".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+        show_live: false,
+        on_means: false,
+    };
+    let row = create_intermediate(&pool, practice, intermediate)
+        .await
+        .unwrap();
+    assert_eq!(shown("Ia").await.as_deref(), Some("I_a"));
+    let intermediate = IntermediateInput {
+        display_symbol: Some("I_b".into()),
+        symbol: "Ia".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+        show_live: false,
+        on_means: false,
+    };
+    update_intermediate(&pool, practice, &row.id, intermediate)
+        .await
+        .unwrap();
+    assert_eq!(shown("Ia").await.as_deref(), Some("I_b"));
+
+    let point = PointResultInput {
+        display_symbol: Some("P_a".into()),
+        symbol: "Pa".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+    };
+    let row = create_point_result(&pool, practice, point).await.unwrap();
+    assert_eq!(shown("Pa").await.as_deref(), Some("P_a"));
+    let point = PointResultInput {
+        display_symbol: None,
+        symbol: "Pa".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+    };
+    update_point_result(&pool, practice, &row.id, point)
+        .await
+        .unwrap();
+    assert_eq!(shown("Pa").await.as_deref(), Some("P_a"));
+
+    let aggregate = AggregateInput {
+        display_symbol: Some("G_a".into()),
+        symbol: "Ga".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+        is_final: false,
+    };
+    let row = create_aggregate(&pool, practice, aggregate).await.unwrap();
+    assert_eq!(shown("Ga").await.as_deref(), Some("G_a"));
+    let aggregate = AggregateInput {
+        display_symbol: Some("G_b".into()),
+        symbol: "Ga".into(),
+        name: "a".into(),
+        unit: "m".into(),
+        formula: "2".into(),
+        is_final: false,
+    };
+    update_aggregate(&pool, practice, &row.id, aggregate)
+        .await
+        .unwrap();
+    assert_eq!(shown("Ga").await.as_deref(), Some("G_b"));
+}
+
+#[tokio::test]
+async fn a_submission_shows_the_symbols_of_its_version_never_the_draft() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    assert!(set_display_symbol(&pool, practice, "T1", "T_publicado")
+        .await
+        .unwrap());
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+    let version = current_version(&pool, practice).await.unwrap().unwrap();
+    for (id, linked) in [
+        ("con-version", Some(version.id.as_str())),
+        ("sin-version", None),
+    ] {
+        sqlx::query(
+            "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+             csv_path, analysis_json, submitted_at, practice_version_id) \
+             VALUES (?1, 'a', 'g', 'c', ?2, '', '', '{}', '2026-10-01T00:00:00Z', ?3)",
+        )
+        .bind(id)
+        .bind(practice)
+        .bind(linked)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    assert!(set_display_symbol(&pool, practice, "T1", "T_borrador")
+        .await
+        .unwrap());
+
+    for id in ["con-version", "sin-version"] {
+        let symbols = submission_display_symbols(&pool, id).await.unwrap();
+        assert_eq!(symbols["T1"], "T_publicado", "{id}");
+    }
+    assert!(submission_display_symbols(&pool, "no-existe")
+        .await
+        .unwrap()
+        .is_empty());
+
+    sqlx::query(
+        "UPDATE practice_versions \
+         SET definition_json = json_set(definition_json, '$.display_symbols', 5) WHERE id = ?1",
+    )
+    .bind(&version.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(submission_display_symbols(&pool, "con-version")
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn a_submission_without_version_reads_the_published_version_everywhere() {
+    let (pool, _dir) = setup().await;
+    db::run_startup_seeds(&pool, true, None).await.unwrap();
+    let practice = "p1-estadistica";
+    let tolerance = |value: f64| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query(
+                "UPDATE practice_results SET tolerance = ?1 WHERE practice_id = ?2 AND symbol = 'Q'",
+            )
+            .bind(value)
+            .bind(practice)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+    tolerance(1.0).await;
+    assert!(set_display_symbol(&pool, practice, "T1", "T_publicado")
+        .await
+        .unwrap());
+    publish_checked(&pool, practice, None, None, |_| vec![])
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, course_id, practice_id, \
+         file_name, csv_path, analysis_json, submitted_at) \
+         VALUES ('sin-version', 'a', 'g', 'c', (SELECT id FROM courses LIMIT 1), ?1, '', '', '{}', \
+         '2026-10-01T00:00:00Z')",
+    )
+    .bind(practice)
+    .execute(&pool)
+    .await
+    .unwrap();
+    tolerance(2.0).await;
+    assert!(set_display_symbol(&pool, practice, "T1", "T_borrador")
+        .await
+        .unwrap());
+
+    let definition = submission_definition(&pool, "sin-version")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(definition.display_symbols["T1"], "T_publicado");
+    let detail = db::submission_detail(&pool, "sin-version")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(detail.display_symbols["T1"], "T_publicado");
+    assert_eq!(detail.result_tolerances["Q"], 1.0);
+}
+
+fn presentation_of(definition: &PracticeDefinition, symbol: &str) -> (String, String) {
+    let q = definition
+        .quantities
+        .iter()
+        .find(|q| q.symbol == symbol)
+        .unwrap_or_else(|| panic!("falta {symbol} en {}", definition.practice_id));
+    (q.label_mode.clone(), q.input_widget.clone())
+}
+
+fn presentation(label: &str, widget: &str) -> (String, String) {
+    (label.to_string(), widget.to_string())
+}
+
+async fn assert_seeded_presentation(pool: &SqlitePool, read_version: bool) {
+    let cases = [
+        ("p1-estadistica", "T1", "nombre", "cronometro"),
+        ("p1-estadistica", "t_med", "nombre", "teclado"),
+        ("p3-relajacion", "T_oc", "nombre_simbolo", "teclado"),
+        ("p3-relajacion", "tmedio", "nombre", "teclado"),
+        ("fluidos-1", "t", "nombre", "cronometro"),
+        ("viscosidad", "t", "nombre", "cronometro"),
+        ("fluidos-2", "t", "nombre", "teclado"),
+        ("p2-cc", "Vg_s", "simbolo", "teclado"),
+        ("filtros", "VRpp", "simbolo", "teclado"),
+        ("ca-rlc", "a_R", "simbolo", "teclado"),
+    ];
+    for (practice, symbol, label, widget) in cases {
+        let found = if read_version {
+            current_version(pool, practice)
+                .await
+                .unwrap()
+                .unwrap()
+                .definition
+        } else {
+            definition(pool, practice).await.unwrap().unwrap()
+        };
+        assert_eq!(
+            presentation_of(&found, symbol),
+            presentation(label, widget),
+            "{practice}/{symbol}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn seeded_quantities_get_their_label_and_input() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+
+    assert_seeded_presentation(&pool, false).await;
+    assert_seeded_presentation(&pool, true).await;
+}
+
+#[tokio::test]
+async fn seeding_sets_label_and_input_without_the_migration() {
+    let (pool, _dir) = setup().await;
+    super::seed::run_seeds(&pool).await.unwrap();
+
+    assert_seeded_presentation(&pool, false).await;
+}
+
+#[tokio::test]
+async fn the_label_and_input_migration_updates_drafts_and_versions_once() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query("UPDATE practice_quantities SET label_mode = 'nombre', input_widget = 'teclado'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = json_set(definition_json, '$.quantities', \
+         (SELECT json_group_array(json(json_remove(value, '$.label_mode', '$.input_widget'))) \
+          FROM json_each(definition_json, '$.quantities')))",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-rotulo-y-entrada'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_quantity_presentation(&pool)
+        .await
+        .unwrap();
+
+    assert_seeded_presentation(&pool, false).await;
+    assert_seeded_presentation(&pool, true).await;
+    for practice in [
+        "p1-estadistica",
+        "p2-cc",
+        "p3-relajacion",
+        "fluidos-2",
+        "filtros",
+    ] {
+        let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+        assert_eq!(found.kind, DraftChangeKind::None, "{practice}");
+    }
+
+    sqlx::query(
+        "UPDATE practice_quantities SET label_mode = 'nombre' \
+         WHERE practice_id = 'p2-cc' AND symbol = 'Vg_s'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    display::migrate_legacy_quantity_presentation(&pool)
+        .await
+        .unwrap();
+    let draft = definition(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(
+        presentation_of(&draft, "Vg_s"),
+        presentation("nombre", "teclado"),
+        "una migración ya aplicada no se repite"
+    );
+}
+
+#[tokio::test]
+async fn the_label_and_input_migration_keeps_what_the_teacher_chose() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET label_mode = 'nombre_simbolo', input_widget = 'cronometro' \
+         WHERE practice_id = 'p3-relajacion' AND symbol = 'tmedio'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-rotulo-y-entrada'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_quantity_presentation(&pool)
+        .await
+        .unwrap();
+
+    let draft = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
+    assert_eq!(
+        presentation_of(&draft, "tmedio"),
+        presentation("nombre_simbolo", "cronometro")
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_version_does_not_stop_the_label_and_input_migration() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = '{\"quantities\": 5}' \
+         WHERE practice_id = 'p1-estadistica'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-rotulo-y-entrada'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_quantity_presentation(&pool)
+        .await
+        .unwrap();
+
+    assert!(db::migration_applied(&pool, "2026-11-rotulo-y-entrada")
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
+async fn changing_a_label_or_input_is_cosmetic_and_summarized() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET label_mode = 'simbolo', input_widget = 'teclado' \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 'T1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let found = draft_changes(&pool, "p1-estadistica")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(
+        found.changes,
+        vec![
+            "Cambia el rótulo de T1".to_string(),
+            "Cambia la entrada de T1".to_string()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn renaming_a_quantity_does_not_hide_its_input_change() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET symbol = 'T_1', input_widget = 'teclado' \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 'T1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let found = draft_changes(&pool, "p1-estadistica")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        found
+            .changes
+            .contains(&"Cambia la entrada de T_1".to_string()),
+        "{:?}",
+        found.changes
+    );
+}
+
+#[tokio::test]
+async fn a_copy_keeps_label_and_input_and_a_missing_field_resets_them() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let copy = duplicate_practice(&pool, "p1-estadistica", "Copia P1", "u1")
+        .await
+        .unwrap()
+        .unwrap();
+    let copied = definition(&pool, &copy.id).await.unwrap().unwrap();
+    assert_eq!(
+        presentation_of(&copied, "T1"),
+        presentation("nombre", "cronometro")
+    );
+
+    let created = create_quantity(
+        &pool,
+        &copy.id,
+        QuantityInput {
+            label_mode: Some("simbolo".into()),
+            input_widget: Some("cronometro".into()),
+            quantity: Some("tiempo".into()),
+            ..new_quantity("t_nuevo")
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(created.label_mode, "simbolo");
+    assert_eq!(created.input_widget, "cronometro");
+
+    let kept = update_quantity(
+        &pool,
+        &created.id,
+        QuantityInput {
+            quantity: Some("tiempo".into()),
+            ..new_quantity("t_nuevo")
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(kept.label_mode, "simbolo");
+    assert_eq!(kept.input_widget, "cronometro");
+
+    let not_time = update_quantity(&pool, &created.id, new_quantity("t_nuevo"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(not_time.label_mode, "simbolo");
+    assert_eq!(not_time.input_widget, "teclado");
+}
+
+async fn compare_with_of(
+    pool: &SqlitePool,
+    practice: &str,
+    symbol: &str,
+    in_version: bool,
+) -> String {
+    let sql = if in_version {
+        "SELECT COALESCE(json_extract(r.value, '$.compare_with'), '') \
+         FROM practices p JOIN practice_versions v ON v.id = p.current_version_id, \
+         json_each(v.definition_json, '$.results') r \
+         WHERE p.id = ?1 AND json_extract(r.value, '$.symbol') = ?2"
+    } else {
+        "SELECT compare_with FROM practice_results WHERE practice_id = ?1 AND symbol = ?2"
+    };
+    let (value,): (String,) = sqlx::query_as(sql)
+        .bind(practice)
+        .bind(symbol)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    value
+}
+
+async fn assert_seeded_comparisons(pool: &SqlitePool, in_version: bool) {
+    for (result, quantity) in [
+        ("VR1_s_t", "VR1_s"),
+        ("VR3_s_t", "VR3_s"),
+        ("VR2_p_t", "VR2_p"),
+        ("P_max_t", ""),
+        ("RP_max_t", ""),
+        ("I_s", ""),
+    ] {
+        assert_eq!(
+            compare_with_of(pool, "p2-cc", result, in_version).await,
+            quantity,
+            "{result} (versión: {in_version})"
+        );
+    }
+}
+
+#[tokio::test]
+async fn seeding_sets_what_each_theoretical_result_compares_with() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+
+    assert_seeded_comparisons(&pool, false).await;
+    assert_seeded_comparisons(&pool, true).await;
+}
+
+#[tokio::test]
+async fn the_compare_with_migration_updates_drafts_and_versions_once() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query("UPDATE practice_results SET compare_with = ''")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = json_set(definition_json, '$.results', \
+         (SELECT json_group_array(json(json_remove(value, '$.compare_with'))) \
+          FROM json_each(definition_json, '$.results')))",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-comparar-con'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    display::migrate_legacy_compare_with(&pool).await.unwrap();
+
+    assert_seeded_comparisons(&pool, false).await;
+    assert_seeded_comparisons(&pool, true).await;
+    let found = draft_changes(&pool, "p2-cc").await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::None);
+
+    sqlx::query("UPDATE practice_results SET compare_with = '' WHERE symbol = 'VR1_s_t'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    display::migrate_legacy_compare_with(&pool).await.unwrap();
+    assert_eq!(compare_with_of(&pool, "p2-cc", "VR1_s_t", false).await, "");
+}
+
+#[tokio::test]
+async fn renaming_or_removing_the_quantity_carries_its_comparison() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p1-estadistica";
+    let q = create_quantity(&pool, practice, new_quantity("Qa"))
+        .await
+        .unwrap();
+    let result = ResultInput {
+        compare_with: Some("Qa".into()),
+        symbol: "Qa_t".into(),
+        ..sample_result()
+    };
+    create_result(&pool, practice, result, None).await.unwrap();
+
+    update_quantity(&pool, &q.id, new_quantity("Qb"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(compare_with_of(&pool, practice, "Qa_t", false).await, "Qb");
+
+    remove_quantity(&pool, practice, &q.id).await.unwrap();
+    assert_eq!(compare_with_of(&pool, practice, "Qa_t", false).await, "");
+}
+
+#[tokio::test]
+async fn a_submission_brings_the_comparisons_of_its_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at) \
+         VALUES ('s', 'a', 'g', 'c', 'p2-cc', '', '', '{}', '2026-10-01T00:00:00Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pairs = submission_comparisons(&pool, "s").await.unwrap();
+    assert_eq!(pairs["VR1_s_t"], "VR1_s");
+    assert_eq!(pairs["VR2_p_t"], "VR2_p");
+    assert!(!pairs.contains_key("P_max_t"));
+    assert!(submission_comparisons(&pool, "no-existe")
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+async fn live_symbols(pool: &SqlitePool, practice: &str, in_version: bool) -> Vec<String> {
+    let sql = if in_version {
+        "SELECT json_extract(i.value, '$.symbol') \
+         FROM practices p JOIN practice_versions v ON v.id = p.current_version_id, \
+         json_each(v.definition_json, '$.intermediates') i \
+         WHERE p.id = ?1 AND json_extract(i.value, '$.show_live') = 1"
+    } else {
+        "SELECT symbol FROM practice_intermediates WHERE practice_id = ?1 AND show_live = 1"
+    };
+    sqlx::query_scalar(sql)
+        .bind(practice)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+async fn assert_seeded_live_columns(pool: &SqlitePool) {
+    for in_version in [false, true] {
+        assert_eq!(live_symbols(pool, "p2-cc", in_version).await, ["P"]);
+        assert_eq!(live_symbols(pool, "fluidos-1", in_version).await, ["Q"]);
+        assert_eq!(live_symbols(pool, "viscosidad", in_version).await, ["v"]);
+        assert!(live_symbols(pool, "filtros", in_version).await.is_empty());
+    }
+    for practice in ["p2-cc", "fluidos-1", "viscosidad"] {
+        let found = draft_changes(pool, practice).await.unwrap().unwrap();
+        assert_eq!(found.kind, DraftChangeKind::None, "{practice}");
+    }
+}
+
+#[tokio::test]
+async fn seeding_marks_the_live_columns() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+
+    assert_seeded_live_columns(&pool).await;
+    let def = definition(&pool, "viscosidad").await.unwrap().unwrap();
+    assert_eq!(def.y_formula.as_deref(), Some("dx/t"));
+}
+
+async fn without_live_columns(pool: &SqlitePool) {
+    for sql in [
+        "UPDATE practice_intermediates SET show_live = 0",
+        "DELETE FROM practice_intermediates WHERE practice_id = 'viscosidad' AND symbol = 'v'",
+        "UPDATE practice_versions SET definition_json = json_set(definition_json, '$.intermediates', \
+         (SELECT json_group_array(json(json_remove(value, '$.show_live'))) \
+          FROM json_each(definition_json, '$.intermediates') \
+          WHERE json_extract(value, '$.symbol') <> 'v'))",
+        "DELETE FROM applied_migrations WHERE name = '2026-11-columnas-en-vivo'",
+    ] {
+        sqlx::query(sql).execute(pool).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn the_live_columns_migration_updates_drafts_and_versions_once() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    without_live_columns(&pool).await;
+
+    display::migrate_legacy_live_columns(&pool).await.unwrap();
+    assert_seeded_live_columns(&pool).await;
+
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-columnas-en-vivo'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    display::migrate_legacy_live_columns(&pool).await.unwrap();
+    assert_seeded_live_columns(&pool).await;
 }

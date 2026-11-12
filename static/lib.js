@@ -8,9 +8,6 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-const CC_PART_SUFFIX = /_[spc](?:_t)?$/;
-const CC_BASE_SYMBOLS = new Set(["Vg", "RA", "VR1", "VR2", "VR3", "I"]);
-
 const GREEK_NAMES = { rho: "ρ", gamma: "γ", mu: "μ", phi: "φ", tau: "τ", omega: "ω" };
 const GREEK_PREFIX = new RegExp(`^(${Object.keys(GREEK_NAMES).join("|")})(?=_|\\d|$)`);
 
@@ -26,35 +23,16 @@ function subscriptHtml(escaped, pattern) {
   });
 }
 
+let displaySymbols = new Map();
+
+export function setDisplaySymbols(symbols) {
+  displaySymbols = new Map(Object.entries(symbols ?? {}));
+}
+
 export function symbolHtml(value) {
-  const specials = {
-    tmedio: "t<sub>1/2</sub>",
-    T_oc: "T<sub>OC</sub>",
-    T_OC: "T<sub>OC</sub>",
-    Vg: "V<sub>G</sub>",
-    RA: "R<sub>A</sub>",
-    VRpp: "V<sub>R,PP</sub>",
-    VCpp: "V<sub>C,PP</sub>",
-    VLpp: "V<sub>L,PP</sub>",
-    VR_teo: "V<sub>R,teo</sub>",
-    VR_exp: "V<sub>R,exp</sub>",
-    VC_teo: "V<sub>C,teo</sub>",
-    VC_exp: "V<sub>C,exp</sub>",
-    VL_teo: "V<sub>L,teo</sub>",
-    VL_exp: "V<sub>L,exp</sub>",
-    phiR_teo: "φ<sub>R,teo</sub>",
-    phiR_exp: "φ<sub>R,exp</sub>",
-    phiC_teo: "φ<sub>C,teo</sub>",
-    phiC_exp: "φ<sub>C,exp</sub>",
-    phiL_teo: "φ<sub>L,teo</sub>",
-    phiL_exp: "φ<sub>L,exp</sub>",
-  };
   const raw = String(value);
-  if (specials[raw]) return specials[raw];
-  const base = raw.replace(CC_PART_SUFFIX, "");
-  if (base !== raw && CC_BASE_SYMBOLS.has(base)) return symbolHtml(base);
   return subscriptHtml(
-    escapeHtml(raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
+    escapeHtml(displaySymbols.get(raw) ?? raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
     SYMBOL_SUBSCRIPT,
   );
 }
@@ -375,14 +353,6 @@ export function compareResults(autoDerived, studentResults, tolerances = {}) {
   });
 }
 
-export function pointPower(r, i) {
-  return i * i * r;
-}
-
-export function flowRate(v, t) {
-  return v / t;
-}
-
 export function draftMeasurementsByQuantity(measurements) {
   const map = new Map();
   for (const m of measurements ?? []) {
@@ -398,6 +368,11 @@ export function draftMeasurementsByQuantity(measurements) {
   return map;
 }
 
+export function draftedQuantityIds(measurements) {
+  const hasReadings = (m) => m.values?.length || m.operator_replicas?.some((reps) => reps.length);
+  return new Set((measurements ?? []).filter(hasReadings).map((m) => m.quantity_id));
+}
+
 export function analysisSections(analysis) {
   const parts = analysis?.parts ?? [];
   if (!parts.length) return [{ title: null, analysis }];
@@ -407,11 +382,31 @@ export function analysisSections(analysis) {
   ];
 }
 
-export function compareMeasuredVsTheoretical(quantities, derived) {
+export function compareOptionGroups(definition, { result = null, section = null } = {}, current = "") {
+  const options = definition?.compare_options;
+  const shared = options?.shared ?? (definition?.quantities ?? []).map((q) => q.symbol);
+  const ofPart = (id) => options?.parts?.[id] ?? shared;
+  let groups;
+  if (result) groups = [[null, options?.results?.[result] ?? shared]];
+  else if (section) groups = [[null, section.part_id ? ofPart(section.part_id) : shared]];
+  else {
+    groups = [[null, shared]].concat(
+      (definition?.parts ?? []).map((p) => [p.title, ofPart(p.id).filter((s) => !shared.includes(s))]),
+    );
+  }
+  groups = groups.filter(([label, symbols]) => label == null || symbols.length);
+  const offered = groups.some(([, symbols]) => symbols.includes(current));
+  return result && current && !offered ? [["Guardada (fuera de alcance)", [current]], ...groups] : groups;
+}
+
+export function comparisonPairs(definition) {
+  return new Map((definition?.results ?? []).filter((r) => r.compare_with).map((r) => [r.symbol, r.compare_with]));
+}
+
+export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Map()) {
   const byQuantity = new Map((quantities ?? []).map((q) => [q.symbol, q]));
   return (derived ?? []).reduce((rows, d) => {
-    if (!d.symbol.endsWith("_t")) return rows;
-    const q = byQuantity.get(d.symbol.slice(0, -2));
+    const q = byQuantity.get(pairs.get(d.symbol));
     if (!q) return rows;
     const ev = q.result?.mean ?? null;
     const eu = q.result?.u_expanded ?? null;

@@ -5,7 +5,16 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 3] = ["name", "title", "tolerance"];
+const COSMETIC_KEYS: [&str; 8] = [
+    "name",
+    "title",
+    "tolerance",
+    "display_symbols",
+    "label_mode",
+    "input_widget",
+    "compare_with",
+    "show_live",
+];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
 const FREELY_ORDERED: [&str; 4] = ["quantities", "results", "parts", "sections"];
 
@@ -52,7 +61,10 @@ fn strip(value: &mut Value, keys: &[&str]) {
             for key in keys {
                 object.remove(*key);
             }
-            object.values_mut().for_each(|v| strip(v, keys));
+            object
+                .iter_mut()
+                .filter(|(key, _)| key.as_str() != "display_symbols")
+                .for_each(|(_, v)| strip(v, keys));
         }
         Value::Array(items) => items.iter_mut().for_each(|v| strip(v, keys)),
         _ => {}
@@ -269,6 +281,43 @@ fn tolerance_changes(published: &PracticeDefinition, draft: &PracticeDefinition)
         .collect()
 }
 
+fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -> Vec<String> {
+    let before: std::collections::BTreeSet<&str> =
+        super::display::version_symbols(published).collect();
+    let after: std::collections::BTreeSet<&str> = super::display::version_symbols(draft).collect();
+    let symbols = before
+        .intersection(&after)
+        .filter(|symbol| {
+            published.display_symbols.get(**symbol) != draft.display_symbols.get(**symbol)
+        })
+        .map(|symbol| format!("Cambia cómo se muestra {symbol}"));
+    let quantities = draft.quantities.iter().flat_map(|new| {
+        let old = published.quantities.iter().find(|q| q.id == new.id);
+        let label = old
+            .filter(|q| q.label_mode != new.label_mode)
+            .map(|_| format!("Cambia el rótulo de {}", new.symbol));
+        let widget = old
+            .filter(|q| q.input_widget != new.input_widget)
+            .map(|_| format!("Cambia la entrada de {}", new.symbol));
+        label.into_iter().chain(widget)
+    });
+    let comparisons = draft.results.iter().filter_map(|new| {
+        let old = published.results.iter().find(|r| r.id == new.id)?;
+        (old.compare_with != new.compare_with)
+            .then(|| format!("Cambia con qué se compara {}", new.symbol))
+    });
+    let live = draft.intermediates.iter().filter_map(|new| {
+        let old = published.intermediates.iter().find(|i| i.id == new.id)?;
+        (old.show_live != new.show_live)
+            .then(|| format!("Cambia si {} se muestra en vivo", new.symbol))
+    });
+    symbols
+        .chain(quantities)
+        .chain(comparisons)
+        .chain(live)
+        .collect()
+}
+
 pub fn change_kind(
     published: &PracticeDefinition,
     draft: &PracticeDefinition,
@@ -285,8 +334,7 @@ pub fn change_kind(
     )
 }
 
-/// Compara una versión publicada con el borrador. Los nombres, títulos, tolerancias y el orden de
-/// las listas que no afecta el cálculo son cosméticos.
+/// Compara una versión publicada con el borrador; nombres, títulos, tolerancias y orden son cosméticos.
 ///
 /// ```
 /// use quantify::db::PracticeResult;
@@ -296,12 +344,15 @@ pub fn change_kind(
 ///     id: "r".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
 ///     unit: "m/s2".into(), formula: "2*L".into(), position: 0, tolerance: None,
 ///     is_final: true, has_uncertainty: true,
+///     ..Default::default()
 /// };
 /// let published = PracticeDefinition { results: vec![result.clone()], ..Default::default() };
 /// let kind = |draft: &PracticeDefinition| compare_definitions(&published, draft).unwrap().kind;
 /// assert_eq!(kind(&published), DraftChangeKind::None);
 ///
-/// let renamed = PracticeResult { name: "Gravedad".into(), tolerance: Some(1.0), ..result.clone() };
+/// let renamed = PracticeResult {
+///     name: "Gravedad".into(), tolerance: Some(1.0), compare_with: "L".into(), ..result.clone()
+/// };
 /// let draft = PracticeDefinition { results: vec![renamed], ..Default::default() };
 /// assert_eq!(kind(&draft), DraftChangeKind::Cosmetic);
 ///
@@ -318,8 +369,16 @@ pub fn compare_definitions(
     let kind = change_kind(published, draft)?;
     let changes = match kind {
         DraftChangeKind::None => Vec::new(),
-        DraftChangeKind::Cosmetic => tolerance_changes(published, draft),
-        DraftChangeKind::Structural => list_changes(published, draft)?,
+        DraftChangeKind::Cosmetic => [
+            tolerance_changes(published, draft),
+            display_changes(published, draft),
+        ]
+        .concat(),
+        DraftChangeKind::Structural => [
+            list_changes(published, draft)?,
+            display_changes(published, draft),
+        ]
+        .concat(),
     };
     Ok(DefinitionComparison { kind, changes })
 }
