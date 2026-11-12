@@ -8,7 +8,10 @@ import { membersEditorMarkup, wireMembersEditor } from "./analysis-members.js";
 import { regressionMarkup, scatterMarkup } from "./analysis-plots.js";
 export { regressionMarkup, scatterMarkup };
 
-export function renderAnalysis(target, submission, includeReview = false, definition = null, pairs = comparisonPairs(definition)) {
+export function renderAnalysis(
+  target, submission, includeReview = false, definition = null,
+  pairs = definition ? comparisonPairs(definition) : new Map(Object.entries(submission.comparisons ?? {})),
+) {
   setDisplaySymbols(submission.display_symbols);
   target.classList.remove("detail-empty");
 
@@ -275,6 +278,7 @@ export function formAnalysisMarkup(analysis, pairs) {
   const sections = analysisSections(analysis);
   if (sections.length === 1) return singleAnalysisMarkup(analysis, pairs);
   const [shared, ...parts] = sections;
+  const measured = sections.flatMap((s) => s.analysis.quantities ?? []);
   const sharedHasData =
     (shared.analysis.quantities?.length ?? 0) +
       (shared.analysis.derived?.length ?? 0) +
@@ -284,13 +288,13 @@ export function formAnalysisMarkup(analysis, pairs) {
       (s) => `
       <section class="analysis-part">
         <h3 class="analysis-part-title">${escapeHtml(s.title)}</h3>
-        ${singleAnalysisMarkup(s.analysis, pairs)}
+        ${singleAnalysisMarkup(s.analysis, pairs, measured)}
       </section>`,
     )
     .join("") + (sharedHasData ? "" : renderWarnings(shared.analysis.warnings ?? []));
 }
 
-function singleAnalysisMarkup(analysis, pairs) {
+function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ?? []) {
   const quantities = analysis.quantities ?? [];
   const derived = analysis.derived ?? [];
   const quantitiesTable = quantitiesTableMarkup(quantities);
@@ -326,7 +330,7 @@ function singleAnalysisMarkup(analysis, pairs) {
       ${blocks}
       ${quantitiesSection}
       ${derivedBlock}
-      ${measuredVsTheoreticalMarkup(quantities, derived, pairs)}
+      ${measuredVsTheoreticalMarkup(measured, derived, pairs)}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
   }
@@ -358,7 +362,7 @@ function singleAnalysisMarkup(analysis, pairs) {
     <h3>Incertidumbres por magnitud</h3>
     ${quantitiesTable}
     ${derivedBlock}
-    ${measuredVsTheoreticalMarkup(quantities, derived, pairs)}
+    ${measuredVsTheoreticalMarkup(measured, derived, pairs)}
     ${renderWarnings(analysis.warnings ?? [])}
   `;
 }

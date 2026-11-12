@@ -699,7 +699,7 @@ pub async fn update_result(
         .bind(input.is_final)
         .bind(input.has_uncertainty)
         .bind(display_symbol(&input.display_symbol))
-        .bind(display_symbol(&input.compare_with))
+        .bind(input.compare_with())
         .execute(pool)
         .await?
         .rows_affected(),
@@ -719,7 +719,7 @@ pub async fn update_result(
         .bind(input.is_final)
         .bind(input.has_uncertainty)
         .bind(display_symbol(&input.display_symbol))
-        .bind(display_symbol(&input.compare_with))
+        .bind(input.compare_with())
         .execute(pool)
         .await?
         .rows_affected(),
@@ -949,7 +949,7 @@ pub(super) async fn insert_result(
     .bind(input.is_final)
     .bind(input.has_uncertainty)
     .bind(display_symbol(&input.display_symbol).unwrap_or(""))
-    .bind(display_symbol(&input.compare_with).unwrap_or(""))
+    .bind(input.compare_with().unwrap_or(""))
     .execute(&mut *conn)
     .await?;
     Ok(id)

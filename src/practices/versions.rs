@@ -138,6 +138,24 @@ pub async fn submission_display_symbols(
     }))
 }
 
+pub async fn submission_comparisons(
+    pool: &SqlitePool,
+    submission_id: &str,
+) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT CAST(json_extract(r.value, '$.symbol') AS TEXT), \
+                CAST(json_extract(r.value, '$.compare_with') AS TEXT) \
+         FROM submissions s JOIN practices p ON p.id = s.practice_id \
+         JOIN practice_versions v ON v.id = COALESCE(s.practice_version_id, p.current_version_id), \
+         json_each(v.definition_json, '$.results') r \
+         WHERE s.id = ?1 AND COALESCE(json_extract(r.value, '$.compare_with'), '') <> ''",
+    )
+    .bind(submission_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
 fn snapshot(definition: &PracticeDefinition) -> anyhow::Result<String> {
     let mut definition = definition.clone();
     definition.status = "publicada".into();

@@ -4351,3 +4351,26 @@ async fn renaming_or_removing_the_quantity_carries_its_comparison() {
     remove_quantity(&pool, practice, &q.id).await.unwrap();
     assert_eq!(compare_with_of(&pool, practice, "Qa_t", false).await, "");
 }
+
+#[tokio::test]
+async fn a_submission_brings_the_comparisons_of_its_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO submissions (id, student_name, group_name, course, practice_id, file_name, \
+         csv_path, analysis_json, submitted_at) \
+         VALUES ('s', 'a', 'g', 'c', 'p2-cc', '', '', '{}', '2026-10-01T00:00:00Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pairs = submission_comparisons(&pool, "s").await.unwrap();
+    assert_eq!(pairs["VR1_s_t"], "VR1_s");
+    assert_eq!(pairs["VR2_p_t"], "VR2_p");
+    assert!(!pairs.contains_key("P_max_t"));
+    assert!(submission_comparisons(&pool, "no-existe")
+        .await
+        .unwrap()
+        .is_empty());
+}

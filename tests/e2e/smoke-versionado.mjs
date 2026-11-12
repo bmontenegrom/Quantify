@@ -71,10 +71,11 @@ await withE2E({ port: PORT, dbName: "quantify-versionado.db" }, async ({ login }
   step("docente: la entrega compara y con x en medido vs teórico");
   await page.click('.tab.teacher-only[data-view="submissions"]');
   await page.click(`.submission-item:has-text("${NAME}")`);
-  const compareRows = page.locator("#submission-detail-body .compare-table tbody tr");
+  const compareRows = page.locator("#submission-detail-body .measured-vs-theoretical tbody tr");
   await compareRows.first().waitFor();
   assert((await compareRows.count()) === 1, "medido vs teórico debía tener una fila");
-  assert((await compareRows.first().textContent()).includes("x"), "la fila debía ser la de x");
+  const cells = await compareRows.first().locator("td").allTextContents();
+  assert(/^x\b/.test(cells[0].trim()), `la fila debía ser la de x, fue "${cells[0]}"`);
 
   step("docente: recién publicada no hay cambios sin publicar");
   await page.click('.tab.teacher-only[data-view="practices"]');

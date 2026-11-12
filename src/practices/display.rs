@@ -315,7 +315,7 @@ pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Re
             .fetch_all(&mut *tx)
             .await?;
     for (id, json) in versions {
-        let mut definition = match super::versions::parse(&json) {
+        let definition = match super::versions::parse(&json) {
             Ok(definition) => definition,
             Err(error) => {
                 tracing::warn!(
@@ -331,33 +331,23 @@ pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Re
             .iter()
             .map(|q| q.symbol.as_str())
             .collect();
-        let targets: Vec<Option<String>> = definition
-            .results
-            .iter()
-            .map(|r| {
-                r.compare_with
-                    .is_empty()
-                    .then(|| legacy_compare_with(&r.symbol, &symbols).map(str::to_string))
-                    .flatten()
-            })
-            .collect();
-        if targets.iter().all(Option::is_none) {
-            continue;
-        }
-        for (result, target) in definition.results.iter_mut().zip(targets) {
-            if let Some(target) = target {
-                result.compare_with = target;
+        for (i, result) in definition.results.iter().enumerate() {
+            if !result.compare_with.is_empty() {
+                continue;
             }
+            let Some(target) = legacy_compare_with(&result.symbol, &symbols) else {
+                continue;
+            };
+            sqlx::query(
+                "UPDATE practice_versions \
+                 SET definition_json = json_set(definition_json, ?1, ?2) WHERE id = ?3",
+            )
+            .bind(format!("$.results[{i}].compare_with"))
+            .bind(target)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
         }
-        sqlx::query(
-            "UPDATE practice_versions \
-             SET definition_json = json_set(definition_json, '$.results', json(?1)) \
-             WHERE id = ?2",
-        )
-        .bind(serde_json::to_string(&definition.results)?)
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
     }
     sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
         .bind(LEGACY_COMPARE_WITH)

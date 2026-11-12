@@ -559,9 +559,16 @@ pub(super) async fn delete_quantity(
     require_teacher(&state, &headers).await?;
     let before = load_definition(&state, &id).await?;
     let mut after = before.clone();
+    let removed = before
+        .quantities
+        .iter()
+        .find(|q| q.id == qid)
+        .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
     after.quantities.retain(|q| q.id != qid);
-    if after.quantities.len() == before.quantities.len() {
-        return Err(AppError::not_found("magnitud no encontrada en la practica"));
+    for result in &mut after.results {
+        if result.compare_with == removed.symbol {
+            result.compare_with.clear();
+        }
     }
     guard_change(&before, &after, "eliminar la magnitud")?;
     match practices::remove_quantity(&state.pool, &id, &qid).await? {
@@ -1096,7 +1103,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
     for r in &def.results {
         let input = ResultInput {
             display_symbol: None,
-            compare_with: None,
+            compare_with: Some(r.compare_with.clone()),
             symbol: r.symbol.clone(),
             name: r.name.clone(),
             unit: r.unit.clone(),
@@ -1348,12 +1355,7 @@ fn with_new_result(
         tolerance: input.tolerance.flatten(),
         is_final: input.is_final,
         has_uncertainty: input.has_uncertainty,
-        compare_with: input
-            .compare_with
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_string(),
+        compare_with: input.compare_with().unwrap_or("").to_string(),
     });
     if let Some(section) = after
         .sections
@@ -1374,8 +1376,8 @@ fn with_updated_result(
     let item = after.results.iter_mut().find(|x| x.id == result_id)?;
     let old_symbol = std::mem::replace(&mut item.symbol, input.symbol.trim().to_string());
     item.formula = input.formula.trim().to_string();
-    if let Some(compare_with) = &input.compare_with {
-        item.compare_with = compare_with.trim().to_string();
+    if let Some(compare_with) = input.compare_with() {
+        item.compare_with = compare_with.to_string();
     }
     let new_symbol = item.symbol.clone();
     for symbol in after.sections.iter_mut().flat_map(|s| s.results.iter_mut()) {
@@ -1654,10 +1656,11 @@ fn validate_result(
             return Err(AppError::bad_request("tolerancia no puede ser negativa"));
         }
     }
-    let compare_with = input.compare_with.as_deref().map(str::trim).unwrap_or("");
+    let compare_with = input.compare_with().unwrap_or("");
     if !compare_with.is_empty() && !def.quantities.iter().any(|q| q.symbol == compare_with) {
         return Err(AppError::bad_request(
-            "\"Comparar con\" tiene que ser el símbolo de una magnitud de la práctica.",
+            "\"Comparar con\" tiene que ser el símbolo de una magnitud de la práctica, \
+             de la misma parte que el mensurando o de los datos compartidos.",
         ));
     }
     computation::check_formula(input.formula.trim(), &result_scope(def))
@@ -2550,6 +2553,25 @@ mod tests {
                     && message.contains("RA_p")),
             "{problems:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_saved_comparison_must_point_to_a_quantity_of_its_part_or_shared() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let with = |compare_with: &str| {
+            let mut def = cc.clone();
+            let r = def.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
+            r.unwrap().compare_with = compare_with.into();
+            formula_problems(&def)
+        };
+        assert!(with("VR1_s").is_empty());
+        assert!(with("R1").is_empty(), "una magnitud compartida vale");
+        assert!(!with("VR1_p").is_empty(), "una magnitud de otra parte no");
+        assert!(!with("nada").is_empty());
     }
 
     #[tokio::test]

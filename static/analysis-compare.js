@@ -7,7 +7,7 @@ export function measuredVsTheoreticalMarkup(quantities, derived, pairs) {
     <h3>Medido vs teórico (automático)</h3>
     <p class="submission-meta">Cada magnitud medida comparada con el valor teórico que calcula el programa (con su U propagada).</p>
     <div class="data-table-wrap">
-      <table class="data-table compare-table">
+      <table class="data-table compare-table measured-vs-theoretical">
         <thead>
           <tr>
             <th>Magnitud</th><th>Medido (±U)</th><th>Teórico (±U)</th>
