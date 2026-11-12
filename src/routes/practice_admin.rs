@@ -1125,7 +1125,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
     for r in &def.results {
         let input = ResultInput {
             display_symbol: None,
-            compare_with: Some(r.compare_with.clone()),
+            compare_with: None,
             symbol: r.symbol.clone(),
             name: r.name.clone(),
             unit: r.unit.clone(),
@@ -1135,6 +1135,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
             has_uncertainty: r.has_uncertainty,
         };
         note("el mensurando", &r.symbol, validate_result(def, &input));
+        note("la comparación de", &r.symbol, check_compare(def, r));
     }
     let kind = def.analysis_kind.as_deref();
     if kind == Some("regresion_lineal") {
@@ -1442,7 +1443,6 @@ pub(super) async fn create_result(
     )
     .await?;
     let after = with_new_result(&def, &input, section_id.as_deref());
-    guard_compare_scope(&after, &input)?;
     guard_change(&def, &after, "guardar el mensurando")?;
     Ok(Json(
         practices::create_result(&state.pool, &id, input, section_id.as_deref()).await?,
@@ -1471,7 +1471,6 @@ pub(super) async fn update_result(
     .await?;
     let after = with_updated_result(&def, &rid, &input)
         .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
-    guard_compare_scope(&after, &input)?;
     guard_change(&def, &after, "guardar el mensurando")?;
     let updated = practices::update_result(&state.pool, &rid, input)
         .await?
@@ -1660,25 +1659,32 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     Ok(())
 }
 
-const COMPARE_SCOPE: &str =
-    "\"Comparar con\" tiene que ser el símbolo de una magnitud de la práctica, \
-     de la misma parte que el mensurando o de los datos compartidos.";
-
-fn guard_compare_scope(
-    after: &practices::PracticeDefinition,
-    input: &ResultInput,
+fn check_compare(
+    def: &practices::PracticeDefinition,
+    result: &db::PracticeResult,
 ) -> Result<(), AppError> {
-    match input.compare_with().filter(|s| !s.is_empty()) {
-        Some(target)
-            if !after
-                .comparable_quantities(input.symbol.trim())
-                .iter()
-                .any(|s| s == target) =>
-        {
-            Err(AppError::bad_request(COMPARE_SCOPE))
-        }
-        _ => Ok(()),
+    let target = result.compare_with.as_str();
+    if target.is_empty() {
+        return Ok(());
     }
+    let quantity = def
+        .quantities
+        .iter()
+        .find(|q| q.symbol == target)
+        .ok_or_else(|| {
+            AppError::bad_request(
+                "\"Comparar con\" tiene que ser el símbolo de una magnitud de la práctica, \
+                 de la misma parte que el mensurando o de los datos compartidos.",
+            )
+        })?;
+    let (unit, target_unit) = (result.unit.trim(), quantity.unit.trim());
+    if unit != target_unit {
+        return Err(AppError::bad_request(format!(
+            "\"Comparar con\" necesita la misma unidad: el mensurando está en \"{unit}\" \
+             y {target} en \"{target_unit}\"."
+        )));
+    }
+    Ok(())
 }
 
 fn validate_result(
@@ -1697,20 +1703,6 @@ fn validate_result(
     if let Some(Some(t)) = input.tolerance {
         if t < 0.0 {
             return Err(AppError::bad_request("tolerancia no puede ser negativa"));
-        }
-    }
-    if let Some(target) = input.compare_with().filter(|s| !s.is_empty()) {
-        let quantity = def
-            .quantities
-            .iter()
-            .find(|q| q.symbol == target)
-            .ok_or_else(|| AppError::bad_request(COMPARE_SCOPE))?;
-        let (unit, target_unit) = (input.unit.trim(), quantity.unit.trim());
-        if unit != target_unit {
-            return Err(AppError::bad_request(format!(
-                "\"Comparar con\" necesita la misma unidad: el mensurando está en \"{unit}\" \
-                 y {target} en \"{target_unit}\"."
-            )));
         }
     }
     computation::check_formula(input.formula.trim(), &result_scope(def))
@@ -2388,7 +2380,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_result_compares_only_with_a_quantity_of_the_practice() {
+    fn check_compare_needs_a_quantity_of_the_view_with_the_same_unit() {
         let def = practices::PracticeDefinition {
             quantities: vec![db::PracticeQuantity {
                 symbol: "V".into(),
@@ -2397,26 +2389,16 @@ mod tests {
             }],
             ..Default::default()
         };
-        let r = |compare_with: Option<&str>| ResultInput {
-            display_symbol: None,
-            compare_with: compare_with.map(Into::into),
+        let r = |compare_with: &str, unit: &str| db::PracticeResult {
             symbol: "V_t".into(),
-            name: "Teórico".into(),
-            unit: "V".into(),
-            formula: "2*V".into(),
-            tolerance: None,
-            is_final: false,
-            has_uncertainty: true,
+            unit: unit.into(),
+            compare_with: compare_with.into(),
+            ..Default::default()
         };
-        assert!(validate_result(&def, &r(None)).is_ok());
-        assert!(validate_result(&def, &r(Some(""))).is_ok());
-        assert!(validate_result(&def, &r(Some(" V "))).is_ok());
-        assert!(validate_result(&def, &r(Some("W"))).is_err());
-        let in_mv = ResultInput {
-            unit: "mV".into(),
-            ..r(Some("V"))
-        };
-        let error = validate_result(&def, &in_mv).unwrap_err();
+        assert!(check_compare(&def, &r("", "V")).is_ok());
+        assert!(check_compare(&def, &r("V", " V ")).is_ok());
+        assert!(check_compare(&def, &r("W", "V")).is_err());
+        let error = check_compare(&def, &r("V", "mV")).unwrap_err();
         assert!(
             error.message().contains("misma unidad"),
             "{}",
@@ -2664,9 +2646,55 @@ mod tests {
             has_uncertainty: true,
         };
         let new = input("VR1_s_t2", "Vg_s * R1 / (R1 + R2 + R3 + RA_s)", "VR1_s");
-        assert!(guard_compare_scope(&with_new_result(&cc, &new, None), &new).is_ok());
+        let save = |input: &ResultInput| {
+            guard_change(
+                &cc,
+                &with_new_result(&cc, input, None),
+                "guardar el mensurando",
+            )
+        };
+        assert!(save(&new).is_ok());
         let crossed = input("VR1_s_t2", "Vg_s * R1 / (R1 + R2 + R3 + RA_s)", "VR1_p");
-        assert!(guard_compare_scope(&with_new_result(&cc, &crossed, None), &crossed).is_err());
+        let error = save(&crossed).unwrap_err();
+        assert!(
+            error.message().contains("la comparación de VR1_s_t2"),
+            "{}",
+            error.message()
+        );
+
+        let mut stale = cc.clone();
+        let stale_r = stale.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
+        stale_r.unwrap().compare_with = "VR1_p".into();
+        let vr1_s_t = cc.results.iter().find(|r| r.symbol == "VR1_s_t").unwrap();
+        let renamed = ResultInput {
+            name: "Otro nombre".into(),
+            ..input("VR1_s_t", &vr1_s_t.formula, "VR1_p")
+        };
+        let after = with_updated_result(&stale, &vr1_s_t.id, &renamed).unwrap();
+        assert!(
+            guard_change(&stale, &after, "guardar el mensurando").is_ok(),
+            "una comparación ya rota no bloquea editar otro campo"
+        );
+
+        let mut broken = cc.clone();
+        let broken_r = broken.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
+        broken_r.unwrap().formula = "no_existe * 2".into();
+        let vr1_s = cc.quantities.iter().find(|q| q.symbol == "VR1_s").unwrap();
+        let in_mv = QuantityInput {
+            symbol: "VR1_s".into(),
+            name: vr1_s.name.clone(),
+            unit: "mV".into(),
+            per_point: vr1_s.per_point,
+            is_given: vr1_s.is_given,
+            ..Default::default()
+        };
+        let after = with_updated_quantity(&broken, &vr1_s.id, &in_mv).unwrap();
+        let error = guard_change(&broken, &after, "guardar la magnitud").unwrap_err();
+        assert!(
+            error.message().contains("la comparación de VR1_s_t"),
+            "una fórmula rota no esconde la comparación nueva: {}",
+            error.message()
+        );
 
         let vr1_s = cc.quantities.iter().find(|q| q.symbol == "VR1_s").unwrap();
         let edit = |unit: &str| {
