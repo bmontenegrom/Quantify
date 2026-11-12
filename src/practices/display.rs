@@ -361,33 +361,51 @@ pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Re
 }
 
 fn legacy_live(practice_id: &str, intermediate: &PracticeIntermediate) -> bool {
-    LEGACY_LIVE.iter().any(|(practice, symbol, formula)| {
-        *practice == practice_id
-            && intermediate.symbol == *symbol
-            && intermediate.formula == *formula
-    })
+    let formula: String = intermediate.formula.split_whitespace().collect();
+    let velocity = practice_id == "viscosidad" && formula == "dx/t";
+    velocity
+        || LEGACY_LIVE.iter().any(|(practice, symbol, seeded)| {
+            *practice == practice_id && intermediate.symbol == *symbol && formula == *seeded
+        })
 }
 
 fn legacy_velocity(definition: &PracticeDefinition, id: &str) -> Option<PracticeIntermediate> {
     let has = |symbol: &str| definition.quantities.iter().any(|q| q.symbol == symbol);
-    let free = !version_symbols(definition).any(|symbol| symbol == "v");
-    (definition.practice_id == "viscosidad" && has("dx") && has("t") && free).then(|| {
-        PracticeIntermediate {
-            id: id.into(),
-            practice_id: definition.practice_id.clone(),
-            position: definition
-                .intermediates
-                .iter()
-                .map(|i| i.position + 1)
-                .max()
-                .unwrap_or(0),
-            symbol: "v".into(),
-            name: "Velocidad limite".into(),
-            unit: "m/s".into(),
-            formula: "dx/t".into(),
-            show_live: true,
-        }
+    let compatible = definition
+        .intermediates
+        .iter()
+        .any(|i| legacy_live(&definition.practice_id, i));
+    if definition.practice_id != "viscosidad" || !has("dx") || !has("t") || compatible {
+        return None;
+    }
+    let taken: Vec<&str> = version_symbols(definition).collect();
+    let symbol = ["v".to_string(), "v_lim".to_string()]
+        .into_iter()
+        .chain((2..).map(|n| format!("v_lim{n}")))
+        .find(|s| !taken.contains(&s.as_str()))?;
+    Some(PracticeIntermediate {
+        id: id.into(),
+        practice_id: definition.practice_id.clone(),
+        position: definition
+            .intermediates
+            .iter()
+            .map(|i| i.position + 1)
+            .max()
+            .unwrap_or(0),
+        symbol,
+        name: "Velocidad limite".into(),
+        unit: "m/s".into(),
+        formula: "dx/t".into(),
+        show_live: true,
     })
+}
+
+fn velocity_display(v: &PracticeIntermediate) -> &str {
+    if v.symbol == "v" {
+        ""
+    } else {
+        "v"
+    }
 }
 
 pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -395,31 +413,41 @@ pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Re
         return Ok(());
     }
     let velocity_id = uuid::Uuid::new_v4().to_string();
-    let draft = super::crud::definition(pool, "viscosidad").await?;
-    let mut tx = pool.begin().await?;
-    for (practice, symbol, formula) in LEGACY_LIVE {
-        sqlx::query(
-            "UPDATE practice_intermediates SET show_live = 1              WHERE practice_id = ?1 AND symbol = ?2 AND formula = ?3",
-        )
-        .bind(practice)
-        .bind(symbol)
-        .bind(formula)
-        .execute(&mut *tx)
-        .await?;
+    let mut drafts = Vec::new();
+    for practice in ["p2-cc", "fluidos-1", "viscosidad"] {
+        if let Some(definition) = super::crud::definition(pool, practice).await? {
+            drafts.push(definition);
+        }
     }
-    if let Some(v) = draft.and_then(|d| legacy_velocity(&d, &velocity_id)) {
-        sqlx::query(
-            "INSERT INTO practice_intermediates              (id, practice_id, position, symbol, name, unit, formula, display_symbol, show_live)              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', 1)",
-        )
-        .bind(&v.id)
-        .bind(&v.practice_id)
-        .bind(v.position)
-        .bind(&v.symbol)
-        .bind(&v.name)
-        .bind(&v.unit)
-        .bind(&v.formula)
-        .execute(&mut *tx)
-        .await?;
+    let mut tx = pool.begin().await?;
+    for definition in &drafts {
+        for intermediate in definition
+            .intermediates
+            .iter()
+            .filter(|i| !i.show_live && legacy_live(&definition.practice_id, i))
+        {
+            sqlx::query("UPDATE practice_intermediates SET show_live = 1 WHERE id = ?1")
+                .bind(&intermediate.id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        if let Some(v) = legacy_velocity(definition, &velocity_id) {
+            sqlx::query(
+                "INSERT INTO practice_intermediates \
+                 (id, practice_id, position, symbol, name, unit, formula, display_symbol, show_live) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
+            )
+            .bind(&v.id)
+            .bind(&v.practice_id)
+            .bind(v.position)
+            .bind(&v.symbol)
+            .bind(&v.name)
+            .bind(&v.unit)
+            .bind(&v.formula)
+            .bind(velocity_display(&v))
+            .execute(&mut *tx)
+            .await?;
+        }
     }
     let versions: Vec<(String, String)> =
         sqlx::query_as("SELECT id, definition_json FROM practice_versions")
@@ -442,7 +470,8 @@ pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Re
                 continue;
             }
             sqlx::query(
-                "UPDATE practice_versions                  SET definition_json = json_set(definition_json, ?1, json('true')) WHERE id = ?2",
+                "UPDATE practice_versions \
+                 SET definition_json = json_set(definition_json, ?1, json('true')) WHERE id = ?2",
             )
             .bind(format!("$.intermediates[{i}].show_live"))
             .bind(&id)
@@ -451,12 +480,25 @@ pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Re
         }
         if let Some(v) = legacy_velocity(&definition, &velocity_id) {
             sqlx::query(
-                "UPDATE practice_versions                  SET definition_json = json_insert(definition_json, '$.intermediates[#]', json(?1))                  WHERE id = ?2",
+                "UPDATE practice_versions \
+                 SET definition_json = json_insert(definition_json, '$.intermediates[#]', json(?1)) \
+                 WHERE id = ?2",
             )
             .bind(serde_json::to_string(&v)?)
             .bind(&id)
             .execute(&mut *tx)
             .await?;
+            if !velocity_display(&v).is_empty() {
+                sqlx::query(
+                    "UPDATE practice_versions \
+                     SET definition_json = json_set(definition_json, ?1, ?2) WHERE id = ?3",
+                )
+                .bind(format!("$.display_symbols.{}", v.symbol))
+                .bind(velocity_display(&v))
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
     }
     sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")

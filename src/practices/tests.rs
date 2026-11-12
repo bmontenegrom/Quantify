@@ -4421,10 +4421,7 @@ async fn seeding_marks_the_live_columns() {
     assert_eq!(def.y_formula.as_deref(), Some("dx/t"));
 }
 
-#[tokio::test]
-async fn the_live_columns_migration_updates_drafts_and_versions_once() {
-    let (pool, _dir) = setup().await;
-    seed_definitions(&pool).await.unwrap();
+async fn without_live_columns(pool: &SqlitePool) {
     for sql in [
         "UPDATE practice_intermediates SET show_live = 0",
         "DELETE FROM practice_intermediates WHERE practice_id = 'viscosidad' AND symbol = 'v'",
@@ -4434,8 +4431,15 @@ async fn the_live_columns_migration_updates_drafts_and_versions_once() {
           WHERE json_extract(value, '$.symbol') <> 'v'))",
         "DELETE FROM applied_migrations WHERE name = '2026-11-columnas-en-vivo'",
     ] {
-        sqlx::query(sql).execute(&pool).await.unwrap();
+        sqlx::query(sql).execute(pool).await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn the_live_columns_migration_updates_drafts_and_versions_once() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    without_live_columns(&pool).await;
 
     display::migrate_legacy_live_columns(&pool).await.unwrap();
     assert_seeded_live_columns(&pool).await;
@@ -4446,4 +4450,83 @@ async fn the_live_columns_migration_updates_drafts_and_versions_once() {
         .unwrap();
     display::migrate_legacy_live_columns(&pool).await.unwrap();
     assert_seeded_live_columns(&pool).await;
+}
+
+#[tokio::test]
+async fn the_live_columns_migration_reuses_a_velocity_intermediate_already_there() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    without_live_columns(&pool).await;
+    create_intermediate(
+        &pool,
+        "viscosidad",
+        IntermediateInput {
+            display_symbol: None,
+            symbol: "vel".into(),
+            name: "Velocidad".into(),
+            unit: "m/s".into(),
+            formula: "dx / t".into(),
+            show_live: false,
+        },
+    )
+    .await
+    .unwrap();
+    let def = definition(&pool, "viscosidad").await.unwrap().unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = json_insert(definition_json, \
+         '$.intermediates[#]', json(?1)) \
+         WHERE practice_id = 'viscosidad'",
+    )
+    .bind(serde_json::to_string(&def.intermediates[0]).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    display::migrate_legacy_live_columns(&pool).await.unwrap();
+
+    for in_version in [false, true] {
+        assert_eq!(live_symbols(&pool, "viscosidad", in_version).await, ["vel"]);
+    }
+    let found = draft_changes(&pool, "viscosidad").await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::None);
+}
+
+#[tokio::test]
+async fn the_live_columns_migration_shows_a_new_velocity_as_v_when_v_is_taken() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    without_live_columns(&pool).await;
+    for sql in [
+        "UPDATE practice_quantities SET symbol = 'v' \
+         WHERE practice_id = 'viscosidad' AND symbol = 'Temp'",
+        "UPDATE practice_versions SET definition_json = replace(definition_json, '\"Temp\"', '\"v\"') \
+         WHERE practice_id = 'viscosidad'",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+
+    display::migrate_legacy_live_columns(&pool).await.unwrap();
+
+    for in_version in [false, true] {
+        assert_eq!(
+            live_symbols(&pool, "viscosidad", in_version).await,
+            ["v_lim"]
+        );
+    }
+    let draft = definition(&pool, "viscosidad").await.unwrap().unwrap();
+    assert_eq!(
+        draft.display_symbols.get("v_lim").map(String::as_str),
+        Some("v")
+    );
+    let version = current_version(&pool, "viscosidad").await.unwrap().unwrap();
+    assert_eq!(
+        version
+            .definition
+            .display_symbols
+            .get("v_lim")
+            .map(String::as_str),
+        Some("v")
+    );
+    let found = draft_changes(&pool, "viscosidad").await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::None);
 }

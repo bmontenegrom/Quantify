@@ -736,7 +736,9 @@ de lo planeado:
   `v` da promedio(dx/t_k), mientras que el eje usa dx/promedio(t), como pide la técnica. Pasar el
   eje a `v` habría cambiado los números. Por eso no hay versión 2: la migración agrega `v` al
   borrador y al JSON de las versiones, y los golden no cambian, porque los intermedios no salen en
-  el análisis. El promedio que se ve en vivo puede diferir del valor del eje.
+  el análisis. El promedio que se ve en vivo puede diferir del valor del eje. Si la definición ya
+  tiene un intermedio `dx/t`, se marca ese; si `v` está ocupado, se crea `v_lim`, que se muestra
+  como «v».
 - **Una columna por intermedio.** La celda muestra cada réplica y el promedio (antes fluidos-1
   tenía tres columnas: Q_1, Q_2 y Q_medio).
 - **La columna en vivo se llena cuando la fila está completa**, porque se mandan las mismas
