@@ -805,9 +805,13 @@ Cada PR de implementación sigue el mismo patrón:
      aparece el cronómetro; queda solo para preseleccionar el instrumento por defecto del widget.
 3. **`feat(practicas)`: comparación medido vs teórico configurable (F6, 3/4).**
    - **`compare_with`** en resultados: el símbolo de una magnitud de la práctica, validado. Renombrar
-     la magnitud actualiza la referencia.
-   - **Migración**: los `VR*_t` de P2-CC apuntan a su `VR*`.
+     la magnitud actualiza la referencia; quitarla (retirarla o borrarla) la deja vacía.
+   - **Migración**: traduce la regla vieja sin ids de práctica (`X_t` con magnitud `X` en la misma
+     práctica): hoy solo los `VR*_t` de P2-CC, que apuntan a su `VR*`. `RP_max_t` y `P_max_t` no
+     tienen magnitud homónima y siguen sin comparación. La siembra los marca explícitamente.
    - **Frontend**: `compareMeasuredVsTheoretical` empareja por `compare_with` en vez del sufijo `_t`.
+     Los pares salen de la definición (la de la versión de la entrega), no del análisis guardado, así
+     las entregas viejas también se comparan.
 4. **`feat(practicas)`: columnas en vivo desde la definición (F6, 4/4).**
    - **`show_live`** en intermedios.
    - **`POST /practices/{id}/live-values`**, con los mismos permisos que `analyze-preview`. Evalúa

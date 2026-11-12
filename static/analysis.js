@@ -9,6 +9,7 @@ import { regressionMarkup, scatterMarkup } from "./analysis-plots.js";
 export { regressionMarkup, scatterMarkup };
 
 export function renderAnalysis(target, submission, includeReview = false, definition = null) {
+  const pairs = new Map(Object.entries(submission.comparisons ?? {}));
   setDisplaySymbols(submission.display_symbols);
   target.classList.remove("detail-empty");
 
@@ -19,7 +20,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     const hasOperators = sections.some((s) => (s.analysis.operators?.length ?? 0) > 0);
     let body = "";
     if (submission.analysis) {
-      body += formAnalysisMarkup(submission.analysis);
+      body += formAnalysisMarkup(submission.analysis, pairs);
       if (studentResults.length) {
         const finalAggregateSymbols = new Set(
           (definition?.aggregates ?? []).filter((a) => a.is_final).map((a) => a.symbol),
@@ -271,10 +272,11 @@ function aggregatesMarkup(aggregates) {
     </div>`;
 }
 
-export function formAnalysisMarkup(analysis) {
+export function formAnalysisMarkup(analysis, pairs) {
   const sections = analysisSections(analysis);
-  if (sections.length === 1) return singleAnalysisMarkup(analysis);
+  if (sections.length === 1) return singleAnalysisMarkup(analysis, pairs);
   const [shared, ...parts] = sections;
+  const sharedQuantities = shared.analysis.quantities ?? [];
   const sharedHasData =
     (shared.analysis.quantities?.length ?? 0) +
       (shared.analysis.derived?.length ?? 0) +
@@ -284,13 +286,13 @@ export function formAnalysisMarkup(analysis) {
       (s) => `
       <section class="analysis-part">
         <h3 class="analysis-part-title">${escapeHtml(s.title)}</h3>
-        ${singleAnalysisMarkup(s.analysis)}
+        ${singleAnalysisMarkup(s.analysis, pairs, s === shared ? sharedQuantities : [...sharedQuantities, ...(s.analysis.quantities ?? [])])}
       </section>`,
     )
     .join("") + (sharedHasData ? "" : renderWarnings(shared.analysis.warnings ?? []));
 }
 
-function singleAnalysisMarkup(analysis) {
+function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ?? []) {
   const quantities = analysis.quantities ?? [];
   const derived = analysis.derived ?? [];
   const quantitiesTable = quantitiesTableMarkup(quantities);
@@ -326,7 +328,7 @@ function singleAnalysisMarkup(analysis) {
       ${blocks}
       ${quantitiesSection}
       ${derivedBlock}
-      ${measuredVsTheoreticalMarkup(quantities, derived)}
+      ${measuredVsTheoreticalMarkup(measured, derived, pairs)}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
   }
@@ -358,7 +360,7 @@ function singleAnalysisMarkup(analysis) {
     <h3>Incertidumbres por magnitud</h3>
     ${quantitiesTable}
     ${derivedBlock}
-    ${measuredVsTheoreticalMarkup(quantities, derived)}
+    ${measuredVsTheoreticalMarkup(measured, derived, pairs)}
     ${renderWarnings(analysis.warnings ?? [])}
   `;
 }

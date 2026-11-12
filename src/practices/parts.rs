@@ -1,5 +1,34 @@
 use super::{PracticeDefinition, PracticePart};
 
+#[derive(Debug, Default, serde::Serialize)]
+pub struct CompareOptions {
+    pub results: std::collections::BTreeMap<String, Vec<String>>,
+    pub parts: std::collections::BTreeMap<String, Vec<String>>,
+    pub shared: Vec<String>,
+}
+
+fn symbols(view: &PracticeDefinition) -> Vec<String> {
+    view.quantities.iter().map(|q| q.symbol.clone()).collect()
+}
+
+fn comparable_in(views: &[PracticeDefinition], result: &str) -> Vec<String> {
+    common_quantities(
+        views
+            .iter()
+            .filter(|v| v.results.iter().any(|r| r.symbol == result)),
+    )
+}
+
+fn common_quantities<'a>(views: impl Iterator<Item = &'a PracticeDefinition>) -> Vec<String> {
+    views
+        .map(symbols)
+        .reduce(|mut all: Vec<String>, here: Vec<String>| {
+            all.retain(|s| here.contains(s));
+            all
+        })
+        .unwrap_or_default()
+}
+
 pub fn is_point_based(kind: Option<&str>) -> bool {
     matches!(kind, Some("regresion_lineal" | "curva"))
 }
@@ -130,6 +159,41 @@ impl PracticeDefinition {
             part.effective_kind = kind;
         }
         self
+    }
+
+    fn views(&self) -> Vec<PracticeDefinition> {
+        if self.parts.is_empty() {
+            return vec![self.clone()];
+        }
+        std::iter::once(self.shared_view())
+            .chain(
+                self.parts
+                    .iter()
+                    .filter(|p| self.part_has_content(p))
+                    .map(|p| self.part_view(p)),
+            )
+            .collect()
+    }
+
+    pub fn comparable_quantities(&self, result: &str) -> Vec<String> {
+        comparable_in(&self.views(), result)
+    }
+
+    pub fn compare_options(&self) -> CompareOptions {
+        let views = self.views();
+        CompareOptions {
+            results: self
+                .results
+                .iter()
+                .map(|r| (r.symbol.clone(), comparable_in(&views, &r.symbol)))
+                .collect(),
+            parts: self
+                .parts
+                .iter()
+                .map(|p| (p.id.clone(), symbols(&self.part_view(p))))
+                .collect(),
+            shared: common_quantities(views.iter()),
+        }
     }
 
     pub fn with_mirrored_kind(mut self) -> PracticeDefinition {

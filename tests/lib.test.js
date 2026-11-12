@@ -30,6 +30,8 @@ import {
   scatterPlot,
   compareResults,
   compareMeasuredVsTheoretical,
+  comparisonPairs,
+  compareOptionGroups,
   pointPower,
   flowRate,
   draftMeasurementsByQuantity,
@@ -537,7 +539,7 @@ test("draftMeasurementsByQuantity: lista vacía o ausente da un Map vacío", () 
   assert.equal(draftMeasurementsByQuantity(undefined).size, 0);
 });
 
-test("compareMeasuredVsTheoretical empareja X con X_t y calcula deltas", () => {
+test("compareMeasuredVsTheoretical empareja cada resultado con su compare_with y calcula deltas", () => {
   const quantities = [
     { symbol: "VR1_s", name: "Voltaje en R1", unit: "V", result: { mean: 1.5, u_expanded: 0.1 } },
     { symbol: "Vg_s", name: "Fuente", unit: "V", result: { mean: 8, u_expanded: 0.2 } },
@@ -546,7 +548,7 @@ test("compareMeasuredVsTheoretical empareja X con X_t y calcula deltas", () => {
     { symbol: "VR1_s_t", name: "Teorica R1", unit: "V", value: 1.6, u_expanded: 0.08 },
     { symbol: "I_s", name: "Corriente", unit: "A", value: 0.015, u_expanded: 0.001 },
   ];
-  const rows = compareMeasuredVsTheoretical(quantities, derived);
+  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["VR1_s_t", "VR1_s"]]));
   assert.equal(rows.length, 1);
   const [row] = rows;
   assert.equal(row.symbol, "VR1_s");
@@ -564,11 +566,37 @@ test("compareMeasuredVsTheoretical: deltas null con teórico 0 o U faltante", ()
     { symbol: "X", name: "X", unit: "u", result: { mean: 2, u_expanded: null } },
   ];
   const derived = [{ symbol: "X_t", name: "X teorica", unit: "u", value: 0, u_expanded: 0.1 }];
-  const [row] = compareMeasuredVsTheoretical(quantities, derived);
+  const [row] = compareMeasuredVsTheoretical(quantities, derived, new Map([["X_t", "X"]]));
   assert.ok(Math.abs(row.dValue - 2) < 1e-9);
   assert.equal(row.dValuePct, null);
   assert.equal(row.dU, null);
   assert.equal(row.dUPct, null);
+});
+
+test("compareMeasuredVsTheoretical ya no empareja por el sufijo _t sino por los pares", () => {
+  const quantities = [
+    { symbol: "X", name: "X", unit: "u", result: { mean: 2, u_expanded: 0.1 } },
+    { symbol: "Y", name: "Y", unit: "u", result: { mean: 3, u_expanded: 0.1 } },
+  ];
+  const derived = [
+    { symbol: "X_t", name: "X teórica", unit: "u", value: 2.1, u_expanded: 0.1 },
+    { symbol: "Y_calc", name: "Y calculada", unit: "u", value: 3.2, u_expanded: 0.1 },
+  ];
+  assert.deepEqual(compareMeasuredVsTheoretical(quantities, derived).map((r) => r.symbol), []);
+  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["Y_calc", "Y"]]));
+  assert.deepEqual(rows.map((r) => [r.symbol, r.theoreticalSymbol]), [["Y", "Y_calc"]]);
+});
+
+test("comparisonPairs arma los pares desde los resultados con compare_with", () => {
+  const definition = {
+    results: [
+      { symbol: "VR1_s_t", compare_with: "VR1_s" },
+      { symbol: "I_s", compare_with: "" },
+      { symbol: "P_max_t" },
+    ],
+  };
+  assert.deepEqual([...comparisonPairs(definition)], [["VR1_s_t", "VR1_s"]]);
+  assert.equal(comparisonPairs(null).size, 0);
 });
 
 test("SI_PREFIXES es un array con entradas para 'm', 'k' y ''", () => {
@@ -772,4 +800,30 @@ test("symbolHtml dibuja los subíndices genéricos sin símbolo a mostrar", () =
   assert.equal(symbolHtml("I_teo"), "I<sub>teo</sub>");
   assert.equal(symbolHtml("a_R"), "a<sub>R</sub>");
   assert.equal(symbolHtml("b_R"), "b<sub>R</sub>");
+});
+
+test("compareOptionGroups usa las opciones del servidor y no pierde la comparación guardada", () => {
+  const definition = {
+    parts: [{ id: "serie", title: "Serie" }, { id: "paralelo", title: "Paralelo" }],
+    quantities: [{ symbol: "R1" }, { symbol: "VR1_s" }, { symbol: "VR1_p" }],
+    compare_options: {
+      results: { VR1_s_t: ["R1", "VR1_s"] },
+      parts: { serie: ["R1", "VR1_s"], paralelo: ["R1", "VR1_p"] },
+      shared: ["R1"],
+    },
+  };
+  assert.deepEqual(compareOptionGroups(definition, { result: "VR1_s_t" }, "VR1_s"), [[null, ["R1", "VR1_s"]]]);
+  assert.deepEqual(compareOptionGroups(definition, { section: { part_id: "paralelo" } }), [[null, ["R1", "VR1_p"]]]);
+  assert.deepEqual(compareOptionGroups(definition, { section: { part_id: null } }), [[null, ["R1"]]]);
+  assert.deepEqual(compareOptionGroups(definition), [[null, ["R1"]], ["Serie", ["VR1_s"]], ["Paralelo", ["VR1_p"]]]);
+  assert.deepEqual(compareOptionGroups(definition, { result: "VR1_s_t" }, "VR1_p"), [
+    ["Guardada (fuera de alcance)", ["VR1_p"]],
+    [null, ["R1", "VR1_s"]],
+  ]);
+  assert.deepEqual(compareOptionGroups({ quantities: [{ symbol: "x" }] }), [[null, ["x"]]]);
+  assert.deepEqual(
+    compareOptionGroups(definition, { section: { part_id: "paralelo" } }, "VR1_s"),
+    [[null, ["R1", "VR1_p"]]],
+    "en un mensurando nuevo una elección fuera de alcance no se presenta como guardada",
+  );
 });

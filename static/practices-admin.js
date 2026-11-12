@@ -9,6 +9,7 @@ import {
   unitHtml,
   analysisKindLabel,
   formatDate,
+  compareOptionGroups,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -334,6 +335,11 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("#practice-operators-form")?.addEventListener("submit", savePracticeOperatorCount);
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
+  practiceWorkspace.querySelector('#new-result-form [name="section_id"]')?.addEventListener("change", (e) => {
+    const section = def?.sections?.find((s) => s.id === e.target.value) ?? null;
+    const select = e.target.form.elements.compare_with;
+    select.innerHTML = compareOptionsHtml(compareOptionGroups(def, { section }, select.value), select.value);
+  });
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
 
   for (const kind of Object.values(SYMBOL_FORMULA_KINDS)) {
@@ -935,6 +941,17 @@ function newResultSectionHtml(def) {
   return `<label>Sección <select name="section_id">${options}</select></label>`;
 }
 
+function compareOptionsHtml(groups, current) {
+  const option = (value, text = value) =>
+    `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(text)}</option>`;
+  return option("", "— sin comparación —") + groups
+    .map(([label, symbols]) => {
+      const items = symbols.map((s) => option(s)).join("");
+      return label == null ? items : `<optgroup label="${escapeHtml(label)}">${items}</optgroup>`;
+    })
+    .join("");
+}
+
 function renderResultForm(res, practiceId, def = null) {
   const v = (f) => res ? escapeHtml(String(res[f] ?? "")) : "";
   const formId = res ? "edit-result-form" : "new-result-form";
@@ -962,6 +979,9 @@ function renderResultForm(res, practiceId, def = null) {
       <label>
         <input name="has_uncertainty" type="checkbox" ${res ? (res.has_uncertainty ? "checked" : "") : "checked"} />
         Tiene incertidumbre (desmarcá para mostrarlo siempre sin ±U)
+      </label>
+      <label>Comparar con (medido vs teórico)
+        <select name="compare_with">${compareOptionsHtml(compareOptionGroups(def, { result: res?.symbol }, res?.compare_with ?? ""), res?.compare_with ?? "")}</select>
       </label>
       <div class="detail-actions">
         <button type="submit">${res ? "Guardar" : "Agregar"}</button>
@@ -995,7 +1015,7 @@ function renderResultsList(def, practiceId) {
         </td>
       </tr>`;
     const editRow = editing
-      ? `<tr><td colspan="8" class="scale-edit-cell">${renderResultForm(r, practiceId)}</td></tr>`
+      ? `<tr><td colspan="8" class="scale-edit-cell">${renderResultForm(r, practiceId, def)}</td></tr>`
       : "";
     return [baseRow, editRow];
   });
@@ -1367,6 +1387,7 @@ async function saveNewResult(event) {
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
         display_symbol: raw.display_symbol,
+        compare_with: raw.compare_with ?? "",
         section_id: raw.section_id || null,
       });
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
@@ -1393,6 +1414,7 @@ async function saveEditResult(event) {
         is_final: raw.is_final === "on",
         has_uncertainty: raw.has_uncertainty === "on",
         display_symbol: raw.display_symbol,
+        compare_with: raw.compare_with ?? "",
       });
       state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     },

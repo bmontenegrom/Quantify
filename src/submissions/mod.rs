@@ -112,6 +112,7 @@ pub struct SubmissionDetail {
     pub members: Vec<ReportMember>,
     pub result_tolerances: HashMap<String, f64>,
     pub display_symbols: std::collections::BTreeMap<String, String>,
+    pub comparisons: std::collections::BTreeMap<String, String>,
     pub student_comment: Option<String>,
 }
 
@@ -771,8 +772,10 @@ pub async fn submission_detail(
         && !row.results_visible_to_student
         && Utc::now() < editable_until;
     let display_symbols = crate::practices::submission_display_symbols(pool, &row.id).await?;
+    let comparisons = crate::practices::submission_comparisons(pool, &row.id).await?;
     Ok(Some(SubmissionDetail {
         display_symbols,
+        comparisons,
         id: row.id,
         student_name: row.student_name,
         group_name: row.group_name,

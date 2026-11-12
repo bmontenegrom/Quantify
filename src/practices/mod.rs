@@ -89,6 +89,21 @@ pub struct ResultInput {
     pub is_final: bool,
     #[serde(default = "default_true")]
     pub has_uncertainty: bool,
+    #[serde(default)]
+    pub compare_with: Option<String>,
+}
+
+impl ResultInput {
+    /// ```
+    /// use quantify::practices::ResultInput;
+    /// let input: ResultInput = serde_json::from_value(serde_json::json!({
+    ///     "symbol": "V_t", "name": "V", "unit": "V", "formula": "2", "compare_with": " V "
+    /// })).unwrap();
+    /// assert_eq!(input.compare_with(), Some("V"));
+    /// ```
+    pub fn compare_with(&self) -> Option<&str> {
+        self.compare_with.as_deref().map(str::trim)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -269,6 +284,6 @@ pub use changes::*;
 pub use crud::*;
 pub use layout::*;
 pub use lifecycle::*;
-pub use parts::is_point_based;
+pub use parts::{is_point_based, CompareOptions};
 pub use seed::seed_definitions;
 pub use versions::*;

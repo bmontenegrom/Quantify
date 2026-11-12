@@ -312,13 +312,28 @@ pub(super) async fn practice_definition(
     headers: HeaderMap,
     Path(id): Path<String>,
     Query(query): Query<DefinitionQuery>,
-) -> Result<Json<practices::PracticeDefinition>, AppError> {
+) -> Result<Json<DefinitionView>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
     if matches!(user.role.as_str(), "docente" | "admin") && !query.published {
-        return Ok(Json(load_definition(&state, &id).await?));
+        let definition = load_definition(&state, &id).await?;
+        return Ok(Json(DefinitionView {
+            compare_options: Some(definition.compare_options()),
+            definition,
+        }));
     }
-    Ok(Json(published_definition(&state, &id).await?))
+    Ok(Json(DefinitionView {
+        definition: published_definition(&state, &id).await?,
+        compare_options: None,
+    }))
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct DefinitionView {
+    #[serde(flatten)]
+    definition: practices::PracticeDefinition,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compare_options: Option<practices::CompareOptions>,
 }
 
 async fn published_definition(
@@ -488,6 +503,33 @@ pub(super) async fn create_quantity(
     ))
 }
 
+fn with_updated_quantity(
+    def: &practices::PracticeDefinition,
+    quantity_id: &str,
+    input: &QuantityInput,
+) -> Option<practices::PracticeDefinition> {
+    let mut after = def.clone();
+    let q = after.quantities.iter_mut().find(|q| q.id == quantity_id)?;
+    let old_symbol = std::mem::replace(&mut q.symbol, input.symbol.trim().to_string());
+    q.unit = input.unit.trim().to_string();
+    q.per_point = input.per_point;
+    q.is_given = input.is_given;
+    let new_symbol = q.symbol.clone();
+    for section in &mut after.sections {
+        for symbol in &mut section.quantities {
+            if *symbol == old_symbol {
+                symbol.clone_from(&new_symbol);
+            }
+        }
+    }
+    for result in &mut after.results {
+        if result.compare_with == old_symbol {
+            result.compare_with.clone_from(&new_symbol);
+        }
+    }
+    Some(after)
+}
+
 pub(super) async fn update_quantity(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -517,23 +559,8 @@ pub(super) async fn update_quantity(
     )
     .await?;
     let before = load_definition(&state, &practice_id).await?;
-    let mut after = before.clone();
-    let q = after
-        .quantities
-        .iter_mut()
-        .find(|q| q.id == qid)
+    let after = with_updated_quantity(&before, &qid, &input)
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
-    let old_symbol = std::mem::replace(&mut q.symbol, input.symbol.trim().to_string());
-    q.per_point = input.per_point;
-    q.is_given = input.is_given;
-    let new_symbol = q.symbol.clone();
-    for section in &mut after.sections {
-        for symbol in &mut section.quantities {
-            if *symbol == old_symbol {
-                symbol.clone_from(&new_symbol);
-            }
-        }
-    }
     guard_change(&before, &after, "guardar la magnitud")?;
     let updated = practices::update_quantity(&state.pool, &qid, input)
         .await?
@@ -554,9 +581,16 @@ pub(super) async fn delete_quantity(
     require_teacher(&state, &headers).await?;
     let before = load_definition(&state, &id).await?;
     let mut after = before.clone();
+    let removed = before
+        .quantities
+        .iter()
+        .find(|q| q.id == qid)
+        .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
     after.quantities.retain(|q| q.id != qid);
-    if after.quantities.len() == before.quantities.len() {
-        return Err(AppError::not_found("magnitud no encontrada en la practica"));
+    for result in &mut after.results {
+        if result.compare_with == removed.symbol {
+            result.compare_with.clear();
+        }
     }
     guard_change(&before, &after, "eliminar la magnitud")?;
     match practices::remove_quantity(&state.pool, &id, &qid).await? {
@@ -1091,6 +1125,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
     for r in &def.results {
         let input = ResultInput {
             display_symbol: None,
+            compare_with: None,
             symbol: r.symbol.clone(),
             name: r.name.clone(),
             unit: r.unit.clone(),
@@ -1100,6 +1135,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
             has_uncertainty: r.has_uncertainty,
         };
         note("el mensurando", &r.symbol, validate_result(def, &input));
+        note("la comparación de", &r.symbol, check_compare(def, r));
     }
     let kind = def.analysis_kind.as_deref();
     if kind == Some("regresion_lineal") {
@@ -1342,6 +1378,7 @@ fn with_new_result(
         tolerance: input.tolerance.flatten(),
         is_final: input.is_final,
         has_uncertainty: input.has_uncertainty,
+        compare_with: input.compare_with().unwrap_or("").to_string(),
     });
     if let Some(section) = after
         .sections
@@ -1362,6 +1399,10 @@ fn with_updated_result(
     let item = after.results.iter_mut().find(|x| x.id == result_id)?;
     let old_symbol = std::mem::replace(&mut item.symbol, input.symbol.trim().to_string());
     item.formula = input.formula.trim().to_string();
+    item.unit = input.unit.trim().to_string();
+    if let Some(compare_with) = input.compare_with() {
+        item.compare_with = compare_with.to_string();
+    }
     let new_symbol = item.symbol.clone();
     for symbol in after.sections.iter_mut().flat_map(|s| s.results.iter_mut()) {
         if *symbol == old_symbol {
@@ -1401,11 +1442,8 @@ pub(super) async fn create_result(
         None,
     )
     .await?;
-    guard_change(
-        &def,
-        &with_new_result(&def, &input, section_id.as_deref()),
-        "guardar el mensurando",
-    )?;
+    let after = with_new_result(&def, &input, section_id.as_deref());
+    guard_change(&def, &after, "guardar el mensurando")?;
     Ok(Json(
         practices::create_result(&state.pool, &id, input, section_id.as_deref()).await?,
     ))
@@ -1617,6 +1655,34 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
         return Err(AppError::bad_request(
             "El cronómetro solo aplica a una magnitud física \"tiempo\" que no sea un dato dado.",
         ));
+    }
+    Ok(())
+}
+
+fn check_compare(
+    def: &practices::PracticeDefinition,
+    result: &db::PracticeResult,
+) -> Result<(), AppError> {
+    let target = result.compare_with.as_str();
+    if target.is_empty() {
+        return Ok(());
+    }
+    let quantity = def
+        .quantities
+        .iter()
+        .find(|q| q.symbol == target)
+        .ok_or_else(|| {
+            AppError::bad_request(
+                "\"Comparar con\" tiene que ser el símbolo de una magnitud de la práctica, \
+                 de la misma parte que el mensurando o de los datos compartidos.",
+            )
+        })?;
+    let (unit, target_unit) = (result.unit.trim(), quantity.unit.trim());
+    if unit != target_unit {
+        return Err(AppError::bad_request(format!(
+            "\"Comparar con\" necesita la misma unidad: el mensurando está en \"{unit}\" \
+             y {target} en \"{target_unit}\"."
+        )));
     }
     Ok(())
 }
@@ -2123,6 +2189,7 @@ mod tests {
                 tolerance: None,
                 is_final: false,
                 has_uncertainty: true,
+                ..Default::default()
             }],
             curves: vec![],
             operator_count: None,
@@ -2290,6 +2357,7 @@ mod tests {
         };
         let r = |unit: &str| ResultInput {
             display_symbol: None,
+            compare_with: None,
             symbol: "M_medio".into(),
             name: "Coeficiente medio".into(),
             unit: unit.into(),
@@ -2309,6 +2377,33 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn check_compare_needs_a_quantity_of_the_view_with_the_same_unit() {
+        let def = practices::PracticeDefinition {
+            quantities: vec![db::PracticeQuantity {
+                symbol: "V".into(),
+                unit: "V".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let r = |compare_with: &str, unit: &str| db::PracticeResult {
+            symbol: "V_t".into(),
+            unit: unit.into(),
+            compare_with: compare_with.into(),
+            ..Default::default()
+        };
+        assert!(check_compare(&def, &r("", "V")).is_ok());
+        assert!(check_compare(&def, &r("V", " V ")).is_ok());
+        assert!(check_compare(&def, &r("W", "V")).is_err());
+        let error = check_compare(&def, &r("V", "mV")).unwrap_err();
+        assert!(
+            error.message().contains("misma unidad"),
+            "{}",
+            error.message()
+        );
     }
 
     #[tokio::test]
@@ -2504,6 +2599,140 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_saved_comparison_must_point_to_a_quantity_of_its_part_or_shared() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let with = |compare_with: &str, unit: &str| {
+            let mut def = cc.clone();
+            let r = def.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
+            let r = r.unwrap();
+            r.compare_with = compare_with.into();
+            r.unit = unit.into();
+            formula_problems(&def)
+        };
+        assert!(with("VR1_s", "V").is_empty());
+        assert!(with("R1", "ohm").is_empty(), "una magnitud compartida vale");
+        assert!(!with("R1", "V").is_empty(), "con otra unidad no");
+        assert!(
+            !with("VR1_p", "V").is_empty(),
+            "una magnitud de otra parte no"
+        );
+        assert!(!with("nada", "V").is_empty());
+
+        let options = cc.compare_options();
+        let vr1_s_t = &options.results["VR1_s_t"];
+        assert!(vr1_s_t.contains(&"VR1_s".into()) && vr1_s_t.contains(&"R1".into()));
+        assert!(!vr1_s_t.contains(&"VR1_p".into()));
+        assert!(
+            options.results["Req"].contains(&"VR1_p".into()),
+            "parte inferida"
+        );
+        assert!(options.parts["p2-cc-paralelo"].contains(&"VR1_p".into()));
+        assert!(options.shared.contains(&"R1".into()));
+        assert!(!options.shared.contains(&"VR1_s".into()));
+
+        let input = |symbol: &str, formula: &str, compare_with: &str| ResultInput {
+            display_symbol: None,
+            compare_with: Some(compare_with.into()),
+            symbol: symbol.into(),
+            name: symbol.into(),
+            unit: "V".into(),
+            formula: formula.into(),
+            tolerance: None,
+            is_final: false,
+            has_uncertainty: true,
+        };
+        let new = input("VR1_s_t2", "Vg_s * R1 / (R1 + R2 + R3 + RA_s)", "VR1_s");
+        let save = |input: &ResultInput| {
+            guard_change(
+                &cc,
+                &with_new_result(&cc, input, None),
+                "guardar el mensurando",
+            )
+        };
+        assert!(save(&new).is_ok());
+        let crossed = input("VR1_s_t2", "Vg_s * R1 / (R1 + R2 + R3 + RA_s)", "VR1_p");
+        let error = save(&crossed).unwrap_err();
+        assert!(
+            error.message().contains("la comparación de VR1_s_t2"),
+            "{}",
+            error.message()
+        );
+
+        let mut stale = cc.clone();
+        let stale_r = stale.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
+        stale_r.unwrap().compare_with = "VR1_p".into();
+        let vr1_s_t = cc.results.iter().find(|r| r.symbol == "VR1_s_t").unwrap();
+        let renamed = ResultInput {
+            name: "Otro nombre".into(),
+            ..input("VR1_s_t", &vr1_s_t.formula, "VR1_p")
+        };
+        let after = with_updated_result(&stale, &vr1_s_t.id, &renamed).unwrap();
+        assert!(
+            guard_change(&stale, &after, "guardar el mensurando").is_ok(),
+            "una comparación ya rota no bloquea editar otro campo"
+        );
+
+        let mut broken = cc.clone();
+        let broken_r = broken.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
+        broken_r.unwrap().formula = "no_existe * 2".into();
+        let vr1_s = cc.quantities.iter().find(|q| q.symbol == "VR1_s").unwrap();
+        let in_mv = QuantityInput {
+            symbol: "VR1_s".into(),
+            name: vr1_s.name.clone(),
+            unit: "mV".into(),
+            per_point: vr1_s.per_point,
+            is_given: vr1_s.is_given,
+            ..Default::default()
+        };
+        let after = with_updated_quantity(&broken, &vr1_s.id, &in_mv).unwrap();
+        let error = guard_change(&broken, &after, "guardar la magnitud").unwrap_err();
+        assert!(
+            error.message().contains("la comparación de VR1_s_t"),
+            "una fórmula rota no esconde la comparación nueva: {}",
+            error.message()
+        );
+
+        let vr1_s = cc.quantities.iter().find(|q| q.symbol == "VR1_s").unwrap();
+        let edit = |unit: &str| {
+            let input = QuantityInput {
+                symbol: "VR1_s".into(),
+                name: vr1_s.name.clone(),
+                unit: unit.into(),
+                per_point: vr1_s.per_point,
+                is_given: vr1_s.is_given,
+                ..Default::default()
+            };
+            let after = with_updated_quantity(&cc, &vr1_s.id, &input).unwrap();
+            guard_change(&cc, &after, "guardar la magnitud")
+        };
+        assert!(edit(" V ").is_ok());
+        let error = edit("mV").unwrap_err();
+        assert!(
+            error.message().contains("misma unidad"),
+            "{}",
+            error.message()
+        );
+
+        let vr1_s_t = cc.results.iter().find(|r| r.symbol == "VR1_s_t").unwrap();
+        let only_unit = ResultInput {
+            compare_with: None,
+            unit: "mV".into(),
+            ..input("VR1_s_t", &vr1_s_t.formula, "")
+        };
+        let after = with_updated_result(&cc, &vr1_s_t.id, &only_unit).unwrap();
+        let error = guard_change(&cc, &after, "guardar el mensurando").unwrap_err();
+        assert!(
+            error.message().contains("misma unidad"),
+            "{}",
+            error.message()
+        );
+    }
+
+    #[tokio::test]
     async fn changing_the_practice_kind_revalidates_the_parts_that_inherit_it() {
         let (pool, _dir) = crate::computation::tests::setup().await;
         let hidro = practices::definition(&pool, "hidrostatica")
@@ -2602,6 +2831,7 @@ mod tests {
         let i_s = cc.results.iter().find(|r| r.symbol == "I_s").unwrap();
         let input = ResultInput {
             display_symbol: None,
+            compare_with: None,
             symbol: "I_serie".into(),
             name: i_s.name.clone(),
             unit: i_s.unit.clone(),
@@ -3071,6 +3301,7 @@ mod tests {
         let (pool, _dir) = crate::computation::tests::setup().await;
         let input = |symbol: &str, formula: &str| ResultInput {
             display_symbol: None,
+            compare_with: None,
             symbol: symbol.into(),
             name: symbol.into(),
             unit: "m".into(),

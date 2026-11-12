@@ -183,6 +183,7 @@ pub struct PracticeResult {
     pub is_final: bool,
     #[serde(default = "default_true")]
     pub has_uncertainty: bool,
+    pub compare_with: String,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]

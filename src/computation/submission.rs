@@ -293,6 +293,7 @@ pub fn validate_student_results(
 ///     id: "r".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
 ///     unit: "m/s2".into(), formula: "L".into(), position: 0, tolerance: None,
 ///     is_final: true, has_uncertainty: true,
+///     ..Default::default()
 /// };
 /// let def = PracticeDefinition { results: vec![g], ..Default::default() };
 /// let result = |symbol: &str| StudentResultInput { symbol: symbol.into(), value: 9.8, u_expanded: None };
