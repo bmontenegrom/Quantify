@@ -21,6 +21,16 @@ async function openPractice(page, practiceId) {
   await page.waitForSelector("#measurement-fields .measurement-row, #measurement-fields .series-table");
 }
 
+async function liveText(row, expected) {
+  const cell = row.locator(".series-live-value").first();
+  for (let i = 0; i < 50; i += 1) {
+    const text = (await cell.innerText()).replace(/,/g, ".");
+    if (text.includes(expected)) return text;
+    await row.page().waitForTimeout(200);
+  }
+  return (await cell.innerText()).replace(/,/g, ".");
+}
+
 async function assertInputContrast(page) {
   const handle = await page.waitForFunction(() => {
     const el = document.querySelector("#measurement-fields input");
@@ -73,8 +83,8 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   const firstRow = page.locator("#measurement-fields .series-row").first();
   await firstRow.locator(".series-value").nth(0).fill("100");
   await firstRow.locator(".series-value").nth(1).fill("0.5");
-  const liveText = await firstRow.locator(".series-live-value").innerText();
-  assert(liveText.replace(",", ".").includes("25"), `celda P debía mostrar 25, mostró "${liveText}"`);
+  const power = await liveText(firstRow, "25");
+  assert(power.includes("25"), `celda P debía mostrar 25, mostró "${power}"`);
   await page.screenshot({ path: join(ARTIFACTS, "visual-cc-potencia.png"), fullPage: true });
 
   for (const [sym, inputsU] of [
@@ -95,6 +105,12 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
 
   const row = page.locator("#measurement-fields .series-row").first();
   for (const input of await row.locator(".series-value, .series-replica").all()) await input.fill("2");
+  await row.locator(".series-replica").last().fill("4");
+  const flow = await liveText(row, "0.75");
+  assert(
+    flow.split("\n").length === 3 && flow.includes("0.5") && flow.includes("0.75"),
+    `Q debía mostrar Q_1, Q_2 y su promedio 0.75, mostró "${flow}"`,
+  );
   await row.locator(".series-point-result").first().fill("1234");
   await waitForDraft(page, { result: "Re#0", value: 1234 });
   await page.reload();

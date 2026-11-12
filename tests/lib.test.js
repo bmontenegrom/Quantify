@@ -32,8 +32,6 @@ import {
   compareMeasuredVsTheoretical,
   comparisonPairs,
   compareOptionGroups,
-  pointPower,
-  flowRate,
   draftMeasurementsByQuantity,
   draftedQuantityIds,
   SI_PREFIXES,
@@ -445,19 +443,6 @@ test("compareResults: verdict pass/fail según tolerancia", () => {
   assert.equal(pass.verdict, "pass");
   const [fail] = compareResults(auto, student, { Q: 3 });
   assert.equal(fail.verdict, "fail");
-});
-
-test("pointPower calcula P = I²·R", () => {
-  assert.equal(pointPower(100, 0.5), 25);
-  assert.equal(pointPower(0, 3), 0);
-  assert.equal(pointPower(200, 0), 0);
-  assert.equal(pointPower(100, -0.5), 25);
-});
-
-test("flowRate calcula Q = V/t", () => {
-  assert.equal(flowRate(1e-3, 10), 1e-4);
-  assert.equal(flowRate(0, 10), 0);
-  assert.equal(flowRate(1e-3, 0), Infinity);
 });
 
 test("draftMeasurementsByQuantity: columna de un valor por punto", () => {

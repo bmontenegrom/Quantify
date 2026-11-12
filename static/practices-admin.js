@@ -73,7 +73,7 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "(Re_max + Re_min) / 2",
     ...statusStrings("Mensurando agregado", false),
     confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
-    hasFinal: true,
+    flags: [{ field: "is_final", column: "Final", label: "Resultado final (comparable, sin incertidumbre)" }],
   },
   intermediate: {
     kind: "intermediate",
@@ -87,6 +87,10 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "V / t",
     ...statusStrings("Intermedia", true),
     confirmDelete: "¿Eliminar esta magnitud intermedia? Esta accion no se puede deshacer.",
+    flags: [
+      { field: "on_means", column: "Sobre promedios", label: "Calcular sobre los promedios del punto (en vez de por réplica y después promediar)" },
+      { field: "show_live", column: "En vivo", label: "Mostrar en vivo en la tabla del alumno" },
+    ],
   },
 };
 
@@ -104,9 +108,9 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" /></label>
       ${
-        kind.hasFinal
-          ? `<label class="checkbox-field"><input name="is_final" type="checkbox" ${item?.is_final ? "checked" : ""} /> Resultado final (comparable, sin incertidumbre)</label>`
-          : ""
+        (kind.flags ?? [])
+          .map((f) => `<label class="checkbox-field"><input name="${f.field}" type="checkbox" ${item?.[f.field] ? "checked" : ""} /> ${f.label}</label>`)
+          .join("")
       }
       <div class="detail-actions">
         <button type="submit">${item ? "Guardar" : "Agregar"}</button>
@@ -119,10 +123,11 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
 function renderSymbolFormulaList(kind, def, practiceId) {
   const items = kind.listOf(def);
   if (items.length === 0) return `<p class="submission-meta">${kind.emptyText}</p>`;
-  const colspan = kind.hasFinal ? 4 : 3;
+  const flags = kind.flags ?? [];
+  const colspan = 3 + flags.length;
   const rows = items.flatMap((item) => {
     const editing = isEditing(kind.kind, item.id);
-    const finalCell = kind.hasFinal ? `<td>${item.is_final ? "Sí" : "—"}</td>` : "";
+    const finalCell = flags.map((f) => `<td>${item[f.field] ? "Sí" : "—"}</td>`).join("");
     const baseRow = `
       <tr>
         <td class="directory-primary">${adminSymbolHtml(item.symbol)} <span class="submission-meta">${inlineMathHtml(item.name)}${item.unit ? ` (${unitHtml(item.unit)})` : " (adimensional)"}</span></td>
@@ -141,7 +146,7 @@ function renderSymbolFormulaList(kind, def, practiceId) {
   return `
     <div class="data-table-wrap">
       <table class="data-table">
-        <thead><tr><th>Símbolo</th><th>Fórmula</th>${kind.hasFinal ? "<th>Final</th>" : ""}<th>Acciones</th></tr></thead>
+        <thead><tr><th>Símbolo</th><th>Fórmula</th>${flags.map((f) => `<th>${f.column}</th>`).join("")}<th>Acciones</th></tr></thead>
         <tbody>${rows.join("")}</tbody>
       </table>
     </div>
@@ -157,7 +162,7 @@ function symbolFormulaPayloadFromForm(form, kind) {
     formula: raw.formula,
     display_symbol: raw.display_symbol,
   };
-  if (kind.hasFinal) payload.is_final = raw.is_final === "on";
+  for (const f of kind.flags ?? []) payload[f.field] = raw[f.field] === "on";
   return payload;
 }
 
@@ -760,7 +765,7 @@ function renderAggregatesSection(practice, def) {
 function renderIntermediatesSection(practice, def) {
   return symbolFormulaSection("intermediate", practice, def, {
     title: "Magnitudes intermedias por punto",
-    help: "Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio). El símbolo queda disponible en las fórmulas de eje.",
+    help: "Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio), o, con \"Calcular sobre los promedios\", una sola vez con las magnitudes ya promediadas (p. ej. v = dx/t con el tiempo medio). Una intermedia que usa otra anterior recibe su promedio. El símbolo queda disponible en las fórmulas de eje.",
     addLabel: "Nueva intermedia",
   });
 }

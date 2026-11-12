@@ -727,7 +727,27 @@ arranca con el admin solo (`SEED_ADMIN_PASSWORD` es obligatoria salvo con `SEED_
 recrea nada. Siguen corriendo en cada arranque
 `seed_practices`, `seed_course` y `seed_instruments`, que se retiran con las siembras en F8.
 
-### F6 — Sin casos especiales en el frontend ni en las siembras
+### F6 — Sin casos especiales en el frontend ni en las siembras ✅ HECHA
+
+**Estado (2026-11-12)**: hecho en #115, #116, #119 y la PR de columnas en vivo. Cambios respecto
+de lo planeado:
+- **La columna en vivo calcula exactamente lo mismo que el ajuste**: el promedio que se ve es el
+  valor que usa el análisis. Un intermedio que usa otro anterior recibe su promedio, como en el
+  ajuste, así que muestra un solo valor.
+- **Intermedios "sobre los promedios"** (`on_means`, estructural). Por defecto un intermedio se
+  evalúa réplica por réplica y después se promedia: promedio(f(x_k)). Con `on_means` se evalúa una
+  sola vez sobre las magnitudes ya promediadas del punto: f(promedio(x)). Para fórmulas no lineales
+  no da lo mismo.
+- **Viscosidad conserva su eje y en `dx/t`** y gana `v = dx/t` sobre los promedios, que da
+  exactamente el valor del eje: dx/promedio(t), como pide la técnica. La migración agrega `v` al
+  borrador y al JSON de las versiones sin crear la versión 2, y los golden no cambian, porque los
+  intermedios no salen en el análisis.
+- **Una columna por intermedio.** La celda muestra cada réplica y el promedio (antes fluidos-1
+  tenía tres columnas: Q_1, Q_2 y Q_medio).
+- **La columna en vivo se llena cuando la fila está completa**, porque se mandan las mismas
+  mediciones que a la vista previa. Antes, en fluidos-1, Q aparecía aunque faltara h.
+- `POST /practices/{id}/live-values` resuelve la definición igual que `analyze-preview` (borrador,
+  entrega, versión o publicada) y no necesita dos puntos. Se borró `static/constants.js`.
 
 1. Propiedades de presentación (3.8) en schema, API y admin.
 2. Migración de una sola vez que traduce cada caso especial a datos: J2 (`show_live`), J3/J7

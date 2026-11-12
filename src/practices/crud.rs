@@ -66,6 +66,7 @@ pub async fn definition(
 
 trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin {
     const TABLE: &'static str;
+    const FLAGS: &'static [&'static str] = &[];
 }
 
 impl SymbolFormulaRow for PracticePointResult {
@@ -74,6 +75,11 @@ impl SymbolFormulaRow for PracticePointResult {
 
 impl SymbolFormulaRow for PracticeIntermediate {
     const TABLE: &'static str = "practice_intermediates";
+    const FLAGS: &'static [&'static str] = &["show_live", "on_means"];
+}
+
+fn flag_columns<T: SymbolFormulaRow>() -> String {
+    T::FLAGS.iter().map(|f| format!(", {f}")).collect()
 }
 
 async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
@@ -81,8 +87,9 @@ async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
     practice_id: &str,
 ) -> anyhow::Result<Vec<T>> {
     let query = format!(
-        "SELECT id, practice_id, position, symbol, name, unit, formula \
+        "SELECT id, practice_id, position, symbol, name, unit, formula{} \
          FROM {} WHERE practice_id = ?1 ORDER BY position, id",
+        flag_columns::<T>(),
         T::TABLE
     );
     Ok(sqlx::query_as::<_, T>(&query)
@@ -96,7 +103,8 @@ async fn fetch_symbol_formula_row<T: SymbolFormulaRow>(
     id: &str,
 ) -> anyhow::Result<T> {
     let query = format!(
-        "SELECT id, practice_id, position, symbol, name, unit, formula FROM {} WHERE id = ?1",
+        "SELECT id, practice_id, position, symbol, name, unit, formula{} FROM {} WHERE id = ?1",
+        flag_columns::<T>(),
         T::TABLE
     );
     Ok(sqlx::query_as::<_, T>(&query)
@@ -120,6 +128,7 @@ fn input_widget(input: &QuantityInput) -> &str {
         .unwrap_or(DEFAULT_INPUT_WIDGET)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     pool: &SqlitePool,
     practice_id: &str,
@@ -128,15 +137,20 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     unit: &str,
     formula: &str,
     display: Option<&str>,
+    flags: &[bool],
 ) -> anyhow::Result<T> {
     let position = next_position(pool, T::TABLE, "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     let query = format!(
-        "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula, display_symbol) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        T::TABLE
+        "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula, display_symbol{}) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8{})",
+        T::TABLE,
+        flag_columns::<T>(),
+        (0..T::FLAGS.len())
+            .map(|k| format!(", ?{}", k + 9))
+            .collect::<String>(),
     );
-    sqlx::query(&query)
+    let mut insert = sqlx::query(&query)
         .bind(&id)
         .bind(practice_id)
         .bind(position)
@@ -144,9 +158,11 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
         .bind(name)
         .bind(unit)
         .bind(formula)
-        .bind(display.unwrap_or(""))
-        .execute(pool)
-        .await?;
+        .bind(display.unwrap_or(""));
+    for flag in flags {
+        insert = insert.bind(*flag);
+    }
+    insert.execute(pool).await?;
     fetch_symbol_formula_row::<T>(pool, &id).await
 }
 
@@ -160,23 +176,31 @@ async fn update_symbol_formula_row<T: SymbolFormulaRow>(
     unit: &str,
     formula: &str,
     display: Option<&str>,
+    flags: &[bool],
 ) -> anyhow::Result<Option<T>> {
     let query = format!(
         "UPDATE {} SET symbol = ?3, name = ?4, unit = ?5, formula = ?6, \
-         display_symbol = COALESCE(?7, display_symbol) \
+         display_symbol = COALESCE(?7, display_symbol){} \
          WHERE id = ?1 AND practice_id = ?2",
-        T::TABLE
+        T::TABLE,
+        T::FLAGS
+            .iter()
+            .enumerate()
+            .map(|(k, f)| format!(", {f} = ?{}", k + 8))
+            .collect::<String>(),
     );
-    let result = sqlx::query(&query)
+    let mut update = sqlx::query(&query)
         .bind(row_id)
         .bind(practice_id)
         .bind(symbol)
         .bind(name)
         .bind(unit)
         .bind(formula)
-        .bind(display)
-        .execute(pool)
-        .await?;
+        .bind(display);
+    for flag in flags {
+        update = update.bind(*flag);
+    }
+    let result = update.execute(pool).await?;
     if result.rows_affected() == 0 {
         return Ok(None);
     }
@@ -225,6 +249,7 @@ pub async fn create_point_result(
         input.unit.trim(),
         formula,
         display_symbol(&input.display_symbol),
+        &[],
     )
     .await
 }
@@ -249,6 +274,7 @@ pub async fn update_point_result(
         input.unit.trim(),
         formula,
         display_symbol(&input.display_symbol),
+        &[],
     )
     .await
 }
@@ -386,6 +412,7 @@ pub async fn create_intermediate(
         input.unit.trim(),
         formula,
         display_symbol(&input.display_symbol),
+        &[input.show_live, input.on_means],
     )
     .await
 }
@@ -410,6 +437,7 @@ pub async fn update_intermediate(
         input.unit.trim(),
         formula,
         display_symbol(&input.display_symbol),
+        &[input.show_live, input.on_means],
     )
     .await
 }

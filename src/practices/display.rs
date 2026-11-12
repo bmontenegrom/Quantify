@@ -1,4 +1,4 @@
-use super::PracticeDefinition;
+use super::{PracticeDefinition, PracticeIntermediate};
 use crate::db::DISPLAY_SYMBOL_TABLES;
 use sqlx::SqlitePool;
 use std::collections::BTreeMap;
@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 const LEGACY_DISPLAY_SYMBOLS: &str = "2026-11-simbolos-a-mostrar";
 const LEGACY_QUANTITY_PRESENTATION: &str = "2026-11-rotulo-y-entrada";
 const LEGACY_COMPARE_WITH: &str = "2026-11-comparar-con";
+const LEGACY_LIVE_COLUMNS: &str = "2026-11-columnas-en-vivo";
+const LEGACY_LIVE: [(&str, &str, &str); 2] = [("p2-cc", "P", "I*I*R"), ("fluidos-1", "Q", "V/t")];
 const LEGACY_SYMBOL_FIRST: [&str; 22] = [
     "Vg_s", "RA_s", "VR1_s", "VR2_s", "VR3_s", "Vg_p", "RA_p", "VR1_p", "VR2_p", "VR3_p", "Vg_c",
     "RA_c", "Vg", "VRpp", "VCpp", "VLpp", "a_R", "b_R", "a_C", "b_C", "a_L", "b_L",
@@ -351,6 +353,125 @@ pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Re
     }
     sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
         .bind(LEGACY_COMPARE_WITH)
+        .bind(chrono::Utc::now())
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+fn legacy_live(practice_id: &str, intermediate: &PracticeIntermediate) -> bool {
+    LEGACY_LIVE.iter().any(|(practice, symbol, formula)| {
+        *practice == practice_id
+            && intermediate.symbol == *symbol
+            && intermediate.formula == *formula
+    })
+}
+
+fn legacy_velocity(definition: &PracticeDefinition, id: &str) -> Option<PracticeIntermediate> {
+    let free = !version_symbols(definition).any(|symbol| symbol == "v");
+    (definition.practice_id == "viscosidad" && free).then(|| PracticeIntermediate {
+        id: id.into(),
+        practice_id: definition.practice_id.clone(),
+        position: definition
+            .intermediates
+            .iter()
+            .map(|i| i.position + 1)
+            .max()
+            .unwrap_or(0),
+        symbol: "v".into(),
+        name: "Velocidad limite".into(),
+        unit: "m/s".into(),
+        formula: "dx/t".into(),
+        show_live: true,
+        on_means: true,
+    })
+}
+
+pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Result<()> {
+    if crate::db::migration_applied(pool, LEGACY_LIVE_COLUMNS).await? {
+        return Ok(());
+    }
+    let velocity_id = uuid::Uuid::new_v4().to_string();
+    let mut drafts = Vec::new();
+    for practice in ["p2-cc", "fluidos-1", "viscosidad"] {
+        if let Some(definition) = super::crud::definition(pool, practice).await? {
+            drafts.push(definition);
+        }
+    }
+    let mut tx = pool.begin().await?;
+    for definition in &drafts {
+        for intermediate in definition
+            .intermediates
+            .iter()
+            .filter(|i| !i.show_live && legacy_live(&definition.practice_id, i))
+        {
+            sqlx::query("UPDATE practice_intermediates SET show_live = 1 WHERE id = ?1")
+                .bind(&intermediate.id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        if let Some(v) = legacy_velocity(definition, &velocity_id) {
+            sqlx::query(
+                "INSERT INTO practice_intermediates \
+                 (id, practice_id, position, symbol, name, unit, formula, display_symbol, \
+                  show_live, on_means) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', 1, 1)",
+            )
+            .bind(&v.id)
+            .bind(&v.practice_id)
+            .bind(v.position)
+            .bind(&v.symbol)
+            .bind(&v.name)
+            .bind(&v.unit)
+            .bind(&v.formula)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    let versions: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, definition_json FROM practice_versions")
+            .fetch_all(&mut *tx)
+            .await?;
+    for (id, json) in versions {
+        let definition = match super::versions::parse(&json) {
+            Ok(definition) => definition,
+            Err(error) => {
+                tracing::warn!(
+                    version_id = %id,
+                    %error,
+                    "versión ilegible: queda sin columnas en vivo y esta migración no se repite"
+                );
+                continue;
+            }
+        };
+        for (i, intermediate) in definition.intermediates.iter().enumerate() {
+            if intermediate.show_live || !legacy_live(&definition.practice_id, intermediate) {
+                continue;
+            }
+            sqlx::query(
+                "UPDATE practice_versions \
+                 SET definition_json = json_set(definition_json, ?1, json('true')) WHERE id = ?2",
+            )
+            .bind(format!("$.intermediates[{i}].show_live"))
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        if let Some(v) = legacy_velocity(&definition, &velocity_id) {
+            sqlx::query(
+                "UPDATE practice_versions \
+                 SET definition_json = json_insert(definition_json, '$.intermediates[#]', json(?1)) \
+                 WHERE id = ?2",
+            )
+            .bind(serde_json::to_string(&v)?)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
+        .bind(LEGACY_LIVE_COLUMNS)
         .bind(chrono::Utc::now())
         .execute(&mut *tx)
         .await?;
