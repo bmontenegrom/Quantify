@@ -439,10 +439,11 @@ pub(crate) fn build_points(
             .iter()
             .map(|q| (q.symbol.clone(), magnitude_at(q.id.as_str(), i)))
             .collect();
-        let mut intermediate_values: HashMap<&str, f64> = HashMap::new();
+        let mut intermediate_values: HashMap<&str, Vec<f64>> = HashMap::new();
         for (it, tree) in &compiled_intermediates {
-            let value = mean(&point_intermediate(tree, &inputs, &intermediate_values, i));
-            intermediate_values.insert(it.symbol.as_str(), value);
+            let replicas = point_intermediate(tree, &inputs, &intermediate_values, i);
+            let value = mean(&replicas);
+            intermediate_values.insert(it.symbol.as_str(), replicas);
             context.insert(it.symbol.clone(), value);
         }
 
@@ -467,7 +468,7 @@ fn mean(values: &[f64]) -> f64 {
 fn point_intermediate(
     tree: &Node,
     inputs: &PointInputs,
-    earlier: &HashMap<&str, f64>,
+    earlier: &HashMap<&str, Vec<f64>>,
     i: usize,
 ) -> Vec<f64> {
     let PointInputs {
@@ -484,10 +485,20 @@ fn point_intermediate(
             .map_or(&[][..], |v| v.as_slice())
     };
     let is_broadcastable = |sym: &str| id_of(sym).is_some_and(|id| broadcastable.contains(id));
+    let earlier_at = |sym: &str| earlier.get(sym).map_or(&[][..], |v| v.as_slice());
     let n_reps = tree
         .iter_variable_identifiers()
-        .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
-        .map(|v| reps_at(v).len())
+        .map(|v| {
+            if symbol_to_id.contains_key(v) {
+                if is_broadcastable(v) {
+                    0
+                } else {
+                    reps_at(v).len()
+                }
+            } else {
+                earlier_at(v).len()
+            }
+        })
         .max()
         .unwrap_or(0)
         .max(1);
@@ -506,7 +517,13 @@ fn point_intermediate(
                         };
                         (v, value)
                     } else {
-                        (v, earlier.get(v).copied().unwrap_or(f64::NAN))
+                        let reps = earlier_at(v);
+                        let value = if reps.len() == 1 {
+                            reps[0]
+                        } else {
+                            reps.get(r).copied().unwrap_or(f64::NAN)
+                        };
+                        (v, value)
                     }
                 })
                 .collect();
@@ -562,12 +579,12 @@ pub fn live_values(
     let finite = |v: f64| v.is_finite().then_some(v);
     Ok((0..n_points)
         .map(|i| {
-            let mut earlier: HashMap<&str, f64> = HashMap::new();
+            let mut earlier: HashMap<&str, Vec<f64>> = HashMap::new();
             let mut row = Vec::new();
             for (it, tree) in &compiled {
                 let replicas = point_intermediate(tree, &inputs, &earlier, i);
                 let value = mean(&replicas);
-                earlier.insert(it.symbol.as_str(), value);
+                earlier.insert(it.symbol.as_str(), replicas.clone());
                 if it.show_live {
                     row.push(LiveValue {
                         symbol: it.symbol.clone(),

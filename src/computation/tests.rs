@@ -3166,6 +3166,7 @@ fn live_values_show_each_replica_and_their_mean_from_a_single_point() {
         intermediate("Q", "V/t", true),
         intermediate("Q2", "Q*h", false),
         intermediate("Qh", "Q2/h", true),
+        intermediate("Qsq", "Q*Q", true),
     ];
     let measurements = vec![
         measurement("h", &[2.0]),
@@ -3184,7 +3185,12 @@ fn live_values_show_each_replica_and_their_mean_from_a_single_point() {
             },
             LiveValue {
                 symbol: "Qh".into(),
-                replicas: vec![None],
+                replicas: vec![Some(10.0), None],
+                mean: None,
+            },
+            LiveValue {
+                symbol: "Qsq".into(),
+                replicas: vec![Some(100.0), None],
                 mean: None,
             },
         ]
@@ -3198,5 +3204,29 @@ fn live_values_show_each_replica_and_their_mean_from_a_single_point() {
     let rows = live_values(&quantities, &intermediates, &measurements).unwrap();
     assert_eq!(rows[0][0].replicas, vec![Some(10.0), Some(5.0)]);
     assert_eq!(rows[0][0].mean, Some(7.5));
+    assert_eq!(rows[0][1].replicas, vec![Some(10.0), Some(5.0)]);
     assert_eq!(rows[0][1].mean, Some(7.5));
+    assert_eq!(rows[0][2].replicas, vec![Some(100.0), Some(25.0)]);
+    assert_eq!(rows[0][2].mean, Some(62.5));
+}
+
+#[test]
+fn chained_intermediates_use_each_replica_in_the_fit() {
+    let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
+    let intermediate = |symbol: &str, formula: &str| PracticeIntermediate {
+        symbol: symbol.into(),
+        formula: formula.into(),
+        ..Default::default()
+    };
+    let intermediates = vec![intermediate("Q", "V/t"), intermediate("Qsq", "Q*Q")];
+    let measurements = vec![
+        point_rep("q-V", vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
+        point_rep("q-t", vec![vec![1.0, 2.0], vec![1.0, 2.0]]),
+        measurement("py", &[100.0, 200.0]),
+    ];
+    let a = reg(&quantities, &intermediates, &[], "Qsq", "py", &measurements).unwrap();
+    assert_eq!(
+        a.regression.unwrap().points,
+        vec![(62.5, 100.0), (250.0, 200.0)]
+    );
 }
