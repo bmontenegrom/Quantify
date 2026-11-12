@@ -66,7 +66,6 @@ pub async fn definition(
 
 trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin {
     const TABLE: &'static str;
-    const EXTRA_COLUMNS: &'static str = "";
     const FLAGS: &'static [&'static str] = &[];
 }
 
@@ -76,8 +75,11 @@ impl SymbolFormulaRow for PracticePointResult {
 
 impl SymbolFormulaRow for PracticeIntermediate {
     const TABLE: &'static str = "practice_intermediates";
-    const EXTRA_COLUMNS: &'static str = ", show_live, on_means";
     const FLAGS: &'static [&'static str] = &["show_live", "on_means"];
+}
+
+fn flag_columns<T: SymbolFormulaRow>() -> String {
+    T::FLAGS.iter().map(|f| format!(", {f}")).collect()
 }
 
 async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
@@ -87,7 +89,7 @@ async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
     let query = format!(
         "SELECT id, practice_id, position, symbol, name, unit, formula{} \
          FROM {} WHERE practice_id = ?1 ORDER BY position, id",
-        T::EXTRA_COLUMNS,
+        flag_columns::<T>(),
         T::TABLE
     );
     Ok(sqlx::query_as::<_, T>(&query)
@@ -102,7 +104,7 @@ async fn fetch_symbol_formula_row<T: SymbolFormulaRow>(
 ) -> anyhow::Result<T> {
     let query = format!(
         "SELECT id, practice_id, position, symbol, name, unit, formula{} FROM {} WHERE id = ?1",
-        T::EXTRA_COLUMNS,
+        flag_columns::<T>(),
         T::TABLE
     );
     Ok(sqlx::query_as::<_, T>(&query)
@@ -143,7 +145,7 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
         "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula, display_symbol{}) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8{})",
         T::TABLE,
-        T::FLAGS.iter().map(|f| format!(", {f}")).collect::<String>(),
+        flag_columns::<T>(),
         (0..T::FLAGS.len())
             .map(|k| format!(", ?{}", k + 9))
             .collect::<String>(),

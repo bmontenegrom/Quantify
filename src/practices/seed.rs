@@ -752,6 +752,20 @@ async fn seed_viscosidad(pool: &SqlitePool) -> anyhow::Result<()> {
             },
         )
         .await?;
+        create_intermediate(
+            pool,
+            "viscosidad",
+            IntermediateInput {
+                display_symbol: None,
+                symbol: "v".into(),
+                name: "Velocidad limite".into(),
+                unit: "m/s".into(),
+                formula: "dx/t".into(),
+                show_live: true,
+                on_means: true,
+            },
+        )
+        .await?;
     }
     sqlx::query(
         "UPDATE practice_quantities SET is_given = 1 \

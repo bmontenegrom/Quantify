@@ -194,9 +194,7 @@ pub struct PracticeIntermediate {
     pub name: String,
     pub unit: String,
     pub formula: String,
-    #[sqlx(default)]
     pub show_live: bool,
-    #[sqlx(default)]
     pub on_means: bool,
 }
 
