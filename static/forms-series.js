@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
 import { definitionParts, definitionSections, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireRemoveReplica, collectMeasurements, finalResultRowHtml } from "./forms.js";
@@ -291,37 +291,39 @@ let liveTimer = null;
 let liveRequest = 0;
 
 export function updateSeriesLive() {
-  if (!liveIntermediates().length) return;
   clearTimeout(liveTimer);
   liveRequest += 1;
+  if (!liveIntermediates().length) return;
   liveTimer = setTimeout(refreshLiveValues, 250);
 }
 
-function liveValueHtml({ symbol, replicas, mean }) {
-  const show = (v) => (v == null ? "—" : format(v));
-  if (replicas.length < 2) return show(mean);
-  const lines = replicas.map((v, k) => `${symbolHtml(`${symbol}_${k + 1}`)} ${show(v)}`);
-  return [...lines, `x̄ ${show(mean)}`].join("<br>");
+function liveValueHtml({ replicas, mean }) {
+  if (replicas.length < 2) return num(mean);
+  const lines = replicas.map((v, k) => `#${k + 1} ${num(v)}`);
+  return [...lines, `x̄ ${num(mean)}`].join("<br>");
 }
 
 async function refreshLiveValues() {
   const request = liveRequest;
-  const measurements = collectMeasurements();
+  const rowsEl = [...measurementFields.querySelectorAll(".series-row")];
   let rows = [];
-  if (pointCount(measurements) > 0) {
+  let error = "";
+  if (rowsEl.some(seriesRowComplete)) {
     try {
-      rows = await postJson(previewUrl("live-values"), previewBody(measurements));
-    } catch {
-      rows = [];
+      rows = await postJson(previewUrl("live-values"), previewBody(collectMeasurements()));
+    } catch (e) {
+      error = e.message ?? "No se pudo calcular";
     }
   }
   if (request !== liveRequest) return;
   let k = -1;
-  measurementFields.querySelectorAll(".series-row").forEach((row) => {
+  rowsEl.forEach((row) => {
     const values = seriesRowComplete(row) ? rows[++k] ?? [] : [];
     row.querySelectorAll(".series-live").forEach((cell) => {
       const live = values.find((v) => v.symbol === cell.dataset.liveSymbol);
-      cell.querySelector(".series-live-value").innerHTML = live ? liveValueHtml(live) : "—";
+      const out = cell.querySelector(".series-live-value");
+      out.innerHTML = live ? liveValueHtml(live) : "—";
+      out.title = error;
     });
   });
 }

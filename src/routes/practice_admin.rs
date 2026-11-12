@@ -420,13 +420,11 @@ pub(super) async fn live_values(
     Path(id): Path<String>,
     Json(body): Json<AnalyzePreviewBody>,
 ) -> Result<Json<Vec<Vec<computation::LiveValue>>>, AppError> {
-    let definition = preview_definition(&state, &headers, &id, &body).await?;
-    let rows = computation::live_values(
-        &definition.quantities,
-        &definition.intermediates,
-        &body.measurements,
-    )
-    .map_err(|e| AppError::bad_request(e.to_string()))?;
+    let view = preview_definition(&state, &headers, &id, &body)
+        .await?
+        .point_view();
+    let rows = computation::live_values(&view.quantities, &view.intermediates, &body.measurements)
+        .map_err(|e| AppError::bad_request(e.to_string()))?;
     Ok(Json(rows))
 }
 
@@ -785,6 +783,8 @@ pub(super) async fn update_intermediate(
         .ok_or_else(|| AppError::not_found("magnitud intermedia no encontrada"))?;
     item.symbol = input.symbol.trim().to_string();
     item.formula = input.formula.trim().to_string();
+    item.show_live = input.show_live;
+    item.on_means = input.on_means;
     guard_change(&def, &after, "guardar la magnitud intermedia")?;
     let updated = practices::update_intermediate(&state.pool, &id, &iid, input)
         .await?

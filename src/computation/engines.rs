@@ -339,6 +339,20 @@ impl<'a> PointInputs<'a> {
     }
 }
 
+type CompiledIntermediates<'a> = Vec<(&'a PracticeIntermediate, Node)>;
+
+fn compile_intermediates(
+    mut allowed: Vec<String>,
+    intermediates: &[PracticeIntermediate],
+) -> anyhow::Result<(CompiledIntermediates<'_>, Vec<String>)> {
+    let mut compiled = Vec::with_capacity(intermediates.len());
+    for it in intermediates {
+        compiled.push((it, compile_formula(&it.formula, &allowed)?));
+        allowed.push(it.symbol.clone());
+    }
+    Ok((compiled, allowed))
+}
+
 pub(crate) fn build_points(
     quantities: &[PracticeQuantity],
     intermediates: &[PracticeIntermediate],
@@ -359,14 +373,8 @@ pub(crate) fn build_points(
     let per_point_syms: std::collections::HashSet<&str> =
         per_point_quantity_symbols(quantities).collect();
 
-    let mut allowed = magnitude_symbols.clone();
-    let mut compiled_intermediates: Vec<(&PracticeIntermediate, Node)> = Vec::new();
-    for it in intermediates {
-        let tree = compile_formula(&it.formula, &allowed)?;
-        allowed.push(it.symbol.clone());
-        compiled_intermediates.push((it, tree));
-    }
-    let axis_symbols = allowed;
+    let (compiled_intermediates, axis_symbols) =
+        compile_intermediates(magnitude_symbols, intermediates)?;
     let x_tree = compile_formula(x_formula, &axis_symbols)?;
     let y_tree = compile_formula(y_formula, &axis_symbols)?;
     let intermediate_symbols: std::collections::HashSet<&str> = compiled_intermediates
@@ -557,22 +565,12 @@ pub fn live_values(
     measurements: &[MeasurementInput],
 ) -> anyhow::Result<Vec<Vec<LiveValue>>> {
     let inputs = PointInputs::new(quantities, measurements);
-    let mut allowed: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    let mut compiled = Vec::with_capacity(intermediates.len());
-    for it in intermediates {
-        compiled.push((it, compile_formula(&it.formula, &allowed)?));
-        allowed.push(it.symbol.clone());
-    }
-    let per_point_ids: std::collections::HashSet<&str> = quantities
-        .iter()
-        .filter(|q| q.per_point && !q.is_given)
-        .map(|q| q.id.as_str())
-        .collect();
-    let n_points = inputs
-        .point_values
-        .iter()
-        .filter(|(id, _)| per_point_ids.contains(*id))
-        .map(|(_, values)| values.len())
+    let magnitude_symbols = quantities.iter().map(|q| q.symbol.clone()).collect();
+    let (compiled, _) = compile_intermediates(magnitude_symbols, intermediates)?;
+    let n_points = per_point_quantity_symbols(quantities)
+        .filter_map(|sym| inputs.symbol_to_id.get(sym))
+        .filter_map(|id| inputs.point_values.get(id))
+        .map(|values| values.len())
         .min()
         .unwrap_or(0);
     let finite = |v: f64| v.is_finite().then_some(v);
