@@ -123,6 +123,8 @@ pub struct PracticeDefinition {
     pub aggregates: Vec<PracticeAggregate>,
     pub parts: Vec<PracticePart>,
     pub sections: Vec<PracticeSection>,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub result_parts: std::collections::BTreeMap<String, String>,
     pub display_symbols: std::collections::BTreeMap<String, String>,
     pub current_version: Option<i64>,
 }

@@ -31,6 +31,7 @@ import {
   compareResults,
   compareMeasuredVsTheoretical,
   comparisonPairs,
+  comparableQuantities,
   pointPower,
   flowRate,
   draftMeasurementsByQuantity,
@@ -799,4 +800,19 @@ test("symbolHtml dibuja los subíndices genéricos sin símbolo a mostrar", () =
   assert.equal(symbolHtml("I_teo"), "I<sub>teo</sub>");
   assert.equal(symbolHtml("a_R"), "a<sub>R</sub>");
   assert.equal(symbolHtml("b_R"), "b<sub>R</sub>");
+});
+
+test("comparableQuantities ofrece las magnitudes compartidas y las de la parte del resultado", () => {
+  const definition = {
+    parts: [{ id: "serie" }, { id: "paralelo" }],
+    sections: [
+      { id: "s", part_id: "serie", quantities: ["VR1_s"] },
+      { id: "p", part_id: "paralelo", quantities: ["VR1_p"] },
+      { id: "c", part_id: null, quantities: ["R1"] },
+    ],
+    quantities: [{ symbol: "VR1_s" }, { symbol: "VR1_p" }, { symbol: "R1" }, { symbol: "Vg" }],
+  };
+  assert.deepEqual(comparableQuantities(definition, "serie"), ["VR1_s", "R1", "Vg"]);
+  assert.deepEqual(comparableQuantities(definition), ["R1", "Vg"]);
+  assert.deepEqual(comparableQuantities({ quantities: [{ symbol: "x" }] }), ["x"]);
 });

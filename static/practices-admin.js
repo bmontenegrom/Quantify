@@ -9,6 +9,7 @@ import {
   unitHtml,
   analysisKindLabel,
   formatDate,
+  comparableQuantities,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -334,6 +335,11 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("#practice-operators-form")?.addEventListener("submit", savePracticeOperatorCount);
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
+  practiceWorkspace.querySelector('#new-result-form [name="section_id"]')?.addEventListener("change", (e) => {
+    const part = def?.sections?.find((s) => s.id === e.target.value)?.part_id ?? null;
+    const select = e.target.form.elements.compare_with;
+    select.innerHTML = compareOptionsHtml(def, part, select.value);
+  });
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
 
   for (const kind of Object.values(SYMBOL_FORMULA_KINDS)) {
@@ -935,6 +941,12 @@ function newResultSectionHtml(def) {
   return `<label>Sección <select name="section_id">${options}</select></label>`;
 }
 
+function compareOptionsHtml(def, part, current) {
+  return [["", "— sin comparación —"], ...comparableQuantities(def, part).map((s) => [s, s])]
+    .map(([value, text]) => `<option value="${escapeHtml(value)}"${value === current ? " selected" : ""}>${escapeHtml(text)}</option>`)
+    .join("");
+}
+
 function renderResultForm(res, practiceId, def = null) {
   const v = (f) => res ? escapeHtml(String(res[f] ?? "")) : "";
   const formId = res ? "edit-result-form" : "new-result-form";
@@ -963,10 +975,9 @@ function renderResultForm(res, practiceId, def = null) {
         <input name="has_uncertainty" type="checkbox" ${res ? (res.has_uncertainty ? "checked" : "") : "checked"} />
         Tiene incertidumbre (desmarcá para mostrarlo siempre sin ±U)
       </label>
-      ${selectFieldHtml("Comparar con (medido vs teórico)", "compare_with", [
-        ["", "— sin comparación —"],
-        ...(def?.quantities ?? []).map((q) => [escapeHtml(q.symbol), escapeHtml(q.symbol)]),
-      ], escapeHtml(res?.compare_with ?? ""))}
+      <label>Comparar con (medido vs teórico)
+        <select name="compare_with">${compareOptionsHtml(def, res ? def?.result_parts?.[res.symbol] ?? null : null, res?.compare_with ?? "")}</select>
+      </label>
       <div class="detail-actions">
         <button type="submit">${res ? "Guardar" : "Agregar"}</button>
         ${res ? `<button type="button" data-cancel-result>Cancelar</button>` : ""}

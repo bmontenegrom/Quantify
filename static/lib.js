@@ -390,6 +390,19 @@ export function analysisSections(analysis) {
   ];
 }
 
+export function comparableQuantities(definition, part = null) {
+  const partIds = new Set((definition?.parts ?? []).map((p) => p.id));
+  const partOf = new Map();
+  for (const s of definition?.sections ?? []) {
+    for (const q of s.quantities ?? []) {
+      if (!partOf.has(q)) partOf.set(q, partIds.has(s.part_id) ? s.part_id : null);
+    }
+  }
+  return (definition?.quantities ?? [])
+    .map((q) => q.symbol)
+    .filter((symbol) => [null, part].includes(partOf.get(symbol) ?? null));
+}
+
 export function comparisonPairs(definition) {
   return new Map((definition?.results ?? []).filter((r) => r.compare_with).map((r) => [r.symbol, r.compare_with]));
 }

@@ -132,6 +132,15 @@ impl PracticeDefinition {
         self
     }
 
+    pub fn with_result_parts(mut self) -> PracticeDefinition {
+        self.result_parts = self
+            .results
+            .iter()
+            .filter_map(|r| Some((r.symbol.clone(), self.result_part(&r.symbol)?.to_string())))
+            .collect();
+        self
+    }
+
     pub fn with_mirrored_kind(mut self) -> PracticeDefinition {
         if self.parts.iter().any(|p| p.analysis_kind.is_some()) {
             self.analysis_kind = Some(

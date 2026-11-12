@@ -316,7 +316,9 @@ pub(super) async fn practice_definition(
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
     if matches!(user.role.as_str(), "docente" | "admin") && !query.published {
-        return Ok(Json(load_definition(&state, &id).await?));
+        return Ok(Json(
+            load_definition(&state, &id).await?.with_result_parts(),
+        ));
     }
     Ok(Json(published_definition(&state, &id).await?))
 }
@@ -2079,6 +2081,7 @@ mod tests {
             parts: vec![],
             sections: vec![],
             display_symbols: Default::default(),
+            result_parts: Default::default(),
             current_version: None,
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
@@ -2165,6 +2168,7 @@ mod tests {
             parts: vec![],
             sections: vec![],
             display_symbols: Default::default(),
+            result_parts: Default::default(),
             current_version: None,
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
@@ -2311,6 +2315,7 @@ mod tests {
             parts: vec![],
             sections: vec![],
             display_symbols: Default::default(),
+            result_parts: Default::default(),
             current_version: None,
         };
         let r = |unit: &str| ResultInput {
@@ -2572,6 +2577,12 @@ mod tests {
         assert!(with("R1").is_empty(), "una magnitud compartida vale");
         assert!(!with("VR1_p").is_empty(), "una magnitud de otra parte no");
         assert!(!with("nada").is_empty());
+
+        let json = serde_json::to_value(&cc).unwrap();
+        assert!(json.get("result_parts").is_none(), "no entra en versiones");
+        let parts = cc.with_result_parts().result_parts;
+        assert_eq!(parts["VR1_s_t"], "p2-cc-serie");
+        assert_eq!(parts["Req"], "p2-cc-paralelo");
     }
 
     #[tokio::test]
