@@ -73,7 +73,7 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "(Re_max + Re_min) / 2",
     ...statusStrings("Mensurando agregado", false),
     confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
-    hasFinal: true,
+    flag: { field: "is_final", column: "Final", label: "Resultado final (comparable, sin incertidumbre)" },
   },
   intermediate: {
     kind: "intermediate",
@@ -87,6 +87,7 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "V / t",
     ...statusStrings("Intermedia", true),
     confirmDelete: "¿Eliminar esta magnitud intermedia? Esta accion no se puede deshacer.",
+    flag: { field: "show_live", column: "En vivo", label: "Mostrar en vivo en la tabla del alumno (cada réplica y el promedio)" },
   },
 };
 
@@ -104,8 +105,8 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
       <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" /></label>
       ${
-        kind.hasFinal
-          ? `<label class="checkbox-field"><input name="is_final" type="checkbox" ${item?.is_final ? "checked" : ""} /> Resultado final (comparable, sin incertidumbre)</label>`
+        kind.flag
+          ? `<label class="checkbox-field"><input name="${kind.flag.field}" type="checkbox" ${item?.[kind.flag.field] ? "checked" : ""} /> ${kind.flag.label}</label>`
           : ""
       }
       <div class="detail-actions">
@@ -119,10 +120,10 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
 function renderSymbolFormulaList(kind, def, practiceId) {
   const items = kind.listOf(def);
   if (items.length === 0) return `<p class="submission-meta">${kind.emptyText}</p>`;
-  const colspan = kind.hasFinal ? 4 : 3;
+  const colspan = kind.flag ? 4 : 3;
   const rows = items.flatMap((item) => {
     const editing = isEditing(kind.kind, item.id);
-    const finalCell = kind.hasFinal ? `<td>${item.is_final ? "Sí" : "—"}</td>` : "";
+    const finalCell = kind.flag ? `<td>${item[kind.flag.field] ? "Sí" : "—"}</td>` : "";
     const baseRow = `
       <tr>
         <td class="directory-primary">${adminSymbolHtml(item.symbol)} <span class="submission-meta">${inlineMathHtml(item.name)}${item.unit ? ` (${unitHtml(item.unit)})` : " (adimensional)"}</span></td>
@@ -141,7 +142,7 @@ function renderSymbolFormulaList(kind, def, practiceId) {
   return `
     <div class="data-table-wrap">
       <table class="data-table">
-        <thead><tr><th>Símbolo</th><th>Fórmula</th>${kind.hasFinal ? "<th>Final</th>" : ""}<th>Acciones</th></tr></thead>
+        <thead><tr><th>Símbolo</th><th>Fórmula</th>${kind.flag ? `<th>${kind.flag.column}</th>` : ""}<th>Acciones</th></tr></thead>
         <tbody>${rows.join("")}</tbody>
       </table>
     </div>
@@ -157,7 +158,7 @@ function symbolFormulaPayloadFromForm(form, kind) {
     formula: raw.formula,
     display_symbol: raw.display_symbol,
   };
-  if (kind.hasFinal) payload.is_final = raw.is_final === "on";
+  if (kind.flag) payload[kind.flag.field] = raw[kind.flag.field] === "on";
   return payload;
 }
 

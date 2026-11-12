@@ -353,14 +353,6 @@ export function compareResults(autoDerived, studentResults, tolerances = {}) {
   });
 }
 
-export function pointPower(r, i) {
-  return i * i * r;
-}
-
-export function flowRate(v, t) {
-  return v / t;
-}
-
 export function draftMeasurementsByQuantity(measurements) {
   const map = new Map();
   for (const m of measurements ?? []) {

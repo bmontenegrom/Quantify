@@ -194,6 +194,8 @@ pub struct PracticeIntermediate {
     pub name: String,
     pub unit: String,
     pub formula: String,
+    #[sqlx(default)]
+    pub show_live: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -204,6 +206,8 @@ pub struct IntermediateInput {
     pub name: String,
     pub unit: String,
     pub formula: String,
+    #[serde(default)]
+    pub show_live: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]

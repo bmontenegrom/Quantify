@@ -636,6 +636,7 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
                 name: "Potencia disipada en R".into(),
                 unit: "W".into(),
                 formula: "I*I*R".into(),
+                show_live: true,
             },
         )
         .await?;
@@ -690,6 +691,7 @@ async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
                 name: "Caudal medio".into(),
                 unit: "m3/s".into(),
                 formula: "V/t".into(),
+                show_live: true,
             },
         )
         .await?;
@@ -935,6 +937,7 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
                     name: name.into(),
                     unit: unit.into(),
                     formula: formula.into(),
+                    show_live: false,
                 },
             )
             .await?;
@@ -1643,6 +1646,7 @@ pub async fn seed_definitions(pool: &SqlitePool) -> anyhow::Result<()> {
     super::display::migrate_legacy_display_symbols(pool).await?;
     super::display::migrate_legacy_quantity_presentation(pool).await?;
     super::display::migrate_legacy_compare_with(pool).await?;
+    super::display::migrate_legacy_live_columns(pool).await?;
     super::versions::ensure_versions(pool).await
 }
 

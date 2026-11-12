@@ -1638,6 +1638,10 @@ button.back-link {
   width: 92px;
 }
 
+.series-live-value {
+  white-space: nowrap;
+}
+
 .series-mean {
   display: block;
   margin-top: 2px;

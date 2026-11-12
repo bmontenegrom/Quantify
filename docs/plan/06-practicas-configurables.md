@@ -727,7 +727,22 @@ arranca con el admin solo (`SEED_ADMIN_PASSWORD` es obligatoria salvo con `SEED_
 recrea nada. Siguen corriendo en cada arranque
 `seed_practices`, `seed_course` y `seed_instruments`, que se retiran con las siembras en F8.
 
-### F6 — Sin casos especiales en el frontend ni en las siembras
+### F6 — Sin casos especiales en el frontend ni en las siembras ✅ HECHA
+
+**Estado (2026-11-12)**: hecho en #115, #116, #119 y la PR de columnas en vivo. Cambios respecto
+de lo planeado:
+- **Viscosidad conserva su eje y en `dx/t`.** El intermedio `v = dx/t` se agrega solo para la
+  columna en vivo. El motor evalúa los intermedios réplica por réplica y después promedia, así que
+  `v` da promedio(dx/t_k), mientras que el eje usa dx/promedio(t), como pide la técnica. Pasar el
+  eje a `v` habría cambiado los números. Por eso no hay versión 2: la migración agrega `v` al
+  borrador y al JSON de las versiones, y los golden no cambian, porque los intermedios no salen en
+  el análisis. El promedio que se ve en vivo puede diferir del valor del eje.
+- **Una columna por intermedio.** La celda muestra cada réplica y el promedio (antes fluidos-1
+  tenía tres columnas: Q_1, Q_2 y Q_medio).
+- **La columna en vivo se llena cuando la fila está completa**, porque se mandan las mismas
+  mediciones que a la vista previa. Antes, en fluidos-1, Q aparecía aunque faltara h.
+- `POST /practices/{id}/live-values` resuelve la definición igual que `analyze-preview` (borrador,
+  entrega, versión o publicada) y no necesita dos puntos. Se borró `static/constants.js`.
 
 1. Propiedades de presentación (3.8) en schema, API y admin.
 2. Migración de una sola vez que traduce cada caso especial a datos: J2 (`show_live`), J3/J7

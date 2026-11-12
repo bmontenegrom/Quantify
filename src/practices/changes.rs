@@ -5,7 +5,7 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 7] = [
+const COSMETIC_KEYS: [&str; 8] = [
     "name",
     "title",
     "tolerance",
@@ -13,6 +13,7 @@ const COSMETIC_KEYS: [&str; 7] = [
     "label_mode",
     "input_widget",
     "compare_with",
+    "show_live",
 ];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
 const FREELY_ORDERED: [&str; 4] = ["quantities", "results", "parts", "sections"];
@@ -305,7 +306,16 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
         (old.compare_with != new.compare_with)
             .then(|| format!("Cambia con qué se compara {}", new.symbol))
     });
-    symbols.chain(quantities).chain(comparisons).collect()
+    let live = draft.intermediates.iter().filter_map(|new| {
+        let old = published.intermediates.iter().find(|i| i.id == new.id)?;
+        (old.show_live != new.show_live)
+            .then(|| format!("Cambia si {} se muestra en vivo", new.symbol))
+    });
+    symbols
+        .chain(quantities)
+        .chain(comparisons)
+        .chain(live)
+        .collect()
 }
 
 pub fn change_kind(

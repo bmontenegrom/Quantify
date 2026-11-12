@@ -171,7 +171,7 @@ Potencia:  RP_max_t = RA_c + R2·R3 / (R2 + R3)                  (Rth)
 ```
 
 `P_max_e`, `P_max_t`, `RP_max_e` y `RP_max_t` se entregan y muestran **sin incertidumbre**
-(`RESULTS_WITHOUT_U` en `static/constants.js`). Los alias de extremos (`{S}_max`,
+(el mensurando tiene `has_uncertainty = 0`). Los alias de extremos (`{S}_max`,
 `{T}_at_{S}_max`) los inyecta el camino `curva` del motor con U = 0; como `check_formula` de la
 UI admin no los conoce, las fórmulas de `P_max_e`/`RP_max_e` no son editables desde la pestaña
 Prácticas.

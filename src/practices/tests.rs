@@ -290,6 +290,7 @@ async fn symbol_taken_detects_cross_table_collision() {
             name: "Iv".into(),
             unit: "u".into(),
             formula: "l".into(),
+            show_live: false,
         },
     )
     .await
@@ -653,6 +654,7 @@ async fn intermediate_crud_roundtrip() {
             name: "Caudal".into(),
             unit: "m3/s".into(),
             formula: "V/t".into(),
+            show_live: false,
         },
     )
     .await
@@ -672,6 +674,7 @@ async fn intermediate_crud_roundtrip() {
             name: "x".into(),
             unit: "x".into(),
             formula: "V*t".into(),
+            show_live: false,
         },
     )
     .await
@@ -687,6 +690,7 @@ async fn intermediate_crud_roundtrip() {
             name: "Caudal".into(),
             unit: "m3/s".into(),
             formula: "V*t".into(),
+            show_live: false,
         },
     )
     .await
@@ -703,6 +707,7 @@ async fn intermediate_crud_roundtrip() {
             name: "z".into(),
             unit: "".into(),
             formula: "   ".into(),
+            show_live: false,
         },
     )
     .await
@@ -3801,6 +3806,7 @@ async fn display_symbols_are_saved_with_the_element() {
         name: "a".into(),
         unit: "m".into(),
         formula: "2".into(),
+        show_live: false,
     };
     let row = create_intermediate(&pool, practice, intermediate)
         .await
@@ -3812,6 +3818,7 @@ async fn display_symbols_are_saved_with_the_element() {
         name: "a".into(),
         unit: "m".into(),
         formula: "2".into(),
+        show_live: false,
     };
     update_intermediate(&pool, practice, &row.id, intermediate)
         .await
@@ -4373,4 +4380,70 @@ async fn a_submission_brings_the_comparisons_of_its_version() {
         .await
         .unwrap()
         .is_empty());
+}
+
+async fn live_symbols(pool: &SqlitePool, practice: &str, in_version: bool) -> Vec<String> {
+    let sql = if in_version {
+        "SELECT json_extract(i.value, '$.symbol') \
+         FROM practices p JOIN practice_versions v ON v.id = p.current_version_id, \
+         json_each(v.definition_json, '$.intermediates') i \
+         WHERE p.id = ?1 AND json_extract(i.value, '$.show_live') = 1"
+    } else {
+        "SELECT symbol FROM practice_intermediates WHERE practice_id = ?1 AND show_live = 1"
+    };
+    sqlx::query_scalar(sql)
+        .bind(practice)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+async fn assert_seeded_live_columns(pool: &SqlitePool) {
+    for in_version in [false, true] {
+        assert_eq!(live_symbols(pool, "p2-cc", in_version).await, ["P"]);
+        assert_eq!(live_symbols(pool, "fluidos-1", in_version).await, ["Q"]);
+        assert_eq!(live_symbols(pool, "viscosidad", in_version).await, ["v"]);
+        assert!(live_symbols(pool, "filtros", in_version).await.is_empty());
+    }
+    for practice in ["p2-cc", "fluidos-1", "viscosidad"] {
+        let found = draft_changes(pool, practice).await.unwrap().unwrap();
+        assert_eq!(found.kind, DraftChangeKind::None, "{practice}");
+    }
+}
+
+#[tokio::test]
+async fn seeding_marks_the_live_columns() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+
+    assert_seeded_live_columns(&pool).await;
+    let def = definition(&pool, "viscosidad").await.unwrap().unwrap();
+    assert_eq!(def.y_formula.as_deref(), Some("dx/t"));
+}
+
+#[tokio::test]
+async fn the_live_columns_migration_updates_drafts_and_versions_once() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    for sql in [
+        "UPDATE practice_intermediates SET show_live = 0",
+        "DELETE FROM practice_intermediates WHERE practice_id = 'viscosidad' AND symbol = 'v'",
+        "UPDATE practice_versions SET definition_json = json_set(definition_json, '$.intermediates', \
+         (SELECT json_group_array(json(json_remove(value, '$.show_live'))) \
+          FROM json_each(definition_json, '$.intermediates') \
+          WHERE json_extract(value, '$.symbol') <> 'v'))",
+        "DELETE FROM applied_migrations WHERE name = '2026-11-columnas-en-vivo'",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+
+    display::migrate_legacy_live_columns(&pool).await.unwrap();
+    assert_seeded_live_columns(&pool).await;
+
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-columnas-en-vivo'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    display::migrate_legacy_live_columns(&pool).await.unwrap();
+    assert_seeded_live_columns(&pool).await;
 }

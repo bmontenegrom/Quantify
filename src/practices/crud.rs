@@ -66,6 +66,7 @@ pub async fn definition(
 
 trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin {
     const TABLE: &'static str;
+    const EXTRA_COLUMNS: &'static str = "";
 }
 
 impl SymbolFormulaRow for PracticePointResult {
@@ -74,6 +75,7 @@ impl SymbolFormulaRow for PracticePointResult {
 
 impl SymbolFormulaRow for PracticeIntermediate {
     const TABLE: &'static str = "practice_intermediates";
+    const EXTRA_COLUMNS: &'static str = ", show_live";
 }
 
 async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
@@ -81,8 +83,9 @@ async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
     practice_id: &str,
 ) -> anyhow::Result<Vec<T>> {
     let query = format!(
-        "SELECT id, practice_id, position, symbol, name, unit, formula \
+        "SELECT id, practice_id, position, symbol, name, unit, formula{} \
          FROM {} WHERE practice_id = ?1 ORDER BY position, id",
+        T::EXTRA_COLUMNS,
         T::TABLE
     );
     Ok(sqlx::query_as::<_, T>(&query)
@@ -96,7 +99,8 @@ async fn fetch_symbol_formula_row<T: SymbolFormulaRow>(
     id: &str,
 ) -> anyhow::Result<T> {
     let query = format!(
-        "SELECT id, practice_id, position, symbol, name, unit, formula FROM {} WHERE id = ?1",
+        "SELECT id, practice_id, position, symbol, name, unit, formula{} FROM {} WHERE id = ?1",
+        T::EXTRA_COLUMNS,
         T::TABLE
     );
     Ok(sqlx::query_as::<_, T>(&query)
@@ -378,7 +382,7 @@ pub async fn create_intermediate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
     }
-    create_symbol_formula_row(
+    let mut row: PracticeIntermediate = create_symbol_formula_row(
         pool,
         practice_id,
         symbol,
@@ -387,7 +391,19 @@ pub async fn create_intermediate(
         formula,
         display_symbol(&input.display_symbol),
     )
-    .await
+    .await?;
+    set_show_live(pool, &row.id, input.show_live).await?;
+    row.show_live = input.show_live;
+    Ok(row)
+}
+
+async fn set_show_live(pool: &SqlitePool, id: &str, show_live: bool) -> anyhow::Result<()> {
+    sqlx::query("UPDATE practice_intermediates SET show_live = ?2 WHERE id = ?1")
+        .bind(id)
+        .bind(show_live)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn update_intermediate(
@@ -401,7 +417,7 @@ pub async fn update_intermediate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
     }
-    update_symbol_formula_row(
+    let Some(mut row): Option<PracticeIntermediate> = update_symbol_formula_row(
         pool,
         practice_id,
         intermediate_id,
@@ -411,7 +427,13 @@ pub async fn update_intermediate(
         formula,
         display_symbol(&input.display_symbol),
     )
-    .await
+    .await?
+    else {
+        return Ok(None);
+    };
+    set_show_live(pool, &row.id, input.show_live).await?;
+    row.show_live = input.show_live;
+    Ok(Some(row))
 }
 
 pub async fn delete_intermediate(

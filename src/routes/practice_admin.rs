@@ -371,38 +371,63 @@ pub(super) struct AnalyzePreviewBody {
     draft: bool,
 }
 
-pub(super) async fn analyze_preview(
-    State(state): State<SharedState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    Json(body): Json<AnalyzePreviewBody>,
-) -> Result<Json<computation::FormAnalysis>, AppError> {
-    let user = current_user(&state, &headers).await?;
-    ensure_student_can_see(&state, &user, &id, &["publicada"]).await?;
+async fn preview_definition(
+    state: &SharedState,
+    headers: &HeaderMap,
+    id: &str,
+    body: &AnalyzePreviewBody,
+) -> Result<practices::PracticeDefinition, AppError> {
+    let user = current_user(state, headers).await?;
+    ensure_student_can_see(state, &user, id, &["publicada"]).await?;
     if body.draft {
-        require_teacher(&state, &headers).await?;
+        require_teacher(state, headers).await?;
     }
-    let definition = match &body.submission_id {
-        _ if body.draft => load_definition(&state, &id).await?,
+    Ok(match &body.submission_id {
+        _ if body.draft => load_definition(state, id).await?,
         Some(submission_id) => {
-            ensure_submission_access(&state, &user, submission_id).await?;
+            ensure_submission_access(state, &user, submission_id).await?;
             practices::submission_definition(&state.pool, submission_id)
                 .await?
                 .filter(|d| d.practice_id == id)
                 .ok_or_else(|| AppError::not_found("entrega no encontrada"))?
         }
         None if body.practice_version.is_some() => {
-            practices::version_for_form(&state.pool, &id, body.practice_version)
+            practices::version_for_form(&state.pool, id, body.practice_version)
                 .await
                 .map_err(AppError::from_domain_or_db)?
                 .definition
         }
-        None => published_definition(&state, &id).await?,
-    };
+        None => published_definition(state, id).await?,
+    })
+}
+
+pub(super) async fn analyze_preview(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<AnalyzePreviewBody>,
+) -> Result<Json<computation::FormAnalysis>, AppError> {
+    let definition = preview_definition(&state, &headers, &id, &body).await?;
     let analysis = computation::analyze_definition(&state.pool, &definition, &body.measurements)
         .await
         .map_err(AppError::from_domain_or_db)?;
     Ok(Json(analysis))
+}
+
+pub(super) async fn live_values(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<AnalyzePreviewBody>,
+) -> Result<Json<Vec<Vec<computation::LiveValue>>>, AppError> {
+    let definition = preview_definition(&state, &headers, &id, &body).await?;
+    let rows = computation::live_values(
+        &definition.quantities,
+        &definition.intermediates,
+        &body.measurements,
+    )
+    .map_err(|e| AppError::bad_request(e.to_string()))?;
+    Ok(Json(rows))
 }
 
 pub(super) async fn set_practice_analysis_kind(
@@ -1160,6 +1185,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
                 name: it.name.clone(),
                 unit: it.unit.clone(),
                 formula: it.formula.clone(),
+                show_live: it.show_live,
             };
             note(
                 "la intermedia",
@@ -2115,6 +2141,7 @@ mod tests {
                 name: "Q".into(),
                 unit: "u".into(),
                 formula: "V/t".into(),
+                show_live: false,
             }],
             point_results: vec![],
             aggregates: vec![],
@@ -2129,6 +2156,7 @@ mod tests {
             name: "x".into(),
             unit: "u".into(),
             formula: formula.into(),
+            show_live: false,
         };
 
         assert!(validate_intermediate(&def, &input("pi", "V*2"), None).is_err());
@@ -2201,6 +2229,7 @@ mod tests {
                 name: "Q".into(),
                 unit: "u".into(),
                 formula: "h".into(),
+                show_live: false,
             }],
             point_results: vec![],
             aggregates: vec![agg("a0", "Re_max", 0), agg("a1", "Re_min", 1)],
@@ -2891,6 +2920,7 @@ mod tests {
             name: "Pn".into(),
             unit: "".into(),
             formula: formula.into(),
+            show_live: false,
         };
         assert!(validate_intermediate(&cc, &intermediate("I*I*R"), None).is_ok());
         assert!(validate_intermediate(&cc, &intermediate("I*Vg_p"), None).is_err());

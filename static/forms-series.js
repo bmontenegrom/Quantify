@@ -1,8 +1,7 @@
 import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, prefixFactor, pointPower, flowRate, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
-import { SERIES_LIVE_COLUMNS } from "./constants.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
 import { definitionParts, definitionSections, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireRemoveReplica, collectMeasurements, finalResultRowHtml } from "./forms.js";
@@ -12,7 +11,7 @@ export const SERIES_INITIAL_ROWS = 3;
 export function renderSeriesTable(definition) {
   const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
   const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
-  const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
+  const liveCols = liveIntermediates();
   const header = cols
     .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${symbolHtml(q.symbol)}${q.unit ? ` <span class="submission-meta">(${unitHtml(q.unit)})</span>` : ""}</th>`)
     .join("") + liveCols
@@ -131,29 +130,37 @@ export function refreshSeries() {
   updateRegressionPreview();
 }
 
+function pointCount(measurements) {
+  return measurements.reduce(
+    (n, m) => Math.max(n, m.point_replicas?.length ?? m.values.length),
+    0,
+  );
+}
+
+function previewUrl(action) {
+  return `/api/practices/${encodeURIComponent(practiceSelect.value)}/${action}`;
+}
+
+function previewBody(measurements) {
+  return {
+    measurements,
+    submission_id:
+      state.editingPracticeId === practiceSelect.value ? state.editingSubmissionId : null,
+    practice_version: formPracticeVersion(practiceSelect.value),
+    draft: Boolean(state.draftPreviewPracticeId),
+  };
+}
+
 async function updateRegressionPreview() {
   const container = measurementFields.querySelector(".series-preview");
   if (!container) return;
   const measurements = collectMeasurements();
-  const points = measurements.reduce(
-    (n, m) => Math.max(n, m.point_replicas?.length ?? m.values.length),
-    0,
-  );
-  if (points < 2) {
+  if (pointCount(measurements) < 2) {
     container.innerHTML = `<p class="submission-meta">Cargá al menos 2 puntos completos para ver la vista previa.</p>`;
     return;
   }
   try {
-    const full = await postJson(
-      `/api/practices/${encodeURIComponent(practiceSelect.value)}/analyze-preview`,
-      {
-        measurements,
-        submission_id:
-          state.editingPracticeId === practiceSelect.value ? state.editingSubmissionId : null,
-        practice_version: formPracticeVersion(practiceSelect.value),
-        draft: Boolean(state.draftPreviewPracticeId),
-      }
-    );
+    const full = await postJson(previewUrl("analyze-preview"), previewBody(measurements));
     setDisplaySymbols(state.practiceForm?.definition?.display_symbols);
     const analysis = analysisSections(full)
       .map((s) => s.analysis)
@@ -197,13 +204,17 @@ export function seriesRowHtml(cols) {
       return `<td class="series-cell"><div class="series-input-wrap">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" /></div></td>`;
     })
     .join("");
-  const liveCells = (SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [])
+  const liveCells = liveIntermediates()
     .map((c) => `<td class="series-live" data-live-symbol="${escapeHtml(c.symbol)}"><span class="series-live-value submission-meta">—</span></td>`)
     .join("");
   const pointResultCells = seriesPointResultCols()
     .map((p) => `<td class="series-point-result-cell"><input class="series-point-result" data-symbol="${escapeHtml(p.symbol)}" type="number" step="any" placeholder="${escapeHtml(p.symbol)}" /></td>`)
     .join("");
   return `<tr class="series-row">${cells}${liveCells}${pointResultCells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
+}
+
+function liveIntermediates() {
+  return (state.practiceForm?.definition?.intermediates ?? []).filter((i) => i.show_live);
 }
 
 function seriesPointResultCols() {
@@ -276,78 +287,41 @@ function sharedRowHtml(q) {
     </fieldset>`;
 }
 
-function seriesCellValue(row, quantityId) {
-  const input = row.querySelector(`.series-value[data-quantity-id="${CSS.escape(quantityId)}"]`);
-  if (!input) return NaN;
-  const raw = input.value.trim();
-  if (raw === "") return NaN;
-  const factor = prefixFactor(input.closest(".series-cell").querySelector(".prefix-select").value);
-  return Number(raw) * factor;
-}
-
-function replicaValueAt(row, quantityId, k) {
-  const cell = row.querySelector(`.series-replica[data-quantity-id="${CSS.escape(quantityId)}"]`)?.closest(".series-cell--replicas");
-  const input = cell?.querySelectorAll(".series-replica")[k];
-  if (!input) return NaN;
-  const raw = input.value.trim();
-  if (raw === "") return NaN;
-  return Number(raw) * prefixFactor(cell.querySelector(".prefix-select").value);
-}
-
-function fluidosCaudalLiveValue(symbol, row, idBySymbol) {
-  const q1 = flowRate(replicaValueAt(row, idBySymbol.get("V") ?? "", 0), replicaValueAt(row, idBySymbol.get("t") ?? "", 0));
-  const q2 = flowRate(replicaValueAt(row, idBySymbol.get("V") ?? "", 1), replicaValueAt(row, idBySymbol.get("t") ?? "", 1));
-  if (symbol === "Q_1") return q1;
-  if (symbol === "Q_2") return q2;
-  if (symbol === "Q_medio") return Number.isFinite(q1) && Number.isFinite(q2) ? (q1 + q2) / 2 : NaN;
-  return NaN;
-}
-
-function sharedSingleValue(quantityId) {
-  const replica = measurementFields
-    .querySelector(`.measurement-row[data-quantity-id="${CSS.escape(quantityId)}"]`)
-    ?.querySelector(".replica");
-  const raw = replica?.querySelector(".measure-value")?.value.trim();
-  if (!raw) return NaN;
-  return Number(raw) * prefixFactor(replica.querySelector(".prefix-select").value);
-}
-
-function rowReplicaMean(row, quantityId) {
-  const cell = row
-    .querySelector(`.series-replica[data-quantity-id="${CSS.escape(quantityId)}"]`)
-    ?.closest(".series-cell--replicas");
-  const reps = cell ? cellReplicaValues(cell) : [];
-  return reps.length ? reps.reduce((a, b) => a + b, 0) / reps.length : NaN;
-}
-
-function viscosidadVelocityLiveValue(row, idBySymbol) {
-  const dx = sharedSingleValue(idBySymbol.get("dx") ?? "");
-  const tMean = rowReplicaMean(row, idBySymbol.get("t") ?? "");
-  return Number.isFinite(dx) && Number.isFinite(tMean) && tMean !== 0 ? dx / tMean : NaN;
-}
+let liveTimer = null;
+let liveRequest = 0;
 
 export function updateSeriesLive() {
-  const liveCols = SERIES_LIVE_COLUMNS[practiceSelect.value] ?? [];
-  if (!liveCols.length) return;
-  const quantities = state.practiceForm?.definition?.quantities ?? [];
-  const idBySymbol = new Map(quantities.map((q) => [q.symbol, q.id]));
-  const practice = practiceSelect.value;
-  measurementFields.querySelectorAll(".series-row").forEach((row) => {
-    for (const col of liveCols) {
-      const cell = row.querySelector(`.series-live[data-live-symbol="${CSS.escape(col.symbol)}"]`);
-      const out = cell?.querySelector(".series-live-value");
-      if (!out) continue;
-      let value;
-      if (practice === "fluidos-1") {
-        value = fluidosCaudalLiveValue(col.symbol, row, idBySymbol);
-      } else if (practice === "viscosidad") {
-        value = viscosidadVelocityLiveValue(row, idBySymbol);
-      } else {
-        const args = col.inputs.map((sym) => seriesCellValue(row, idBySymbol.get(sym) ?? ""));
-        value = args.every(Number.isFinite) ? pointPower(...args) : NaN;
-      }
-      out.textContent = Number.isFinite(value) ? format(value) : "—";
+  if (!liveIntermediates().length) return;
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(refreshLiveValues, 250);
+}
+
+function liveValueHtml({ symbol, replicas, mean }) {
+  const show = (v) => (v == null ? "—" : format(v));
+  if (replicas.length < 2) return show(mean);
+  const lines = replicas.map((v, k) => `${symbolHtml(`${symbol}_${k + 1}`)} ${show(v)}`);
+  return [...lines, `x̄ ${show(mean)}`].join("<br>");
+}
+
+async function refreshLiveValues() {
+  const request = ++liveRequest;
+  const measurements = collectMeasurements();
+  let rows = [];
+  if (pointCount(measurements) > 0) {
+    try {
+      rows = await postJson(previewUrl("live-values"), previewBody(measurements));
+    } catch {
+      rows = [];
     }
+  }
+  if (request !== liveRequest) return;
+  let k = -1;
+  measurementFields.querySelectorAll(".series-row").forEach((row) => {
+    const values = seriesRowComplete(row) ? rows[++k] ?? [] : [];
+    row.querySelectorAll(".series-live").forEach((cell) => {
+      const live = values.find((v) => v.symbol === cell.dataset.liveSymbol);
+      cell.querySelector(".series-live-value").innerHTML = live ? liveValueHtml(live) : "—";
+    });
   });
 }
 
