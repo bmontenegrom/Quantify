@@ -276,7 +276,7 @@ export function formAnalysisMarkup(analysis, pairs) {
   const sections = analysisSections(analysis);
   if (sections.length === 1) return singleAnalysisMarkup(analysis, pairs);
   const [shared, ...parts] = sections;
-  const measured = sections.flatMap((s) => s.analysis.quantities ?? []);
+  const sharedQuantities = shared.analysis.quantities ?? [];
   const sharedHasData =
     (shared.analysis.quantities?.length ?? 0) +
       (shared.analysis.derived?.length ?? 0) +
@@ -286,7 +286,7 @@ export function formAnalysisMarkup(analysis, pairs) {
       (s) => `
       <section class="analysis-part">
         <h3 class="analysis-part-title">${escapeHtml(s.title)}</h3>
-        ${singleAnalysisMarkup(s.analysis, pairs, measured)}
+        ${singleAnalysisMarkup(s.analysis, pairs, s === shared ? sharedQuantities : [...sharedQuantities, ...(s.analysis.quantities ?? [])])}
       </section>`,
     )
     .join("") + (sharedHasData ? "" : renderWarnings(shared.analysis.warnings ?? []));

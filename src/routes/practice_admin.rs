@@ -1398,6 +1398,7 @@ fn with_updated_result(
     let item = after.results.iter_mut().find(|x| x.id == result_id)?;
     let old_symbol = std::mem::replace(&mut item.symbol, input.symbol.trim().to_string());
     item.formula = input.formula.trim().to_string();
+    item.unit = input.unit.trim().to_string();
     if let Some(compare_with) = input.compare_with() {
         item.compare_with = compare_with.to_string();
     }
@@ -2682,6 +2683,20 @@ mod tests {
         };
         assert!(edit(" V ").is_ok());
         let error = edit("mV").unwrap_err();
+        assert!(
+            error.message().contains("misma unidad"),
+            "{}",
+            error.message()
+        );
+
+        let vr1_s_t = cc.results.iter().find(|r| r.symbol == "VR1_s_t").unwrap();
+        let only_unit = ResultInput {
+            compare_with: None,
+            unit: "mV".into(),
+            ..input("VR1_s_t", &vr1_s_t.formula, "")
+        };
+        let after = with_updated_result(&cc, &vr1_s_t.id, &only_unit).unwrap();
+        let error = guard_change(&cc, &after, "guardar el mensurando").unwrap_err();
         assert!(
             error.message().contains("misma unidad"),
             "{}",

@@ -404,7 +404,7 @@ export function compareOptionGroups(definition, { result = null, section = null 
   }
   groups = groups.filter(([label, symbols]) => label == null || symbols.length);
   const offered = groups.some(([, symbols]) => symbols.includes(current));
-  return current && !offered ? [["Guardada (fuera de alcance)", [current]], ...groups] : groups;
+  return result && current && !offered ? [["Guardada (fuera de alcance)", [current]], ...groups] : groups;
 }
 
 export function comparisonPairs(definition) {

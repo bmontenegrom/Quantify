@@ -7,9 +7,21 @@ pub struct CompareOptions {
     pub shared: Vec<String>,
 }
 
+fn symbols(view: &PracticeDefinition) -> Vec<String> {
+    view.quantities.iter().map(|q| q.symbol.clone()).collect()
+}
+
+fn comparable_in(views: &[PracticeDefinition], result: &str) -> Vec<String> {
+    common_quantities(
+        views
+            .iter()
+            .filter(|v| v.results.iter().any(|r| r.symbol == result)),
+    )
+}
+
 fn common_quantities<'a>(views: impl Iterator<Item = &'a PracticeDefinition>) -> Vec<String> {
     views
-        .map(|v| v.quantities.iter().map(|q| q.symbol.clone()).collect())
+        .map(symbols)
         .reduce(|mut all: Vec<String>, here: Vec<String>| {
             all.retain(|s| here.contains(s));
             all
@@ -154,31 +166,33 @@ impl PracticeDefinition {
             return vec![self.clone()];
         }
         std::iter::once(self.shared_view())
-            .chain(self.parts.iter().map(|p| self.part_view(p)))
+            .chain(
+                self.parts
+                    .iter()
+                    .filter(|p| self.part_has_content(p))
+                    .map(|p| self.part_view(p)),
+            )
             .collect()
     }
 
     pub fn comparable_quantities(&self, result: &str) -> Vec<String> {
-        common_quantities(
-            self.views()
-                .iter()
-                .filter(|v| v.results.iter().any(|r| r.symbol == result)),
-        )
+        comparable_in(&self.views(), result)
     }
 
     pub fn compare_options(&self) -> CompareOptions {
+        let views = self.views();
         CompareOptions {
             results: self
                 .results
                 .iter()
-                .map(|r| (r.symbol.clone(), self.comparable_quantities(&r.symbol)))
+                .map(|r| (r.symbol.clone(), comparable_in(&views, &r.symbol)))
                 .collect(),
             parts: self
                 .parts
                 .iter()
-                .map(|p| (p.id.clone(), common_quantities([self.part_view(p)].iter())))
+                .map(|p| (p.id.clone(), symbols(&self.part_view(p))))
                 .collect(),
-            shared: common_quantities(self.views().iter()),
+            shared: common_quantities(views.iter()),
         }
     }
 

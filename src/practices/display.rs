@@ -274,41 +274,46 @@ pub(super) async fn migrate_legacy_quantity_presentation(pool: &SqlitePool) -> a
     Ok(())
 }
 
-fn legacy_compare_with<'a>(result: &str, quantities: &[&'a str]) -> Option<&'a str> {
+fn legacy_compare_with(definition: &PracticeDefinition, result: &str) -> Option<String> {
+    let r = definition.results.iter().find(|r| r.symbol == result)?;
     let base = result.strip_suffix("_t")?;
-    quantities.iter().copied().find(|q| *q == base)
+    let q = definition.quantities.iter().find(|q| q.symbol == base)?;
+    let in_scope = definition
+        .comparable_quantities(result)
+        .iter()
+        .any(|s| s == base);
+    (in_scope && q.unit.trim() == r.unit.trim()).then(|| base.to_string())
 }
 
 pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Result<()> {
     if crate::db::migration_applied(pool, LEGACY_COMPARE_WITH).await? {
         return Ok(());
     }
-    let mut tx = pool.begin().await?;
-    let quantities: Vec<(String, String)> =
-        sqlx::query_as("SELECT practice_id, symbol FROM practice_quantities WHERE removed = 0")
-            .fetch_all(&mut *tx)
-            .await?;
-    let mut by_practice: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for (practice_id, symbol) in &quantities {
-        by_practice.entry(practice_id).or_default().push(symbol);
+    let practices: Vec<(String,)> = sqlx::query_as("SELECT id FROM practices")
+        .fetch_all(pool)
+        .await?;
+    let mut drafts = Vec::new();
+    for (practice_id,) in practices {
+        if let Some(definition) = super::crud::definition(pool, &practice_id).await? {
+            drafts.push(definition);
+        }
     }
-    let results: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT id, practice_id, symbol FROM practice_results WHERE compare_with = ''",
-    )
-    .fetch_all(&mut *tx)
-    .await?;
-    for (id, practice_id, symbol) in results {
-        let symbols = by_practice
-            .get(practice_id.as_str())
-            .map_or(&[][..], Vec::as_slice);
-        let Some(target) = legacy_compare_with(&symbol, symbols) else {
-            continue;
-        };
-        sqlx::query("UPDATE practice_results SET compare_with = ?1 WHERE id = ?2")
-            .bind(target)
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+    let mut tx = pool.begin().await?;
+    for definition in &drafts {
+        for result in definition
+            .results
+            .iter()
+            .filter(|r| r.compare_with.is_empty())
+        {
+            let Some(target) = legacy_compare_with(definition, &result.symbol) else {
+                continue;
+            };
+            sqlx::query("UPDATE practice_results SET compare_with = ?1 WHERE id = ?2")
+                .bind(target)
+                .bind(&result.id)
+                .execute(&mut *tx)
+                .await?;
+        }
     }
     let versions: Vec<(String, String)> =
         sqlx::query_as("SELECT id, definition_json FROM practice_versions")
@@ -326,16 +331,11 @@ pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Re
                 continue;
             }
         };
-        let symbols: Vec<&str> = definition
-            .quantities
-            .iter()
-            .map(|q| q.symbol.as_str())
-            .collect();
         for (i, result) in definition.results.iter().enumerate() {
             if !result.compare_with.is_empty() {
                 continue;
             }
-            let Some(target) = legacy_compare_with(&result.symbol, &symbols) else {
+            let Some(target) = legacy_compare_with(&definition, &result.symbol) else {
                 continue;
             };
             sqlx::query(
@@ -360,15 +360,38 @@ pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Re
 
 #[cfg(test)]
 mod tests {
-    use super::{legacy_compare_with, legacy_display_symbol, legacy_quantity_presentation};
+    use super::{
+        legacy_compare_with, legacy_display_symbol, legacy_quantity_presentation,
+        PracticeDefinition,
+    };
 
     #[test]
-    fn legacy_compare_with_pairs_x_t_with_quantity_x() {
-        let quantities = ["VR1_s", "VR2_s", "R1"];
-        assert_eq!(legacy_compare_with("VR1_s_t", &quantities), Some("VR1_s"));
-        assert_eq!(legacy_compare_with("P_max_t", &quantities), None);
-        assert_eq!(legacy_compare_with("VR1_s", &quantities), None);
-        assert_eq!(legacy_compare_with("R1_teo", &quantities), None);
+    fn legacy_compare_with_pairs_x_t_with_quantity_x_of_its_scope_and_unit() {
+        let quantity = |symbol: &str, unit: &str| crate::db::PracticeQuantity {
+            symbol: symbol.into(),
+            unit: unit.into(),
+            ..Default::default()
+        };
+        let result = |symbol: &str, unit: &str| crate::db::PracticeResult {
+            symbol: symbol.into(),
+            unit: unit.into(),
+            ..Default::default()
+        };
+        let definition = PracticeDefinition {
+            quantities: vec![quantity("V", "V"), quantity("T", "ms")],
+            results: vec![
+                result("V_t", "V"),
+                result("T_t", "s"),
+                result("P_t", "W"),
+                result("V", "V"),
+            ],
+            ..Default::default()
+        };
+        let pair = |r: &str| legacy_compare_with(&definition, r);
+        assert_eq!(pair("V_t").as_deref(), Some("V"));
+        assert_eq!(pair("T_t"), None, "otra unidad");
+        assert_eq!(pair("P_t"), None, "sin magnitud P");
+        assert_eq!(pair("V"), None, "sin sufijo _t");
     }
 
     #[test]

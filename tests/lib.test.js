@@ -821,4 +821,9 @@ test("compareOptionGroups usa las opciones del servidor y no pierde la comparaci
     [null, ["R1", "VR1_s"]],
   ]);
   assert.deepEqual(compareOptionGroups({ quantities: [{ symbol: "x" }] }), [[null, ["x"]]]);
+  assert.deepEqual(
+    compareOptionGroups(definition, { section: { part_id: "paralelo" } }, "VR1_s"),
+    [[null, ["R1", "VR1_p"]]],
+    "en un mensurando nuevo una elección fuera de alcance no se presenta como guardada",
+  );
 });
