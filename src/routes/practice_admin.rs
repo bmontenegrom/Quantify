@@ -1186,6 +1186,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
                 unit: it.unit.clone(),
                 formula: it.formula.clone(),
                 show_live: it.show_live,
+                on_means: it.on_means,
             };
             note(
                 "la intermedia",
@@ -2142,6 +2143,7 @@ mod tests {
                 unit: "u".into(),
                 formula: "V/t".into(),
                 show_live: false,
+                on_means: false,
             }],
             point_results: vec![],
             aggregates: vec![],
@@ -2157,6 +2159,7 @@ mod tests {
             unit: "u".into(),
             formula: formula.into(),
             show_live: false,
+            on_means: false,
         };
 
         assert!(validate_intermediate(&def, &input("pi", "V*2"), None).is_err());
@@ -2230,6 +2233,7 @@ mod tests {
                 unit: "u".into(),
                 formula: "h".into(),
                 show_live: false,
+                on_means: false,
             }],
             point_results: vec![],
             aggregates: vec![agg("a0", "Re_max", 0), agg("a1", "Re_min", 1)],
@@ -2921,6 +2925,7 @@ mod tests {
             unit: "".into(),
             formula: formula.into(),
             show_live: false,
+            on_means: false,
         };
         assert!(validate_intermediate(&cc, &intermediate("I*I*R"), None).is_ok());
         assert!(validate_intermediate(&cc, &intermediate("I*Vg_p"), None).is_err());

@@ -75,7 +75,7 @@ impl SymbolFormulaRow for PracticePointResult {
 
 impl SymbolFormulaRow for PracticeIntermediate {
     const TABLE: &'static str = "practice_intermediates";
-    const EXTRA_COLUMNS: &'static str = ", show_live";
+    const EXTRA_COLUMNS: &'static str = ", show_live, on_means";
 }
 
 async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
@@ -392,17 +392,23 @@ pub async fn create_intermediate(
         display_symbol(&input.display_symbol),
     )
     .await?;
-    set_show_live(pool, &row.id, input.show_live).await?;
-    row.show_live = input.show_live;
+    set_intermediate_flags(pool, &mut row, &input).await?;
     Ok(row)
 }
 
-async fn set_show_live(pool: &SqlitePool, id: &str, show_live: bool) -> anyhow::Result<()> {
-    sqlx::query("UPDATE practice_intermediates SET show_live = ?2 WHERE id = ?1")
-        .bind(id)
-        .bind(show_live)
+async fn set_intermediate_flags(
+    pool: &SqlitePool,
+    row: &mut PracticeIntermediate,
+    input: &IntermediateInput,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE practice_intermediates SET show_live = ?2, on_means = ?3 WHERE id = ?1")
+        .bind(&row.id)
+        .bind(input.show_live)
+        .bind(input.on_means)
         .execute(pool)
         .await?;
+    row.show_live = input.show_live;
+    row.on_means = input.on_means;
     Ok(())
 }
 
@@ -431,8 +437,7 @@ pub async fn update_intermediate(
     else {
         return Ok(None);
     };
-    set_show_live(pool, &row.id, input.show_live).await?;
-    row.show_live = input.show_live;
+    set_intermediate_flags(pool, &mut row, &input).await?;
     Ok(Some(row))
 }
 

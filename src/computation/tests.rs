@@ -1450,6 +1450,7 @@ fn compute_regresion_uses_per_point_intermediate_averaged_over_replicas() {
         unit: "u".into(),
         formula: "V/t".into(),
         show_live: false,
+        on_means: false,
     }];
     let rep = |groups: Vec<Vec<f64>>, id: &str| MeasurementInput {
         quantity_id: id.into(),
@@ -1494,6 +1495,7 @@ fn intermediate_broadcasts_single_value_magnitudes_over_replicas() {
         unit: "u".into(),
         formula: "h*V/t".into(),
         show_live: false,
+        on_means: false,
     }];
     let measurements = vec![
         measurement("h", &[2.0, 3.0]),
@@ -1520,6 +1522,7 @@ fn intermediate_formula_can_use_constants() {
         unit: "u".into(),
         formula: "pi*r*r".into(),
         show_live: false,
+        on_means: false,
     }];
     let measurements = vec![
         measurement("r", &[2.0, 3.0]),
@@ -1543,6 +1546,7 @@ fn intermediate_rejects_mismatched_replica_counts() {
         unit: "u".into(),
         formula: "V/t".into(),
         show_live: false,
+        on_means: false,
     }];
     let measurements = vec![
         point_rep("q-V", vec![vec![10.0, 20.0], vec![10.0, 20.0]]),
@@ -1565,6 +1569,7 @@ fn intermediate_can_reference_an_earlier_intermediate() {
             unit: "u".into(),
             formula: "V/t".into(),
             show_live: false,
+            on_means: false,
         },
         PracticeIntermediate {
             id: "i2".into(),
@@ -1575,6 +1580,7 @@ fn intermediate_can_reference_an_earlier_intermediate() {
             unit: "u".into(),
             formula: "Q*2".into(),
             show_live: false,
+            on_means: false,
         },
     ];
     let measurements = vec![
@@ -1873,6 +1879,7 @@ fn intermediate_can_use_shared_scalar_across_points() {
         unit: "u".into(),
         formula: "px/c".into(),
         show_live: false,
+        on_means: false,
     }];
     let measurements = vec![
         measurement("px", &[1.0, 2.0]),
@@ -1908,6 +1915,7 @@ fn shared_scalar_with_multiple_readings_collapses_to_one_value() {
         unit: "u".into(),
         formula: "px/c".into(),
         show_live: false,
+        on_means: false,
     }];
     let measurements = vec![
         measurement("px", &[1.0, 2.0]),
@@ -2143,6 +2151,10 @@ async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
         .map(|i| i.symbol.as_str())
         .collect();
     assert_eq!(symbols, ["v"], "solo la columna en vivo");
+    assert!(
+        def.intermediates[0].on_means,
+        "v = dx/t sobre el tiempo medio, como el eje"
+    );
     assert_eq!(def.y_formula.as_deref(), Some("dx/t"));
     assert_eq!(def.point_results.len(), 1, "Re");
     let id = |sym: &str| {
@@ -3154,7 +3166,7 @@ async fn a_retired_quantity_stays_in_the_submissions_that_used_it() {
 }
 
 #[test]
-fn live_values_show_each_replica_and_their_mean_from_a_single_point() {
+fn live_values_match_what_the_fit_uses_from_a_single_point() {
     let quantities = vec![quantity("h"), quantity("V"), quantity("t")];
     let intermediate = |symbol: &str, formula: &str, show_live| PracticeIntermediate {
         symbol: symbol.into(),
@@ -3185,12 +3197,12 @@ fn live_values_show_each_replica_and_their_mean_from_a_single_point() {
             },
             LiveValue {
                 symbol: "Qh".into(),
-                replicas: vec![Some(10.0), None],
+                replicas: vec![None],
                 mean: None,
             },
             LiveValue {
                 symbol: "Qsq".into(),
-                replicas: vec![Some(100.0), None],
+                replicas: vec![None],
                 mean: None,
             },
         ]
@@ -3204,10 +3216,48 @@ fn live_values_show_each_replica_and_their_mean_from_a_single_point() {
     let rows = live_values(&quantities, &intermediates, &measurements).unwrap();
     assert_eq!(rows[0][0].replicas, vec![Some(10.0), Some(5.0)]);
     assert_eq!(rows[0][0].mean, Some(7.5));
-    assert_eq!(rows[0][1].replicas, vec![Some(10.0), Some(5.0)]);
-    assert_eq!(rows[0][1].mean, Some(7.5));
-    assert_eq!(rows[0][2].replicas, vec![Some(100.0), Some(25.0)]);
-    assert_eq!(rows[0][2].mean, Some(62.5));
+    assert_eq!(rows[0][1].replicas, vec![Some(7.5)]);
+    assert_eq!(rows[0][2].replicas, vec![Some(56.25)]);
+    assert_eq!(rows[0][2].mean, Some(56.25));
+}
+
+#[test]
+fn an_intermediate_on_means_applies_its_formula_to_the_point_means() {
+    let mut dx = quantity("dx");
+    dx.per_point = false;
+    let quantities = vec![quantity("R"), quantity("t"), dx];
+    let v = PracticeIntermediate {
+        symbol: "v".into(),
+        formula: "dx/t".into(),
+        show_live: true,
+        on_means: true,
+        ..Default::default()
+    };
+    let measurements = vec![
+        measurement("R", &[1.0, 2.0]),
+        point_rep(
+            "q-t",
+            vec![vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![2.0, 2.0, 2.0, 2.0, 2.0]],
+        ),
+        measurement("dx", &[0.2]),
+    ];
+    let rows = live_values(&quantities, std::slice::from_ref(&v), &measurements).unwrap();
+    assert_eq!(rows[0][0].replicas, vec![Some(0.2 / 3.0)]);
+    assert_eq!(rows[1][0].mean, Some(0.1));
+
+    let with_v = reg(
+        &quantities,
+        std::slice::from_ref(&v),
+        &[],
+        "R",
+        "v",
+        &measurements,
+    )
+    .unwrap();
+    let direct = reg(&quantities, &[], &[], "R", "dx/t", &measurements).unwrap();
+    let points = with_v.regression.unwrap().points;
+    assert_eq!(points, direct.regression.unwrap().points);
+    assert_eq!(points[0].1, rows[0][0].mean.unwrap());
 }
 
 #[test]

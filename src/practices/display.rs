@@ -397,6 +397,7 @@ fn legacy_velocity(definition: &PracticeDefinition, id: &str) -> Option<Practice
         unit: "m/s".into(),
         formula: "dx/t".into(),
         show_live: true,
+        on_means: true,
     })
 }
 
@@ -434,8 +435,9 @@ pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Re
         if let Some(v) = legacy_velocity(definition, &velocity_id) {
             sqlx::query(
                 "INSERT INTO practice_intermediates \
-                 (id, practice_id, position, symbol, name, unit, formula, display_symbol, show_live) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
+                 (id, practice_id, position, symbol, name, unit, formula, display_symbol, \
+                  show_live, on_means) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 1)",
             )
             .bind(&v.id)
             .bind(&v.practice_id)

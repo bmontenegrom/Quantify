@@ -291,6 +291,7 @@ async fn symbol_taken_detects_cross_table_collision() {
             unit: "u".into(),
             formula: "l".into(),
             show_live: false,
+            on_means: false,
         },
     )
     .await
@@ -655,6 +656,7 @@ async fn intermediate_crud_roundtrip() {
             unit: "m3/s".into(),
             formula: "V/t".into(),
             show_live: false,
+            on_means: false,
         },
     )
     .await
@@ -675,6 +677,7 @@ async fn intermediate_crud_roundtrip() {
             unit: "x".into(),
             formula: "V*t".into(),
             show_live: false,
+            on_means: false,
         },
     )
     .await
@@ -691,6 +694,7 @@ async fn intermediate_crud_roundtrip() {
             unit: "m3/s".into(),
             formula: "V*t".into(),
             show_live: false,
+            on_means: false,
         },
     )
     .await
@@ -708,6 +712,7 @@ async fn intermediate_crud_roundtrip() {
             unit: "".into(),
             formula: "   ".into(),
             show_live: false,
+            on_means: false,
         },
     )
     .await
@@ -3807,6 +3812,7 @@ async fn display_symbols_are_saved_with_the_element() {
         unit: "m".into(),
         formula: "2".into(),
         show_live: false,
+        on_means: false,
     };
     let row = create_intermediate(&pool, practice, intermediate)
         .await
@@ -3819,6 +3825,7 @@ async fn display_symbols_are_saved_with_the_element() {
         unit: "m".into(),
         formula: "2".into(),
         show_live: false,
+        on_means: false,
     };
     update_intermediate(&pool, practice, &row.id, intermediate)
         .await
@@ -4467,6 +4474,7 @@ async fn the_live_columns_migration_reuses_a_velocity_intermediate_already_there
             unit: "m/s".into(),
             formula: "dx / t".into(),
             show_live: false,
+            on_means: false,
         },
     )
     .await

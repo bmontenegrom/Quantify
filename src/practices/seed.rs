@@ -637,6 +637,7 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
                 unit: "W".into(),
                 formula: "I*I*R".into(),
                 show_live: true,
+                on_means: false,
             },
         )
         .await?;
@@ -692,6 +693,7 @@ async fn seed_fluidos1(pool: &SqlitePool) -> anyhow::Result<()> {
                 unit: "m3/s".into(),
                 formula: "V/t".into(),
                 show_live: true,
+                on_means: false,
             },
         )
         .await?;
@@ -938,6 +940,7 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
                     unit: unit.into(),
                     formula: formula.into(),
                     show_live: false,
+                    on_means: false,
                 },
             )
             .await?;

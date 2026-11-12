@@ -571,6 +571,13 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
+    add_column_if_missing(
+        pool,
+        "practice_intermediates",
+        "on_means",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
     for table in ["practice_quantities", "practice_results"] {
         add_column_if_missing(
             pool,
