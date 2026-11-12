@@ -741,8 +741,7 @@ de lo planeado:
 - **Viscosidad conserva su eje y en `dx/t`** y gana `v = dx/t` sobre los promedios, que da
   exactamente el valor del eje: dx/promedio(t), como pide la técnica. La migración agrega `v` al
   borrador y al JSON de las versiones sin crear la versión 2, y los golden no cambian, porque los
-  intermedios no salen en el análisis. Si la definición ya tiene un intermedio `dx/t`, se marca ese;
-  si `v` está ocupado, se crea `v_lim`, que se muestra como «v».
+  intermedios no salen en el análisis.
 - **Una columna por intermedio.** La celda muestra cada réplica y el promedio (antes fluidos-1
   tenía tres columnas: Q_1, Q_2 y Q_medio).
 - **La columna en vivo se llena cuando la fila está completa**, porque se mandan las mismas

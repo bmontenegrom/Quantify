@@ -361,29 +361,16 @@ pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Re
 }
 
 fn legacy_live(practice_id: &str, intermediate: &PracticeIntermediate) -> bool {
-    let formula: String = intermediate.formula.split_whitespace().collect();
-    let velocity = practice_id == "viscosidad" && formula == "dx/t";
-    velocity
-        || LEGACY_LIVE.iter().any(|(practice, symbol, seeded)| {
-            *practice == practice_id && intermediate.symbol == *symbol && formula == *seeded
-        })
+    LEGACY_LIVE.iter().any(|(practice, symbol, formula)| {
+        *practice == practice_id
+            && intermediate.symbol == *symbol
+            && intermediate.formula == *formula
+    })
 }
 
 fn legacy_velocity(definition: &PracticeDefinition, id: &str) -> Option<PracticeIntermediate> {
-    let has = |symbol: &str| definition.quantities.iter().any(|q| q.symbol == symbol);
-    let compatible = definition
-        .intermediates
-        .iter()
-        .any(|i| legacy_live(&definition.practice_id, i));
-    if definition.practice_id != "viscosidad" || !has("dx") || !has("t") || compatible {
-        return None;
-    }
-    let taken: Vec<&str> = version_symbols(definition).collect();
-    let symbol = ["v".to_string(), "v_lim".to_string()]
-        .into_iter()
-        .chain((2..).map(|n| format!("v_lim{n}")))
-        .find(|s| !taken.contains(&s.as_str()))?;
-    Some(PracticeIntermediate {
+    let free = !version_symbols(definition).any(|symbol| symbol == "v");
+    (definition.practice_id == "viscosidad" && free).then(|| PracticeIntermediate {
         id: id.into(),
         practice_id: definition.practice_id.clone(),
         position: definition
@@ -392,21 +379,13 @@ fn legacy_velocity(definition: &PracticeDefinition, id: &str) -> Option<Practice
             .map(|i| i.position + 1)
             .max()
             .unwrap_or(0),
-        symbol,
+        symbol: "v".into(),
         name: "Velocidad limite".into(),
         unit: "m/s".into(),
         formula: "dx/t".into(),
         show_live: true,
         on_means: true,
     })
-}
-
-fn velocity_display(v: &PracticeIntermediate) -> &str {
-    if v.symbol == "v" {
-        ""
-    } else {
-        "v"
-    }
 }
 
 pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -437,7 +416,7 @@ pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Re
                 "INSERT INTO practice_intermediates \
                  (id, practice_id, position, symbol, name, unit, formula, display_symbol, \
                   show_live, on_means) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 1)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', 1, 1)",
             )
             .bind(&v.id)
             .bind(&v.practice_id)
@@ -446,7 +425,6 @@ pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Re
             .bind(&v.name)
             .bind(&v.unit)
             .bind(&v.formula)
-            .bind(velocity_display(&v))
             .execute(&mut *tx)
             .await?;
         }
@@ -490,17 +468,6 @@ pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Re
             .bind(&id)
             .execute(&mut *tx)
             .await?;
-            if !velocity_display(&v).is_empty() {
-                sqlx::query(
-                    "UPDATE practice_versions \
-                     SET definition_json = json_set(definition_json, ?1, ?2) WHERE id = ?3",
-                )
-                .bind(format!("$.display_symbols.{}", v.symbol))
-                .bind(velocity_display(&v))
-                .bind(&id)
-                .execute(&mut *tx)
-                .await?;
-            }
         }
     }
     sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
