@@ -503,6 +503,33 @@ pub(super) async fn create_quantity(
     ))
 }
 
+fn with_updated_quantity(
+    def: &practices::PracticeDefinition,
+    quantity_id: &str,
+    input: &QuantityInput,
+) -> Option<practices::PracticeDefinition> {
+    let mut after = def.clone();
+    let q = after.quantities.iter_mut().find(|q| q.id == quantity_id)?;
+    let old_symbol = std::mem::replace(&mut q.symbol, input.symbol.trim().to_string());
+    q.unit = input.unit.trim().to_string();
+    q.per_point = input.per_point;
+    q.is_given = input.is_given;
+    let new_symbol = q.symbol.clone();
+    for section in &mut after.sections {
+        for symbol in &mut section.quantities {
+            if *symbol == old_symbol {
+                symbol.clone_from(&new_symbol);
+            }
+        }
+    }
+    for result in &mut after.results {
+        if result.compare_with == old_symbol {
+            result.compare_with.clone_from(&new_symbol);
+        }
+    }
+    Some(after)
+}
+
 pub(super) async fn update_quantity(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -532,28 +559,8 @@ pub(super) async fn update_quantity(
     )
     .await?;
     let before = load_definition(&state, &practice_id).await?;
-    let mut after = before.clone();
-    let q = after
-        .quantities
-        .iter_mut()
-        .find(|q| q.id == qid)
+    let after = with_updated_quantity(&before, &qid, &input)
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
-    let old_symbol = std::mem::replace(&mut q.symbol, input.symbol.trim().to_string());
-    q.per_point = input.per_point;
-    q.is_given = input.is_given;
-    let new_symbol = q.symbol.clone();
-    for section in &mut after.sections {
-        for symbol in &mut section.quantities {
-            if *symbol == old_symbol {
-                symbol.clone_from(&new_symbol);
-            }
-        }
-    }
-    for result in &mut after.results {
-        if result.compare_with == old_symbol {
-            result.compare_with.clone_from(&new_symbol);
-        }
-    }
     guard_change(&before, &after, "guardar la magnitud")?;
     let updated = practices::update_quantity(&state.pool, &qid, input)
         .await?
@@ -2659,6 +2666,27 @@ mod tests {
         assert!(guard_compare_scope(&with_new_result(&cc, &new, None), &new).is_ok());
         let crossed = input("VR1_s_t2", "Vg_s * R1 / (R1 + R2 + R3 + RA_s)", "VR1_p");
         assert!(guard_compare_scope(&with_new_result(&cc, &crossed, None), &crossed).is_err());
+
+        let vr1_s = cc.quantities.iter().find(|q| q.symbol == "VR1_s").unwrap();
+        let edit = |unit: &str| {
+            let input = QuantityInput {
+                symbol: "VR1_s".into(),
+                name: vr1_s.name.clone(),
+                unit: unit.into(),
+                per_point: vr1_s.per_point,
+                is_given: vr1_s.is_given,
+                ..Default::default()
+            };
+            let after = with_updated_quantity(&cc, &vr1_s.id, &input).unwrap();
+            guard_change(&cc, &after, "guardar la magnitud")
+        };
+        assert!(edit(" V ").is_ok());
+        let error = edit("mV").unwrap_err();
+        assert!(
+            error.message().contains("misma unidad"),
+            "{}",
+            error.message()
+        );
     }
 
     #[tokio::test]
