@@ -67,6 +67,7 @@ pub async fn definition(
 trait SymbolFormulaRow: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin {
     const TABLE: &'static str;
     const EXTRA_COLUMNS: &'static str = "";
+    const FLAGS: &'static [&'static str] = &[];
 }
 
 impl SymbolFormulaRow for PracticePointResult {
@@ -76,6 +77,7 @@ impl SymbolFormulaRow for PracticePointResult {
 impl SymbolFormulaRow for PracticeIntermediate {
     const TABLE: &'static str = "practice_intermediates";
     const EXTRA_COLUMNS: &'static str = ", show_live, on_means";
+    const FLAGS: &'static [&'static str] = &["show_live", "on_means"];
 }
 
 async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
@@ -124,6 +126,7 @@ fn input_widget(input: &QuantityInput) -> &str {
         .unwrap_or(DEFAULT_INPUT_WIDGET)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     pool: &SqlitePool,
     practice_id: &str,
@@ -132,15 +135,20 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     unit: &str,
     formula: &str,
     display: Option<&str>,
+    flags: &[bool],
 ) -> anyhow::Result<T> {
     let position = next_position(pool, T::TABLE, "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     let query = format!(
-        "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula, display_symbol) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        T::TABLE
+        "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula, display_symbol{}) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8{})",
+        T::TABLE,
+        T::FLAGS.iter().map(|f| format!(", {f}")).collect::<String>(),
+        (0..T::FLAGS.len())
+            .map(|k| format!(", ?{}", k + 9))
+            .collect::<String>(),
     );
-    sqlx::query(&query)
+    let mut insert = sqlx::query(&query)
         .bind(&id)
         .bind(practice_id)
         .bind(position)
@@ -148,9 +156,11 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
         .bind(name)
         .bind(unit)
         .bind(formula)
-        .bind(display.unwrap_or(""))
-        .execute(pool)
-        .await?;
+        .bind(display.unwrap_or(""));
+    for flag in flags {
+        insert = insert.bind(*flag);
+    }
+    insert.execute(pool).await?;
     fetch_symbol_formula_row::<T>(pool, &id).await
 }
 
@@ -164,23 +174,31 @@ async fn update_symbol_formula_row<T: SymbolFormulaRow>(
     unit: &str,
     formula: &str,
     display: Option<&str>,
+    flags: &[bool],
 ) -> anyhow::Result<Option<T>> {
     let query = format!(
         "UPDATE {} SET symbol = ?3, name = ?4, unit = ?5, formula = ?6, \
-         display_symbol = COALESCE(?7, display_symbol) \
+         display_symbol = COALESCE(?7, display_symbol){} \
          WHERE id = ?1 AND practice_id = ?2",
-        T::TABLE
+        T::TABLE,
+        T::FLAGS
+            .iter()
+            .enumerate()
+            .map(|(k, f)| format!(", {f} = ?{}", k + 8))
+            .collect::<String>(),
     );
-    let result = sqlx::query(&query)
+    let mut update = sqlx::query(&query)
         .bind(row_id)
         .bind(practice_id)
         .bind(symbol)
         .bind(name)
         .bind(unit)
         .bind(formula)
-        .bind(display)
-        .execute(pool)
-        .await?;
+        .bind(display);
+    for flag in flags {
+        update = update.bind(*flag);
+    }
+    let result = update.execute(pool).await?;
     if result.rows_affected() == 0 {
         return Ok(None);
     }
@@ -229,6 +247,7 @@ pub async fn create_point_result(
         input.unit.trim(),
         formula,
         display_symbol(&input.display_symbol),
+        &[],
     )
     .await
 }
@@ -253,6 +272,7 @@ pub async fn update_point_result(
         input.unit.trim(),
         formula,
         display_symbol(&input.display_symbol),
+        &[],
     )
     .await
 }
@@ -382,7 +402,7 @@ pub async fn create_intermediate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
     }
-    let mut row: PracticeIntermediate = create_symbol_formula_row(
+    create_symbol_formula_row(
         pool,
         practice_id,
         symbol,
@@ -390,26 +410,9 @@ pub async fn create_intermediate(
         input.unit.trim(),
         formula,
         display_symbol(&input.display_symbol),
+        &[input.show_live, input.on_means],
     )
-    .await?;
-    set_intermediate_flags(pool, &mut row, &input).await?;
-    Ok(row)
-}
-
-async fn set_intermediate_flags(
-    pool: &SqlitePool,
-    row: &mut PracticeIntermediate,
-    input: &IntermediateInput,
-) -> anyhow::Result<()> {
-    sqlx::query("UPDATE practice_intermediates SET show_live = ?2, on_means = ?3 WHERE id = ?1")
-        .bind(&row.id)
-        .bind(input.show_live)
-        .bind(input.on_means)
-        .execute(pool)
-        .await?;
-    row.show_live = input.show_live;
-    row.on_means = input.on_means;
-    Ok(())
+    .await
 }
 
 pub async fn update_intermediate(
@@ -423,7 +426,7 @@ pub async fn update_intermediate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
     }
-    let Some(mut row): Option<PracticeIntermediate> = update_symbol_formula_row(
+    update_symbol_formula_row(
         pool,
         practice_id,
         intermediate_id,
@@ -432,13 +435,9 @@ pub async fn update_intermediate(
         input.unit.trim(),
         formula,
         display_symbol(&input.display_symbol),
+        &[input.show_live, input.on_means],
     )
-    .await?
-    else {
-        return Ok(None);
-    };
-    set_intermediate_flags(pool, &mut row, &input).await?;
-    Ok(Some(row))
+    .await
 }
 
 pub async fn delete_intermediate(

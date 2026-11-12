@@ -655,13 +655,14 @@ async fn intermediate_crud_roundtrip() {
             name: "Caudal".into(),
             unit: "m3/s".into(),
             formula: "V/t".into(),
-            show_live: false,
+            show_live: true,
             on_means: false,
         },
     )
     .await
     .unwrap();
     assert_eq!(q.symbol, "Q");
+    assert!(q.show_live && !q.on_means);
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     assert_eq!(def.intermediates.len(), 1);
     assert_eq!(def.intermediates[0].formula, "V/t");
@@ -694,13 +695,16 @@ async fn intermediate_crud_roundtrip() {
             unit: "m3/s".into(),
             formula: "V*t".into(),
             show_live: false,
-            on_means: false,
+            on_means: true,
         },
     )
     .await
     .unwrap()
     .unwrap();
     assert_eq!(updated.formula, "V*t");
+    assert!(!updated.show_live && updated.on_means);
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    assert!(!def.intermediates[0].show_live && def.intermediates[0].on_means);
 
     assert!(create_intermediate(
         &pool,

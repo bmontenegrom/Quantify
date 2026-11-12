@@ -290,12 +290,7 @@ impl<'a> PointInputs<'a> {
             if given_ids.contains(m.quantity_id.as_str()) {
                 m.values.first().copied().unwrap_or(f64::NAN)
             } else {
-                let xs = m.point_values();
-                if xs.is_empty() {
-                    f64::NAN
-                } else {
-                    xs.iter().sum::<f64>() / xs.len() as f64
-                }
+                mean(&m.point_values())
             }
         };
 

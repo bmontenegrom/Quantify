@@ -11,7 +11,7 @@ export const SERIES_INITIAL_ROWS = 3;
 export function renderSeriesTable(definition) {
   const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
   const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
-  const liveCols = liveIntermediates();
+  const liveCols = liveIntermediates(definition);
   const header = cols
     .map((q) => `<th data-quantity-id="${escapeHtml(q.id)}">${symbolHtml(q.symbol)}${q.unit ? ` <span class="submission-meta">(${unitHtml(q.unit)})</span>` : ""}</th>`)
     .join("") + liveCols
@@ -213,8 +213,8 @@ export function seriesRowHtml(cols) {
   return `<tr class="series-row">${cells}${liveCells}${pointResultCells}<td><button type="button" class="remove-series-row" title="Quitar">✕</button></td></tr>`;
 }
 
-function liveIntermediates() {
-  return (state.practiceForm?.definition?.intermediates ?? []).filter((i) => i.show_live);
+function liveIntermediates(definition = state.practiceForm?.definition) {
+  return (definition?.intermediates ?? []).filter((i) => i.show_live);
 }
 
 function seriesPointResultCols() {
