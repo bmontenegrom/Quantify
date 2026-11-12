@@ -293,6 +293,7 @@ let liveRequest = 0;
 export function updateSeriesLive() {
   if (!liveIntermediates().length) return;
   clearTimeout(liveTimer);
+  liveRequest += 1;
   liveTimer = setTimeout(refreshLiveValues, 250);
 }
 
@@ -304,7 +305,7 @@ function liveValueHtml({ symbol, replicas, mean }) {
 }
 
 async function refreshLiveValues() {
-  const request = ++liveRequest;
+  const request = liveRequest;
   const measurements = collectMeasurements();
   let rows = [];
   if (pointCount(measurements) > 0) {
@@ -347,6 +348,7 @@ export function wireSeriesRemove() {
       if (measurementFields.querySelectorAll(".series-row").length <= 1) return;
       btn.closest(".series-row").remove();
       wireSeriesRemove();
+      updateSeriesLive();
     };
     btn.style.visibility = rows.length <= 1 ? "hidden" : "visible";
   });
