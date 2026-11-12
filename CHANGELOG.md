@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.0](https://github.com/bmontenegrom/Quantify/compare/v0.5.0...v0.6.0) (2026-11-12)
+
+
+### Funcionalidades
+
+* **practicas:** columnas en vivo desde la definición (F6, 4/4) ([#120](https://github.com/bmontenegrom/Quantify/issues/120)) ([b7c1f44](https://github.com/bmontenegrom/Quantify/commit/b7c1f444396c106ec585a1f2aaa9ab8f7d9e66ad))
+* **practicas:** comparación medido vs teórico configurable (F6, 3/4) ([#119](https://github.com/bmontenegrom/Quantify/issues/119)) ([221b38d](https://github.com/bmontenegrom/Quantify/commit/221b38ddfb98ceb36f5637474b185b34e5404da1))
+* **practicas:** rótulo y entrada de cada magnitud (F6, 2/4) ([#116](https://github.com/bmontenegrom/Quantify/issues/116)) ([6de84ff](https://github.com/bmontenegrom/Quantify/commit/6de84ff0c69e6e4fc4663382cb6ab03cbe3dfc38))
+* **practicas:** símbolo a mostrar configurable (F6, 1/4) ([#115](https://github.com/bmontenegrom/Quantify/issues/115)) ([4b3c29d](https://github.com/bmontenegrom/Quantify/commit/4b3c29d55f866b6e0deb3532107487af931f6b0a))
+
+
+### Correcciones
+
+* **db:** sin datos de prueba en producción ni al reiniciar ([#113](https://github.com/bmontenegrom/Quantify/issues/113)) ([98d4cd7](https://github.com/bmontenegrom/Quantify/commit/98d4cd70886a7783dee4eb3fce7e06d0bfdd648d))
+* **formularios:** el cronómetro vuelve con su estado al restaurar un borrador ([#117](https://github.com/bmontenegrom/Quantify/issues/117)) ([6b277aa](https://github.com/bmontenegrom/Quantify/commit/6b277aade15b75827a2e2fae250323de467c220e))
+* **formularios:** un instrumento por grupo en las magnitudes por operador ([#118](https://github.com/bmontenegrom/Quantify/issues/118)) ([0e42c83](https://github.com/bmontenegrom/Quantify/commit/0e42c83ff59dfdbd1f8586c497de58ebdb45ecc9))
+
 ## [0.5.0](https://github.com/bmontenegrom/Quantify/compare/v0.4.0...v0.5.0) (2026-11-05)
 
 
