@@ -134,11 +134,20 @@ fn draft_problems(def: &practices::PracticeDefinition) -> Vec<Problem> {
             kind,
             id: None,
         });
-    let elements = element_problems(def).into_iter().map(|p| Problem {
-        message: format!("{}: {}", p.element, p.message),
-        kind: p.kind,
-        id: p.id,
-    });
+    let mut seen = Vec::new();
+    let elements = element_problems(def)
+        .into_iter()
+        .filter(|p| {
+            let key = (p.check, p.id.clone(), p.element.clone());
+            let new = !seen.contains(&key);
+            seen.push(key);
+            new
+        })
+        .map(|p| Problem {
+            message: format!("{}: {}", p.element, p.message),
+            kind: p.kind,
+            id: p.id,
+        });
     structure.chain(elements).collect()
 }
 
@@ -542,6 +551,9 @@ pub(super) async fn set_practice_regression_formulas(
     let axis = |f: &str| Some(f.trim().to_string()).filter(|f| !f.is_empty());
     after.x_formula = axis(&body.x_formula);
     after.y_formula = axis(&body.y_formula);
+    if let (Some(x), Some(y)) = (&after.x_formula, &after.y_formula) {
+        uses_series(&def, x, y)?;
+    }
     guard_change(&def, &after, "guardar los ejes")?;
     if !practices::set_regression_formulas(&state.pool, &id, &body.x_formula, &body.y_formula)
         .await?
@@ -2870,6 +2882,31 @@ mod tests {
             .map(|p| p.message)
             .collect();
         assert_eq!(axes.len(), 1, "Q solo usa escalares: {axes:?}");
+
+        let mut cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut shared = cc.results[0].clone();
+        shared.id = "compartido-roto".into();
+        shared.symbol = "roto".into();
+        shared.formula = "nada * 2".into();
+        cc.results.push(shared);
+        let listed = draft_problems(&cc)
+            .into_iter()
+            .filter(|p| p.id.as_deref() == Some("compartido-roto"))
+            .count();
+        assert_eq!(
+            listed, 1,
+            "un compartido roto se lista una vez, no una por parte"
+        );
+        assert!(
+            element_problems(&cc)
+                .iter()
+                .filter(|p| p.id.as_deref() == Some("compartido-roto"))
+                .count()
+                > 1
+        );
 
         let mut renamed = def.clone();
         let h = renamed

@@ -594,6 +594,7 @@ function goToProblem({ kind, id }) {
     renderPracticesPage();
     const cell = practiceWorkspace.querySelector(".scale-edit-cell");
     if (cell) return cell.scrollIntoView({ block: "center" });
+    state.editing = { kind: null, id: null };
     target = parts;
   }
   const el = practiceWorkspace.querySelector(target) ?? practiceWorkspace.querySelector(parts);
@@ -1163,7 +1164,6 @@ function syncQuantityForm(form) {
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
   const repeated = "repeated" in raw;
-  const perPoint = "per_point" in raw;
   const replicas = Number(raw.replicas_per_point);
   const slots = raw.slot_count ? Number(raw.slot_count) : null;
   if (slots != null && !Number.isInteger(slots)) {
@@ -1176,7 +1176,7 @@ function quantityPayloadFromForm(form) {
     quantity: raw.quantity || null,
     repeated,
     replicas_per_point: repeated && raw.replicas_per_point && replicas > 0 ? replicas : null,
-    per_point: perPoint,
+    per_point: "per_point" in raw,
     is_given: "is_given" in raw,
     has_uncertainty: "has_uncertainty" in raw,
     optional: "optional" in raw,
