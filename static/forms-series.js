@@ -135,7 +135,10 @@ export function refreshSeries() {
 }
 
 function pointCount(measurements) {
-  return measurements.reduce(
+  const series = new Set(
+    (state.practiceForm?.definition?.quantities ?? []).filter((q) => q.per_point && !q.is_given).map((q) => q.id),
+  );
+  return measurements.filter((m) => series.has(m.quantity_id)).reduce(
     (n, m) => Math.max(n, m.point_replicas?.length ?? m.values.length),
     0,
   );

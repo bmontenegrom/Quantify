@@ -694,6 +694,19 @@ test("validateMeasurements: cuenta puntos desde point_replicas (réplicas por pu
   assert.ok(typeof few === "string");
 });
 
+test("validateMeasurements: las réplicas de una compartida no cuentan como puntos", () => {
+  const meta = { x: { perPoint: true }, g: { perPoint: false } };
+  const err = validateMeasurements(
+    [
+      { quantity_id: "x", values: [], given_u: null },
+      { quantity_id: "g", values: [9.8, 9.81], given_u: null },
+    ],
+    "regresion_lineal",
+    meta,
+  );
+  assert.ok(typeof err === "string");
+});
+
 test("validateMeasurements: regresión exige escalares compartidos completos (Motor E)", () => {
   const meta = {
     x: { name: "x", perPoint: true },

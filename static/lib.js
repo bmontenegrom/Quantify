@@ -458,7 +458,8 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
   if (analysisKind === "regresion_lineal" || analysisKind === "curva") {
     const pointCount = (m) => m.point_replicas?.length ?? m.values.length;
-    const points = Math.max(0, ...measurements.map(pointCount));
+    const isSeries = (m) => metaMap[m.quantity_id]?.perPoint !== false && !metaMap[m.quantity_id]?.isGiven;
+    const points = Math.max(0, ...measurements.filter(isSeries).map(pointCount));
     if (points < 2) {
       return analysisKind === "curva"
         ? "Cargá al menos 2 puntos completos para graficar la curva."
