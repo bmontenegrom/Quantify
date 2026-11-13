@@ -914,7 +914,7 @@ function pointBasedFor(qty) {
   const section = def.sections?.find((sec) => sec.quantities?.includes(qty.symbol));
   if (!section?.part_id) return true;
   const part = def.parts.find((p) => p.id === section.part_id);
-  return POINT_KINDS.includes(part?.effective_kind);
+  return !part || POINT_KINDS.includes(part.effective_kind);
 }
 
 function roleSelectHtml(qty) {
