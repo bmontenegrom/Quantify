@@ -446,12 +446,16 @@ export function formulaScope(definition, kind, { id = "", symbol = "", section =
   return byId[id ?? ""] ?? byId[""] ?? [];
 }
 
-export function formulaHelpHtml(symbols, functions = []) {
+export function formulaHelpHtml(symbols, functions = [], known = null) {
   const chip = (insert, label, title) =>
     `<button type="button" class="formula-chip" data-insert="${escapeHtml(insert)}" title="${escapeHtml(title)}">${label}</button>`;
-  const symbolChips = [...new Set([...symbols, "pi", "e"])].map((s) => chip(s, symbolHtml(s), s)).join("");
+  const all = [...new Set([...symbols, "pi", "e"])];
+  const isKnown = (s) => !known || known.has(s) || s === "pi" || s === "e";
+  const row = (chips) => (chips ? `<div class="formula-chips">${chips}</div>` : "");
+  const symbolChips = all.filter(isKnown).map((s) => chip(s, symbolHtml(s), s)).join("");
+  const derivedChips = all.filter((s) => !isKnown(s)).map((s) => chip(s, `<code>${escapeHtml(s)}</code>`, s)).join("");
   const functionChips = functions.map(([name, description]) => chip(`${name}()`, escapeHtml(name), description)).join("");
-  return `<details class="formula-help"><summary>Símbolos y funciones</summary><div class="formula-chips">${symbolChips}</div><div class="formula-chips">${functionChips}</div></details>`;
+  return `<details class="formula-help"><summary>Símbolos y funciones</summary>${row(symbolChips)}${row(derivedChips)}${row(functionChips)}</details>`;
 }
 
 export function comparisonPairs(definition) {

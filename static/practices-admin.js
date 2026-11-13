@@ -33,7 +33,13 @@ function displaySymbolFieldHtml(item) {
 }
 
 function formulaHelpFor(symbols) {
-  return formulaHelpHtml(symbols, state.practiceDefinition?.formula_scopes?.functions ?? []);
+  const def = state.practiceDefinition;
+  const known = new Set(
+    ["quantities", "intermediates", "results", "point_results", "aggregates"]
+      .flatMap((list) => (def?.[list] ?? []).map((item) => item.symbol))
+      .concat(["slope", "intercept"]),
+  );
+  return formulaHelpHtml(symbols, def?.formula_scopes?.functions ?? [], known);
 }
 
 function formulaFieldHtml(label, input, symbols) {

@@ -901,6 +901,15 @@ test("formulaHelpHtml: botones que insertan símbolos, constantes y funciones", 
   assert.ok(!html.includes("<details open"));
 });
 
+test("formulaHelpHtml: los nombres derivados van aparte y se muestran como se escriben", () => {
+  const html = formulaHelpHtml(["V", "V_first", "I_at_f_max"], [], new Set(["V"]));
+  const rows = html.match(/<div class="formula-chips">.*?<\/div>/g);
+  assert.equal(rows.length, 2, "una fila de símbolos y otra de derivados (sin funciones)");
+  assert.ok(rows[0].includes('data-insert="V"') && rows[0].includes('data-insert="pi"'));
+  assert.ok(rows[1].includes("<code>I_at_f_max</code>"), "sin subíndices engañosos");
+  assert.ok(!html.includes("<sub>AT"));
+});
+
 test("formatSymbolHtml no busca en los símbolos a mostrar", () => {
   setDisplaySymbols({ VR: "V_R_PP" });
   assert.equal(formatSymbolHtml("VR"), "VR");
