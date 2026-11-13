@@ -583,11 +583,25 @@ fn with_updated_quantity(
     let mut after = def.clone();
     let q = after.quantities.iter_mut().find(|q| q.id == quantity_id)?;
     let old_symbol = std::mem::replace(&mut q.symbol, input.symbol.trim().to_string());
+    q.name = input.name.trim().to_string();
     q.unit = input.unit.trim().to_string();
+    q.repeated = input.repeated;
+    q.quantity.clone_from(&input.quantity);
     q.per_point = input.per_point;
     q.is_given = input.is_given;
+    q.has_uncertainty = input.has_uncertainty;
+    q.optional = input.optional;
     q.slot_count = input.slot_count;
     q.replicas_per_point = input.replicas_per_point;
+    if let Some(mode) = &input.label_mode {
+        q.label_mode.clone_from(mode);
+    }
+    let timed = input.quantity.as_deref() == Some("tiempo") && !input.is_given;
+    q.input_widget = match &input.input_widget {
+        Some(widget) if timed => widget.clone(),
+        _ if timed => q.input_widget.clone(),
+        _ => practices::DEFAULT_INPUT_WIDGET.to_string(),
+    };
     let new_symbol = q.symbol.clone();
     for section in &mut after.sections {
         for symbol in &mut section.quantities {
@@ -2892,6 +2906,26 @@ mod tests {
             quantity_problems(&after).is_empty(),
             "quitar las réplicas junto con la serie no deja problemas en la magnitud"
         );
+
+        let t = clean.quantities.iter().find(|q| q.symbol == "t").unwrap();
+        assert_eq!(t.input_widget, "cronometro");
+        let given = |input_widget: Option<&str>| QuantityInput {
+            symbol: "t".into(),
+            name: t.name.clone(),
+            unit: t.unit.clone(),
+            quantity: Some("tiempo".into()),
+            is_given: true,
+            per_point: false,
+            input_widget: input_widget.map(str::to_string),
+            ..Default::default()
+        };
+        for widget in [Some("teclado"), None] {
+            let after = with_updated_quantity(&clean, &t.id, &given(widget)).unwrap();
+            assert!(
+                guard_change(&clean, &after, "guardar la magnitud").is_ok(),
+                "pasar a dato dado deja el cronómetro en teclado ({widget:?})"
+            );
+        }
         assert_eq!(
             publish_problems(&def),
             problems
