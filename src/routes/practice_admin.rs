@@ -13,6 +13,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct SetAnalysisKindBody {
@@ -377,12 +378,14 @@ pub(super) async fn practice_definition(
         let definition = load_definition(&state, &id).await?;
         return Ok(Json(DefinitionView {
             compare_options: Some(definition.compare_options()),
+            formula_scopes: Some(formula_scopes(&definition)),
             definition,
         }));
     }
     Ok(Json(DefinitionView {
         definition: published_definition(&state, &id).await?,
         compare_options: None,
+        formula_scopes: None,
     }))
 }
 
@@ -392,6 +395,54 @@ pub(super) struct DefinitionView {
     definition: practices::PracticeDefinition,
     #[serde(skip_serializing_if = "Option::is_none")]
     compare_options: Option<practices::CompareOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    formula_scopes: Option<FormulaScopes>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct FormulaScopes {
+    results: Vec<String>,
+    part_results: BTreeMap<String, Vec<String>>,
+    intermediates: BTreeMap<String, Vec<String>>,
+    aggregates: BTreeMap<String, Vec<String>>,
+    point_results: Vec<String>,
+    axes: Vec<String>,
+    functions: &'static [(&'static str, &'static str)],
+}
+
+fn formula_scopes(def: &practices::PracticeDefinition) -> FormulaScopes {
+    let (results, part_results) = if def.parts.is_empty() {
+        (result_scope_in(def), BTreeMap::new())
+    } else {
+        (
+            result_scope_in(&def.shared_view()),
+            def.parts
+                .iter()
+                .map(|p| (p.id.clone(), result_scope_in(&def.part_view(p))))
+                .collect(),
+        )
+    };
+    let view = def.point_view();
+    let by_id = |ids: Vec<&str>, scope: &dyn Fn(Option<&str>) -> Vec<String>| {
+        std::iter::once((String::new(), scope(None)))
+            .chain(ids.into_iter().map(|id| (id.to_string(), scope(Some(id)))))
+            .collect()
+    };
+    FormulaScopes {
+        results,
+        part_results,
+        intermediates: by_id(
+            view.intermediates.iter().map(|it| it.id.as_str()).collect(),
+            &|id| intermediate_scope(&view, id),
+        ),
+        aggregates: by_id(
+            view.aggregates.iter().map(|a| a.id.as_str()).collect(),
+            &|id| aggregate_scope(&view, id),
+        ),
+        point_results: point_result_scope(&view),
+        axes: axis_scope(def),
+        functions: computation::FUNCTIONS,
+    }
 }
 
 async fn published_definition(
@@ -905,14 +956,23 @@ fn validate_intermediate(
     }
     validate_symbol_format(symbol)?;
     validate_symbol_not_reserved(symbol)?;
+    computation::check_formula(formula, &intermediate_scope(def, exclude_id))
+        .map_err(|e| AppError::bad_request(e.to_string()))?;
+    Ok(())
+}
+
+fn intermediate_scope(
+    view: &practices::PracticeDefinition,
+    exclude_id: Option<&str>,
+) -> Vec<String> {
     let self_pos = exclude_id.and_then(|id| {
-        def.intermediates
+        view.intermediates
             .iter()
             .find(|it| it.id == id)
             .map(|it| it.position)
     });
-    let mut allowed: Vec<String> = def.quantities.iter().map(|q| q.symbol.clone()).collect();
-    for it in &def.intermediates {
+    let mut allowed: Vec<String> = view.quantities.iter().map(|q| q.symbol.clone()).collect();
+    for it in &view.intermediates {
         if Some(it.id.as_str()) == exclude_id {
             continue;
         }
@@ -920,9 +980,7 @@ fn validate_intermediate(
             allowed.push(it.symbol.clone());
         }
     }
-    computation::check_formula(formula, &allowed)
-        .map_err(|e| AppError::bad_request(e.to_string()))?;
-    Ok(())
+    allowed
 }
 
 pub(super) async fn create_point_result(
@@ -1024,14 +1082,18 @@ fn validate_point_result(
     }
     validate_symbol_format(symbol)?;
     validate_symbol_not_reserved(symbol)?;
-    let mut allowed: Vec<String> = def.quantities.iter().map(|q| q.symbol.clone()).collect();
-    allowed.extend(def.intermediates.iter().map(|it| it.symbol.clone()));
-    allowed.extend(def.results.iter().map(|r| r.symbol.clone()));
-    allowed.push("slope".into());
-    allowed.push("intercept".into());
-    computation::check_formula(formula, &allowed)
+    computation::check_formula(formula, &point_result_scope(def))
         .map_err(|e| AppError::bad_request(e.to_string()))?;
     Ok(())
+}
+
+fn point_result_scope(view: &practices::PracticeDefinition) -> Vec<String> {
+    let mut allowed: Vec<String> = view.quantities.iter().map(|q| q.symbol.clone()).collect();
+    allowed.extend(view.intermediates.iter().map(|it| it.symbol.clone()));
+    allowed.extend(view.results.iter().map(|r| r.symbol.clone()));
+    allowed.push("slope".into());
+    allowed.push("intercept".into());
+    allowed
 }
 
 pub(super) async fn create_aggregate(
@@ -1130,22 +1192,28 @@ fn validate_aggregate(
     }
     validate_symbol_format(symbol)?;
     validate_symbol_not_reserved(symbol)?;
-    let mut allowed: Vec<String> = def
+    computation::check_formula(formula, &aggregate_scope(def, exclude_id))
+        .map_err(|e| AppError::bad_request(e.to_string()))?;
+    Ok(())
+}
+
+fn aggregate_scope(view: &practices::PracticeDefinition, exclude_id: Option<&str>) -> Vec<String> {
+    let mut allowed: Vec<String> = view
         .quantities
         .iter()
         .filter(|q| !q.per_point || q.is_given)
         .map(|q| q.symbol.clone())
         .collect();
-    allowed.extend(def.results.iter().map(|r| r.symbol.clone()));
+    allowed.extend(view.results.iter().map(|r| r.symbol.clone()));
     allowed.push("slope".into());
     allowed.push("intercept".into());
     let self_pos = exclude_id.and_then(|id| {
-        def.aggregates
+        view.aggregates
             .iter()
             .find(|a| a.id == id)
             .map(|a| a.position)
     });
-    for a in &def.aggregates {
+    for a in &view.aggregates {
         if Some(a.id.as_str()) == exclude_id {
             continue;
         }
@@ -1153,20 +1221,18 @@ fn validate_aggregate(
             allowed.push(a.symbol.clone());
         }
     }
-    let endpoint_bases = def
+    let endpoint_bases = view
         .quantities
         .iter()
         .filter(|q| q.per_point && !q.is_given)
         .map(|q| q.symbol.clone())
-        .chain(def.intermediates.iter().map(|it| it.symbol.clone()));
+        .chain(view.intermediates.iter().map(|it| it.symbol.clone()));
     for base in endpoint_bases {
         for suffix in ["first", "first2", "last", "last2"] {
             allowed.push(format!("{base}_{suffix}"));
         }
     }
-    computation::check_formula(formula, &allowed)
-        .map_err(|e| AppError::bad_request(e.to_string()))?;
-    Ok(())
+    allowed
 }
 
 fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Result<(), AppError> {
@@ -2663,6 +2729,100 @@ mod tests {
             let problems = formula_problems(&def);
             assert!(problems.is_empty(), "{}: {problems:?}", def.practice_id);
         }
+    }
+
+    #[tokio::test]
+    async fn formula_scopes_offer_exactly_what_the_validators_accept() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        for practice in db::practices(&pool).await.unwrap() {
+            let def = practices::definition(&pool, &practice.id)
+                .await
+                .unwrap()
+                .unwrap();
+            let scopes = formula_scopes(&def);
+            let id = &def.practice_id;
+            let intermediate = |formula: &str| practices::IntermediateInput {
+                display_symbol: None,
+                symbol: "Zprueba".into(),
+                name: "prueba".into(),
+                unit: String::new(),
+                formula: formula.into(),
+                show_live: false,
+                on_means: false,
+            };
+            for (key, symbols) in &scopes.intermediates {
+                let exclude = Some(key.as_str()).filter(|k| !k.is_empty());
+                for s in symbols {
+                    assert!(
+                        validate_intermediate(&def, &intermediate(s), exclude).is_ok(),
+                        "{id}: intermedia {key:?} ofrece {s}"
+                    );
+                }
+            }
+            for (key, symbols) in &scopes.aggregates {
+                let exclude = Some(key.as_str()).filter(|k| !k.is_empty());
+                for s in symbols {
+                    let input = practices::AggregateInput {
+                        display_symbol: None,
+                        symbol: "Zprueba".into(),
+                        name: "prueba".into(),
+                        unit: String::new(),
+                        formula: s.clone(),
+                        is_final: false,
+                    };
+                    assert!(
+                        validate_aggregate(&def, &input, exclude).is_ok(),
+                        "{id}: agregado {key:?} ofrece {s}"
+                    );
+                }
+            }
+            for s in &scopes.point_results {
+                let input = practices::PointResultInput {
+                    display_symbol: None,
+                    symbol: "Zprueba".into(),
+                    name: "prueba".into(),
+                    unit: String::new(),
+                    formula: s.clone(),
+                };
+                assert!(
+                    validate_point_result(&def, &input).is_ok(),
+                    "{id}: derivada por punto ofrece {s}"
+                );
+            }
+            for s in &scopes.axes {
+                assert!(check_axes(&def, s, s).is_ok(), "{id}: eje ofrece {s}");
+            }
+            let accepted = result_scope(&def);
+            for s in scopes
+                .results
+                .iter()
+                .chain(scopes.part_results.values().flatten())
+            {
+                assert!(accepted.contains(s), "{id}: mensurando ofrece {s}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_intermediate_only_sees_the_earlier_ones() {
+        let mut def = practices::PracticeDefinition {
+            analysis_kind: Some("regresion_lineal".into()),
+            ..Default::default()
+        };
+        for (i, symbol) in ["A", "B"].into_iter().enumerate() {
+            def.intermediates.push(practices::PracticeIntermediate {
+                id: symbol.into(),
+                symbol: symbol.into(),
+                formula: "1".into(),
+                position: i as i64,
+                ..Default::default()
+            });
+        }
+        let scopes = formula_scopes(&def);
+        assert!(!scopes.intermediates["A"].contains(&"B".to_string()));
+        assert!(scopes.intermediates["B"].contains(&"A".to_string()));
+        assert!(!scopes.intermediates["B"].contains(&"B".to_string()));
+        assert!(scopes.intermediates[""].contains(&"B".to_string()));
     }
 
     #[tokio::test]
