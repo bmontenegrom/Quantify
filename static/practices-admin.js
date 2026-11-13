@@ -29,7 +29,7 @@ function displaySymbolFieldHtml(item) {
   const symbols = state.practiceDefinition?.display_symbols ?? {};
   const shown = item && Object.hasOwn(symbols, item.symbol) ? symbols[item.symbol] : "";
   const preview = formatSymbolHtml(shown || item?.symbol || "");
-  return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /><span class="symbol-preview" aria-live="polite">${preview}</span></label>`;
+  return `<div class="display-symbol-field"><label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label><span class="symbol-preview" aria-hidden="true">${preview}</span></div>`;
 }
 
 function formulaFieldHtml(label, input, symbols) {
@@ -41,8 +41,9 @@ function insertIntoFormula(button) {
   const input = button.closest(".formula-field")?.querySelector("input");
   if (!input) return;
   const text = button.dataset.insert;
-  const start = input.selectionStart ?? input.value.length;
-  const end = input.selectionEnd ?? input.value.length;
+  const focused = document.activeElement === input;
+  const start = focused ? input.selectionStart : input.value.length;
+  const end = focused ? input.selectionEnd : input.value.length;
   input.setRangeText(text, start, end, "end");
   if (text.endsWith("()")) input.setSelectionRange(input.selectionEnd - 1, input.selectionEnd - 1);
   input.focus();
@@ -50,11 +51,14 @@ function insertIntoFormula(button) {
 }
 
 function refreshSymbolPreview(input) {
-  const preview = input.closest("label")?.querySelector(".symbol-preview");
+  const preview = input.closest(".display-symbol-field")?.querySelector(".symbol-preview");
   if (!preview) return;
   preview.innerHTML = formatSymbolHtml(input.value.trim() || input.form?.elements.symbol?.value.trim() || "");
 }
 
+practiceWorkspace.addEventListener("mousedown", (e) => {
+  if (e.target.closest("[data-insert]")) e.preventDefault();
+});
 practiceWorkspace.addEventListener("click", (e) => {
   const button = e.target.closest("[data-insert]");
   if (button) insertIntoFormula(button);
@@ -1082,7 +1086,7 @@ function renderResultForm(res, practiceId, def = null) {
       ${displaySymbolFieldHtml(res)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
-      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" />`, formulaScope(def, "result", { section: res ? (def?.sections ?? []).find((sec) => (sec.results ?? []).includes(res.symbol)) : null }))}
+      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" />`, formulaScope(def, "result", { section: res ? (def?.sections ?? []).find((sec) => (sec.results ?? []).includes(res.symbol)) : null }).filter((sym) => sym !== res?.symbol))}
       <p class="submission-meta">La incertidumbre se propaga desde las magnitudes.</p>
       ${res ? "" : newResultSectionHtml(def)}
       <label>Tolerancia (%)

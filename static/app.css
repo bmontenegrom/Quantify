@@ -1246,6 +1246,11 @@ button.back-link {
   border-color: var(--accent);
 }
 
+.display-symbol-field {
+  display: grid;
+  gap: 4px;
+}
+
 .symbol-preview {
   color: var(--muted);
   font-size: 0.95rem;
