@@ -69,6 +69,16 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     "el problema debía abrir el alta de magnitudes",
   );
 
+  step("docente: réplicas por punto y ranuras se habilitan solo cuando aplican");
+  const quantityForm = page.locator("#new-quantity-form");
+  const disabled = (name) => quantityForm.locator(`[name="${name}"]`).isDisabled();
+  assert(!(await disabled("replicas_per_point")) && (await disabled("slot_count")), "por defecto: réplicas sí, ranuras no");
+  await quantityForm.locator('[name="per_point"]').setChecked(false);
+  await quantityForm.locator('[name="is_given"]').setChecked(true);
+  assert((await disabled("replicas_per_point")) && !(await disabled("slot_count")), "sin serie y dato dado: ranuras sí, réplicas no");
+  await quantityForm.locator('[name="per_point"]').setChecked(true);
+  await quantityForm.locator('[name="is_given"]').setChecked(false);
+
   step("docente: agrega L (dato) y T (réplicas)");
   await openAddForm(page, "#new-quantity-form");
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "L", name: "Largo", unit: "m" }, { is_given: true, repeated: false });

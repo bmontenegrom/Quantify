@@ -419,8 +419,8 @@ export function renderPracticesPage() {
     form.addEventListener("submit", saveEditQuantity);
   });
   practiceWorkspace.querySelectorAll("#new-quantity-form, [data-edit-quantity-form]").forEach((form) => {
-    syncStopwatchOption(form);
-    form.addEventListener("input", () => syncStopwatchOption(form));
+    syncQuantityForm(form);
+    form.addEventListener("input", () => syncQuantityForm(form));
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1152,10 +1152,13 @@ async function savePracticeRegressionFormulas(event) {
   }, "Fórmulas de ajuste guardadas");
 }
 
-function syncStopwatchOption(form) {
-  const option = form.elements.input_widget.querySelector('option[value="cronometro"]');
-  option.disabled = form.elements.quantity.value !== "tiempo" || form.elements.is_given.checked;
-  if (option.disabled && option.selected) form.elements.input_widget.value = "teclado";
+function syncQuantityForm(form) {
+  const { elements } = form;
+  const option = elements.input_widget.querySelector('option[value="cronometro"]');
+  option.disabled = elements.quantity.value !== "tiempo" || elements.is_given.checked;
+  if (option.disabled && option.selected) elements.input_widget.value = "teclado";
+  elements.replicas_per_point.disabled = !elements.per_point.checked;
+  elements.slot_count.disabled = !elements.is_given.checked;
 }
 
 function quantityPayloadFromForm(form) {
