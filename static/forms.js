@@ -427,12 +427,7 @@ export function renderMeasurementFields(draft) {
       return;
     }
     if (row.dataset.isGiven === "1") return;
-    row.querySelector(".add-replica")?.addEventListener("click", () => {
-      const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
-      row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(unit));
-      wireRemoveReplica(row);
-    });
-    wireRemoveReplica(row);
+    wireReplicaRow(row);
   });
 }
 
@@ -525,12 +520,22 @@ export function collectFinalResults() {
   return [...scalar, ...collectSeriesPointResults()];
 }
 
-export function wireRemoveReplica(row) {
+export function wireReplicaRow(row) {
+  row.querySelector(".add-replica")?.addEventListener("click", () => {
+    const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
+    row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+    wireRemoveReplica(row);
+  });
+  wireRemoveReplica(row);
+}
+
+function wireRemoveReplica(row) {
   const replicas = row.querySelectorAll(".replica");
   row.querySelectorAll(".remove-replica").forEach((btn) => {
     btn.onclick = () => {
       if (row.querySelectorAll(".replica").length <= 1) return;
       btn.closest(".replica").remove();
+      wireRemoveReplica(row);
       row.dispatchEvent(new Event("input", { bubbles: true }));
     };
   });

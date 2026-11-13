@@ -4,7 +4,7 @@ import { postJson } from "./api.js";
 import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
 import { definitionParts, definitionSections, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
-import { quantityNameHtml, wireRemoveReplica, collectMeasurements, finalResultRowHtml } from "./forms.js";
+import { quantityNameHtml, wireReplicaRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
 export const SERIES_INITIAL_ROWS = 3;
 
@@ -80,11 +80,7 @@ export function renderSeriesTable(definition) {
       inst.addEventListener("change", () => populateScaleOptions(row));
       populateScaleOptions(row);
     }
-    row.querySelector(".add-replica")?.addEventListener("click", () => {
-      row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(row.querySelector(".measure-value")?.dataset.unit ?? ""));
-      wireRemoveReplica(row);
-    });
-    wireRemoveReplica(row);
+    wireReplicaRow(row);
   });
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
