@@ -331,7 +331,9 @@ export const QUANTITY_ROLES = [
 
 export function quantityRole(quantity, pointBased) {
   if (quantity.is_given) return quantity.has_uncertainty === false ? "constante" : "catedra";
-  if (pointBased && quantity.per_point) return quantity.repeated ? "serie_replicas" : "serie";
+  if (pointBased && quantity.per_point) {
+    return quantity.repeated && quantity.replicas_per_point > 0 ? "serie_replicas" : "serie";
+  }
   return quantity.repeated ? "replicas" : "unica";
 }
 
@@ -341,7 +343,7 @@ export function roleFlags(role, pointBased, current = {}) {
   return {
     is_given: given,
     has_uncertainty: role !== "constante",
-    repeated: given ? Boolean(current.repeated) : role === "replicas" || role === "serie_replicas",
+    repeated: given || role === "serie" ? Boolean(current.repeated) : role === "replicas" || role === "serie_replicas",
     per_point: series || (!pointBased && (current.per_point ?? true)),
   };
 }

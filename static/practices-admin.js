@@ -928,7 +928,7 @@ function renderQuantityForm(qty, practiceId) {
       <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" /></label>
       ${roleSelectHtml(qty)}
       <label data-for-roles="serie_replicas">Réplicas por punto
-        <input name="replicas_per_point" type="number" min="1" step="1" value="${v("replicas_per_point")}" placeholder="cantidad" />
+        <input name="replicas_per_point" type="number" min="1" step="1" required value="${v("replicas_per_point")}" placeholder="cantidad" />
       </label>
       <label class="detail-form-checkbox">
         <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />

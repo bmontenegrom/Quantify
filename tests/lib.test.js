@@ -820,16 +820,18 @@ test("quantityRole y roleFlags: cada rol vuelve a sí mismo", () => {
   for (const pointBased of [true, false]) {
     for (const { id, series } of QUANTITY_ROLES) {
       if (series && !pointBased) continue;
-      assert.equal(quantityRole(roleFlags(id, pointBased), pointBased), id, `${id} (serie: ${pointBased})`);
+      const quantity = { ...roleFlags(id, pointBased), replicas_per_point: id === "serie_replicas" ? 2 : null };
+      assert.equal(quantityRole(quantity, pointBased), id, `${id} (serie: ${pointBased})`);
     }
   }
 });
 
 test("quantityRole: en una práctica estadística per_point no cuenta", () => {
-  const q = { is_given: false, per_point: true, repeated: true, has_uncertainty: true };
+  const q = { is_given: false, per_point: true, repeated: true, has_uncertainty: true, replicas_per_point: 3 };
   assert.equal(quantityRole(q, false), "replicas");
   assert.equal(quantityRole(q, true), "serie_replicas");
   assert.equal(quantityRole({ is_given: true, has_uncertainty: false }, true), "constante");
+  assert.equal(quantityRole({ ...q, replicas_per_point: null }, true), "serie", "réplicas sin cantidad: un valor por punto");
 });
 
 test("roleFlags: conserva lo que el rol no decide", () => {
@@ -837,6 +839,7 @@ test("roleFlags: conserva lo que el rol no decide", () => {
   assert.equal(roleFlags("unica", false, { per_point: false }).per_point, false);
   assert.equal(roleFlags("unica", true, { per_point: true }).per_point, false);
   assert.equal(roleFlags("catedra", true, { repeated: true }).repeated, true);
+  assert.equal(roleFlags("serie", true, { repeated: true }).repeated, true, "una serie de P3 conserva su repeated");
   assert.deepEqual(roleFlags("serie_replicas", true), {
     is_given: false,
     has_uncertainty: true,

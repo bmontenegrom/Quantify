@@ -29,6 +29,10 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
     await page.locator('#new-quantity-form [name="replicas_per_point"]').isVisible(),
     "una serie con réplicas pide cuántas por punto",
   );
+  assert(
+    !(await page.locator('#new-quantity-form [name="replicas_per_point"]').evaluate((input) => input.checkValidity())),
+    "sin la cantidad de réplicas el formulario no se envía",
+  );
   await role.selectOption("replicas");
   await fillAndSubmit(page, "#new-quantity-form", {
     symbol: "crud_test_qty",
