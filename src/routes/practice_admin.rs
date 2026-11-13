@@ -1776,6 +1776,12 @@ pub(super) async fn update_result(
 ) -> Result<Json<db::PracticeResult>, AppError> {
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &practice_id).await?;
+    let own = def
+        .results
+        .iter()
+        .find(|r| r.id == rid)
+        .map(|r| r.symbol.clone())
+        .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
     validate_result(&def, &input)?;
     guard_symbol(
         &state.pool,
@@ -1788,12 +1794,7 @@ pub(super) async fn update_result(
         None,
     )
     .await?;
-    let own = def
-        .results
-        .iter()
-        .find(|r| r.id == rid)
-        .map_or(input.symbol.trim(), |r| r.symbol.as_str());
-    check_no_cycle(&def, own, &input)?;
+    check_no_cycle(&def, &own, &input)?;
     let after = with_updated_result(&def, &rid, &input)
         .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
     guard_change(&def, &after, "guardar el mensurando")?;
