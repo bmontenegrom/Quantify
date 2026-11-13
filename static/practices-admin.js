@@ -331,6 +331,7 @@ export function renderPracticesPage() {
     const { openDraftPreview } = await import("./forms.js");
     await openDraftPreview(practiceId);
   });
+  renderProblems(practice.id);
   if (def?.current_version) renderDraftChanges(practice.id);
   practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
     deletePractice(e.currentTarget.dataset.practiceId);
@@ -555,6 +556,7 @@ function practiceLifecycleActions(practice, def) {
   const publishedActions = practice.status === "borrador" ? "" : versionInfo;
   const tryDraft = `<button type="button" data-practice-try-draft data-practice-id="${id}">Probar el borrador</button>`;
   return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""} ${publishedActions} ${tryDraft}</div>
+    <div id="practice-problems"></div>
     <div id="practice-draft-changes"></div>`;
 }
 
@@ -574,6 +576,55 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions, v
       </div>
       <button type="button" data-practice-publish-version data-practice-id="${id}">${structural ? `Publicar versión ${version + 1}` : `Actualizar versión ${version}`}</button>
     </div>`;
+}
+
+const EDITABLE_KINDS = new Set(["quantity", "result", "curve", "intermediate", "pointResult", "aggregate"]);
+let problemsRequest = 0;
+
+function problemItemHtml({ message }, k) {
+  return `<li><button type="button" class="link-button" data-problem="${k}">${escapeHtml(message)}</button></li>`;
+}
+
+function goToProblem({ kind, id }) {
+  if (id && EDITABLE_KINDS.has(kind)) {
+    state.editing = { kind, id };
+    renderPracticesPage();
+    practiceWorkspace.querySelector(".scale-edit-cell")?.scrollIntoView({ block: "center" });
+    return;
+  }
+  const target = {
+    axes: "#practice-regression-form",
+    layout: '[data-add-panel="part"]',
+  }[kind] ?? `[data-add-panel="${kind}"]`;
+  const el = practiceWorkspace.querySelector(target);
+  if (el?.tagName === "DETAILS") el.open = true;
+  (el?.closest("section") ?? el)?.scrollIntoView({ block: "start" });
+}
+
+async function renderProblems(practiceId) {
+  const box = practiceWorkspace.querySelector("#practice-problems");
+  if (!box) return;
+  const request = ++problemsRequest;
+  try {
+    const problems = await fetchJson(`/api/practices/${practiceId}/problems`);
+    if (request !== problemsRequest) return;
+    if (!problems.length) {
+      box.innerHTML = `<p class="submission-meta practice-problems-ok">Sin problemas: la definición está completa.</p>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="edit-banner practice-problems" role="status">
+        <div>
+          <strong>Para publicar falta resolver (${problems.length})</strong>
+          <ul>${problems.map(problemItemHtml).join("")}</ul>
+        </div>
+      </div>`;
+    box.querySelectorAll("[data-problem]").forEach((btn) => {
+      btn.addEventListener("click", () => goToProblem(problems[Number(btn.dataset.problem)]));
+    });
+  } catch (error) {
+    if (request === problemsRequest) box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+  }
 }
 
 let lastDraftChanges = null;

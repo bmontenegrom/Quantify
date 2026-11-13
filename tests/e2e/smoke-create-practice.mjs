@@ -56,6 +56,19 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await fillAndSubmit(page, "#new-practice-form", { name: NAME, description: "Prueba E2E" });
   await page.waitForSelector("#practice-workspace .practice-state--borrador");
 
+  step("docente: el panel lista lo que falta y lleva a donde se arregla");
+  const problem = page.locator("#practice-problems [data-problem]", { hasText: "magnitudes de entrada" });
+  await problem.waitFor();
+  assert(
+    !(await page.locator('details[data-add-panel="quantity"]').evaluate((d) => d.open)),
+    "el alta de magnitudes debía empezar cerrada",
+  );
+  await problem.click();
+  assert(
+    await page.locator('details[data-add-panel="quantity"]').evaluate((d) => d.open),
+    "el problema debía abrir el alta de magnitudes",
+  );
+
   step("docente: agrega L (dato) y T (réplicas)");
   await openAddForm(page, "#new-quantity-form");
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "L", name: "Largo", unit: "m" }, { is_given: true, repeated: false });
@@ -63,6 +76,8 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await openAddForm(page, "#new-quantity-form");
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "T", name: "Periodo", unit: "s" });
   await waitForStatus(page, "Magnitud agregada");
+  await problem.waitFor({ state: "detached" });
+  await page.locator("#practice-problems [data-problem]", { hasText: "mensurandos" }).waitFor();
 
   step("docente: renombrar una magnitud y vaciar su símbolo a mostrar lo borra");
   const row = (symbol) => `#practice-workspace tr:has(code:text-is("${symbol}"))`;
