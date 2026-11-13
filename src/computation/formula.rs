@@ -9,7 +9,12 @@ fn float_literals(formula: &str) -> String {
     let mut out = String::with_capacity(formula.len() + 8);
     let mut i = 0;
     while i < chars.len() {
+        let exponent = i >= 3
+            && matches!(chars[i - 1], '+' | '-')
+            && matches!(chars[i - 2], 'e' | 'E')
+            && (chars[i - 3].is_ascii_digit() || chars[i - 3] == '.');
         let starts_number = chars[i].is_ascii_digit()
+            && !exponent
             && (i == 0 || !(chars[i - 1].is_alphanumeric() || matches!(chars[i - 1], '_' | '.')));
         if !starts_number {
             out.push(chars[i]);
@@ -28,8 +33,12 @@ fn float_literals(formula: &str) -> String {
     out
 }
 
+fn parse(formula: &str) -> evalexpr::EvalexprResult<Node> {
+    build_operator_tree(&float_literals(formula))
+}
+
 pub(crate) fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
-    let tree = build_operator_tree(&float_literals(formula))
+    let tree = parse(formula)
         .map_err(|err| anyhow::anyhow!("la formula \"{formula}\" no es valida: {err}"))?;
     if let Some(name) = tree
         .iter_function_identifiers()
@@ -110,25 +119,41 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
 /// assert!(err.contains("\"math::foo\""));
 /// let err = check_formula("math::pow(L)", &allowed).unwrap_err().to_string();
 /// assert!(err.contains("cantidad de argumentos"));
+/// let err = check_formula("L > 1", &allowed).unwrap_err().to_string();
+/// assert!(err.contains("no da un número"));
+/// assert!(check_formula("4*pi*1e-7*L", &allowed).is_ok());
 /// ```
 pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
     let tree = compile_formula(formula, allowed)?;
     let ones: HashMap<&str, f64> = allowed.iter().map(|s| (s.as_str(), 1.0)).collect();
-    if evaluate(&tree, &ones).is_err() {
-        anyhow::bail!(
-            "la fórmula \"{formula}\" no se puede calcular: revisá que cada función tenga la cantidad de argumentos que pide"
-        );
+    match evaluate(&tree, &ones) {
+        Ok(_) => Ok(()),
+        Err(Unusable::NotANumber) => anyhow::bail!(
+            "la fórmula \"{formula}\" no da un número (¿quedó una comparación o una coma de más?)"
+        ),
+        Err(Unusable::Failed) if tree.iter_function_identifiers().next().is_some() => {
+            anyhow::bail!(
+                "la fórmula \"{formula}\" no se puede calcular: revisá que cada función tenga la cantidad de argumentos que pide"
+            )
+        }
+        Err(Unusable::Failed) => {
+            anyhow::bail!("la fórmula \"{formula}\" no se puede calcular")
+        }
     }
-    Ok(())
+}
+
+enum Unusable {
+    NotANumber,
+    Failed,
 }
 
 pub(crate) fn formula_symbols(formula: &str) -> Vec<String> {
-    build_operator_tree(formula)
+    parse(formula)
         .map(|tree| tree.iter_variable_identifiers().map(String::from).collect())
         .unwrap_or_default()
 }
 
-fn evaluate(tree: &Node, values: &HashMap<&str, f64>) -> Result<f64, ()> {
+fn evaluate(tree: &Node, values: &HashMap<&str, f64>) -> Result<f64, Unusable> {
     let mut context = HashMapContext::new();
     for (name, value) in CONSTANTS {
         let _ = context.set_value(name.to_string(), Value::Float(value));
@@ -136,12 +161,13 @@ fn evaluate(tree: &Node, values: &HashMap<&str, f64>) -> Result<f64, ()> {
     for (symbol, value) in values {
         context
             .set_value((*symbol).to_string(), Value::Float(*value))
-            .map_err(|_| ())?;
+            .map_err(|_| Unusable::Failed)?;
     }
     match tree.eval_with_context(&context) {
         Ok(Value::Float(value)) => Ok(value),
         Ok(Value::Int(value)) => Ok(value as f64),
-        _ => Err(()),
+        Ok(_) => Err(Unusable::NotANumber),
+        Err(_) => Err(Unusable::Failed),
     }
 }
 

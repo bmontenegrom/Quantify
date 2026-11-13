@@ -327,6 +327,10 @@ fn integer_literals_divide_as_decimals() {
     assert_eq!(eval("math::pow(L, 1/2)"), 2.0);
     assert_eq!(eval("T1/2"), 1.5);
     assert_eq!(eval("2.5*2"), 5.0);
+    assert!((eval("1e-3*2") - 0.002).abs() < 1e-15);
+    assert!((eval("2.5E-3*L") - 0.01).abs() < 1e-15);
+    assert_eq!(eval("6e+2/L"), 150.0);
+    assert!((eval("2*e-1") - (2.0 * std::f64::consts::E - 1.0)).abs() < 1e-12);
     assert!((eval("math::log10(100)") - 2.0).abs() < 1e-12);
 }
 
