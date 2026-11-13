@@ -331,6 +331,7 @@ export function renderPracticesPage() {
     const { openDraftPreview } = await import("./forms.js");
     await openDraftPreview(practiceId);
   });
+  renderProblems(practice.id);
   if (def?.current_version) renderDraftChanges(practice.id);
   practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
     deletePractice(e.currentTarget.dataset.practiceId);
@@ -418,8 +419,8 @@ export function renderPracticesPage() {
     form.addEventListener("submit", saveEditQuantity);
   });
   practiceWorkspace.querySelectorAll("#new-quantity-form, [data-edit-quantity-form]").forEach((form) => {
-    syncStopwatchOption(form);
-    form.addEventListener("input", () => syncStopwatchOption(form));
+    syncQuantityForm(form);
+    form.addEventListener("input", () => syncQuantityForm(form));
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -555,6 +556,7 @@ function practiceLifecycleActions(practice, def) {
   const publishedActions = practice.status === "borrador" ? "" : versionInfo;
   const tryDraft = `<button type="button" data-practice-try-draft data-practice-id="${id}">Probar el borrador</button>`;
   return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""} ${publishedActions} ${tryDraft}</div>
+    <div id="practice-problems"></div>
     <div id="practice-draft-changes"></div>`;
 }
 
@@ -574,6 +576,62 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions, v
       </div>
       <button type="button" data-practice-publish-version data-practice-id="${id}">${structural ? `Publicar versión ${version + 1}` : `Actualizar versión ${version}`}</button>
     </div>`;
+}
+
+const EDITABLE_KINDS = new Set(["quantity", "result", "curve", "intermediate", "pointResult", "aggregate"]);
+let problemsRequest = 0;
+let lastProblems = null;
+
+function problemItemHtml({ message }, k) {
+  return `<li><button type="button" class="link-button" data-problem="${k}">${escapeHtml(message)}</button></li>`;
+}
+
+function goToProblem({ kind, id }) {
+  const parts = '[data-add-panel="part"]';
+  let target = { axes: "#practice-regression-form", layout: parts }[kind] ?? `[data-add-panel="${kind}"]`;
+  if (id && EDITABLE_KINDS.has(kind)) {
+    state.editing = { kind, id };
+    renderPracticesPage();
+    const cell = practiceWorkspace.querySelector(".scale-edit-cell");
+    if (cell) return cell.scrollIntoView({ block: "center" });
+    state.editing = { kind: null, id: null };
+    target = parts;
+  }
+  const el = practiceWorkspace.querySelector(target) ?? practiceWorkspace.querySelector(parts);
+  if (el?.tagName === "DETAILS" && el.matches(`[data-add-panel="${kind}"]`)) el.open = true;
+  (el?.closest("section") ?? el)?.scrollIntoView({ block: "start" });
+}
+
+async function renderProblems(practiceId) {
+  const box = practiceWorkspace.querySelector("#practice-problems");
+  if (!box) return;
+  if (lastProblems?.practiceId === practiceId) paintProblems(box, lastProblems.problems);
+  const request = ++problemsRequest;
+  try {
+    const problems = await fetchJson(`/api/practices/${practiceId}/problems`);
+    if (request !== problemsRequest) return;
+    lastProblems = { practiceId, problems };
+    paintProblems(box, problems);
+  } catch (error) {
+    if (request === problemsRequest) box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function paintProblems(box, problems) {
+  if (!problems.length) {
+    box.innerHTML = `<p class="submission-meta practice-problems-ok">Sin problemas: la definición está completa.</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="edit-banner practice-problems" role="status">
+      <div>
+        <strong>Para publicar falta resolver (${problems.length})</strong>
+        <ul>${problems.map(problemItemHtml).join("")}</ul>
+      </div>
+    </div>`;
+  box.querySelectorAll("[data-problem]").forEach((btn) => {
+    btn.addEventListener("click", () => goToProblem(problems[Number(btn.dataset.problem)]));
+  });
 }
 
 let lastDraftChanges = null;
@@ -1094,10 +1152,13 @@ async function savePracticeRegressionFormulas(event) {
   }, "Fórmulas de ajuste guardadas");
 }
 
-function syncStopwatchOption(form) {
-  const option = form.elements.input_widget.querySelector('option[value="cronometro"]');
-  option.disabled = form.elements.quantity.value !== "tiempo" || form.elements.is_given.checked;
-  if (option.disabled && option.selected) form.elements.input_widget.value = "teclado";
+function syncQuantityForm(form) {
+  const { elements } = form;
+  const option = elements.input_widget.querySelector('option[value="cronometro"]');
+  option.disabled = elements.quantity.value !== "tiempo" || elements.is_given.checked;
+  if (option.disabled && option.selected) elements.input_widget.value = "teclado";
+  elements.replicas_per_point.disabled = !elements.per_point.checked;
+  elements.slot_count.disabled = !elements.is_given.checked;
 }
 
 function quantityPayloadFromForm(form) {

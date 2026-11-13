@@ -107,19 +107,71 @@ pub(super) struct StatusBody {
 }
 
 fn publish_problems(def: &practices::PracticeDefinition) -> Vec<String> {
-    let mut problems = structure_problems(def);
-    problems.extend(
-        formula_problems(def)
-            .into_iter()
-            .map(|(element, message)| format!("{element}: {message}")),
-    );
-    problems
+    draft_problems(def).into_iter().map(|p| p.message).collect()
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct Problem {
+    message: String,
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+}
+
+struct ElementProblem {
+    check: &'static str,
+    element: String,
+    message: String,
+    kind: &'static str,
+    id: Option<String>,
+}
+
+fn draft_problems(def: &practices::PracticeDefinition) -> Vec<Problem> {
+    let structure = located_structure_problems(def)
+        .into_iter()
+        .map(|(message, kind)| Problem {
+            message,
+            kind,
+            id: None,
+        });
+    let mut seen = Vec::new();
+    let elements = element_problems(def)
+        .into_iter()
+        .filter(|p| {
+            let key = (p.check, p.id.clone(), p.element.clone());
+            let new = !seen.contains(&key);
+            seen.push(key);
+            new
+        })
+        .map(|p| Problem {
+            message: format!("{}: {}", p.element, p.message),
+            kind: p.kind,
+            id: p.id,
+        });
+    structure.chain(elements).collect()
+}
+
+pub(super) async fn practice_problems(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<Problem>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let def = load_definition(&state, &id).await?;
+    Ok(Json(draft_problems(&def)))
 }
 
 fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
+    located_structure_problems(def)
+        .into_iter()
+        .map(|(message, _)| message)
+        .collect()
+}
+
+fn located_structure_problems(def: &practices::PracticeDefinition) -> Vec<(String, &'static str)> {
     let mut problems = Vec::new();
     if def.quantities.is_empty() {
-        problems.push("no tiene magnitudes de entrada".to_string());
+        problems.push(("no tiene magnitudes de entrada".to_string(), "quantity"));
     }
     if def.parts.is_empty() {
         problems.extend(kind_problems(def));
@@ -130,12 +182,15 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
         && def.point_results.is_empty()
         && def.aggregates.is_empty()
     {
-        problems.push("no tiene mensurandos".to_string());
+        problems.push(("no tiene mensurandos".to_string(), "result"));
     }
     if let Some(series) = def.stray_series() {
-        problems.push(format!(
-            "tiene magnitudes por punto fuera de la parte \"{}\", que es la de la serie",
-            series.title
+        problems.push((
+            format!(
+                "tiene magnitudes por punto fuera de la parte \"{}\", que es la de la serie",
+                series.title
+            ),
+            "layout",
         ));
     }
     for part in def
@@ -146,24 +201,27 @@ fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
         problems.extend(
             kind_problems(&def.part_view(part))
                 .into_iter()
-                .map(|p| format!("la parte \"{}\" {p}", part.title)),
+                .map(|(p, kind)| (format!("la parte \"{}\" {p}", part.title), kind)),
         );
     }
     problems
 }
 
-fn kind_problems(def: &practices::PracticeDefinition) -> Vec<String> {
+fn kind_problems(def: &practices::PracticeDefinition) -> Vec<(String, &'static str)> {
     let mut problems = Vec::new();
     match def.analysis_kind.as_deref() {
         Some("curva") if def.curves.is_empty() => {
-            problems.push("es de tipo curva y no tiene curvas".to_string());
+            problems.push(("es de tipo curva y no tiene curvas".to_string(), "curve"));
         }
         Some("regresion_lineal") if def.x_formula.is_none() || def.y_formula.is_none() => {
-            problems.push("es de regresion y le faltan las formulas de los ejes".to_string());
+            problems.push((
+                "es de regresion y le faltan las formulas de los ejes".to_string(),
+                "axes",
+            ));
         }
         Some("curva") => {}
         _ if def.results.is_empty() => {
-            problems.push("no tiene mensurandos".to_string());
+            problems.push(("no tiene mensurandos".to_string(), "result"));
         }
         _ => {}
     }
@@ -493,6 +551,9 @@ pub(super) async fn set_practice_regression_formulas(
     let axis = |f: &str| Some(f.trim().to_string()).filter(|f| !f.is_empty());
     after.x_formula = axis(&body.x_formula);
     after.y_formula = axis(&body.y_formula);
+    if let (Some(x), Some(y)) = (&after.x_formula, &after.y_formula) {
+        uses_series(&def, x, y)?;
+    }
     guard_change(&def, &after, "guardar los ejes")?;
     if !practices::set_regression_formulas(&state.pool, &id, &body.x_formula, &body.y_formula)
         .await?
@@ -534,9 +595,25 @@ fn with_updated_quantity(
     let mut after = def.clone();
     let q = after.quantities.iter_mut().find(|q| q.id == quantity_id)?;
     let old_symbol = std::mem::replace(&mut q.symbol, input.symbol.trim().to_string());
+    q.name = input.name.trim().to_string();
     q.unit = input.unit.trim().to_string();
+    q.repeated = input.repeated;
+    q.quantity.clone_from(&input.quantity);
     q.per_point = input.per_point;
     q.is_given = input.is_given;
+    q.has_uncertainty = input.has_uncertainty;
+    q.optional = input.optional;
+    q.slot_count = input.slot_count;
+    q.replicas_per_point = input.replicas_per_point;
+    if let Some(mode) = &input.label_mode {
+        q.label_mode.clone_from(mode);
+    }
+    let timed = input.quantity.as_deref() == Some("tiempo") && !input.is_given;
+    q.input_widget = match &input.input_widget {
+        Some(widget) if timed => widget.clone(),
+        _ if timed => q.input_widget.clone(),
+        _ => practices::DEFAULT_INPUT_WIDGET.to_string(),
+    };
     let new_symbol = q.symbol.clone();
     for section in &mut after.sections {
         for symbol in &mut section.quantities {
@@ -893,6 +970,15 @@ pub(super) async fn update_point_result(
         None,
     )
     .await?;
+    let mut after = def.clone();
+    let item = after
+        .point_results
+        .iter_mut()
+        .find(|x| x.id == pid)
+        .ok_or_else(|| AppError::not_found("magnitud derivada por punto no encontrada"))?;
+    item.symbol = input.symbol.trim().to_string();
+    item.formula = input.formula.trim().to_string();
+    guard_change(&def, &after, "guardar la magnitud derivada por punto")?;
     let updated = practices::update_point_result(&state.pool, &id, &pid, input)
         .await?
         .ok_or_else(|| AppError::not_found("magnitud derivada por punto no encontrada"))?;
@@ -905,6 +991,15 @@ pub(super) async fn delete_point_result(
     Path((id, pid)): Path<(String, String)>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    let before = load_definition(&state, &id).await?;
+    let mut after = before.clone();
+    after.point_results.retain(|x| x.id != pid);
+    if after.point_results.len() == before.point_results.len() {
+        return Err(AppError::not_found(
+            "magnitud derivada por punto no encontrada",
+        ));
+    }
+    guard_change(&before, &after, "eliminar la magnitud derivada por punto")?;
     if !practices::delete_point_result(&state.pool, &id, &pid).await? {
         return Err(AppError::not_found(
             "magnitud derivada por punto no encontrada",
@@ -1080,10 +1175,11 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
             "La curva necesita las formulas de ambos ejes (x e y).",
         ));
     }
-    check_axes(def, &input.x_formula, &input.y_formula)
+    check_axes(def, &input.x_formula, &input.y_formula)?;
+    uses_series(def, &input.x_formula, &input.y_formula)
 }
 
-fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
+fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     let uses: Vec<Vec<usize>> = def
         .results
         .iter()
@@ -1097,54 +1193,108 @@ fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> 
     let (_, blocked) = computation::chain_order(&uses);
     blocked
         .into_iter()
-        .map(|i| {
-            (
-                format!("el mensurando {}", def.results[i].symbol),
-                "se usa a sí mismo a través de otros mensurandos (forma un ciclo, o depende de uno que lo forma)"
-                    .to_string(),
-            )
+        .map(|i| ElementProblem {
+            check: "el ciclo de",
+            element: format!("el mensurando {}", def.results[i].symbol),
+            message: "se usa a sí mismo a través de otros mensurandos (forma un ciclo, o depende de uno que lo forma)"
+                .to_string(),
+            kind: "result",
+            id: Some(def.results[i].id.clone()),
         })
         .collect()
 }
 
+fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
+    def.quantities
+        .iter()
+        .filter_map(|q| {
+            let input = QuantityInput {
+                display_symbol: None,
+                symbol: q.symbol.clone(),
+                name: q.name.clone(),
+                unit: q.unit.clone(),
+                repeated: q.repeated,
+                quantity: q.quantity.clone(),
+                is_given: q.is_given,
+                replicas_per_point: q.replicas_per_point,
+                per_point: q.per_point,
+                has_uncertainty: q.has_uncertainty,
+                optional: q.optional,
+                default_value: None,
+                slot_count: q.slot_count,
+                label_mode: Some(q.label_mode.clone()),
+                input_widget: Some(q.input_widget.clone()),
+            };
+            let error = validate_quantity(&input).err()?;
+            Some(ElementProblem {
+                check: "la magnitud",
+                element: format!("la magnitud {}", q.symbol),
+                message: error.message().to_string(),
+                kind: "quantity",
+                id: Some(q.id.clone()),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
 fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
+    element_problems(def)
+        .into_iter()
+        .map(|p| (p.element, p.message))
+        .collect()
+}
+
+fn element_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     let mut problems = cycle_problems(def);
+    problems.extend(quantity_problems(def));
     if def.parts.is_empty() {
         problems.extend(formula_problems_in(def));
         return problems;
     }
-    problems.extend(formula_problems_in(&def.shared_view()).into_iter().map(
-        |(element, message)| {
-            (
-                element,
-                format!(
-                    "{message} (está en los datos compartidos, que solo pueden usar datos \
-                     compartidos: pasalo a una sección de la parte que corresponda)"
+    problems.extend(
+        formula_problems_in(&def.shared_view())
+            .into_iter()
+            .map(|p| ElementProblem {
+                message: format!(
+                    "{} (está en los datos compartidos, que solo pueden usar datos \
+                     compartidos: pasalo a una sección de la parte que corresponda)",
+                    p.message
                 ),
-            )
-        },
-    ));
+                ..p
+            }),
+    );
     for part in def.parts.iter().filter(|p| def.part_has_content(p)) {
-        problems.extend(formula_problems_in(&def.part_view(part)).into_iter().map(
-            |(element, message)| {
-                (
-                    element,
-                    format!(
-                        "{message} (está en la parte \"{}\", que solo ve lo compartido y lo suyo)",
-                        part.title
+        problems.extend(
+            formula_problems_in(&def.part_view(part))
+                .into_iter()
+                .map(|p| ElementProblem {
+                    message: format!(
+                        "{} (está en la parte \"{}\", que solo ve lo compartido y lo suyo)",
+                        p.message, part.title
                     ),
-                )
-            },
-        ));
+                    ..p
+                }),
+        );
     }
     problems
 }
 
-fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
+fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     let mut problems = Vec::new();
-    let mut note = |what: &str, symbol: &str, result: Result<(), AppError>| {
+    let mut note = |what: &'static str,
+                    symbol: &str,
+                    kind: &'static str,
+                    id: Option<&str>,
+                    result: Result<(), AppError>| {
         if let Err(e) = result {
-            problems.push((format!("{what} {symbol}"), e.message().to_string()));
+            problems.push(ElementProblem {
+                check: what,
+                element: format!("{what} {symbol}"),
+                message: e.message().to_string(),
+                kind,
+                id: id.map(str::to_string),
+            });
         }
     };
     for r in &def.results {
@@ -1159,22 +1309,34 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
             is_final: r.is_final,
             has_uncertainty: r.has_uncertainty,
         };
-        note("el mensurando", &r.symbol, validate_result(def, &input));
-        note("la comparación de", &r.symbol, check_compare(def, r));
+        let id = Some(r.id.as_str());
+        note(
+            "el mensurando",
+            &r.symbol,
+            "result",
+            id,
+            validate_result(def, &input),
+        );
+        note(
+            "la comparación de",
+            &r.symbol,
+            "result",
+            id,
+            check_compare(def, r),
+        );
     }
     let kind = def.analysis_kind.as_deref();
     if kind == Some("regresion_lineal") {
         if let (Some(x), Some(y)) = (&def.x_formula, &def.y_formula) {
-            note("el ajuste", "lineal", check_axes(def, x, y));
+            let axes = check_axes(def, x, y).and_then(|()| uses_series(def, x, y));
+            note("el ajuste", "lineal", "axes", None, axes);
         }
     }
     if kind == Some("curva") {
         for c in &def.curves {
-            note(
-                "la curva",
-                &c.y_formula,
-                check_axes(def, &c.x_formula, &c.y_formula),
-            );
+            let axes = check_axes(def, &c.x_formula, &c.y_formula)
+                .and_then(|()| uses_series(def, &c.x_formula, &c.y_formula));
+            note("la curva", &c.y_formula, "curve", Some(&c.id), axes);
         }
     }
     if matches!(kind, Some("regresion_lineal" | "curva")) {
@@ -1191,6 +1353,8 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
             note(
                 "la intermedia",
                 &it.symbol,
+                "intermediate",
+                Some(&it.id),
                 validate_intermediate(def, &input, Some(&it.id)),
             );
         }
@@ -1207,6 +1371,8 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
             note(
                 "la derivada por punto",
                 &pr.symbol,
+                "pointResult",
+                Some(&pr.id),
                 validate_point_result(def, &input),
             );
         }
@@ -1222,6 +1388,8 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<(String, Stri
             note(
                 "el agregado",
                 &a.symbol,
+                "aggregate",
+                Some(&a.id),
                 validate_aggregate(def, &input, Some(&a.id)),
             );
         }
@@ -1274,18 +1442,50 @@ fn guard_change(
             )));
         }
     }
-    let already_broken: Vec<String> = formula_problems(before)
+    let key = |p: &ElementProblem| match &p.id {
+        Some(id) => format!("{}#{id}", p.check),
+        None => p.element.clone(),
+    };
+    let already_broken: Vec<String> = element_problems(before).iter().map(key).collect();
+    match element_problems(after)
         .into_iter()
-        .map(|(element, _)| element)
-        .collect();
-    match formula_problems(after)
-        .into_iter()
-        .find(|(element, _)| !already_broken.contains(element))
+        .find(|p| !already_broken.contains(&key(p)))
     {
-        Some((element, message)) => Err(AppError::bad_request(format!(
-            "No se puede {what}: {element}: {message}"
+        Some(p) => Err(AppError::bad_request(format!(
+            "No se puede {what}: {}: {}",
+            p.element, p.message
         ))),
         None => Ok(()),
+    }
+}
+
+fn uses_series(def: &practices::PracticeDefinition, x: &str, y: &str) -> Result<(), AppError> {
+    let view = def.point_view();
+    let mut series: Vec<String> = view
+        .quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .map(|q| q.symbol.clone())
+        .collect();
+    for it in &view.intermediates {
+        if computation::formula_symbols(&it.formula)
+            .iter()
+            .any(|s| series.contains(s))
+        {
+            series.push(it.symbol.clone());
+        }
+    }
+    let used = computation::formula_symbols(x)
+        .into_iter()
+        .chain(computation::formula_symbols(y))
+        .any(|s| series.contains(&s));
+    if used {
+        Ok(())
+    } else {
+        Err(AppError::bad_request(
+            "los ejes no usan ninguna magnitud por punto (ni una intermedia que dependa de una), \
+             así que todos los puntos darían lo mismo",
+        ))
     }
 }
 
@@ -1656,6 +1856,12 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     if input.slot_count.is_some() && !input.is_given {
         return Err(AppError::bad_request(
             "Las ranuras solo aplican a un dato dado (marca \"Dato dado\" o deja las ranuras vacias).",
+        ));
+    }
+    if input.replicas_per_point.is_some_and(|n| n > 0) && !input.per_point {
+        return Err(AppError::bad_request(
+            "Las réplicas por punto solo aplican a una magnitud por punto (marcá \"Se mide por \
+             punto\" o dejá las réplicas vacías).",
         ));
     }
     if input
@@ -2320,6 +2526,13 @@ mod tests {
             ..timed(false, "tiempo", "teclado")
         })
         .is_err());
+        let replicas = |per_point| QuantityInput {
+            replicas_per_point: Some(3),
+            per_point,
+            ..timed(false, "tiempo", "teclado")
+        };
+        assert!(validate_quantity(&replicas(true)).is_ok());
+        assert!(validate_quantity(&replicas(false)).is_err());
     }
 
     #[test]
@@ -2589,6 +2802,8 @@ mod tests {
         let problems = publish_problems(&def).join(" | ");
         assert!(problems.contains("magnitudes"), "{problems}");
         assert!(problems.contains("ejes"), "{problems}");
+        let kinds: Vec<&str> = draft_problems(&def).iter().map(|p| p.kind).collect();
+        assert_eq!(kinds, ["quantity", "axes"]);
         for practice in db::practices(&pool).await.unwrap() {
             if practice.id == draft.id {
                 continue;
@@ -2599,6 +2814,162 @@ mod tests {
                 .unwrap();
             assert!(publish_problems(&def).is_empty(), "{}", practice.id);
         }
+    }
+
+    #[tokio::test]
+    async fn draft_problems_point_to_the_element_that_has_them() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let mut def = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(draft_problems(&def).is_empty());
+
+        def.y_formula = Some("rho".into());
+        def.x_formula = Some("g".into());
+        let mu = def.results.iter_mut().find(|r| r.symbol == "mu").unwrap();
+        mu.formula = "nada * 2".into();
+        let mu_id = mu.id.clone();
+        let rho = def
+            .quantities
+            .iter_mut()
+            .find(|q| q.symbol == "rho")
+            .unwrap();
+        rho.slot_count = Some(3);
+        let rho_id = rho.id.clone();
+        let h = def.quantities.iter_mut().find(|q| q.symbol == "h").unwrap();
+        h.per_point = false;
+        h.replicas_per_point = Some(2);
+        let h_id = h.id.clone();
+
+        let problems = draft_problems(&def);
+        let located = |kind: &str| {
+            problems
+                .iter()
+                .filter(|p| p.kind == kind)
+                .map(|p| (p.id.clone(), p.message.clone()))
+                .collect::<Vec<_>>()
+        };
+        let results = located("result");
+        assert_eq!(results.len(), 1, "{problems:?}");
+        assert_eq!(results[0].0.as_deref(), Some(mu_id.as_str()));
+        assert!(results[0].1.starts_with("el mensurando mu: "));
+        let quantities = located("quantity");
+        assert!(quantities
+            .iter()
+            .any(|(id, m)| id.as_deref() == Some(rho_id.as_str()) && m.contains("ranuras")));
+        assert!(quantities.iter().any(
+            |(id, m)| id.as_deref() == Some(h_id.as_str()) && m.contains("réplicas por punto")
+        ));
+        let axes = located("axes");
+        assert_eq!(axes.len(), 1, "{problems:?}");
+        assert!(axes[0].1.contains("no usan ninguna magnitud por punto"));
+
+        let mut scalar = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        let q = scalar
+            .intermediates
+            .iter_mut()
+            .find(|i| i.symbol == "Q")
+            .unwrap();
+        q.formula = "rho*g".into();
+        scalar.y_formula = Some("2/Q".into());
+        let axes: Vec<String> = draft_problems(&scalar)
+            .into_iter()
+            .filter(|p| p.kind == "axes")
+            .map(|p| p.message)
+            .collect();
+        assert_eq!(axes.len(), 1, "Q solo usa escalares: {axes:?}");
+
+        let mut cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut shared = cc.results[0].clone();
+        shared.id = "compartido-roto".into();
+        shared.symbol = "roto".into();
+        shared.formula = "nada * 2".into();
+        cc.results.push(shared);
+        let listed = draft_problems(&cc)
+            .into_iter()
+            .filter(|p| p.id.as_deref() == Some("compartido-roto"))
+            .count();
+        assert_eq!(
+            listed, 1,
+            "un compartido roto se lista una vez, no una por parte"
+        );
+        assert!(
+            element_problems(&cc)
+                .iter()
+                .filter(|p| p.id.as_deref() == Some("compartido-roto"))
+                .count()
+                > 1
+        );
+
+        let mut renamed = def.clone();
+        let h = renamed
+            .quantities
+            .iter_mut()
+            .find(|q| q.id == h_id)
+            .unwrap();
+        h.symbol = "h2".into();
+        assert!(
+            guard_change(&def, &renamed, "renombrar").is_ok(),
+            "renombrar una magnitud que ya tenía un problema no lo empeora"
+        );
+
+        let clean = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        let v = clean.quantities.iter().find(|q| q.symbol == "V").unwrap();
+        assert_eq!(v.replicas_per_point, Some(2));
+        let not_per_point = QuantityInput {
+            symbol: "V".into(),
+            name: v.name.clone(),
+            unit: v.unit.clone(),
+            per_point: false,
+            replicas_per_point: None,
+            ..Default::default()
+        };
+        let after = with_updated_quantity(&clean, &v.id, &not_per_point).unwrap();
+        assert!(after
+            .quantities
+            .iter()
+            .all(|q| q.symbol != "V" || q.replicas_per_point.is_none()));
+        assert!(
+            quantity_problems(&after).is_empty(),
+            "quitar las réplicas junto con la serie no deja problemas en la magnitud"
+        );
+
+        let t = clean.quantities.iter().find(|q| q.symbol == "t").unwrap();
+        assert_eq!(t.input_widget, "cronometro");
+        let given = |input_widget: Option<&str>| QuantityInput {
+            symbol: "t".into(),
+            name: t.name.clone(),
+            unit: t.unit.clone(),
+            quantity: Some("tiempo".into()),
+            is_given: true,
+            per_point: false,
+            input_widget: input_widget.map(str::to_string),
+            ..Default::default()
+        };
+        for widget in [Some("teclado"), None] {
+            let after = with_updated_quantity(&clean, &t.id, &given(widget)).unwrap();
+            assert!(
+                guard_change(&clean, &after, "guardar la magnitud").is_ok(),
+                "pasar a dato dado deja el cronómetro en teclado ({widget:?})"
+            );
+        }
+        assert_eq!(
+            publish_problems(&def),
+            problems
+                .iter()
+                .map(|p| p.message.clone())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
