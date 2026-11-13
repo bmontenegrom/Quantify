@@ -7,6 +7,14 @@ pub(crate) const CONSTANTS: [(&str, f64); 2] =
 pub(crate) fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
     let tree = build_operator_tree(formula)
         .map_err(|err| anyhow::anyhow!("la formula \"{formula}\" no es valida: {err}"))?;
+    if let Some(name) = tree
+        .iter_function_identifiers()
+        .find(|name| !FUNCTIONS.iter().any(|(known, _)| known == name))
+    {
+        anyhow::bail!(
+            "la fórmula \"{formula}\" usa la función \"{name}\", que no está entre las disponibles"
+        );
+    }
     let mut unknown: Vec<&str> = Vec::new();
     for var in tree.iter_variable_identifiers() {
         let is_constant = CONSTANTS.iter().any(|(name, _)| *name == var);
@@ -26,12 +34,14 @@ pub(crate) fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Resu
     }
 }
 
-/// Funciones que el editor acepta en una fórmula, con su descripción.
+/// Funciones que se aceptan en una fórmula, con su descripción. Quedan afuera las escalonadas
+/// (`floor`, `round`, `ceil`), porque la incertidumbre se propaga con una derivada numérica.
 ///
 /// ```
 /// use quantify::computation::FUNCTIONS;
 /// assert!(FUNCTIONS.iter().any(|(name, _)| *name == "math::sqrt"));
 /// assert!(!FUNCTIONS.iter().any(|(name, _)| *name == "random"));
+/// assert!(!FUNCTIONS.iter().any(|(name, _)| *name == "round"));
 /// ```
 pub const FUNCTIONS: &[(&str, &str)] = &[
     ("math::sqrt", "raíz cuadrada"),
@@ -46,10 +56,20 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
     ("math::acos", "arcocoseno (radianes)"),
     ("math::atan", "arcotangente (radianes)"),
     ("math::atan2", "arcotangente de y, x (radianes)"),
+    ("math::sinh", "seno hiperbólico"),
+    ("math::cosh", "coseno hiperbólico"),
+    ("math::tanh", "tangente hiperbólica"),
+    ("math::asinh", "seno hiperbólico inverso"),
+    ("math::acosh", "coseno hiperbólico inverso"),
+    ("math::atanh", "tangente hiperbólica inversa"),
+    ("math::pow", "potencia: base, exponente"),
+    ("math::hypot", "hipotenusa: raíz de x² + y²"),
+    ("math::cbrt", "raíz cúbica"),
+    ("math::log", "logaritmo: valor, base"),
+    ("math::log2", "logaritmo en base 2"),
+    ("math::exp2", "potencia de 2"),
     ("min", "mínimo"),
     ("max", "máximo"),
-    ("floor", "redondeo hacia abajo"),
-    ("round", "redondeo al entero más cercano"),
 ];
 
 /// Valida que una fórmula compile, solo use símbolos de `allowed` (o las constantes `pi` y `e`)
@@ -66,16 +86,7 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
 /// assert!(err.contains("\"math::foo\""));
 /// ```
 pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
-    let tree = compile_formula(formula, allowed)?;
-    if let Some(name) = tree
-        .iter_function_identifiers()
-        .find(|name| !FUNCTIONS.iter().any(|(known, _)| known == name))
-    {
-        anyhow::bail!(
-            "la fórmula \"{formula}\" usa la función \"{name}\", que no está entre las disponibles"
-        );
-    }
-    Ok(())
+    compile_formula(formula, allowed).map(|_| ())
 }
 
 pub(crate) fn formula_symbols(formula: &str) -> Vec<String> {

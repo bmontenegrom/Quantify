@@ -2741,7 +2741,34 @@ mod tests {
                 .unwrap();
             let scopes = formula_scopes(&def);
             let id = &def.practice_id;
-            let intermediate = |formula: &str| practices::IntermediateInput {
+            let mut candidates: Vec<String> = def
+                .quantities
+                .iter()
+                .map(|q| q.symbol.clone())
+                .chain(def.intermediates.iter().map(|it| it.symbol.clone()))
+                .chain(def.results.iter().map(|r| r.symbol.clone()))
+                .chain(def.aggregates.iter().map(|a| a.symbol.clone()))
+                .chain(["slope".into(), "intercept".into()])
+                .chain(scopes.intermediates.values().flatten().cloned())
+                .chain(scopes.aggregates.values().flatten().cloned())
+                .chain(scopes.point_results.iter().cloned())
+                .chain(scopes.axes.iter().cloned())
+                .chain(scopes.results.iter().cloned())
+                .chain(scopes.part_results.values().flatten().cloned())
+                .collect();
+            candidates.sort();
+            candidates.dedup();
+            let exact = |what: &str, offered: &[String], accepts: &dyn Fn(&str) -> bool| {
+                for c in &candidates {
+                    assert_eq!(
+                        accepts(c),
+                        offered.contains(c),
+                        "{id}: {what} con {c} (ofrecido: {})",
+                        offered.contains(c)
+                    );
+                }
+            };
+            let input = |formula: &str| practices::IntermediateInput {
                 display_symbol: None,
                 symbol: "Zprueba".into(),
                 name: "prueba".into(),
@@ -2750,56 +2777,49 @@ mod tests {
                 show_live: false,
                 on_means: false,
             };
-            for (key, symbols) in &scopes.intermediates {
+            for (key, offered) in &scopes.intermediates {
                 let exclude = Some(key.as_str()).filter(|k| !k.is_empty());
-                for s in symbols {
-                    assert!(
-                        validate_intermediate(&def, &intermediate(s), exclude).is_ok(),
-                        "{id}: intermedia {key:?} ofrece {s}"
-                    );
-                }
+                exact(&format!("intermedia {key:?}"), offered, &|c| {
+                    validate_intermediate(&def, &input(c), exclude).is_ok()
+                });
             }
-            for (key, symbols) in &scopes.aggregates {
+            for (key, offered) in &scopes.aggregates {
                 let exclude = Some(key.as_str()).filter(|k| !k.is_empty());
-                for s in symbols {
+                exact(&format!("agregado {key:?}"), offered, &|c| {
                     let input = practices::AggregateInput {
                         display_symbol: None,
                         symbol: "Zprueba".into(),
                         name: "prueba".into(),
                         unit: String::new(),
-                        formula: s.clone(),
+                        formula: c.into(),
                         is_final: false,
                     };
-                    assert!(
-                        validate_aggregate(&def, &input, exclude).is_ok(),
-                        "{id}: agregado {key:?} ofrece {s}"
-                    );
-                }
+                    validate_aggregate(&def, &input, exclude).is_ok()
+                });
             }
-            for s in &scopes.point_results {
+            exact("derivada por punto", &scopes.point_results, &|c| {
                 let input = practices::PointResultInput {
                     display_symbol: None,
                     symbol: "Zprueba".into(),
                     name: "prueba".into(),
                     unit: String::new(),
-                    formula: s.clone(),
+                    formula: c.into(),
                 };
-                assert!(
-                    validate_point_result(&def, &input).is_ok(),
-                    "{id}: derivada por punto ofrece {s}"
-                );
-            }
-            for s in &scopes.axes {
-                assert!(check_axes(&def, s, s).is_ok(), "{id}: eje ofrece {s}");
-            }
-            let accepted = result_scope(&def);
-            for s in scopes
+                validate_point_result(&def, &input).is_ok()
+            });
+            exact("eje", &scopes.axes, &|c| check_axes(&def, c, c).is_ok());
+            let mut offered: Vec<String> = scopes
                 .results
                 .iter()
                 .chain(scopes.part_results.values().flatten())
-            {
-                assert!(accepted.contains(s), "{id}: mensurando ofrece {s}");
-            }
+                .cloned()
+                .collect();
+            offered.sort();
+            offered.dedup();
+            let mut accepted = result_scope(&def);
+            accepted.sort();
+            accepted.dedup();
+            assert_eq!(offered, accepted, "{id}: mensurandos");
         }
     }
 
