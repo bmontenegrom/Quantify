@@ -1173,7 +1173,7 @@ function quantityPayloadFromForm(form) {
     unit: raw.unit,
     quantity: raw.quantity || null,
     repeated,
-    replicas_per_point: repeated && perPoint && raw.replicas_per_point && replicas > 0 ? replicas : null,
+    replicas_per_point: repeated && raw.replicas_per_point && replicas > 0 ? replicas : null,
     per_point: perPoint,
     is_given: "is_given" in raw,
     has_uncertainty: "has_uncertainty" in raw,

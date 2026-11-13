@@ -586,6 +586,8 @@ fn with_updated_quantity(
     q.unit = input.unit.trim().to_string();
     q.per_point = input.per_point;
     q.is_given = input.is_given;
+    q.slot_count = input.slot_count;
+    q.replicas_per_point = input.replicas_per_point;
     let new_symbol = q.symbol.clone();
     for section in &mut after.sections {
         for symbol in &mut section.quantities {
@@ -1147,7 +1149,8 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
             "La curva necesita las formulas de ambos ejes (x e y).",
         ));
     }
-    check_axes(def, &input.x_formula, &input.y_formula)
+    check_axes(def, &input.x_formula, &input.y_formula)?;
+    uses_series(def, &input.x_formula, &input.y_formula)
 }
 
 fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
@@ -1165,7 +1168,7 @@ fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     blocked
         .into_iter()
         .map(|i| ElementProblem {
-            check: "el mensurando",
+            check: "el ciclo de",
             element: format!("el mensurando {}", def.results[i].symbol),
             message: "se usa a sí mismo a través de otros mensurandos (forma un ciclo, o depende de uno que lo forma)"
                 .to_string(),
@@ -1179,17 +1182,28 @@ fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem>
     def.quantities
         .iter()
         .filter_map(|q| {
-            let message = if q.slot_count.is_some() && !q.is_given {
-                "tiene ranuras, pero las ranuras son solo para datos de cátedra"
-            } else if q.replicas_per_point.is_some_and(|n| n > 0) && !q.per_point {
-                "tiene réplicas por punto, pero no es una magnitud por punto"
-            } else {
-                return None;
+            let input = QuantityInput {
+                display_symbol: None,
+                symbol: q.symbol.clone(),
+                name: q.name.clone(),
+                unit: q.unit.clone(),
+                repeated: q.repeated,
+                quantity: q.quantity.clone(),
+                is_given: q.is_given,
+                replicas_per_point: q.replicas_per_point,
+                per_point: q.per_point,
+                has_uncertainty: q.has_uncertainty,
+                optional: q.optional,
+                default_value: None,
+                slot_count: q.slot_count,
+                label_mode: Some(q.label_mode.clone()),
+                input_widget: Some(q.input_widget.clone()),
             };
+            let error = validate_quantity(&input).err()?;
             Some(ElementProblem {
                 check: "la magnitud",
                 element: format!("la magnitud {}", q.symbol),
-                message: message.to_string(),
+                message: error.message().to_string(),
                 kind: "quantity",
                 id: Some(q.id.clone()),
             })
@@ -2853,6 +2867,30 @@ mod tests {
         assert!(
             guard_change(&def, &renamed, "renombrar").is_ok(),
             "renombrar una magnitud que ya tenía un problema no lo empeora"
+        );
+
+        let clean = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        let v = clean.quantities.iter().find(|q| q.symbol == "V").unwrap();
+        assert_eq!(v.replicas_per_point, Some(2));
+        let not_per_point = QuantityInput {
+            symbol: "V".into(),
+            name: v.name.clone(),
+            unit: v.unit.clone(),
+            per_point: false,
+            replicas_per_point: None,
+            ..Default::default()
+        };
+        let after = with_updated_quantity(&clean, &v.id, &not_per_point).unwrap();
+        assert!(after
+            .quantities
+            .iter()
+            .all(|q| q.symbol != "V" || q.replicas_per_point.is_none()));
+        assert!(
+            quantity_problems(&after).is_empty(),
+            "quitar las réplicas junto con la serie no deja problemas en la magnitud"
         );
         assert_eq!(
             publish_problems(&def),
