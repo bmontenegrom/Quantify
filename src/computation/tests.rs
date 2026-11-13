@@ -1,4 +1,4 @@
-use super::formula::compile_formula;
+use super::formula::{compile_formula, eval_compiled};
 use super::*;
 use crate::db::{self, InstrumentScale, PracticeQuantity, PracticeResult};
 use crate::practices::{PracticeAggregate, PracticeIntermediate, PracticePointResult};
@@ -304,6 +304,16 @@ fn compile_formula_rejects_unknown_symbol() {
     assert!(compile_formula("l*a", &symbols).is_ok());
     assert!(compile_formula("l*z", &symbols).is_err());
     assert!(compile_formula("(l*a", &symbols).is_err());
+}
+
+#[test]
+fn an_integer_result_counts_as_a_number() {
+    let symbols = vec!["L".to_string()];
+    let tree = compile_formula("max(L, 0)", &symbols).unwrap();
+    assert_eq!(eval_compiled(&tree, &HashMap::from([("L", -2.0)])), 0.0);
+    assert_eq!(eval_compiled(&tree, &HashMap::from([("L", 3.5)])), 3.5);
+    let tree = compile_formula("min(L, 5)", &symbols).unwrap();
+    assert_eq!(eval_compiled(&tree, &HashMap::from([("L", 9.0)])), 5.0);
 }
 
 #[test]

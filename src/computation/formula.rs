@@ -108,7 +108,11 @@ pub(crate) fn eval_compiled(tree: &Node, values: &HashMap<&str, f64>) -> f64 {
             return f64::NAN;
         }
     }
-    tree.eval_float_with_context(&context).unwrap_or(f64::NAN)
+    match tree.eval_with_context(&context) {
+        Ok(Value::Float(value)) => value,
+        Ok(Value::Int(value)) => value as f64,
+        _ => f64::NAN,
+    }
 }
 
 pub(crate) fn chain_order(uses: &[Vec<usize>]) -> (Vec<usize>, Vec<usize>) {
