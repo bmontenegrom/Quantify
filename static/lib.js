@@ -31,8 +31,12 @@ export function setDisplaySymbols(symbols) {
 
 export function symbolHtml(value) {
   const raw = String(value);
+  return formatSymbolHtml(displaySymbols.get(raw) ?? raw);
+}
+
+export function formatSymbolHtml(value) {
   return subscriptHtml(
-    escapeHtml(displaySymbols.get(raw) ?? raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
+    escapeHtml(String(value)).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
     SYMBOL_SUBSCRIPT,
   );
 }
@@ -426,6 +430,24 @@ export function compareOptionGroups(definition, { result = null, section = null 
   groups = groups.filter(([label, symbols]) => label == null || symbols.length);
   const offered = groups.some(([, symbols]) => symbols.includes(current));
   return result && current && !offered ? [["Guardada (fuera de alcance)", [current]], ...groups] : groups;
+}
+
+export function formulaScope(definition, kind, { id = "", section = null } = {}) {
+  const scopes = definition?.formula_scopes;
+  if (!scopes) return (definition?.quantities ?? []).map((q) => q.symbol);
+  if (kind === "result") return scopes.part_results?.[section?.part_id] ?? scopes.results;
+  if (kind === "point_result") return scopes.point_results;
+  if (kind === "axis") return scopes.axes;
+  const byId = scopes[`${kind}s`] ?? {};
+  return byId[id ?? ""] ?? byId[""] ?? [];
+}
+
+export function formulaHelpHtml(symbols, functions = []) {
+  const chip = (insert, label, title) =>
+    `<button type="button" class="formula-chip" data-insert="${escapeHtml(insert)}" title="${escapeHtml(title)}">${label}</button>`;
+  const symbolChips = [...new Set([...symbols, "pi", "e"])].map((s) => chip(s, symbolHtml(s), s)).join("");
+  const functionChips = functions.map(([name, description]) => chip(`${name}()`, escapeHtml(name), description)).join("");
+  return `<details class="formula-help"><summary>Símbolos y funciones</summary><div class="formula-chips">${symbolChips}</div><div class="formula-chips">${functionChips}</div></details>`;
 }
 
 export function comparisonPairs(definition) {
