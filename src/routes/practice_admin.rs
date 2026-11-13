@@ -1409,23 +1409,30 @@ fn guard_change(
 
 fn uses_series(def: &practices::PracticeDefinition, x: &str, y: &str) -> Result<(), AppError> {
     let view = def.point_view();
-    let series: Vec<&str> = view
+    let mut series: Vec<String> = view
         .quantities
         .iter()
         .filter(|q| q.per_point && !q.is_given)
-        .map(|q| q.symbol.as_str())
-        .chain(view.intermediates.iter().map(|it| it.symbol.as_str()))
+        .map(|q| q.symbol.clone())
         .collect();
+    for it in &view.intermediates {
+        if computation::formula_symbols(&it.formula)
+            .iter()
+            .any(|s| series.contains(s))
+        {
+            series.push(it.symbol.clone());
+        }
+    }
     let used = computation::formula_symbols(x)
         .into_iter()
         .chain(computation::formula_symbols(y))
-        .any(|s| series.contains(&s.as_str()));
+        .any(|s| series.contains(&s));
     if used {
         Ok(())
     } else {
         Err(AppError::bad_request(
-            "los ejes no usan ninguna magnitud por punto ni intermedia, así que todos los puntos \
-             darían lo mismo",
+            "los ejes no usan ninguna magnitud por punto (ni una intermedia que dependa de una), \
+             así que todos los puntos darían lo mismo",
         ))
     }
 }
@@ -2792,6 +2799,24 @@ mod tests {
         let axes = located("axes");
         assert_eq!(axes.len(), 1, "{problems:?}");
         assert!(axes[0].1.contains("no usan ninguna magnitud por punto"));
+
+        let mut scalar = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        let q = scalar
+            .intermediates
+            .iter_mut()
+            .find(|i| i.symbol == "Q")
+            .unwrap();
+        q.formula = "rho*g".into();
+        scalar.y_formula = Some("2/Q".into());
+        let axes: Vec<String> = draft_problems(&scalar)
+            .into_iter()
+            .filter(|p| p.kind == "axes")
+            .map(|p| p.message)
+            .collect();
+        assert_eq!(axes.len(), 1, "Q solo usa escalares: {axes:?}");
         assert_eq!(
             publish_problems(&def),
             problems
