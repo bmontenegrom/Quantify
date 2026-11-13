@@ -320,6 +320,35 @@ function relPct(b, a) {
   return ((b - a) / a) * 100;
 }
 
+export const QUANTITY_ROLES = [
+  { id: "catedra", label: "Dato de cátedra (valor ± U)", short: "Dato de cátedra", series: false },
+  { id: "constante", label: "Dato de cátedra sin incertidumbre / constante", short: "Constante", series: false },
+  { id: "unica", label: "Medida única con instrumento", short: "Medida única", series: false },
+  { id: "replicas", label: "Medida con réplicas (tipo A)", short: "Con réplicas", series: false },
+  { id: "serie", label: "Serie de datos (un valor por punto)", short: "Serie", series: true },
+  { id: "serie_replicas", label: "Serie con réplicas por punto", short: "Serie con réplicas", series: true },
+];
+
+export function quantityRole(quantity, pointBased) {
+  if (quantity.is_given) return quantity.has_uncertainty === false ? "constante" : "catedra";
+  if (pointBased && quantity.per_point) {
+    return quantity.repeated && quantity.replicas_per_point > 0 ? "serie_replicas" : "serie";
+  }
+  return quantity.repeated ? "replicas" : "unica";
+}
+
+export function roleFlags(role, pointBased, current = {}) {
+  const given = role === "catedra" || role === "constante";
+  const series = role === "serie" || role === "serie_replicas";
+  const wasSerie = !current.is_given && current.per_point && !(current.replicas_per_point > 0);
+  return {
+    is_given: given,
+    has_uncertainty: role !== "constante",
+    repeated: given || (role === "serie" && wasSerie) ? Boolean(current.repeated) : role === "replicas" || role === "serie_replicas",
+    per_point: series || (!pointBased && (current.per_point ?? true)),
+  };
+}
+
 export function hasUncertainty(entity) {
   return entity?.has_uncertainty !== false;
 }
@@ -429,7 +458,8 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
   if (analysisKind === "regresion_lineal" || analysisKind === "curva") {
     const pointCount = (m) => m.point_replicas?.length ?? m.values.length;
-    const points = Math.max(0, ...measurements.map(pointCount));
+    const isSeries = (m) => metaMap[m.quantity_id]?.perPoint !== false && !metaMap[m.quantity_id]?.isGiven;
+    const points = Math.max(0, ...measurements.filter(isSeries).map(pointCount));
     if (points < 2) {
       return analysisKind === "curva"
         ? "Cargá al menos 2 puntos completos para graficar la curva."

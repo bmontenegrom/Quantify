@@ -4,7 +4,7 @@ import { postJson } from "./api.js";
 import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
 import { definitionParts, definitionSections, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
-import { quantityNameHtml, wireRemoveReplica, collectMeasurements, finalResultRowHtml } from "./forms.js";
+import { quantityNameHtml, wireReplicaRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
 export const SERIES_INITIAL_ROWS = 3;
 
@@ -80,7 +80,7 @@ export function renderSeriesTable(definition) {
       inst.addEventListener("change", () => populateScaleOptions(row));
       populateScaleOptions(row);
     }
-    wireRemoveReplica(row);
+    wireReplicaRow(row);
   });
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
@@ -131,7 +131,10 @@ export function refreshSeries() {
 }
 
 function pointCount(measurements) {
-  return measurements.reduce(
+  const series = new Set(
+    (state.practiceForm?.definition?.quantities ?? []).filter((q) => q.per_point && !q.is_given).map((q) => q.id),
+  );
+  return measurements.filter((m) => series.has(m.quantity_id)).reduce(
     (n, m) => Math.max(n, m.point_replicas?.length ?? m.values.length),
     0,
   );
@@ -274,14 +277,15 @@ function sharedRowHtml(q) {
   return `
     <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
       <legend>${quantityNameHtml(q)}</legend>
-      <div class="measure-body">
+      <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
         <div class="measure-selectors">
           <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
           <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
         </div>
         <div class="measure-sep"></div>
         <div class="measure-right">
-          <div class="measure-values" data-repeated="0">${renderReplicaInput(q.unit, q.default_value)}</div>
+          <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">${renderReplicaInput(q.unit, q.default_value)}</div>
+          ${q.repeated ? `<button type="button" class="add-replica">＋ agregar réplica</button>` : ""}
         </div>
       </div>
     </fieldset>`;

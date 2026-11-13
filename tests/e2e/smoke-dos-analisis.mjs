@@ -42,6 +42,16 @@ await withE2E({ port: PORT, dbName: "quantify-dos-analisis.db" }, async ({ login
   const kinds = Object.fromEntries(def.parts.map((p) => [p.title, p.effective_kind]));
   assert(kinds.Directa === "estadistico" && kinds.Ajuste === "regresion_lineal", `tipos por parte: ${JSON.stringify(kinds)}`);
 
+  step("docente: el rol de cada magnitud depende de su parte");
+  const roleOptions = async (symbol) => {
+    await page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-edit-quantity]`).click();
+    const values = await page.locator('#edit-quantity-form [name="role"] option').evaluateAll((os) => os.map((o) => o.value));
+    await page.locator("[data-cancel-quantity]").click();
+    return values;
+  };
+  assert(!(await roleOptions("T")).includes("serie"), "T está en la parte estadística: sin roles de serie");
+  assert((await roleOptions("x")).includes("serie"), "x está en la parte de regresión: con roles de serie");
+
   step("docente: ejes, mensurando del ajuste, publica y habilita");
   await post(`${base}/regression-formulas`, { x_formula: "x", y_formula: "y" });
   await post(`${base}/results`, {

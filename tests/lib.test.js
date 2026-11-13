@@ -40,6 +40,9 @@ import {
   histogram,
   normalCurve,
   validateMeasurements,
+  QUANTITY_ROLES,
+  quantityRole,
+  roleFlags,
 } from "../static/lib.js";
 
 function academicFixture() {
@@ -691,6 +694,19 @@ test("validateMeasurements: cuenta puntos desde point_replicas (réplicas por pu
   assert.ok(typeof few === "string");
 });
 
+test("validateMeasurements: las réplicas de una compartida no cuentan como puntos", () => {
+  const meta = { x: { perPoint: true }, g: { perPoint: false } };
+  const err = validateMeasurements(
+    [
+      { quantity_id: "x", values: [], given_u: null },
+      { quantity_id: "g", values: [9.8, 9.81], given_u: null },
+    ],
+    "regresion_lineal",
+    meta,
+  );
+  assert.ok(typeof err === "string");
+});
+
 test("validateMeasurements: regresión exige escalares compartidos completos (Motor E)", () => {
   const meta = {
     x: { name: "x", perPoint: true },
@@ -811,4 +827,39 @@ test("compareOptionGroups usa las opciones del servidor y no pierde la comparaci
     [[null, ["R1", "VR1_p"]]],
     "en un mensurando nuevo una elección fuera de alcance no se presenta como guardada",
   );
+});
+
+test("quantityRole y roleFlags: cada rol vuelve a sí mismo", () => {
+  for (const pointBased of [true, false]) {
+    for (const { id, series } of QUANTITY_ROLES) {
+      if (series && !pointBased) continue;
+      const quantity = { ...roleFlags(id, pointBased), replicas_per_point: id === "serie_replicas" ? 2 : null };
+      assert.equal(quantityRole(quantity, pointBased), id, `${id} (serie: ${pointBased})`);
+    }
+  }
+});
+
+test("quantityRole: en una práctica estadística per_point no cuenta", () => {
+  const q = { is_given: false, per_point: true, repeated: true, has_uncertainty: true, replicas_per_point: 3 };
+  assert.equal(quantityRole(q, false), "replicas");
+  assert.equal(quantityRole(q, true), "serie_replicas");
+  assert.equal(quantityRole({ is_given: true, has_uncertainty: false }, true), "constante");
+  assert.equal(quantityRole({ ...q, replicas_per_point: null }, true), "serie", "réplicas sin cantidad: un valor por punto");
+});
+
+test("roleFlags: conserva lo que el rol no decide", () => {
+  assert.equal(roleFlags("unica", false, { per_point: true }).per_point, true);
+  assert.equal(roleFlags("unica", false, { per_point: false }).per_point, false);
+  assert.equal(roleFlags("unica", true, { per_point: true }).per_point, false);
+  assert.equal(roleFlags("catedra", true, { repeated: true }).repeated, true);
+  assert.equal(roleFlags("serie", true, { per_point: true, repeated: true }).repeated, true, "una serie de P3 conserva su repeated");
+  assert.equal(roleFlags("serie", true, { per_point: false, repeated: true }).repeated, false, "de réplicas a serie");
+  const conReplicas = { per_point: true, repeated: true, replicas_per_point: 3 };
+  assert.equal(roleFlags("serie", true, conReplicas).repeated, false, "de serie con réplicas a serie");
+  assert.deepEqual(roleFlags("serie_replicas", true), {
+    is_given: false,
+    has_uncertainty: true,
+    repeated: true,
+    per_point: true,
+  });
 });

@@ -881,6 +881,13 @@ async fn point_based_submission_stores_point_index_per_point() {
     )
     .await
     .unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET per_point = 0 \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 'T3'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let def = crate::practices::definition(&pool, "p1-estadistica")
         .await
         .unwrap()
@@ -903,6 +910,15 @@ async fn point_based_submission_stores_point_index_per_point() {
                 instrument_id: None,
                 scale_id: None,
                 values: vec![1.0, 2.0, 3.0],
+                given_u: None,
+                point_replicas: None,
+                operator_replicas: None,
+            },
+            MeasurementInput {
+                quantity_id: qid("T3"),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![7.0, 7.1, 7.2, 7.3],
                 given_u: None,
                 point_replicas: None,
                 operator_replicas: None,
@@ -946,6 +962,17 @@ async fn point_based_submission_stores_point_index_per_point() {
     assert!(tmed_rows
         .iter()
         .any(|m| m.point_index == 2 && m.replicate_index == 0 && close(m.value, 6.0, 1e-9)));
+
+    let shared: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T3")).collect();
+    assert_eq!(shared.len(), 4);
+    assert!(shared.iter().all(|m| m.point_index == 0));
+    let mut reps: Vec<_> = shared.iter().map(|m| m.replicate_index).collect();
+    reps.sort();
+    assert_eq!(
+        reps,
+        vec![0, 1, 2, 3],
+        "las réplicas de una compartida no son puntos"
+    );
 }
 
 #[tokio::test]
