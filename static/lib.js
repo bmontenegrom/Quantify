@@ -432,11 +432,11 @@ export function compareOptionGroups(definition, { result = null, section = null 
   return result && current && !offered ? [["Guardada (fuera de alcance)", [current]], ...groups] : groups;
 }
 
-export function formulaScope(definition, kind, { id = "", section = null } = {}) {
+export function formulaScope(definition, kind, { id = "", symbol = "", section = null } = {}) {
   const scopes = definition?.formula_scopes;
   if (!scopes) return (definition?.quantities ?? []).map((q) => q.symbol);
   if (kind === "result") {
-    if (id) return scopes.existing_results?.[id] ?? [];
+    if (symbol) return scopes.existing_results?.[symbol] ?? [];
     if (section) return scopes.part_results?.[section.part_id] ?? scopes.results;
     return [...new Set([scopes.results, ...Object.values(scopes.part_results ?? {})].flat())];
   }

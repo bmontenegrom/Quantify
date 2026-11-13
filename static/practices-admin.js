@@ -32,9 +32,12 @@ function displaySymbolFieldHtml(item) {
   return `<div class="display-symbol-field"><label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label><span class="symbol-preview" aria-hidden="true">${preview}</span></div>`;
 }
 
+function formulaHelpFor(symbols) {
+  return formulaHelpHtml(symbols, state.practiceDefinition?.formula_scopes?.functions ?? []);
+}
+
 function formulaFieldHtml(label, input, symbols) {
-  const functions = state.practiceDefinition?.formula_scopes?.functions ?? [];
-  return `<div class="formula-field wide-field"><label>${label} ${input}</label>${formulaHelpHtml(symbols, functions)}</div>`;
+  return `<div class="formula-field wide-field"><label>${label} ${input}</label>${formulaHelpFor(symbols)}</div>`;
 }
 
 function insertIntoFormula(button) {
@@ -396,7 +399,7 @@ export function renderPracticesPage() {
     select.innerHTML = compareOptionsHtml(compareOptionGroups(def, { section }, select.value), select.value);
     const help = e.target.form.querySelector(".formula-help");
     const open = help.open;
-    help.outerHTML = formulaHelpHtml(formulaScope(def, "result", { section }), def?.formula_scopes?.functions ?? []);
+    help.outerHTML = formulaHelpFor(formulaScope(def, "result", { section }));
     e.target.form.querySelector(".formula-help").open = open;
   });
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
@@ -1089,7 +1092,7 @@ function renderResultForm(res, practiceId, def = null) {
       ${displaySymbolFieldHtml(res)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
-      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" />`, formulaScope(def, "result", { id: res?.symbol ?? "" }))}
+      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" />`, formulaScope(def, "result", { symbol: res?.symbol ?? "" }))}
       <p class="submission-meta">La incertidumbre se propaga desde las magnitudes.</p>
       ${res ? "" : newResultSectionHtml(def)}
       <label>Tolerancia (%)

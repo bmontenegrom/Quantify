@@ -883,7 +883,7 @@ test("formulaScope: alcance por tipo, por parte y por posición", () => {
   assert.deepEqual(formulaScope(definition, "result", { section: { part_id: "p2" } }), ["L", "slope"]);
   assert.deepEqual(formulaScope(definition, "result", { section: { part_id: null } }), ["L"]);
   assert.deepEqual(formulaScope(definition, "result"), ["L", "slope"], "sin sección: cualquier parte");
-  assert.deepEqual(formulaScope(definition, "result", { id: "g" }), ["L"], "uno existente: su alcance del servidor");
+  assert.deepEqual(formulaScope(definition, "result", { symbol: "g" }), ["L"], "uno existente: su alcance del servidor");
   assert.deepEqual(formulaScope(definition, "intermediate", { id: "B" }), ["L", "A"]);
   assert.deepEqual(formulaScope(definition, "intermediate"), ["L", "A", "B"]);
   assert.deepEqual(formulaScope(definition, "aggregate", { id: "nuevo" }), ["L"]);
