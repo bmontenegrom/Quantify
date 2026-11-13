@@ -909,7 +909,7 @@ function roleSelectHtml(qty) {
   const pointBased = pointBasedPractice();
   const current = qty ? quantityRole(qty, pointBased) : pointBased ? "serie" : "replicas";
   const options = QUANTITY_ROLES.filter((r) => pointBased || !r.series).map((r) => [r.id, r.label]);
-  return selectFieldHtml("¿Cómo se ingresa?", "role", options, current);
+  return selectFieldHtml("¿Cómo se ingresa?", "role", options, current).replace("<label>", '<label class="wide-field">');
 }
 
 function renderQuantityForm(qty, practiceId) {
@@ -934,11 +934,11 @@ function renderQuantityForm(qty, practiceId) {
         <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />
         Opcional (puede quedar sin lecturas sin bloquear la entrega)
       </label>
-      <label>Valor inicial (precargado en el formulario del alumno)
-        <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" />
+      <label>Valor inicial
+        <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" title="Se precarga en el formulario del alumno" />
       </label>
-      <label data-for-roles="catedra constante">Ranuras del instrumento (el valor es un entero de 1 a N, en la unidad de arriba)
-        <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" />
+      <label data-for-roles="catedra constante">Ranuras
+        <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" title="El valor es un entero de 1 a N, en la unidad de la magnitud" />
       </label>
       ${selectFieldHtml("Rótulo en el formulario", "label_mode", [
         ["nombre", "Nombre"],

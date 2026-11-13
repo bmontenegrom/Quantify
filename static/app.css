@@ -1204,6 +1204,10 @@ button.back-link {
   margin-top: 4px;
 }
 
+.detail-form-grid .wide-field {
+  grid-column: span 2;
+}
+
 .detail-form-grid .detail-actions,
 .detail-form.compact .detail-actions {
   grid-column: 1 / -1;
@@ -1486,6 +1490,10 @@ button.back-link {
   .detail-form.compact,
   .workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .detail-form-grid .wide-field {
+    grid-column: auto;
   }
 
   .workspace-head {
