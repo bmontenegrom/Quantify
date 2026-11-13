@@ -80,6 +80,10 @@ export function renderSeriesTable(definition) {
       inst.addEventListener("change", () => populateScaleOptions(row));
       populateScaleOptions(row);
     }
+    row.querySelector(".add-replica")?.addEventListener("click", () => {
+      row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(row.querySelector(".measure-value")?.dataset.unit ?? ""));
+      wireRemoveReplica(row);
+    });
     wireRemoveReplica(row);
   });
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
@@ -274,14 +278,15 @@ function sharedRowHtml(q) {
   return `
     <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
       <legend>${quantityNameHtml(q)}</legend>
-      <div class="measure-body">
+      <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
         <div class="measure-selectors">
           <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
           <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
         </div>
         <div class="measure-sep"></div>
         <div class="measure-right">
-          <div class="measure-values" data-repeated="0">${renderReplicaInput(q.unit, q.default_value)}</div>
+          <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">${renderReplicaInput(q.unit, q.default_value)}</div>
+          ${q.repeated ? `<button type="button" class="add-replica">＋ agregar réplica</button>` : ""}
         </div>
       </div>
     </fieldset>`;
