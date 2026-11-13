@@ -412,26 +412,29 @@ pub(super) struct FormulaScopes {
 }
 
 fn formula_scopes(def: &practices::PracticeDefinition) -> FormulaScopes {
-    let (results, part_results) = if def.parts.is_empty() {
-        (result_scope_in(def), BTreeMap::new())
-    } else {
-        (
-            result_scope_in(&def.shared_view()),
-            def.parts
-                .iter()
-                .map(|p| (p.id.clone(), result_scope_in(&def.part_view(p))))
-                .collect(),
-        )
-    };
+    let views = view_scopes(def);
+    let uses = result_uses(def);
     let view = def.point_view();
     let key = |id: Option<&str>| id.unwrap_or_default().to_string();
     FormulaScopes {
-        results,
-        part_results,
+        results: views
+            .iter()
+            .find(|v| v.part_id.is_none())
+            .map(|v| v.scope.clone())
+            .unwrap_or_default(),
+        part_results: views
+            .iter()
+            .filter_map(|v| Some((v.part_id.clone()?, v.scope.clone())))
+            .collect(),
         existing_results: def
             .results
             .iter()
-            .map(|r| (r.symbol.clone(), existing_result_scope(def, &r.symbol)))
+            .map(|r| {
+                (
+                    r.symbol.clone(),
+                    existing_result_scope(&views, &uses, &r.symbol),
+                )
+            })
             .collect(),
         intermediates: std::iter::once(None)
             .chain(view.intermediates.iter().map(|it| Some(it.id.as_str())))
@@ -1577,17 +1580,39 @@ fn check_axes(def: &practices::PracticeDefinition, x: &str, y: &str) -> Result<(
     Ok(())
 }
 
-fn result_scope(def: &practices::PracticeDefinition) -> Vec<String> {
+struct ViewScope {
+    part_id: Option<String>,
+    results: Vec<String>,
+    scope: Vec<String>,
+}
+
+fn view_scopes(def: &practices::PracticeDefinition) -> Vec<ViewScope> {
+    let of = |part_id: Option<String>, view: &practices::PracticeDefinition| ViewScope {
+        part_id,
+        results: view.results.iter().map(|r| r.symbol.clone()).collect(),
+        scope: result_scope_in(view),
+    };
     if def.parts.is_empty() {
-        return result_scope_in(def);
+        return vec![of(None, def)];
     }
-    let mut allowed = result_scope_in(&def.shared_view());
-    for part in &def.parts {
-        allowed.extend(result_scope_in(&def.part_view(part)));
-    }
+    std::iter::once(of(None, &def.shared_view()))
+        .chain(
+            def.parts
+                .iter()
+                .map(|p| of(Some(p.id.clone()), &def.part_view(p))),
+        )
+        .collect()
+}
+
+fn union_scope(views: &[ViewScope]) -> Vec<String> {
+    let mut allowed: Vec<String> = views.iter().flat_map(|v| v.scope.clone()).collect();
     allowed.sort();
     allowed.dedup();
     allowed
+}
+
+fn result_scope(def: &practices::PracticeDefinition) -> Vec<String> {
+    union_scope(&view_scopes(def))
 }
 
 fn result_scope_in(def: &practices::PracticeDefinition) -> Vec<String> {
@@ -1720,7 +1745,6 @@ pub(super) async fn create_result(
     let section_id = section_id.filter(|s| !s.is_empty());
     let def = load_definition(&state, &id).await?;
     validate_result(&def, &input)?;
-    check_no_cycle(&def, input.symbol.trim(), &input)?;
     if let Some(section) = &section_id {
         if !def.sections.iter().any(|s| &s.id == section) {
             return Err(AppError::bad_request("La seccion no es de esta practica."));
@@ -1737,6 +1761,7 @@ pub(super) async fn create_result(
         None,
     )
     .await?;
+    check_no_cycle(&def, input.symbol.trim(), &input)?;
     let after = with_new_result(&def, &input, section_id.as_deref());
     guard_change(&def, &after, "guardar el mensurando")?;
     Ok(Json(
@@ -1753,12 +1778,6 @@ pub(super) async fn update_result(
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &practice_id).await?;
     validate_result(&def, &input)?;
-    let own = def
-        .results
-        .iter()
-        .find(|r| r.id == rid)
-        .map_or(input.symbol.trim(), |r| r.symbol.as_str());
-    check_no_cycle(&def, own, &input)?;
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -1770,6 +1789,12 @@ pub(super) async fn update_result(
         None,
     )
     .await?;
+    let own = def
+        .results
+        .iter()
+        .find(|r| r.id == rid)
+        .map_or(input.symbol.trim(), |r| r.symbol.as_str());
+    check_no_cycle(&def, own, &input)?;
     let after = with_updated_result(&def, &rid, &input)
         .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
     guard_change(&def, &after, "guardar el mensurando")?;
@@ -2016,17 +2041,20 @@ fn validate_result(
         .map_err(|e| AppError::bad_request(e.to_string()))
 }
 
-fn results_using(def: &practices::PracticeDefinition, symbol: &str) -> Vec<String> {
+fn result_uses(def: &practices::PracticeDefinition) -> Vec<(String, Vec<String>)> {
+    def.results
+        .iter()
+        .map(|r| (r.symbol.clone(), computation::formula_symbols(&r.formula)))
+        .collect()
+}
+
+fn results_using(uses: &[(String, Vec<String>)], symbol: &str) -> Vec<String> {
     let mut found = vec![symbol.to_string()];
     loop {
         let before = found.len();
-        for r in &def.results {
-            if !found.contains(&r.symbol)
-                && computation::formula_symbols(&r.formula)
-                    .iter()
-                    .any(|s| found.contains(s))
-            {
-                found.push(r.symbol.clone());
+        for (result, used) in uses {
+            if !found.contains(result) && used.iter().any(|s| found.contains(s)) {
+                found.push(result.clone());
             }
         }
         if found.len() == before {
@@ -2041,7 +2069,7 @@ fn check_no_cycle(
     input: &ResultInput,
 ) -> Result<(), AppError> {
     let symbol = input.symbol.trim();
-    let mut excluded = results_using(def, own);
+    let mut excluded = results_using(&result_uses(def), own);
     excluded.push(symbol.to_string());
     let Some(used) = computation::formula_symbols(input.formula.trim())
         .into_iter()
@@ -2056,21 +2084,21 @@ fn check_no_cycle(
     }))
 }
 
-fn existing_result_scope(def: &practices::PracticeDefinition, symbol: &str) -> Vec<String> {
-    let mut scope = if def.parts.is_empty() {
-        result_scope_in(def)
-    } else {
-        std::iter::once(def.shared_view())
-            .chain(def.parts.iter().map(|p| def.part_view(p)))
-            .filter(|v| v.results.iter().any(|r| r.symbol == symbol))
-            .map(|v| result_scope_in(&v))
-            .reduce(|mut all, here| {
-                all.retain(|s| here.contains(s));
-                all
-            })
-            .unwrap_or_else(|| result_scope(def))
-    };
-    let excluded = results_using(def, symbol);
+fn existing_result_scope(
+    views: &[ViewScope],
+    uses: &[(String, Vec<String>)],
+    symbol: &str,
+) -> Vec<String> {
+    let mut scope = views
+        .iter()
+        .filter(|v| v.results.iter().any(|r| r == symbol))
+        .map(|v| v.scope.clone())
+        .reduce(|mut all, here| {
+            all.retain(|s| here.contains(s));
+            all
+        })
+        .unwrap_or_else(|| union_scope(views));
+    let excluded = results_using(uses, symbol);
     scope.retain(|s| !excluded.contains(s));
     scope
 }
