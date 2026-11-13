@@ -26,17 +26,56 @@ pub(crate) fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Resu
     }
 }
 
-/// Valida que una fórmula compile y solo use símbolos de `allowed` (o las constantes `pi` y `e`).
+/// Funciones que el editor acepta en una fórmula, con su descripción.
+///
+/// ```
+/// use quantify::computation::FUNCTIONS;
+/// assert!(FUNCTIONS.iter().any(|(name, _)| *name == "math::sqrt"));
+/// assert!(!FUNCTIONS.iter().any(|(name, _)| *name == "random"));
+/// ```
+pub const FUNCTIONS: &[(&str, &str)] = &[
+    ("math::sqrt", "raíz cuadrada"),
+    ("math::ln", "logaritmo natural"),
+    ("math::log10", "logaritmo en base 10"),
+    ("math::exp", "exponencial"),
+    ("math::abs", "valor absoluto"),
+    ("math::sin", "seno (radianes)"),
+    ("math::cos", "coseno (radianes)"),
+    ("math::tan", "tangente (radianes)"),
+    ("math::asin", "arcoseno (radianes)"),
+    ("math::acos", "arcocoseno (radianes)"),
+    ("math::atan", "arcotangente (radianes)"),
+    ("math::atan2", "arcotangente de y, x (radianes)"),
+    ("min", "mínimo"),
+    ("max", "máximo"),
+    ("floor", "redondeo hacia abajo"),
+    ("round", "redondeo al entero más cercano"),
+];
+
+/// Valida que una fórmula compile, solo use símbolos de `allowed` (o las constantes `pi` y `e`)
+/// y solo llame funciones de [`FUNCTIONS`].
 ///
 /// ```
 /// use quantify::computation::check_formula;
 /// let allowed = vec!["L".to_string(), "T".to_string()];
 /// assert!(check_formula("4*pi^2*L/T^2", &allowed).is_ok());
+/// assert!(check_formula("math::sqrt(L)", &allowed).is_ok());
 /// let err = check_formula("L * g", &allowed).unwrap_err().to_string();
 /// assert!(err.contains("\"g\""));
+/// let err = check_formula("math::foo(L)", &allowed).unwrap_err().to_string();
+/// assert!(err.contains("\"math::foo\""));
 /// ```
 pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
-    compile_formula(formula, allowed).map(|_| ())
+    let tree = compile_formula(formula, allowed)?;
+    if let Some(name) = tree
+        .iter_function_identifiers()
+        .find(|name| !FUNCTIONS.iter().any(|(known, _)| known == name))
+    {
+        anyhow::bail!(
+            "la fórmula \"{formula}\" usa la función \"{name}\", que no está entre las disponibles"
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn formula_symbols(formula: &str) -> Vec<String> {
