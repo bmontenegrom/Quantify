@@ -1,40 +1,21 @@
-use evalexpr::{build_operator_tree, ContextWithMutableVariables, HashMapContext, Node, Value};
+use evalexpr::{
+    build_operator_tree, ContextWithMutableVariables, HashMapContext, Node, Operator, Value,
+};
 use std::collections::HashMap;
 
 pub(crate) const CONSTANTS: [(&str, f64); 2] =
     [("pi", std::f64::consts::PI), ("e", std::f64::consts::E)];
 
-fn float_literals(formula: &str) -> String {
-    let chars: Vec<char> = formula.chars().collect();
-    let mut out = String::with_capacity(formula.len() + 8);
-    let mut i = 0;
-    while i < chars.len() {
-        let exponent = i >= 3
-            && matches!(chars[i - 1], '+' | '-')
-            && matches!(chars[i - 2], 'e' | 'E')
-            && (chars[i - 3].is_ascii_digit() || chars[i - 3] == '.');
-        let starts_number = chars[i].is_ascii_digit()
-            && !exponent
-            && (i == 0 || !(chars[i - 1].is_alphanumeric() || matches!(chars[i - 1], '_' | '.')));
-        if !starts_number {
-            out.push(chars[i]);
-            i += 1;
-            continue;
-        }
-        while i < chars.len() && chars[i].is_ascii_digit() {
-            out.push(chars[i]);
-            i += 1;
-        }
-        let next = chars.get(i).copied();
-        if !next.is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.')) {
-            out.push_str(".0");
+fn parse(formula: &str) -> evalexpr::EvalexprResult<Node> {
+    let mut tree = build_operator_tree(formula)?;
+    for operator in tree.iter_operators_mut() {
+        if let Operator::Const { value } = operator {
+            if let Value::Int(int) = *value {
+                *value = Value::Float(int as f64);
+            }
         }
     }
-    out
-}
-
-fn parse(formula: &str) -> evalexpr::EvalexprResult<Node> {
-    build_operator_tree(&float_literals(formula))
+    Ok(tree)
 }
 
 pub(crate) fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
@@ -133,7 +114,7 @@ pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
         ),
         Err(Unusable::Failed) if tree.iter_function_identifiers().next().is_some() => {
             anyhow::bail!(
-                "la fórmula \"{formula}\" no se puede calcular: revisá que cada función tenga la cantidad de argumentos que pide"
+                "la fórmula \"{formula}\" no se puede calcular: revisá que cada función tenga la cantidad de argumentos que pide y que sea una sola expresión"
             )
         }
         Err(Unusable::Failed) => {
@@ -159,13 +140,10 @@ fn evaluate(tree: &Node, values: &HashMap<&str, f64>) -> Result<f64, Unusable> {
         let _ = context.set_value(name.to_string(), Value::Float(value));
     }
     for (symbol, value) in values {
-        context
-            .set_value((*symbol).to_string(), Value::Float(*value))
-            .map_err(|_| Unusable::Failed)?;
+        let _ = context.set_value((*symbol).to_string(), Value::Float(*value));
     }
     match tree.eval_with_context(&context) {
         Ok(Value::Float(value)) => Ok(value),
-        Ok(Value::Int(value)) => Ok(value as f64),
         Ok(_) => Err(Unusable::NotANumber),
         Err(_) => Err(Unusable::Failed),
     }
