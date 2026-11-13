@@ -403,6 +403,7 @@ pub(super) struct DefinitionView {
 pub(super) struct FormulaScopes {
     results: Vec<String>,
     part_results: BTreeMap<String, Vec<String>>,
+    existing_results: BTreeMap<String, Vec<String>>,
     intermediates: BTreeMap<String, Vec<String>>,
     aggregates: BTreeMap<String, Vec<String>>,
     point_results: Vec<String>,
@@ -423,24 +424,25 @@ fn formula_scopes(def: &practices::PracticeDefinition) -> FormulaScopes {
         )
     };
     let view = def.point_view();
-    let by_id = |ids: Vec<&str>, scope: &dyn Fn(Option<&str>) -> Vec<String>| {
-        std::iter::once((String::new(), scope(None)))
-            .chain(ids.into_iter().map(|id| (id.to_string(), scope(Some(id)))))
-            .collect()
-    };
+    let key = |id: Option<&str>| id.unwrap_or_default().to_string();
     FormulaScopes {
         results,
         part_results,
-        intermediates: by_id(
-            view.intermediates.iter().map(|it| it.id.as_str()).collect(),
-            &|id| intermediate_scope(&view, id),
-        ),
-        aggregates: by_id(
-            view.aggregates.iter().map(|a| a.id.as_str()).collect(),
-            &|id| aggregate_scope(&view, id),
-        ),
+        existing_results: def
+            .results
+            .iter()
+            .map(|r| (r.symbol.clone(), existing_result_scope(def, &r.symbol)))
+            .collect(),
+        intermediates: std::iter::once(None)
+            .chain(view.intermediates.iter().map(|it| Some(it.id.as_str())))
+            .map(|id| (key(id), intermediate_scope(&view, id)))
+            .collect(),
+        aggregates: std::iter::once(None)
+            .chain(view.aggregates.iter().map(|a| Some(a.id.as_str())))
+            .map(|id| (key(id), aggregate_scope(&view, id)))
+            .collect(),
         point_results: point_result_scope(&view),
-        axes: axis_scope(def),
+        axes: axis_scope(&view),
         functions: computation::FUNCTIONS,
     }
 }
@@ -1555,17 +1557,16 @@ fn uses_series(def: &practices::PracticeDefinition, x: &str, y: &str) -> Result<
     }
 }
 
-fn axis_scope(def: &practices::PracticeDefinition) -> Vec<String> {
-    let def = def.point_view();
-    def.quantities
+fn axis_scope(view: &practices::PracticeDefinition) -> Vec<String> {
+    view.quantities
         .iter()
         .map(|q| q.symbol.clone())
-        .chain(def.intermediates.iter().map(|it| it.symbol.clone()))
+        .chain(view.intermediates.iter().map(|it| it.symbol.clone()))
         .collect()
 }
 
 fn check_axes(def: &practices::PracticeDefinition, x: &str, y: &str) -> Result<(), AppError> {
-    let allowed = axis_scope(def);
+    let allowed = axis_scope(&def.point_view());
     for (axis, formula) in [("x", x.trim()), ("y", y.trim())] {
         if formula.is_empty() {
             continue;
@@ -1719,6 +1720,7 @@ pub(super) async fn create_result(
     let section_id = section_id.filter(|s| !s.is_empty());
     let def = load_definition(&state, &id).await?;
     validate_result(&def, &input)?;
+    check_no_cycle(&def, input.symbol.trim(), &input)?;
     if let Some(section) = &section_id {
         if !def.sections.iter().any(|s| &s.id == section) {
             return Err(AppError::bad_request("La seccion no es de esta practica."));
@@ -1751,6 +1753,12 @@ pub(super) async fn update_result(
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &practice_id).await?;
     validate_result(&def, &input)?;
+    let own = def
+        .results
+        .iter()
+        .find(|r| r.id == rid)
+        .map_or(input.symbol.trim(), |r| r.symbol.as_str());
+    check_no_cycle(&def, own, &input)?;
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -2006,6 +2014,65 @@ fn validate_result(
     }
     computation::check_formula(input.formula.trim(), &result_scope(def))
         .map_err(|e| AppError::bad_request(e.to_string()))
+}
+
+fn results_using(def: &practices::PracticeDefinition, symbol: &str) -> Vec<String> {
+    let mut found = vec![symbol.to_string()];
+    loop {
+        let before = found.len();
+        for r in &def.results {
+            if !found.contains(&r.symbol)
+                && computation::formula_symbols(&r.formula)
+                    .iter()
+                    .any(|s| found.contains(s))
+            {
+                found.push(r.symbol.clone());
+            }
+        }
+        if found.len() == before {
+            return found;
+        }
+    }
+}
+
+fn check_no_cycle(
+    def: &practices::PracticeDefinition,
+    own: &str,
+    input: &ResultInput,
+) -> Result<(), AppError> {
+    let symbol = input.symbol.trim();
+    let mut excluded = results_using(def, own);
+    excluded.push(symbol.to_string());
+    let Some(used) = computation::formula_symbols(input.formula.trim())
+        .into_iter()
+        .find(|s| excluded.contains(s))
+    else {
+        return Ok(());
+    };
+    Err(AppError::bad_request(if used == own || used == symbol {
+        "Un mensurando no puede usarse a sí mismo en su fórmula.".to_string()
+    } else {
+        format!("La fórmula usa \"{used}\", que depende de este mensurando: se formaría un ciclo.")
+    }))
+}
+
+fn existing_result_scope(def: &practices::PracticeDefinition, symbol: &str) -> Vec<String> {
+    let mut scope = if def.parts.is_empty() {
+        result_scope_in(def)
+    } else {
+        std::iter::once(def.shared_view())
+            .chain(def.parts.iter().map(|p| def.part_view(p)))
+            .filter(|v| v.results.iter().any(|r| r.symbol == symbol))
+            .map(|v| result_scope_in(&v))
+            .reduce(|mut all, here| {
+                all.retain(|s| here.contains(s));
+                all
+            })
+            .unwrap_or_else(|| result_scope(def))
+    };
+    let excluded = results_using(def, symbol);
+    scope.retain(|s| !excluded.contains(s));
+    scope
 }
 
 fn require_title(title: &str) -> Result<(), AppError> {
@@ -2820,7 +2887,77 @@ mod tests {
             accepted.sort();
             accepted.dedup();
             assert_eq!(offered, accepted, "{id}: mensurandos");
+            for r in &def.results {
+                let input = |formula: &str| ResultInput {
+                    display_symbol: None,
+                    compare_with: None,
+                    symbol: r.symbol.clone(),
+                    name: r.name.clone(),
+                    unit: r.unit.clone(),
+                    formula: formula.into(),
+                    tolerance: None,
+                    is_final: r.is_final,
+                    has_uncertainty: r.has_uncertainty,
+                };
+                let offered = &scopes.existing_results[&r.symbol];
+                for c in &candidates {
+                    let ok = validate_result(&def, &input(c)).is_ok()
+                        && check_no_cycle(&def, &r.symbol, &input(c)).is_ok();
+                    if offered.contains(c) {
+                        assert!(ok, "{id}: mensurando {} ofrece {c}", r.symbol);
+                    }
+                }
+                assert!(
+                    !offered.contains(&r.symbol),
+                    "{id}: {} se ofrece a sí mismo",
+                    r.symbol
+                );
+            }
         }
+    }
+
+    #[test]
+    fn a_result_cannot_use_itself_or_what_depends_on_it() {
+        let def = practices::PracticeDefinition {
+            quantities: vec![db::PracticeQuantity {
+                symbol: "L".into(),
+                ..Default::default()
+            }],
+            results: ["R:L", "S:R*2", "T:L+1"]
+                .into_iter()
+                .map(|spec| {
+                    let (symbol, formula) = spec.split_once(':').unwrap();
+                    db::PracticeResult {
+                        id: symbol.into(),
+                        symbol: symbol.into(),
+                        formula: formula.into(),
+                        ..Default::default()
+                    }
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let input = |formula: &str| ResultInput {
+            display_symbol: None,
+            compare_with: None,
+            symbol: "R".into(),
+            name: "R".into(),
+            unit: String::new(),
+            formula: formula.into(),
+            tolerance: None,
+            is_final: false,
+            has_uncertainty: true,
+        };
+        let own = check_no_cycle(&def, "R", &input("R+1")).unwrap_err();
+        assert!(own.message().contains("a sí mismo"), "{}", own.message());
+        let cycle = check_no_cycle(&def, "R", &input("S/2")).unwrap_err();
+        assert!(cycle.message().contains("\"S\""), "{}", cycle.message());
+        assert!(check_no_cycle(&def, "R", &input("T*L")).is_ok());
+        let scopes = formula_scopes(&def);
+        assert_eq!(
+            scopes.existing_results["R"],
+            vec!["L".to_string(), "T".to_string()]
+        );
     }
 
     #[test]
