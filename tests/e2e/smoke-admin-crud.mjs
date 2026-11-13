@@ -1,5 +1,5 @@
 
-import { TEACHER, assert, openAddForm, step, symbolText, withE2E } from "./lib.mjs";
+import { TEACHER, assert, openAddForm, step, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8157";
 const PRACTICE_ID = "fluidos-2";
@@ -62,9 +62,9 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
   await page.waitForSelector('#practice-workspace tr:has(code:text-is("crud_test_agg"))', { timeout: 10_000 });
 
   step("verifica que las tres entidades quedaron listadas");
-  const workspaceText = (await page.locator("#practice-workspace").textContent()) ?? "";
   for (const symbol of ["crud_test_qty", "crud_test_res", "crud_test_agg"]) {
-    assert(workspaceText.includes(symbolText(symbol)), `"${symbol}" debía aparecer en el workspace de la práctica`);
+    const rows = await page.locator(`#practice-workspace tr:has(td:first-child code:text-is("${symbol}"))`).count();
+    assert(rows === 1, `"${symbol}" debía aparecer en una fila de la ficha (aparece en ${rows})`);
   }
 
   step("docente: un mensurando con un símbolo inexistente se rechaza al guardar");

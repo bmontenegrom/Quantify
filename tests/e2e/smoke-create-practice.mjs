@@ -27,6 +27,12 @@ async function buildFormulaWithHelp(page, expected) {
   await chip("math::sqrt()").click();
   await page.keyboard.type("L");
   assert((await input.inputValue()) === "math::sqrt(L)", "la función debía dejar el cursor entre paréntesis");
+  await input.evaluate((el) => {
+    el.setSelectionRange(0, 0);
+    el.blur();
+  });
+  await chip("T").click();
+  assert((await input.inputValue()) === "math::sqrt(L)T", "sin foco en la fórmula, el botón debía agregar al final");
   await input.fill("4*");
   await chip("pi").click();
   await page.keyboard.type("^2*");
