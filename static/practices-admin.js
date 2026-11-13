@@ -10,6 +10,9 @@ import {
   analysisKindLabel,
   formatDate,
   compareOptionGroups,
+  QUANTITY_ROLES,
+  quantityRole,
+  roleFlags,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -898,12 +901,24 @@ function renderCurvesList(def, practiceId) {
   `;
 }
 
+function pointBasedPractice() {
+  return ["regresion_lineal", "curva"].includes(state.practiceDefinition?.analysis_kind);
+}
+
+function roleSelectHtml(qty) {
+  const pointBased = pointBasedPractice();
+  const current = qty ? quantityRole(qty, pointBased) : pointBased ? "serie" : "replicas";
+  const options = QUANTITY_ROLES.filter((r) => pointBased || !r.series).map((r) => [r.id, r.label]);
+  return selectFieldHtml("¿Cómo se ingresa?", "role", options, current);
+}
+
 function renderQuantityForm(qty, practiceId) {
   const v = (f) => qty ? escapeHtml(String(qty[f] ?? "")) : "";
   const formId = qty ? "edit-quantity-form" : "new-quantity-form";
   const formAttr = qty ? `data-edit-quantity-form data-qid="${escapeHtml(qty.id)}"` : "";
+  const kept = `data-per-point="${qty?.per_point === false ? 0 : 1}" data-repeated="${qty?.repeated ? 1 : 0}"`;
   return `
-    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
+    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr} ${kept}>
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="l" /></label>
@@ -911,24 +926,9 @@ function renderQuantityForm(qty, practiceId) {
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Longitud del cordón" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm (vacío = adimensional)" /></label>
       <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" /></label>
-      <label class="detail-form-checkbox">
-        <input type="checkbox" name="repeated" ${qty ? (qty.repeated ? "checked" : "") : "checked"} />
-        Admite réplicas (tipo A)
-      </label>
-      <label>Réplicas por punto (regresión/curva)
-        <input name="replicas_per_point" type="number" min="1" step="1" value="${v("replicas_per_point")}" placeholder="sin grilla" />
-      </label>
-      <label class="detail-form-checkbox">
-        <input type="checkbox" name="per_point" ${qty ? (qty.per_point ? "checked" : "") : "checked"} />
-        Se mide por punto (regresión/curva; desmarcá para escalar compartido)
-      </label>
-      <label class="detail-form-checkbox">
-        <input type="checkbox" name="is_given" ${qty?.is_given ? "checked" : ""} />
-        Dato dado (valor ± U cargado a mano, sin instrumento ni réplicas)
-      </label>
-      <label class="detail-form-checkbox">
-        <input type="checkbox" name="has_uncertainty" ${qty ? (qty.has_uncertainty ? "checked" : "") : "checked"} />
-        Tiene incertidumbre (solo aplica si es dato dado; desmarcá para pedir solo "Valor")
+      ${roleSelectHtml(qty)}
+      <label data-for-roles="serie_replicas">Réplicas por punto
+        <input name="replicas_per_point" type="number" min="1" step="1" value="${v("replicas_per_point")}" placeholder="cantidad" />
       </label>
       <label class="detail-form-checkbox">
         <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />
@@ -937,7 +937,7 @@ function renderQuantityForm(qty, practiceId) {
       <label>Valor inicial (precargado en el formulario del alumno)
         <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" />
       </label>
-      <label>Ranuras del instrumento (el valor es un entero de 1 a N, en la unidad de arriba)
+      <label data-for-roles="catedra constante">Ranuras del instrumento (el valor es un entero de 1 a N, en la unidad de arriba)
         <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" />
       </label>
       ${selectFieldHtml("Rótulo en el formulario", "label_mode", [
@@ -969,7 +969,7 @@ function renderQuantitiesList(def, practiceId) {
         <td>${inlineMathHtml(q.name)}</td>
         <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
-        <td>${q.repeated ? "Sí" : "No"}</td>
+        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedPractice())).short}</td>
         <td>${sectionSelectHtml(def, "quantities", q)}</td>
         <td class="directory-actions">
           ${moveButtonsHtml("quantities", q.id, i, quantities.length)}
@@ -987,7 +987,7 @@ function renderQuantitiesList(def, practiceId) {
     <div class="data-table-wrap">
       <table class="data-table">
         <thead>
-          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Magnitud</th><th>Réplicas</th><th>Sección</th><th>Acciones</th></tr>
+          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Magnitud</th><th>Cómo se ingresa</th><th>Sección</th><th>Acciones</th></tr>
         </thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -1154,16 +1154,24 @@ async function savePracticeRegressionFormulas(event) {
 
 function syncQuantityForm(form) {
   const { elements } = form;
+  const role = elements.role.value;
+  const given = roleFlags(role, pointBasedPractice()).is_given;
   const option = elements.input_widget.querySelector('option[value="cronometro"]');
-  option.disabled = elements.quantity.value !== "tiempo" || elements.is_given.checked;
+  option.disabled = elements.quantity.value !== "tiempo" || given;
   if (option.disabled && option.selected) elements.input_widget.value = "teclado";
-  elements.replicas_per_point.disabled = !elements.per_point.checked;
-  elements.slot_count.disabled = !elements.is_given.checked;
+  form.querySelectorAll("[data-for-roles]").forEach((label) => {
+    const applies = label.dataset.forRoles.split(" ").includes(role);
+    label.hidden = !applies;
+    label.querySelector("input").disabled = !applies;
+  });
 }
 
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
-  const repeated = "repeated" in raw;
+  const flags = roleFlags(raw.role, pointBasedPractice(), {
+    per_point: form.dataset.perPoint === "1",
+    repeated: form.dataset.repeated === "1",
+  });
   const replicas = Number(raw.replicas_per_point);
   const slots = raw.slot_count ? Number(raw.slot_count) : null;
   if (slots != null && !Number.isInteger(slots)) {
@@ -1174,11 +1182,8 @@ function quantityPayloadFromForm(form) {
     name: raw.name,
     unit: raw.unit,
     quantity: raw.quantity || null,
-    repeated,
-    replicas_per_point: repeated && raw.replicas_per_point && replicas > 0 ? replicas : null,
-    per_point: "per_point" in raw,
-    is_given: "is_given" in raw,
-    has_uncertainty: "has_uncertainty" in raw,
+    ...flags,
+    replicas_per_point: raw.replicas_per_point && replicas > 0 ? replicas : null,
     optional: "optional" in raw,
     slot_count: slots,
     display_symbol: raw.display_symbol,

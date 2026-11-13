@@ -22,7 +22,14 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
   await openAddForm(page, "#new-quantity-form");
 
   step("docente: crea una magnitud nueva (escalar compartido: un mensurando de regresión solo ve esos)");
-  await page.locator('#new-quantity-form [name="per_point"]').uncheck();
+  const role = page.locator('#new-quantity-form [name="role"]');
+  assert((await role.inputValue()) === "serie", "en una práctica de regresión una magnitud nueva nace como serie");
+  await role.selectOption("serie_replicas");
+  assert(
+    await page.locator('#new-quantity-form [name="replicas_per_point"]').isVisible(),
+    "una serie con réplicas pide cuántas por punto",
+  );
+  await role.selectOption("replicas");
   await fillAndSubmit(page, "#new-quantity-form", {
     symbol: "crud_test_qty",
     name: "Magnitud de prueba CRUD",

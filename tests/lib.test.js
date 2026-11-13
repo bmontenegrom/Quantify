@@ -40,6 +40,9 @@ import {
   histogram,
   normalCurve,
   validateMeasurements,
+  QUANTITY_ROLES,
+  quantityRole,
+  roleFlags,
 } from "../static/lib.js";
 
 function academicFixture() {
@@ -811,4 +814,33 @@ test("compareOptionGroups usa las opciones del servidor y no pierde la comparaci
     [[null, ["R1", "VR1_p"]]],
     "en un mensurando nuevo una elección fuera de alcance no se presenta como guardada",
   );
+});
+
+test("quantityRole y roleFlags: cada rol vuelve a sí mismo", () => {
+  for (const pointBased of [true, false]) {
+    for (const { id, series } of QUANTITY_ROLES) {
+      if (series && !pointBased) continue;
+      assert.equal(quantityRole(roleFlags(id, pointBased), pointBased), id, `${id} (serie: ${pointBased})`);
+    }
+  }
+});
+
+test("quantityRole: en una práctica estadística per_point no cuenta", () => {
+  const q = { is_given: false, per_point: true, repeated: true, has_uncertainty: true };
+  assert.equal(quantityRole(q, false), "replicas");
+  assert.equal(quantityRole(q, true), "serie_replicas");
+  assert.equal(quantityRole({ is_given: true, has_uncertainty: false }, true), "constante");
+});
+
+test("roleFlags: conserva lo que el rol no decide", () => {
+  assert.equal(roleFlags("unica", false, { per_point: true }).per_point, true);
+  assert.equal(roleFlags("unica", false, { per_point: false }).per_point, false);
+  assert.equal(roleFlags("unica", true, { per_point: true }).per_point, false);
+  assert.equal(roleFlags("catedra", true, { repeated: true }).repeated, true);
+  assert.deepEqual(roleFlags("serie_replicas", true), {
+    is_given: false,
+    has_uncertainty: true,
+    repeated: true,
+    per_point: true,
+  });
 });
