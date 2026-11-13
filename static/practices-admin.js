@@ -901,12 +901,24 @@ function renderCurvesList(def, practiceId) {
   `;
 }
 
-function pointBasedPractice() {
-  return ["regresion_lineal", "curva"].includes(state.practiceDefinition?.analysis_kind);
+const POINT_KINDS = ["regresion_lineal", "curva"];
+
+function seriesPractice() {
+  return POINT_KINDS.includes(state.practiceDefinition?.analysis_kind);
+}
+
+function pointBasedFor(qty) {
+  const def = state.practiceDefinition;
+  if (!seriesPractice()) return false;
+  if (!def.parts?.length || !qty) return true;
+  const section = def.sections?.find((sec) => sec.quantities?.includes(qty.symbol));
+  if (!section) return true;
+  const part = def.parts.find((p) => p.id === section.part_id);
+  return POINT_KINDS.includes(part?.effective_kind);
 }
 
 function roleSelectHtml(qty) {
-  const pointBased = pointBasedPractice();
+  const pointBased = pointBasedFor(qty);
   const current = qty ? quantityRole(qty, pointBased) : pointBased ? "serie" : "replicas";
   const options = QUANTITY_ROLES.filter((r) => pointBased || !r.series).map((r) => [r.id, r.label]);
   return selectFieldHtml("¿Cómo se ingresa?", "role", options, current).replace("<label>", '<label class="wide-field">');
@@ -969,7 +981,7 @@ function renderQuantitiesList(def, practiceId) {
         <td>${inlineMathHtml(q.name)}</td>
         <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
-        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedPractice())).short}</td>
+        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedFor(q))).short}</td>
         <td>${sectionSelectHtml(def, "quantities", q)}</td>
         <td class="directory-actions">
           ${moveButtonsHtml("quantities", q.id, i, quantities.length)}
@@ -1155,7 +1167,7 @@ async function savePracticeRegressionFormulas(event) {
 function syncQuantityForm(form) {
   const { elements } = form;
   const role = elements.role.value;
-  const given = roleFlags(role, pointBasedPractice()).is_given;
+  const given = roleFlags(role, seriesPractice()).is_given;
   const option = elements.input_widget.querySelector('option[value="cronometro"]');
   option.disabled = elements.quantity.value !== "tiempo" || given;
   if (option.disabled && option.selected) elements.input_widget.value = "teclado";
@@ -1168,7 +1180,7 @@ function syncQuantityForm(form) {
 
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
-  const flags = roleFlags(raw.role, pointBasedPractice(), {
+  const flags = roleFlags(raw.role, seriesPractice(), {
     per_point: form.dataset.perPoint === "1",
     repeated: form.dataset.repeated === "1",
   });
