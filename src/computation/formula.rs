@@ -4,8 +4,32 @@ use std::collections::HashMap;
 pub(crate) const CONSTANTS: [(&str, f64); 2] =
     [("pi", std::f64::consts::PI), ("e", std::f64::consts::E)];
 
+fn float_literals(formula: &str) -> String {
+    let chars: Vec<char> = formula.chars().collect();
+    let mut out = String::with_capacity(formula.len() + 8);
+    let mut i = 0;
+    while i < chars.len() {
+        let starts_number = chars[i].is_ascii_digit()
+            && (i == 0 || !(chars[i - 1].is_alphanumeric() || matches!(chars[i - 1], '_' | '.')));
+        if !starts_number {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            out.push(chars[i]);
+            i += 1;
+        }
+        let next = chars.get(i).copied();
+        if !next.is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.')) {
+            out.push_str(".0");
+        }
+    }
+    out
+}
+
 pub(crate) fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Result<Node> {
-    let tree = build_operator_tree(formula)
+    let tree = build_operator_tree(&float_literals(formula))
         .map_err(|err| anyhow::anyhow!("la formula \"{formula}\" no es valida: {err}"))?;
     if let Some(name) = tree
         .iter_function_identifiers()
@@ -84,9 +108,18 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
 /// assert!(err.contains("\"g\""));
 /// let err = check_formula("math::foo(L)", &allowed).unwrap_err().to_string();
 /// assert!(err.contains("\"math::foo\""));
+/// let err = check_formula("math::pow(L)", &allowed).unwrap_err().to_string();
+/// assert!(err.contains("cantidad de argumentos"));
 /// ```
 pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
-    compile_formula(formula, allowed).map(|_| ())
+    let tree = compile_formula(formula, allowed)?;
+    let ones: HashMap<&str, f64> = allowed.iter().map(|s| (s.as_str(), 1.0)).collect();
+    if evaluate(&tree, &ones).is_err() {
+        anyhow::bail!(
+            "la fórmula \"{formula}\" no se puede calcular: revisá que cada función tenga la cantidad de argumentos que pide"
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn formula_symbols(formula: &str) -> Vec<String> {
@@ -95,24 +128,25 @@ pub(crate) fn formula_symbols(formula: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(crate) fn eval_compiled(tree: &Node, values: &HashMap<&str, f64>) -> f64 {
+fn evaluate(tree: &Node, values: &HashMap<&str, f64>) -> Result<f64, ()> {
     let mut context = HashMapContext::new();
     for (name, value) in CONSTANTS {
         let _ = context.set_value(name.to_string(), Value::Float(value));
     }
     for (symbol, value) in values {
-        if context
+        context
             .set_value((*symbol).to_string(), Value::Float(*value))
-            .is_err()
-        {
-            return f64::NAN;
-        }
+            .map_err(|_| ())?;
     }
     match tree.eval_with_context(&context) {
-        Ok(Value::Float(value)) => value,
-        Ok(Value::Int(value)) => value as f64,
-        _ => f64::NAN,
+        Ok(Value::Float(value)) => Ok(value),
+        Ok(Value::Int(value)) => Ok(value as f64),
+        _ => Err(()),
     }
+}
+
+pub(crate) fn eval_compiled(tree: &Node, values: &HashMap<&str, f64>) -> f64 {
+    evaluate(tree, values).unwrap_or(f64::NAN)
 }
 
 pub(crate) fn chain_order(uses: &[Vec<usize>]) -> (Vec<usize>, Vec<usize>) {

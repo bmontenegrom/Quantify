@@ -317,6 +317,20 @@ fn an_integer_result_counts_as_a_number() {
 }
 
 #[test]
+fn integer_literals_divide_as_decimals() {
+    let symbols = vec!["L".to_string(), "T1".to_string()];
+    let eval = |formula: &str| {
+        let tree = compile_formula(formula, &symbols).unwrap();
+        eval_compiled(&tree, &HashMap::from([("L", 4.0), ("T1", 3.0)]))
+    };
+    assert_eq!(eval("1/2"), 0.5);
+    assert_eq!(eval("math::pow(L, 1/2)"), 2.0);
+    assert_eq!(eval("T1/2"), 1.5);
+    assert_eq!(eval("2.5*2"), 5.0);
+    assert!((eval("math::log10(100)") - 2.0).abs() < 1e-12);
+}
+
+#[test]
 fn compute_propagates_q_l_a_b() {
     let quantities = vec![quantity("l"), quantity("a"), quantity("b")];
     let results = vec![PracticeResult {
