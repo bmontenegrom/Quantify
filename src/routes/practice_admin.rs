@@ -1761,7 +1761,6 @@ pub(super) async fn create_result(
         None,
     )
     .await?;
-    check_no_cycle(&def, input.symbol.trim(), &input)?;
     let after = with_new_result(&def, &input, section_id.as_deref());
     guard_change(&def, &after, "guardar el mensurando")?;
     Ok(Json(
