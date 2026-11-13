@@ -435,7 +435,10 @@ export function compareOptionGroups(definition, { result = null, section = null 
 export function formulaScope(definition, kind, { id = "", section = null } = {}) {
   const scopes = definition?.formula_scopes;
   if (!scopes) return (definition?.quantities ?? []).map((q) => q.symbol);
-  if (kind === "result") return scopes.part_results?.[section?.part_id] ?? scopes.results;
+  if (kind === "result") {
+    if (section) return scopes.part_results?.[section.part_id] ?? scopes.results;
+    return [...new Set([scopes.results, ...Object.values(scopes.part_results ?? {})].flat())];
+  }
   if (kind === "point_result") return scopes.point_results;
   if (kind === "axis") return scopes.axes;
   const byId = scopes[`${kind}s`] ?? {};

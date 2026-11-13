@@ -18,6 +18,26 @@ async function fillAndSubmit(page, formSelector, fields, checks = {}) {
   await form.locator('button[type="submit"]').click();
 }
 
+async function buildFormulaWithHelp(page, expected) {
+  const form = page.locator("#new-result-form");
+  const input = form.locator('[name="formula"]');
+  const chip = (text) => form.locator(`.formula-help [data-insert="${text}"]`);
+  await form.locator(".formula-help summary").click();
+  await input.fill("");
+  await chip("math::sqrt()").click();
+  await page.keyboard.type("L");
+  assert((await input.inputValue()) === "math::sqrt(L)", "la función debía dejar el cursor entre paréntesis");
+  await input.fill("4*");
+  await chip("pi").click();
+  await page.keyboard.type("^2*");
+  await chip("L").click();
+  await page.keyboard.type("/");
+  await chip("T").click();
+  await page.keyboard.type("^2");
+  const value = await input.inputValue();
+  assert(value === expected, `la fórmula armada con la ayuda debía ser ${expected} (quedó ${value})`);
+}
+
 async function assignSection(page, list, symbol, label) {
   const select = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="${list}"]`);
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -136,10 +156,11 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   ]) {
     await openAddForm(page, "#new-result-form");
     await page.locator('#new-result-form [name="section_id"]').selectOption({ label: section });
+    if (symbol === "g") await buildFormulaWithHelp(page, formula);
     await fillAndSubmit(
       page,
       "#new-result-form",
-      { symbol, name, unit: symbol === "g" ? "m/s2" : "m", formula },
+      symbol === "g" ? { symbol, name, unit: "m/s2" } : { symbol, name, unit: "m", formula },
       { is_final: true },
     );
     await waitForStatus(page, "Mensurando agregado");

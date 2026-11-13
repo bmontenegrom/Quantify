@@ -10,6 +10,9 @@ import {
   analysisKindLabel,
   formatDate,
   compareOptionGroups,
+  formulaScope,
+  formulaHelpHtml,
+  formatSymbolHtml,
   QUANTITY_ROLES,
   quantityRole,
   roleFlags,
@@ -25,8 +28,44 @@ function adminSymbolHtml(symbol) {
 function displaySymbolFieldHtml(item) {
   const symbols = state.practiceDefinition?.display_symbols ?? {};
   const shown = item && Object.hasOwn(symbols, item.symbol) ? symbols[item.symbol] : "";
-  return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label>`;
+  const preview = formatSymbolHtml(shown || item?.symbol || "");
+  return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /><span class="symbol-preview" aria-live="polite">${preview}</span></label>`;
 }
+
+function formulaFieldHtml(label, input, symbols) {
+  const functions = state.practiceDefinition?.formula_scopes?.functions ?? [];
+  return `<div class="formula-field wide-field"><label>${label} ${input}</label>${formulaHelpHtml(symbols, functions)}</div>`;
+}
+
+function insertIntoFormula(button) {
+  const input = button.closest(".formula-field")?.querySelector("input");
+  if (!input) return;
+  const text = button.dataset.insert;
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  input.setRangeText(text, start, end, "end");
+  if (text.endsWith("()")) input.setSelectionRange(input.selectionEnd - 1, input.selectionEnd - 1);
+  input.focus();
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function refreshSymbolPreview(input) {
+  const preview = input.closest("label")?.querySelector(".symbol-preview");
+  if (!preview) return;
+  preview.innerHTML = formatSymbolHtml(input.value.trim() || input.form?.elements.symbol?.value.trim() || "");
+}
+
+practiceWorkspace.addEventListener("click", (e) => {
+  const button = e.target.closest("[data-insert]");
+  if (button) insertIntoFormula(button);
+});
+practiceWorkspace.addEventListener("input", (e) => {
+  if (e.target.name === "display_symbol") refreshSymbolPreview(e.target);
+  if (e.target.name === "symbol") {
+    const field = e.target.form?.elements.display_symbol;
+    if (field) refreshSymbolPreview(field);
+  }
+});
 
 function selectFieldHtml(label, name, options, current) {
   const items = options
@@ -109,7 +148,7 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       ${displaySymbolFieldHtml(item)}
       <label>Nombre <input name="name" value="${v("name")}" placeholder="${kind.namePlaceholder}" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
-      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" /></label>
+      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" />`, formulaScope(state.practiceDefinition, kind.dataAttr.replace("-", "_"), { id: item?.id ?? "" }))}
       ${
         (kind.flags ?? [])
           .map((f) => `<label class="checkbox-field"><input name="${f.field}" type="checkbox" ${item?.[f.field] ? "checked" : ""} /> ${f.label}</label>`)
@@ -348,6 +387,10 @@ export function renderPracticesPage() {
     const section = def?.sections?.find((s) => s.id === e.target.value) ?? null;
     const select = e.target.form.elements.compare_with;
     select.innerHTML = compareOptionsHtml(compareOptionGroups(def, { section }, select.value), select.value);
+    const help = e.target.form.querySelector(".formula-help");
+    const open = help.open;
+    help.outerHTML = formulaHelpHtml(formulaScope(def, "result", { section }), def?.formula_scopes?.functions ?? []);
+    e.target.form.querySelector(".formula-help").open = open;
   });
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
 
@@ -755,9 +798,9 @@ function renderRegressionFormulasForm(practice, def) {
   return `
     <form id="practice-regression-form" class="detail-form detail-form-grid">
       <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
-      <label>Fórmula eje X <input name="x_formula" value="${x}" placeholder="2*pi*f" /></label>
-      <label>Fórmula eje Y <input name="y_formula" value="${y}" placeholder="b / math::sqrt(a*a - b*b)" /></label>
-      <p class="submission-meta">Usá los símbolos de las magnitudes. Disponibles: <code>pi</code>, <code>e</code> y funciones <code>math::*</code> (p. ej. <code>math::sqrt</code>). La pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code> en los mensurandos.</p>
+      ${formulaFieldHtml("Fórmula eje X", `<input name="x_formula" value="${x}" placeholder="2*pi*f" />`, formulaScope(def, "axis"))}
+      ${formulaFieldHtml("Fórmula eje Y", `<input name="y_formula" value="${y}" placeholder="b / math::sqrt(a*a - b*b)" />`, formulaScope(def, "axis"))}
+      <p class="submission-meta">En los mensurandos, la pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code>.</p>
       <div class="detail-actions">
         <button type="submit">Guardar fórmulas</button>
       </div>
@@ -852,8 +895,8 @@ function renderCurveForm(curve, practiceId) {
     <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${curve ? `<input name="cid" type="hidden" value="${escapeHtml(curve.id)}" />` : ""}
-      <label>Fórmula eje X <input name="x_formula" value="${x}" required placeholder="math::log10(2*pi*f)" /></label>
-      <label>Fórmula eje Y <input name="y_formula" value="${y}" required placeholder="VR / Vg" /></label>
+      ${formulaFieldHtml("Fórmula eje X", `<input name="x_formula" value="${x}" required placeholder="math::log10(2*pi*f)" />`, formulaScope(state.practiceDefinition, "axis"))}
+      ${formulaFieldHtml("Fórmula eje Y", `<input name="y_formula" value="${y}" required placeholder="VR / Vg" />`, formulaScope(state.practiceDefinition, "axis"))}
       <label class="detail-form-checkbox">
         <input type="checkbox" name="x_log" ${curve?.x_log ? "checked" : ""} />
         Eje X logarítmico (barridos en frecuencia)
@@ -1039,8 +1082,8 @@ function renderResultForm(res, practiceId, def = null) {
       ${displaySymbolFieldHtml(res)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
-      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" /></label>
-      <p class="submission-meta">Podés usar magnitudes y otros mensurandos (p. ej. <code>I_teo*R</code>); la incertidumbre se propaga desde las magnitudes.</p>
+      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" />`, formulaScope(def, "result", { section: res ? (def?.sections ?? []).find((sec) => (sec.results ?? []).includes(res.symbol)) : null }))}
+      <p class="submission-meta">La incertidumbre se propaga desde las magnitudes.</p>
       ${res ? "" : newResultSectionHtml(def)}
       <label>Tolerancia (%)
         <input name="tolerance" type="number" min="0" step="any"
