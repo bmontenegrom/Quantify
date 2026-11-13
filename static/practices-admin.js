@@ -587,18 +587,17 @@ function problemItemHtml({ message }, k) {
 }
 
 function goToProblem({ kind, id }) {
+  const parts = '[data-add-panel="part"]';
+  let target = { axes: "#practice-regression-form", layout: parts }[kind] ?? `[data-add-panel="${kind}"]`;
   if (id && EDITABLE_KINDS.has(kind)) {
     state.editing = { kind, id };
     renderPracticesPage();
-    practiceWorkspace.querySelector(".scale-edit-cell")?.scrollIntoView({ block: "center" });
-    return;
+    const cell = practiceWorkspace.querySelector(".scale-edit-cell");
+    if (cell) return cell.scrollIntoView({ block: "center" });
+    target = parts;
   }
-  const target = {
-    axes: "#practice-regression-form",
-    layout: '[data-add-panel="part"]',
-  }[kind] ?? `[data-add-panel="${kind}"]`;
-  const el = practiceWorkspace.querySelector(target);
-  if (el?.tagName === "DETAILS") el.open = true;
+  const el = practiceWorkspace.querySelector(target) ?? practiceWorkspace.querySelector(parts);
+  if (el?.tagName === "DETAILS" && el.matches(`[data-add-panel="${kind}"]`)) el.open = true;
   (el?.closest("section") ?? el)?.scrollIntoView({ block: "start" });
 }
 
