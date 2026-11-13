@@ -39,11 +39,7 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
     name: "Magnitud de prueba CRUD",
     unit: "m",
   });
-  await page.waitForFunction(
-    (text) => document.querySelector("#practice-workspace")?.textContent?.includes(text),
-    symbolText("crud_test_qty"),
-    { timeout: 10_000 },
-  );
+  await page.waitForSelector('#practice-workspace tr:has(code:text-is("crud_test_qty"))', { timeout: 10_000 });
 
   step("docente: crea un mensurando nuevo (usa la magnitud recién creada en la fórmula)");
   await openAddForm(page, "#new-result-form");
@@ -53,11 +49,7 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
     unit: "m",
     formula: "crud_test_qty",
   });
-  await page.waitForFunction(
-    (text) => document.querySelector("#practice-workspace")?.textContent?.includes(text),
-    symbolText("crud_test_res"),
-    { timeout: 10_000 },
-  );
+  await page.waitForSelector('#practice-workspace tr:has(code:text-is("crud_test_res"))', { timeout: 10_000 });
 
   step("docente: crea un agregado nuevo (referencia el mensurando recién creado)");
   await openAddForm(page, "#new-aggregate-form");
@@ -67,11 +59,7 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
     unit: "m",
     formula: "crud_test_res",
   });
-  await page.waitForFunction(
-    (text) => document.querySelector("#practice-workspace")?.textContent?.includes(text),
-    symbolText("crud_test_agg"),
-    { timeout: 10_000 },
-  );
+  await page.waitForSelector('#practice-workspace tr:has(code:text-is("crud_test_agg"))', { timeout: 10_000 });
 
   step("verifica que las tres entidades quedaron listadas");
   const workspaceText = (await page.locator("#practice-workspace").textContent()) ?? "";
