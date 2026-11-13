@@ -531,6 +531,7 @@ export function wireRemoveReplica(row) {
     btn.onclick = () => {
       if (row.querySelectorAll(".replica").length <= 1) return;
       btn.closest(".replica").remove();
+      row.dispatchEvent(new Event("input", { bubbles: true }));
     };
   });
   if (replicas.length === 1) {
