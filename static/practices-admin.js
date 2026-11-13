@@ -928,7 +928,7 @@ function renderQuantityForm(qty, practiceId) {
   const v = (f) => qty ? escapeHtml(String(qty[f] ?? "")) : "";
   const formId = qty ? "edit-quantity-form" : "new-quantity-form";
   const formAttr = qty ? `data-edit-quantity-form data-qid="${escapeHtml(qty.id)}"` : "";
-  const kept = `data-per-point="${qty?.per_point === false ? 0 : 1}" data-repeated="${qty?.repeated ? 1 : 0}"`;
+  const kept = `data-per-point="${qty?.per_point === false ? 0 : 1}" data-repeated="${qty?.repeated ? 1 : 0}" data-given="${qty?.is_given ? 1 : 0}" data-replicas="${qty?.replicas_per_point ?? ""}"`;
   return `
     <form id="${formId}" class="detail-form detail-form-grid" ${formAttr} ${kept}>
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
@@ -1183,6 +1183,8 @@ function quantityPayloadFromForm(form) {
   const flags = roleFlags(raw.role, seriesPractice(), {
     per_point: form.dataset.perPoint === "1",
     repeated: form.dataset.repeated === "1",
+    is_given: form.dataset.given === "1",
+    replicas_per_point: Number(form.dataset.replicas) || null,
   });
   const replicas = Number(raw.replicas_per_point);
   const slots = raw.slot_count ? Number(raw.slot_count) : null;

@@ -839,7 +839,10 @@ test("roleFlags: conserva lo que el rol no decide", () => {
   assert.equal(roleFlags("unica", false, { per_point: false }).per_point, false);
   assert.equal(roleFlags("unica", true, { per_point: true }).per_point, false);
   assert.equal(roleFlags("catedra", true, { repeated: true }).repeated, true);
-  assert.equal(roleFlags("serie", true, { repeated: true }).repeated, true, "una serie de P3 conserva su repeated");
+  assert.equal(roleFlags("serie", true, { per_point: true, repeated: true }).repeated, true, "una serie de P3 conserva su repeated");
+  assert.equal(roleFlags("serie", true, { per_point: false, repeated: true }).repeated, false, "de réplicas a serie");
+  const conReplicas = { per_point: true, repeated: true, replicas_per_point: 3 };
+  assert.equal(roleFlags("serie", true, conReplicas).repeated, false, "de serie con réplicas a serie");
   assert.deepEqual(roleFlags("serie_replicas", true), {
     is_given: false,
     has_uncertainty: true,

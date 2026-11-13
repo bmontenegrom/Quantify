@@ -340,10 +340,11 @@ export function quantityRole(quantity, pointBased) {
 export function roleFlags(role, pointBased, current = {}) {
   const given = role === "catedra" || role === "constante";
   const series = role === "serie" || role === "serie_replicas";
+  const wasSerie = !current.is_given && current.per_point && !(current.replicas_per_point > 0);
   return {
     is_given: given,
     has_uncertainty: role !== "constante",
-    repeated: given || role === "serie" ? Boolean(current.repeated) : role === "replicas" || role === "serie_replicas",
+    repeated: given || (role === "serie" && wasSerie) ? Boolean(current.repeated) : role === "replicas" || role === "serie_replicas",
     per_point: series || (!pointBased && (current.per_point ?? true)),
   };
 }
