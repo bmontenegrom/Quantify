@@ -1855,12 +1855,12 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     }
     if input.slot_count.is_some() && !input.is_given {
         return Err(AppError::bad_request(
-            "Las ranuras solo aplican a un dato dado (marca \"Dato dado\" o deja las ranuras vacias).",
+            "Las ranuras solo aplican a un dato de cátedra (elegí ese rol o dejá las ranuras vacías).",
         ));
     }
     if input.replicas_per_point.is_some_and(|n| n > 0) && !input.per_point {
         return Err(AppError::bad_request(
-            "Las réplicas por punto solo aplican a una magnitud por punto (marcá \"Se mide por \
+            "Las réplicas por punto solo aplican a una serie (elegí \"Serie con réplicas por \
              punto\" o dejá las réplicas vacías).",
         ));
     }
