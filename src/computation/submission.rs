@@ -23,11 +23,25 @@ pub struct FormSubmissionInput {
     pub practice_version: Option<i64>,
 }
 
+fn series_quantity_ids(
+    definition: &crate::practices::PracticeDefinition,
+) -> std::collections::HashSet<String> {
+    if !crate::practices::is_point_based(definition.analysis_kind.as_deref()) {
+        return Default::default();
+    }
+    definition
+        .quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .map(|q| q.id.clone())
+        .collect()
+}
+
 async fn insert_measurements(
     conn: &mut sqlx::SqliteConnection,
     submission_id: &str,
     measurements: &[MeasurementInput],
-    point_based: bool,
+    series: &std::collections::HashSet<String>,
 ) -> anyhow::Result<()> {
     for measurement in measurements {
         let rows: Vec<(i64, i64, i64, f64, Option<f64>)> =
@@ -57,7 +71,7 @@ async fn insert_measurements(
                     .first()
                     .map(|&v| vec![(0i64, 0i64, 0i64, v, measurement.given_u)])
                     .unwrap_or_default()
-            } else if point_based {
+            } else if series.contains(&measurement.quantity_id) {
                 measurement
                     .values
                     .iter()
@@ -152,7 +166,7 @@ pub async fn create_form_submission(
     validate_student_results(&definition, &input.student_results)?;
 
     let analysis = analyze_definition(pool, &definition, &input.measurements).await?;
-    let point_based = crate::practices::is_point_based(definition.analysis_kind.as_deref());
+    let series = series_quantity_ids(&definition);
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match &input.meta {
         Some(value) => Some(serde_json::to_string(value)?),
@@ -251,7 +265,7 @@ pub async fn create_form_submission(
     .execute(&mut *tx)
     .await?;
 
-    insert_measurements(&mut tx, &id, &input.measurements, point_based).await?;
+    insert_measurements(&mut tx, &id, &input.measurements, &series).await?;
     tx.commit().await?;
 
     if !input.student_results.is_empty() {
@@ -353,7 +367,7 @@ pub async fn update_form_submission(
     }
 
     let analysis = analyze_definition(pool, &definition, measurements).await?;
-    let point_based = crate::practices::is_point_based(definition.analysis_kind.as_deref());
+    let series = series_quantity_ids(&definition);
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match meta {
         Some(value) => Some(serde_json::to_string(value)?),
@@ -376,7 +390,7 @@ pub async fn update_form_submission(
         .execute(&mut *tx)
         .await?;
 
-    insert_measurements(&mut tx, submission_id, measurements, point_based).await?;
+    insert_measurements(&mut tx, submission_id, measurements, &series).await?;
     tx.commit().await?;
 
     if let Some(results) = student_results {
