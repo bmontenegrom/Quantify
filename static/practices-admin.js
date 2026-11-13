@@ -912,7 +912,7 @@ function pointBasedFor(qty) {
   if (!seriesPractice()) return false;
   if (!def.parts?.length || !qty) return true;
   const section = def.sections?.find((sec) => sec.quantities?.includes(qty.symbol));
-  if (!section) return true;
+  if (!section?.part_id) return true;
   const part = def.parts.find((p) => p.id === section.part_id);
   return POINT_KINDS.includes(part?.effective_kind);
 }
