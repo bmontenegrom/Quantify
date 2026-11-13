@@ -580,6 +580,7 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions, v
 
 const EDITABLE_KINDS = new Set(["quantity", "result", "curve", "intermediate", "pointResult", "aggregate"]);
 let problemsRequest = 0;
+let lastProblems = null;
 
 function problemItemHtml({ message }, k) {
   return `<li><button type="button" class="link-button" data-problem="${k}">${escapeHtml(message)}</button></li>`;
@@ -604,27 +605,33 @@ function goToProblem({ kind, id }) {
 async function renderProblems(practiceId) {
   const box = practiceWorkspace.querySelector("#practice-problems");
   if (!box) return;
+  if (lastProblems?.practiceId === practiceId) paintProblems(box, lastProblems.problems);
   const request = ++problemsRequest;
   try {
     const problems = await fetchJson(`/api/practices/${practiceId}/problems`);
     if (request !== problemsRequest) return;
-    if (!problems.length) {
-      box.innerHTML = `<p class="submission-meta practice-problems-ok">Sin problemas: la definición está completa.</p>`;
-      return;
-    }
-    box.innerHTML = `
-      <div class="edit-banner practice-problems" role="status">
-        <div>
-          <strong>Para publicar falta resolver (${problems.length})</strong>
-          <ul>${problems.map(problemItemHtml).join("")}</ul>
-        </div>
-      </div>`;
-    box.querySelectorAll("[data-problem]").forEach((btn) => {
-      btn.addEventListener("click", () => goToProblem(problems[Number(btn.dataset.problem)]));
-    });
+    lastProblems = { practiceId, problems };
+    paintProblems(box, problems);
   } catch (error) {
     if (request === problemsRequest) box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
   }
+}
+
+function paintProblems(box, problems) {
+  if (!problems.length) {
+    box.innerHTML = `<p class="submission-meta practice-problems-ok">Sin problemas: la definición está completa.</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="edit-banner practice-problems" role="status">
+      <div>
+        <strong>Para publicar falta resolver (${problems.length})</strong>
+        <ul>${problems.map(problemItemHtml).join("")}</ul>
+      </div>
+    </div>`;
+  box.querySelectorAll("[data-problem]").forEach((btn) => {
+    btn.addEventListener("click", () => goToProblem(problems[Number(btn.dataset.problem)]));
+  });
 }
 
 let lastDraftChanges = null;
@@ -1154,6 +1161,7 @@ function syncStopwatchOption(form) {
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
   const repeated = "repeated" in raw;
+  const perPoint = "per_point" in raw;
   const replicas = Number(raw.replicas_per_point);
   const slots = raw.slot_count ? Number(raw.slot_count) : null;
   if (slots != null && !Number.isInteger(slots)) {
@@ -1165,8 +1173,8 @@ function quantityPayloadFromForm(form) {
     unit: raw.unit,
     quantity: raw.quantity || null,
     repeated,
-    replicas_per_point: repeated && raw.replicas_per_point && replicas > 0 ? replicas : null,
-    per_point: "per_point" in raw,
+    replicas_per_point: repeated && perPoint && raw.replicas_per_point && replicas > 0 ? replicas : null,
+    per_point: perPoint,
     is_given: "is_given" in raw,
     has_uncertainty: "has_uncertainty" in raw,
     optional: "optional" in raw,

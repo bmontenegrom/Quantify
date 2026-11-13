@@ -119,6 +119,7 @@ pub(super) struct Problem {
 }
 
 struct ElementProblem {
+    check: &'static str,
     element: String,
     message: String,
     kind: &'static str,
@@ -965,6 +966,11 @@ pub(super) async fn delete_point_result(
     let before = load_definition(&state, &id).await?;
     let mut after = before.clone();
     after.point_results.retain(|x| x.id != pid);
+    if after.point_results.len() == before.point_results.len() {
+        return Err(AppError::not_found(
+            "magnitud derivada por punto no encontrada",
+        ));
+    }
     guard_change(&before, &after, "eliminar la magnitud derivada por punto")?;
     if !practices::delete_point_result(&state.pool, &id, &pid).await? {
         return Err(AppError::not_found(
@@ -1159,6 +1165,7 @@ fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     blocked
         .into_iter()
         .map(|i| ElementProblem {
+            check: "el mensurando",
             element: format!("el mensurando {}", def.results[i].symbol),
             message: "se usa a sí mismo a través de otros mensurandos (forma un ciclo, o depende de uno que lo forma)"
                 .to_string(),
@@ -1180,6 +1187,7 @@ fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem>
                 return None;
             };
             Some(ElementProblem {
+                check: "la magnitud",
                 element: format!("la magnitud {}", q.symbol),
                 message: message.to_string(),
                 kind: "quantity",
@@ -1189,6 +1197,7 @@ fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem>
         .collect()
 }
 
+#[cfg(test)]
 fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)> {
     element_problems(def)
         .into_iter()
@@ -1233,13 +1242,14 @@ fn element_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> 
 
 fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     let mut problems = Vec::new();
-    let mut note = |what: &str,
+    let mut note = |what: &'static str,
                     symbol: &str,
                     kind: &'static str,
                     id: Option<&str>,
                     result: Result<(), AppError>| {
         if let Err(e) = result {
             problems.push(ElementProblem {
+                check: what,
                 element: format!("{what} {symbol}"),
                 message: e.message().to_string(),
                 kind,
@@ -1392,16 +1402,18 @@ fn guard_change(
             )));
         }
     }
-    let already_broken: Vec<String> = formula_problems(before)
+    let key = |p: &ElementProblem| match &p.id {
+        Some(id) => format!("{}#{id}", p.check),
+        None => p.element.clone(),
+    };
+    let already_broken: Vec<String> = element_problems(before).iter().map(key).collect();
+    match element_problems(after)
         .into_iter()
-        .map(|(element, _)| element)
-        .collect();
-    match formula_problems(after)
-        .into_iter()
-        .find(|(element, _)| !already_broken.contains(element))
+        .find(|p| !already_broken.contains(&key(p)))
     {
-        Some((element, message)) => Err(AppError::bad_request(format!(
-            "No se puede {what}: {element}: {message}"
+        Some(p) => Err(AppError::bad_request(format!(
+            "No se puede {what}: {}: {}",
+            p.element, p.message
         ))),
         None => Ok(()),
     }
@@ -1804,6 +1816,12 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     if input.slot_count.is_some() && !input.is_given {
         return Err(AppError::bad_request(
             "Las ranuras solo aplican a un dato dado (marca \"Dato dado\" o deja las ranuras vacias).",
+        ));
+    }
+    if input.replicas_per_point.is_some_and(|n| n > 0) && !input.per_point {
+        return Err(AppError::bad_request(
+            "Las réplicas por punto solo aplican a una magnitud por punto (marcá \"Se mide por \
+             punto\" o dejá las réplicas vacías).",
         ));
     }
     if input
@@ -2468,6 +2486,13 @@ mod tests {
             ..timed(false, "tiempo", "teclado")
         })
         .is_err());
+        let replicas = |per_point| QuantityInput {
+            replicas_per_point: Some(3),
+            per_point,
+            ..timed(false, "tiempo", "teclado")
+        };
+        assert!(validate_quantity(&replicas(true)).is_ok());
+        assert!(validate_quantity(&replicas(false)).is_err());
     }
 
     #[test]
@@ -2817,6 +2842,18 @@ mod tests {
             .map(|p| p.message)
             .collect();
         assert_eq!(axes.len(), 1, "Q solo usa escalares: {axes:?}");
+
+        let mut renamed = def.clone();
+        let h = renamed
+            .quantities
+            .iter_mut()
+            .find(|q| q.id == h_id)
+            .unwrap();
+        h.symbol = "h2".into();
+        assert!(
+            guard_change(&def, &renamed, "renombrar").is_ok(),
+            "renombrar una magnitud que ya tenía un problema no lo empeora"
+        );
         assert_eq!(
             publish_problems(&def),
             problems
