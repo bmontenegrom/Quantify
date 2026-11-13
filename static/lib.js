@@ -436,12 +436,13 @@ export function formulaScope(definition, kind, { id = "", section = null } = {})
   const scopes = definition?.formula_scopes;
   if (!scopes) return (definition?.quantities ?? []).map((q) => q.symbol);
   if (kind === "result") {
+    if (id) return scopes.existing_results?.[id] ?? [];
     if (section) return scopes.part_results?.[section.part_id] ?? scopes.results;
     return [...new Set([scopes.results, ...Object.values(scopes.part_results ?? {})].flat())];
   }
   if (kind === "point_result") return scopes.point_results;
   if (kind === "axis") return scopes.axes;
-  const byId = scopes[`${kind}s`] ?? {};
+  const byId = { intermediate: scopes.intermediates, aggregate: scopes.aggregates }[kind] ?? {};
   return byId[id ?? ""] ?? byId[""] ?? [];
 }
 

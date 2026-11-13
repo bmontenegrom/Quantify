@@ -99,6 +99,7 @@ const SYMBOL_FORMULA_KINDS = {
     urlSegment: "point-results",
     idParam: "pid",
     dataAttr: "point-result",
+    scopeKind: "point_result",
     listOf: (def) => def?.point_results ?? [],
     emptyText: "Sin magnitudes derivadas por punto.",
     symbolPlaceholder: "Re",
@@ -112,6 +113,7 @@ const SYMBOL_FORMULA_KINDS = {
     urlSegment: "aggregates",
     idParam: "aid",
     dataAttr: "aggregate",
+    scopeKind: "aggregate",
     listOf: (def) => def?.aggregates ?? [],
     emptyText: "Sin mensurandos agregados.",
     symbolPlaceholder: "Re_medio",
@@ -126,6 +128,7 @@ const SYMBOL_FORMULA_KINDS = {
     urlSegment: "intermediates",
     idParam: "iid",
     dataAttr: "intermediate",
+    scopeKind: "intermediate",
     listOf: (def) => def?.intermediates ?? [],
     emptyText: "Sin magnitudes intermedias.",
     symbolPlaceholder: "Q",
@@ -152,7 +155,7 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       ${displaySymbolFieldHtml(item)}
       <label>Nombre <input name="name" value="${v("name")}" placeholder="${kind.namePlaceholder}" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
-      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" />`, formulaScope(state.practiceDefinition, kind.dataAttr.replace("-", "_"), { id: item?.id ?? "" }))}
+      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" />`, formulaScope(state.practiceDefinition, kind.scopeKind, { id: item?.id ?? "" }))}
       ${
         (kind.flags ?? [])
           .map((f) => `<label class="checkbox-field"><input name="${f.field}" type="checkbox" ${item?.[f.field] ? "checked" : ""} /> ${f.label}</label>`)
@@ -1086,7 +1089,7 @@ function renderResultForm(res, practiceId, def = null) {
       ${displaySymbolFieldHtml(res)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
-      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" />`, formulaScope(def, "result", { section: res ? (def?.sections ?? []).find((sec) => (sec.results ?? []).includes(res.symbol)) : null }).filter((sym) => sym !== res?.symbol))}
+      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" />`, formulaScope(def, "result", { id: res?.symbol ?? "" }))}
       <p class="submission-meta">La incertidumbre se propaga desde las magnitudes.</p>
       ${res ? "" : newResultSectionHtml(def)}
       <label>Tolerancia (%)
