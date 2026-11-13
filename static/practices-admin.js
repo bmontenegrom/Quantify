@@ -46,14 +46,21 @@ function formulaFieldHtml(label, input, symbols) {
   return `<div class="formula-field wide-field"><label>${label} ${input}</label>${formulaHelpFor(symbols)}</div>`;
 }
 
+let formulaCaret = null;
+
 function insertIntoFormula(button) {
   const input = button.closest(".formula-field")?.querySelector("input");
   if (!input) return;
   const text = button.dataset.insert;
-  const focused = document.activeElement === input;
-  const start = focused ? input.selectionStart : input.value.length;
-  const end = focused ? input.selectionEnd : input.value.length;
-  input.setRangeText(text, start, end, "end");
+  const end = input.value.length;
+  const caret =
+    document.activeElement === input
+      ? { start: input.selectionStart, end: input.selectionEnd }
+      : formulaCaret?.input === input
+        ? formulaCaret
+        : { start: end, end };
+  formulaCaret = null;
+  input.setRangeText(text, caret.start, caret.end, "end");
   if (text.endsWith("()")) input.setSelectionRange(input.selectionEnd - 1, input.selectionEnd - 1);
   input.focus();
   input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -65,6 +72,13 @@ function refreshSymbolPreview(input) {
   preview.innerHTML = formatSymbolHtml(input.value.trim() || input.form?.elements.symbol?.value.trim() || "");
 }
 
+practiceWorkspace.addEventListener("focusin", (e) => {
+  const field = e.target.closest?.(".formula-field");
+  const input = field?.querySelector("input");
+  if (!field || e.target === input) formulaCaret = null;
+  else if (e.relatedTarget === input) formulaCaret = { input, start: input.selectionStart, end: input.selectionEnd };
+  else if (!field.contains(e.relatedTarget)) formulaCaret = null;
+});
 practiceWorkspace.addEventListener("mousedown", (e) => {
   if (e.target.closest("[data-insert]")) e.preventDefault();
 });

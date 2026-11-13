@@ -443,7 +443,7 @@ export function formulaScope(definition, kind, { id = "", symbol = "", section =
   if (kind === "point_result") return scopes.point_results;
   if (kind === "axis") return scopes.axes;
   const byId = { intermediate: scopes.intermediates, aggregate: scopes.aggregates }[kind] ?? {};
-  return byId[id ?? ""] ?? byId[""] ?? [];
+  return byId[id ?? ""] ?? [];
 }
 
 export function formulaHelpHtml(symbols, functions = [], known = null) {

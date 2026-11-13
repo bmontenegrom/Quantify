@@ -886,7 +886,8 @@ test("formulaScope: alcance por tipo, por parte y por posición", () => {
   assert.deepEqual(formulaScope(definition, "result", { symbol: "g" }), ["L"], "uno existente: su alcance del servidor");
   assert.deepEqual(formulaScope(definition, "intermediate", { id: "B" }), ["L", "A"]);
   assert.deepEqual(formulaScope(definition, "intermediate"), ["L", "A", "B"]);
-  assert.deepEqual(formulaScope(definition, "aggregate", { id: "nuevo" }), ["L"]);
+  assert.deepEqual(formulaScope(definition, "aggregate"), ["L"]);
+  assert.deepEqual(formulaScope(definition, "intermediate", { id: "falta" }), [], "sin alcance propio no ofrece el de uno nuevo");
   assert.deepEqual(formulaScope(definition, "axis"), ["L", "A", "B"]);
   assert.deepEqual(formulaScope({ quantities: [{ symbol: "T" }] }, "axis"), ["T"], "sin formula_scopes: las magnitudes");
 });
