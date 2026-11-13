@@ -865,6 +865,98 @@ Sobre la ficha actual (bloques apilados de `practices-admin.js`, #69):
 réplicas por punto, intermedia, derivada por punto) y de Hidrostática (dos partes, compartidos);
 E2E que recorre el asistente.
 
+**Plan de PRs**
+
+Lo que se relevó en el código (2026-11-12):
+- **La ficha** es un solo archivo, `static/practices-admin.js` (~1450 líneas), que se vuelve a
+  armar entero con `innerHTML` después de cada acción. Los bloques van apilados: datos, análisis,
+  partes y secciones, magnitudes, intermedias, curvas, mensurandos, derivadas por punto y
+  agregados. "Nueva práctica" es un formulario chico, sin asistente.
+- **Magnitudes:** los flags son checkboxes sueltos (`repeated`, `per_point`, `is_given`,
+  `has_uncertainty`, `optional`). No hay selector de rol (3.6) y la lista no muestra el rol.
+- **Validación:**
+  - Los errores llegan como un solo texto, en una línea de estado arriba de la ficha.
+  - `publish_problems` ya arma la lista completa (`structure_problems` y `formula_problems`), pero
+    solo aparece como error al publicar.
+  - Cada problema es `(elemento, mensaje)` en texto: no dice parte, id ni campo.
+  - No hay endpoint que liste los problemas del borrador.
+  - Faltan chequeos de 3.9: ejes que no usan ninguna serie, réplicas por punto sin serie, y
+    `slot_count` sin dato de cátedra en la validación completa.
+  - Los handlers de derivadas por punto y el alta de intermedias no pasan por `guard_change`.
+- **Fórmulas:**
+  - Todas las fórmulas son `<input>` comunes, con un texto de ayuda fijo.
+  - Los alcances (qué símbolos ve cada fórmula) se calculan dentro de cada validador y se
+    descartan: `result_scope_in`, `axis_scope`, y los alcances de intermedias, derivadas por punto
+    y agregados.
+  - `compile_formula` solo chequea variables: una función desconocida pasa la validación y da NaN.
+  - Hay un precedente para mandar datos solo al docente: `compare_options` en `DefinitionView`.
+- **Orden:** hay ▲▼ en magnitudes, mensurandos, curvas, partes y secciones. No hay en intermedias,
+  derivadas por punto ni agregados (`Orderable` en `crud.rs`), aunque su orden define qué ve cada
+  una.
+- **"Probar el borrador"** (F5) ya muestra el formulario real del alumno sobre el borrador y calcula
+  con `analyze-preview` (`draft: true`). Falta "rellenar con datos de ejemplo".
+- **`help_text`** no existe en ningún lado.
+- **E2E del editor:** `smoke-admin-crud`, `smoke-create-practice`, `smoke-versionado`,
+  `smoke-simbolo-mostrar` y `smoke-dos-analisis`. Ninguno maneja intermedias ni derivadas por punto
+  desde la UI.
+
+Decisiones:
+- **Asistente = modo guiado sobre la ficha:** los mismos bloques, por pasos, con "Anterior /
+  Siguiente". No es una pantalla nueva con formularios duplicados.
+- **Ayuda para fórmulas:**
+  - debajo de cada fórmula, los símbolos que esa fórmula puede usar y el catálogo de funciones,
+    como botones que insertan en el cursor;
+  - sin autocompletado tipo IDE (punto 3).
+- **Orden con ▲▼, sin arrastre** (punto 5).
+- **Datos de ejemplo generados automáticamente:**
+  - valor inicial o valores simples, con algo de variación entre réplicas;
+  - alcanza para ver que las fórmulas calculan, aunque los números no tengan sentido físico.
+- **Los alcances se calculan en un solo lugar:** los validadores y la ayuda de fórmulas usan las
+  mismas funciones, así lo que se ofrece es exactamente lo que se acepta.
+- **Las funciones desconocidas se rechazan solo en el admin** (`check_formula`). El motor no
+  cambia, así una fórmula vieja no rompe ninguna entrega.
+
+1. **`feat(practicas)`: problemas del borrador siempre a la vista (F7, 1/6).**
+   - Problemas con ubicación: parte, tipo de elemento, id y mensaje.
+   - `GET /practices/{id}/problems`, solo para docentes, devuelve la validación completa del
+     borrador.
+   - Chequeos que faltaban de 3.9: ejes que no usan ninguna serie, réplicas por punto sin serie y
+     `slot_count` sin dato de cátedra.
+   - `guard_change` en los handlers de derivadas por punto y en el alta de intermedias.
+   - Frontend: un panel fijo en la ficha, que se actualiza después de cada acción (como "Cambios
+     sin publicar"). Cada problema lleva al elemento y abre su edición.
+2. **`feat(practicas)`: rol de cada magnitud (F7, 2/6).**
+   - Un selector "¿Cómo se ingresa?" (3.6) reemplaza los checkboxes. Las opciones dependen del tipo
+     de análisis de la parte.
+   - Cada rol muestra solo sus campos: réplicas por punto, ranura, valor inicial, opcional.
+   - La lista muestra el rol.
+   - Sin cambios de schema: el rol se traduce a los mismos flags. `quantityRole` y `roleFlags` van
+     en `lib.js`, con tests.
+3. **`feat(practicas)`: ayuda para escribir fórmulas (F7, 3/6).**
+   - Los alcances inline de los validadores pasan a funciones, y la definición del docente suma
+     `formula_scopes` (como `compare_options`).
+   - Catálogo de funciones como dato en `formula.rs`, con las que hoy permite evalexpr y usan las
+     siembras (`math::ln`, `math::sqrt`, `math::asin`, `math::atan`, …). `check_formula` rechaza
+     las demás.
+   - Frontend: símbolos y funciones clicables debajo de cada fórmula, y vista previa en vivo del
+     símbolo a mostrar.
+4. **`feat(practicas)`: orden completo y textos de ayuda (F7, 4/6).**
+   - ▲▼ en intermedias, derivadas por punto y agregados (`Orderable` + `guard_change`, porque el
+     orden cambia el alcance).
+   - `help_text` en la práctica, las partes y las secciones: es cosmético, se edita en el admin y
+     se muestra en el formulario del alumno.
+5. **`feat(practicas)`: rellenar con datos de ejemplo (F7, 5/6).**
+   - Un botón en "Probar el borrador" que completa todo el formulario. La generación es una función
+     pura en JS, con tests.
+   - Un E2E prueba el borrador de una práctica de regresión con datos de ejemplo.
+6. **`feat(practicas)`: modo guiado para crear prácticas (F7, 6/6).**
+   - Pasos: datos → partes → magnitudes → intermedias, curvas y ejes → mensurandos → secciones →
+     revisar y publicar (panel de problemas, probar con datos de ejemplo, publicar).
+   - "Nueva práctica" abre la ficha en modo guiado, y "Ver todo" vuelve a la ficha completa.
+   - E2E de aceptación: crear desde la UI una réplica de Fluidos I (regresión, réplicas por punto,
+     intermedia, derivada por punto) y una de Hidrostática con dos partes y datos compartidos.
+   - Doc: F7 queda marcada como hecha.
+
 ### F8 — Plantillas y compartir
 
 1. Formato de intercambio JSON con `schema_version` (definición completa, sin ids internos).
