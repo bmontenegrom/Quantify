@@ -15,6 +15,7 @@ import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
+  formHelpHtml, partHelpHtml,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -259,18 +260,6 @@ export function renderPartTabs(practiceId) {
   practicePartTabs.innerHTML = "";
 }
 
-export function formHelpHtml(text, attrs = "") {
-  return text ? `<p class="form-help"${attrs}>${inlineMathHtml(text)}</p>` : "";
-}
-
-export function partHelpHtml(definition) {
-  const tabs = new Set(definitionParts(definition).map((p) => p.id));
-  return (definition.parts ?? [])
-    .filter((p) => tabs.has(p.id))
-    .map((p) => formHelpHtml(p.help_text, ` data-section="${escapeHtml(p.id)}"`))
-    .join("");
-}
-
 function applyPartVisibility() {
   if (!definitionParts(state.practiceForm?.definition).length) return;
   measurementFields.querySelectorAll("[data-section]").forEach((el) => {
@@ -431,7 +420,7 @@ export function renderMeasurementFields(draft) {
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
     measurementFields.innerHTML =
-      partHelpHtml(definition) + definition.quantities.map(quantityRowHtml).join("") + helper + finalResultSectionHtml(definition);
+      definition.quantities.map(quantityRowHtml).join("") + helper + finalResultSectionHtml(definition);
   }
   wireChronoHelpers();
 
