@@ -144,12 +144,13 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   step("docente: dos partes con sus secciones; L sin sección (compartida) y T en la segunda");
   for (const title of ["Parte A", "Parte B"]) {
     await openAddForm(page, "#new-part-form");
-    await fillAndSubmit(page, "#new-part-form", { title });
+    await fillAndSubmit(page, "#new-part-form", { title, help_text: `Ayuda de ${title}` });
     await page.waitForSelector(`#practice-workspace input[aria-label="Título de la parte"][value="${title}"]`);
   }
   for (const [title, part] of [["Seccion A", "Parte A"], ["Seccion B", "Parte B"], ["Seccion R", "Parte B"]]) {
     await openAddForm(page, "#new-section-form");
     await page.locator('#new-section-form [name="title"]').fill(title);
+    await page.locator('#new-section-form [name="help_text"]').fill(`Ayuda de ${title}`);
     await page.locator('#new-section-form [name="part_id"]').selectOption({ label: part });
     await page.locator('#new-section-form button[type="submit"]').click();
     await page.waitForSelector(`#practice-workspace input[aria-label="Título de la sección"][value="${title}"]`);
@@ -210,14 +211,21 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   const tabs = sPage.locator("#practice-part-tabs .part-tab");
   await tabs.nth(1).waitFor();
   assert((await tabs.count()) === 2, "la práctica debía mostrar las dos pestañas");
+  assert((await sPage.locator("#practica-subtitle").textContent()) === "Prueba E2E", "debajo del título va la descripción");
+  const help = (text) => sPage.locator(`#measurement-fields .form-help:text-is("${text}")`);
   const given = sPage.locator(".measurement-row--given").first();
   const measured = sPage.locator('#measurement-fields .measurement-row:not(.measurement-row--given):not([data-final-result])').first();
   await tabs.nth(0).click();
   assert((await given.isVisible()) && !(await measured.isVisible()), "la parte A debía mostrar L y ocultar T");
+  assert(
+    (await help("Ayuda de Parte A").isVisible()) && !(await help("Ayuda de Parte B").isVisible()),
+    "la parte A debía mostrar solo su ayuda",
+  );
   await given.locator(".measure-given-value").fill("1");
   await given.locator(".measure-given-u").fill("0.002");
   await tabs.nth(1).click();
   assert((await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y también L, que es compartida");
+  assert(await help("Ayuda de Seccion B").isVisible(), "la sección B debía mostrar su ayuda");
   await measured.locator(".measure-value").first().fill("2.006");
   const finalG = sPage.locator('[data-final-result="1"][data-symbol="g"]');
   assert(await finalG.isVisible(), "el resultado final g debía verse en la parte B");

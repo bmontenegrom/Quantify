@@ -11,6 +11,7 @@ export function definitionSections(definition) {
   const sections = definition.sections.map((s) => ({
     id: s.part_id ?? undefined,
     title: s.title,
+    help_text: s.help_text,
     symbols: s.quantities,
     results: s.results,
   }));
@@ -39,6 +40,18 @@ export function definitionParts(definition) {
   const series = (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico");
   if (series && (definition?.quantities ?? []).some((q) => q.per_point && !q.is_given)) used.add(series.id);
   return (definition?.parts ?? []).filter((p) => used.has(p.id)).map((p) => ({ id: p.id, label: p.title }));
+}
+
+export function formHelpHtml(text, attrs = "") {
+  return text ? `<p class="form-help"${attrs}>${escapeHtml(text)}</p>` : "";
+}
+
+export function partHelpHtml(definition) {
+  const tabs = new Set(definitionParts(definition).map((p) => p.id));
+  return (definition.parts ?? [])
+    .filter((p) => tabs.has(p.id))
+    .map((p) => formHelpHtml(p.help_text, ` data-section="${escapeHtml(p.id)}"`))
+    .join("");
 }
 
 export function groupBySections(items, sections) {

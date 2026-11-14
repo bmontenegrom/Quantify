@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import {
   courseSelect, groupSelect, practiceSelect, tableSelect,
   measurementFields, latestResult, submitStatus, submitButton,
-  practicaTitle, practicePartTabs, submissionForm, studentComment,
+  practicaTitle, practicaSubtitle, practicePartTabs, submissionForm, studentComment,
 } from "./dom.js";
 import { fetchJson, postJson, deleteJson } from "./api.js";
 import { showToast } from "./toast.js";
@@ -15,6 +15,7 @@ import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
+  formHelpHtml, partHelpHtml,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -107,6 +108,8 @@ export function selectedTableAssignment() {
   );
 }
 
+const DEFAULT_SUBTITLE = practicaSubtitle?.textContent ?? "";
+
 export async function loadSubmissionForm() {
   if (!measurementFields) return;
   const previewing = Boolean(state.draftPreviewPracticeId);
@@ -121,6 +124,10 @@ export async function loadSubmissionForm() {
     const practiceName =
       selectedCourse()?.practices.find((p) => p.id === practiceId)?.name ?? "Nueva entrega";
     practicaTitle.textContent = state.editingSubmissionId ? `Editar — ${practiceName}` : practiceName;
+  }
+  if (practicaSubtitle) {
+    const practice = (previewing ? state.practices : selectedCourse()?.practices)?.find((p) => p.id === practiceId);
+    practicaSubtitle.textContent = practice?.description || DEFAULT_SUBTITLE;
   }
   if (submitButton) submitButton.textContent = state.editingSubmissionId ? "Guardar cambios" : "Entregar";
   if (previewing) {
@@ -401,6 +408,7 @@ export function renderMeasurementFields(draft) {
         : "";
       return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+          ${formHelpHtml(sec.help_text)}
           ${rows.map(quantityRowHtml).join("")}
           ${helper}
           ${finalsHtml}
@@ -408,7 +416,7 @@ export function renderMeasurementFields(draft) {
     });
     const leftoverFinals = allFinals.filter((r) => !embedded.has(r.symbol));
     measurementFields.innerHTML =
-      blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
+      partHelpHtml(definition) + blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
     measurementFields.innerHTML =
@@ -479,6 +487,7 @@ function seriesFinalResultsHtml(definition) {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
     return `<div class="measurement-section"${secAttr}>
         <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+        ${sec.symbols?.length ? "" : formHelpHtml(sec.help_text)}
         <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
         ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;

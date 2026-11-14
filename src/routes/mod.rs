@@ -215,15 +215,27 @@ pub fn api_router(state: SharedState) -> Router {
             "/practices/{id}/intermediates/{iid}",
             post(update_intermediate).delete(delete_intermediate),
         )
+        .route(
+            "/practices/{id}/intermediates/{iid}/move",
+            post(move_intermediate),
+        )
         .route("/practices/{id}/point-results", post(create_point_result))
         .route(
             "/practices/{id}/point-results/{pid}",
             post(update_point_result).delete(delete_point_result),
         )
+        .route(
+            "/practices/{id}/point-results/{pid}/move",
+            post(move_point_result),
+        )
         .route("/practices/{id}/aggregates", post(create_aggregate))
         .route(
             "/practices/{id}/aggregates/{aid}",
             post(update_aggregate).delete(delete_aggregate),
+        )
+        .route(
+            "/practices/{id}/aggregates/{aid}/move",
+            post(move_aggregate),
         )
         .route(
             "/practices/{id}/results/{rid}/tolerance",
