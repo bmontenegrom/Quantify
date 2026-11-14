@@ -3299,6 +3299,13 @@ async fn editing_help_text_updates_the_current_version() {
     .unwrap();
     let found = draft_changes(&pool, practice).await.unwrap().unwrap();
     assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(
+        found.changes,
+        [
+            format!("Cambia la ayuda de la parte {}", part.title),
+            format!("Cambia la ayuda de la sección {}", section.title),
+        ]
+    );
     let no_problems = |_: &PracticeDefinition| Vec::new();
     assert!(matches!(
         publish_checked(&pool, practice, None, None, no_problems)

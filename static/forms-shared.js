@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, inlineMathHtml, unitHtml, SI_PREFIXES, prefixFactor } from "./lib.js";
+import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor } from "./lib.js";
 
 export function formPracticeVersion(practiceId) {
   const definition = state.practiceForm?.definition;
@@ -43,7 +43,7 @@ export function definitionParts(definition) {
 }
 
 export function formHelpHtml(text, attrs = "") {
-  return text ? `<p class="form-help"${attrs}>${inlineMathHtml(text)}</p>` : "";
+  return text ? `<p class="form-help"${attrs}>${escapeHtml(text)}</p>` : "";
 }
 
 export function partHelpHtml(definition) {

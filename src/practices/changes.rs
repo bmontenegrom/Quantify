@@ -312,10 +312,22 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
         (old.show_live != new.show_live)
             .then(|| format!("Cambia si {} se muestra en vivo", new.symbol))
     });
+    let part_help = draft.parts.iter().filter_map(|new| {
+        let old = published.parts.iter().find(|p| p.id == new.id)?;
+        (old.help_text != new.help_text)
+            .then(|| format!("Cambia la ayuda de la parte {}", new.title))
+    });
+    let section_help = draft.sections.iter().filter_map(|new| {
+        let old = published.sections.iter().find(|s| s.id == new.id)?;
+        (old.help_text != new.help_text)
+            .then(|| format!("Cambia la ayuda de la sección {}", new.title))
+    });
     symbols
         .chain(quantities)
         .chain(comparisons)
         .chain(live)
+        .chain(part_help)
+        .chain(section_help)
         .collect()
 }
 
