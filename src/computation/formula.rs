@@ -98,6 +98,8 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
 /// assert!(err.contains("\"math::foo\""));
 /// let err = check_formula("math::pow(L)", &allowed).unwrap_err().to_string();
 /// assert!(err.contains("cantidad de argumentos"));
+/// let err = check_formula("math::sqrt(L, 2)", &allowed).unwrap_err().to_string();
+/// assert!(err.contains("cantidad de argumentos"));
 /// let err = check_formula("math::sqrt(L) * \"x\"", &allowed).unwrap_err().to_string();
 /// assert!(!err.contains("cantidad de argumentos"));
 /// let err = check_formula("L > 1", &allowed).unwrap_err().to_string();
@@ -116,7 +118,13 @@ pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
             evalexpr::EvalexprError::WrongFunctionArgumentAmount { .. }
             | evalexpr::EvalexprError::ExpectedTuple { .. }
             | evalexpr::EvalexprError::ExpectedFixedLengthTuple { .. }
-            | evalexpr::EvalexprError::ExpectedRangedLengthTuple { .. },
+            | evalexpr::EvalexprError::ExpectedRangedLengthTuple { .. }
+            | evalexpr::EvalexprError::ExpectedNumber {
+                actual: Value::Tuple(_),
+            }
+            | evalexpr::EvalexprError::ExpectedFloat {
+                actual: Value::Tuple(_),
+            },
         )) => {
             anyhow::bail!(
                 "la fórmula \"{formula}\" no se puede calcular: revisá que cada función tenga la cantidad de argumentos que pide y que sea una sola expresión"

@@ -1783,6 +1783,7 @@ pub(super) async fn update_result(
         .map(|r| r.symbol.clone())
         .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
     validate_result(&def, &input)?;
+    check_no_cycle(&def, &own, &input)?;
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -1794,7 +1795,6 @@ pub(super) async fn update_result(
         None,
     )
     .await?;
-    check_no_cycle(&def, &own, &input)?;
     let after = with_updated_result(&def, &rid, &input)
         .ok_or_else(|| AppError::not_found("mensurando no encontrado en la practica"))?;
     guard_change(&def, &after, "guardar el mensurando")?;
