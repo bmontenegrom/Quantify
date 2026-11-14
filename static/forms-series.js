@@ -4,7 +4,7 @@ import { postJson } from "./api.js";
 import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
 import { definitionParts, definitionSections, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
-import { quantityNameHtml, wireReplicaRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
+import { quantityNameHtml, wireReplicaRow, collectMeasurements, finalResultRowHtml, formHelpHtml, partHelpHtml } from "./forms.js";
 
 export const SERIES_INITIAL_ROWS = 3;
 
@@ -39,7 +39,7 @@ export function renderSeriesTable(definition) {
           ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
              ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
           : "";
-        return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${rows.map((q) => sharedRowHtml(q)).join("")}${finalsHtml}</div>`;
+        return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${formHelpHtml(sec.help_text)}${rows.map((q) => sharedRowHtml(q)).join("")}${finalsHtml}</div>`;
       });
     if (rest.length) {
       blocks.push(`<div class="shared-quantities"><h4>Medidas</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
@@ -48,6 +48,13 @@ export function renderSeriesTable(definition) {
   } else if (shared.length) {
     sharedSection = `<div class="shared-quantities"><h4>Medidas</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
   }
+  const colSymbols = new Set(cols.map((q) => q.symbol));
+  const sharedSymbols = new Set(shared.map((q) => q.symbol));
+  const seriesHelp = (sections ?? [])
+    .filter((sec) => !sec.series && (sec.symbols ?? []).some((s) => colSymbols.has(s)))
+    .filter((sec) => !sec.symbols.some((s) => sharedSymbols.has(s)))
+    .map((sec) => formHelpHtml(sec.help_text))
+    .join("");
   const partsNote = definitionParts(definition).length
     ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
     : "";
@@ -55,8 +62,10 @@ export function renderSeriesTable(definition) {
   const chronoHelper = hasChrono ? chronoHelperSectionHtml() : "";
   measurementFields.innerHTML = `
     ${partsNote}
+    ${partHelpHtml(definition)}
     ${sharedSection}
     <div${seriesSectionAttr}>
+      ${seriesHelp}
       ${chronoHelper}
       <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. ${
         definition.analysis_kind === "curva"

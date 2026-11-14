@@ -16,9 +16,9 @@ await withE2E({ port: PORT, dbName: "quantify-dos-analisis.db" }, async ({ login
   const x = await qty("x", {});
   const y = await qty("y", {});
   const directa = await post(`${base}/parts`, { title: "Directa" });
-  const ajuste = await post(`${base}/parts`, { title: "Ajuste" });
-  const sDirecta = await post(`${base}/sections`, { title: "Pendulo", part_id: directa.id });
-  const sAjuste = await post(`${base}/sections`, { title: "Barrido", part_id: ajuste.id });
+  const ajuste = await post(`${base}/parts`, { title: "Ajuste", help_text: "Ayuda del ajuste" });
+  const sDirecta = await post(`${base}/sections`, { title: "Pendulo", part_id: directa.id, help_text: "Ayuda del pendulo" });
+  const sAjuste = await post(`${base}/sections`, { title: "Barrido", part_id: ajuste.id, help_text: "Ayuda del barrido" });
   for (const [q, s] of [[L, sDirecta], [T, sDirecta], [x, sAjuste], [y, sAjuste]]) {
     await post(`${base}/quantities/${q.id}/section`, { section_id: s.id });
   }
@@ -69,13 +69,20 @@ await withE2E({ port: PORT, dbName: "quantify-dos-analisis.db" }, async ({ login
   const tabs = sPage.locator("#practice-part-tabs .part-tab");
   await tabs.nth(1).waitFor();
 
+  const help = (text) => sPage.locator(`#measurement-fields .form-help:text-is("${text}")`);
   await tabs.nth(0).click();
+  assert(await help("Ayuda del pendulo").isVisible(), "la sección de datos compartidos debía mostrar su ayuda");
+  assert(!(await help("Ayuda del ajuste").isVisible()), "la ayuda del ajuste no debía verse en la parte Directa");
   const given = sPage.locator(`.measurement-row--given[data-quantity-id="${L.id}"]`);
   await given.locator(".measure-given-value").fill("1");
   await given.locator(".measure-given-u").fill("0.001");
   await sPage.locator(`.measurement-row[data-quantity-id="${T.id}"] .measure-value`).first().fill("2.006");
 
   await tabs.nth(1).click();
+  assert(
+    (await help("Ayuda del ajuste").isVisible()) && (await help("Ayuda del barrido").isVisible()),
+    "la parte de la serie debía mostrar su ayuda y la de su sección",
+  );
   const rows = sPage.locator(".series-table tbody .series-row");
   for (const [i, [xv, yv]] of [[1, 2.1], [2, 3.9], [3, 6.2]].entries()) {
     await rows.nth(i).locator(`.series-value[data-quantity-id="${x.id}"]`).fill(String(xv));

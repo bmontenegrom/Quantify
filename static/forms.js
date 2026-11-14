@@ -259,11 +259,11 @@ export function renderPartTabs(practiceId) {
   practicePartTabs.innerHTML = "";
 }
 
-function formHelpHtml(text, attrs = "") {
+export function formHelpHtml(text, attrs = "") {
   return text ? `<p class="form-help"${attrs}>${inlineMathHtml(text)}</p>` : "";
 }
 
-function partHelpHtml(definition) {
+export function partHelpHtml(definition) {
   return (definition.parts ?? [])
     .map((p) => formHelpHtml(p.help_text, ` data-section="${escapeHtml(p.id)}"`))
     .join("");
@@ -496,7 +496,7 @@ function seriesFinalResultsHtml(definition) {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
     return `<div class="measurement-section"${secAttr}>
         <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
-        ${formHelpHtml(sec.help_text)}
+        ${sec.symbols?.length ? "" : formHelpHtml(sec.help_text)}
         <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
         ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;
