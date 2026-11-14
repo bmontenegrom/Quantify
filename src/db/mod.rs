@@ -369,14 +369,26 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     insert_accounts(&mut conn, &accounts).await
 }
 
-pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f.";
+pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajación de un circuito RC medido de dos formas: directamente, con el tiempo de semidescarga, y a partir del desfasaje según la frecuencia.";
+
+const OLD_SEEDED_DESCRIPTIONS: [(&str, &str); 9] = [
+    ("p1-estadistica", "Pendulo simple con hasta 3 operadores independientes: cada uno mide su propia serie de periodos (T1/T2/T3) y determina su g; incertidumbres tipo A y B, calculo indirecto de g = 4*pi^2*L/T^2."),
+    ("p2-cc", "Circuitos de corriente continua en una sola entrega: serie, paralelo (R1, R2, R3 compartidas) y curva de potencia P = I^2*R sobre carga variable."),
+    ("fluidos-1", "Viscosidad del agua por la ley de Hagen-Poiseuille: ajuste lineal de h/Q^2 contra 1/Q (Q = caudal medio por altura)."),
+    ("viscosidad", "Viscosidad de la glicerina por la ley de Stokes: ajuste lineal de v_lim contra R^2 (v_lim = dx / tiempo medio por esfera)."),
+    ("fluidos-2", "Perdidas energeticas en la descarga de un recipiente por un capilar: ajuste lineal de t contra (sqrt(h_max) - sqrt(h)). M_medio sale de la pendiente; Reynolds max/min y M teorico son mensurandos agregados."),
+    ("filtros", "Barrido en frecuencia de un circuito RLC: respuesta en amplitud VR/Vg y desfasaje phi = asin(b/a) contra la frecuencia angular omega = 2*pi*f (eje log)."),
+    ("ca-rlc", "Circuito RLC serie en corriente alterna: impedancia, corriente y tensiones teoricas vs experimentales por canal (R, C, L), y desfasaje phi = asin(b/a) por canal contra el teorico."),
+    ("hidrostatica", "Densidad de una pieza de goma por el principio de Arquimedes con balanza de Mohr (empuje y densidad por medida, promediados) y tension superficial de una solucion jabonosa por el metodo de Wilhelmy."),
+    ("p3-relajacion", "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f."),
+];
 
 pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
     let practices = [
         (
             "p1-estadistica",
             "Tratamiento estadístico de Datos",
-            "Pendulo simple con hasta 3 operadores independientes: cada uno mide su propia serie de periodos (T1/T2/T3) y determina su g; incertidumbres tipo A y B, calculo indirecto de g = 4*pi^2*L/T^2.",
+            "Medí el período de un péndulo simple y, con su largo, calculá la aceleración de la gravedad. Cada operador mide su propia serie de períodos.",
             "estadistico",
             None,
             None,
@@ -384,7 +396,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         (
             "p2-cc",
             "Corriente continua",
-            "Circuitos de corriente continua en una sola entrega: serie, paralelo (R1, R2, R3 compartidas) y curva de potencia P = I^2*R sobre carga variable.",
+            "Circuitos de corriente continua: resistencias en serie y en paralelo, y la potencia que disipa una carga variable.",
             "curva",
             None,
             None,
@@ -400,7 +412,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         (
             "fluidos-1",
             "Fluidos I",
-            "Viscosidad del agua por la ley de Hagen-Poiseuille: ajuste lineal de h/Q^2 contra 1/Q (Q = caudal medio por altura).",
+            "Viscosidad del agua a partir del caudal que sale por un capilar con distintas alturas de agua (ley de Hagen-Poiseuille).",
             "regresion_lineal",
             Some("1/Q"),
             Some("h/(Q*Q)"),
@@ -408,7 +420,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         (
             "viscosidad",
             "Viscosidad",
-            "Viscosidad de la glicerina por la ley de Stokes: ajuste lineal de v_lim contra R^2 (v_lim = dx / tiempo medio por esfera).",
+            "Viscosidad de la glicerina a partir de la velocidad límite de esferas de distintos radios (ley de Stokes).",
             "regresion_lineal",
             Some("R^2"),
             Some("dx/t"),
@@ -416,7 +428,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         (
             "fluidos-2",
             "Fluidos II",
-            "Perdidas energeticas en la descarga de un recipiente por un capilar: ajuste lineal de t contra (sqrt(h_max) - sqrt(h)). M_medio sale de la pendiente; Reynolds max/min y M teorico son mensurandos agregados.",
+            "Pérdidas de energía en la descarga de un recipiente por un capilar: medí cómo baja el nivel del agua con el tiempo.",
             "regresion_lineal",
             Some("math::sqrt(h_max) - math::sqrt(h)"),
             Some("t"),
@@ -424,7 +436,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         (
             "filtros",
             "Filtros",
-            "Barrido en frecuencia de un circuito RLC: respuesta en amplitud VR/Vg y desfasaje phi = asin(b/a) contra la frecuencia angular omega = 2*pi*f (eje log).",
+            "Respuesta de un circuito RLC según la frecuencia: amplitud y desfasaje de la tensión en la resistencia.",
             "curva",
             None,
             None,
@@ -432,7 +444,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         (
             "ca-rlc",
             "Corriente Alterna (RLC)",
-            "Circuito RLC serie en corriente alterna: impedancia, corriente y tensiones teoricas vs experimentales por canal (R, C, L), y desfasaje phi = asin(b/a) por canal contra el teorico.",
+            "Circuito RLC serie en corriente alterna: tensiones en R, C y L y sus desfasajes, comparados con los valores teóricos.",
             "estadistico",
             None,
             None,
@@ -440,7 +452,7 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         (
             "hidrostatica",
             "Hidrostatica y Tension Superficial",
-            "Densidad de una pieza de goma por el principio de Arquimedes con balanza de Mohr (empuje y densidad por medida, promediados) y tension superficial de una solucion jabonosa por el metodo de Wilhelmy.",
+            "Densidad de una pieza de goma con la balanza de Mohr (principio de Arquímedes) y tensión superficial de una solución jabonosa (método de Wilhelmy).",
             "estadistico",
             None,
             None,
@@ -463,6 +475,21 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(y_formula)
         .execute(pool)
         .await?;
+    }
+
+    for (id, _, description, ..) in practices {
+        let Some((_, old)) = OLD_SEEDED_DESCRIPTIONS
+            .iter()
+            .find(|(old_id, _)| *old_id == id)
+        else {
+            continue;
+        };
+        sqlx::query("UPDATE practices SET description = ?2 WHERE id = ?1 AND description = ?3")
+            .bind(id)
+            .bind(description)
+            .bind(old)
+            .execute(pool)
+            .await?;
     }
 
     for legacy_id in ["p2-serie", "p2-corriente-continua", "p2-potencia"] {

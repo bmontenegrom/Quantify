@@ -3322,6 +3322,38 @@ async fn editing_help_text_updates_the_current_version() {
 }
 
 #[tokio::test]
+async fn seeding_updates_only_the_old_seeded_descriptions() {
+    let (pool, _dir) = setup().await;
+    let set = |id: &'static str, description: &'static str| {
+        sqlx::query("UPDATE practices SET description = ?2 WHERE id = ?1")
+            .bind(id)
+            .bind(description)
+            .execute(&pool)
+    };
+    set(
+        "fluidos-1",
+        "Viscosidad del agua por la ley de Hagen-Poiseuille: ajuste lineal de h/Q^2 contra 1/Q (Q = caudal medio por altura).",
+    )
+    .await
+    .unwrap();
+    set("viscosidad", "Texto del docente").await.unwrap();
+    db::seed_practices(&pool).await.unwrap();
+    let description = |id: &'static str| {
+        sqlx::query_scalar::<_, String>("SELECT description FROM practices WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+    };
+    assert!(description("fluidos-1")
+        .await
+        .unwrap()
+        .starts_with("Viscosidad del agua a partir del caudal"));
+    assert_eq!(
+        description("viscosidad").await.unwrap(),
+        "Texto del docente"
+    );
+}
+
+#[tokio::test]
 async fn reordering_curves_stays_structural() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
