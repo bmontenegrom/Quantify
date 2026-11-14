@@ -43,6 +43,9 @@ import {
   QUANTITY_ROLES,
   quantityRole,
   roleFlags,
+  formatSymbolHtml,
+  formulaScope,
+  formulaHelpHtml,
 } from "../static/lib.js";
 
 function academicFixture() {
@@ -862,4 +865,56 @@ test("roleFlags: conserva lo que el rol no decide", () => {
     repeated: true,
     per_point: true,
   });
+});
+
+test("formulaScope: alcance por tipo, por parte y por posición", () => {
+  const definition = {
+    quantities: [{ symbol: "L" }],
+    formula_scopes: {
+      results: ["L"],
+      part_results: { p2: ["L", "slope"] },
+      existing_results: { g: ["L"] },
+      intermediates: { "": ["L", "A", "B"], A: ["L"], B: ["L", "A"] },
+      aggregates: { "": ["L"] },
+      point_results: ["L", "A", "slope"],
+      axes: ["L", "A", "B"],
+    },
+  };
+  assert.deepEqual(formulaScope(definition, "result", { section: { part_id: "p2" } }), ["L", "slope"]);
+  assert.deepEqual(formulaScope(definition, "result", { section: { part_id: null } }), ["L"]);
+  assert.deepEqual(formulaScope(definition, "result"), ["L", "slope"], "sin sección: cualquier parte");
+  assert.deepEqual(formulaScope(definition, "result", { symbol: "g" }), ["L"], "uno existente: su alcance del servidor");
+  assert.deepEqual(formulaScope(definition, "intermediate", { id: "B" }), ["L", "A"]);
+  assert.deepEqual(formulaScope(definition, "intermediate"), ["L", "A", "B"]);
+  assert.deepEqual(formulaScope(definition, "aggregate"), ["L"]);
+  assert.deepEqual(formulaScope(definition, "intermediate", { id: "falta" }), [], "sin alcance propio no ofrece el de uno nuevo");
+  assert.deepEqual(formulaScope(definition, "axis"), ["L", "A", "B"]);
+  assert.deepEqual(formulaScope({ quantities: [{ symbol: "T" }] }, "axis"), ["T"], "sin formula_scopes: las magnitudes");
+});
+
+test("formulaHelpHtml: botones que insertan símbolos, constantes y funciones", () => {
+  const html = formulaHelpHtml(["V_R", "V_R"], [["math::sqrt", "raíz cuadrada"]]);
+  assert.equal(html.match(/data-insert="V_R"/g).length, 1, "sin repetidos");
+  assert.ok(html.includes('data-insert="pi"') && html.includes('data-insert="e"'));
+  assert.ok(html.includes('data-insert="math::sqrt()"'));
+  assert.ok(html.includes("V<sub>R</sub>"));
+  assert.ok(html.startsWith("<details"), "plegada por defecto");
+  assert.ok(!html.includes("<details open"));
+});
+
+test("formulaHelpHtml: los nombres derivados van aparte y se muestran como se escriben", () => {
+  const html = formulaHelpHtml(["V", "V_first", "I_at_f_max"], [], new Set(["V"]));
+  const rows = html.match(/<div class="formula-chips">.*?<\/div>/g);
+  assert.equal(rows.length, 2, "una fila de símbolos y otra de derivados (sin funciones)");
+  assert.ok(rows[0].includes('data-insert="V"') && rows[0].includes('data-insert="pi"'));
+  assert.ok(rows[1].includes("<code>I_at_f_max</code>"), "sin subíndices engañosos");
+  assert.ok(!html.includes("<sub>AT"));
+});
+
+test("formatSymbolHtml no busca en los símbolos a mostrar", () => {
+  setDisplaySymbols({ VR: "V_R_PP" });
+  assert.equal(formatSymbolHtml("VR"), "VR");
+  assert.equal(formatSymbolHtml("V_R_PP"), "V<sub>R,PP</sub>");
+  assert.equal(formatSymbolHtml("rho_1"), "ρ<sub>1</sub>");
+  setDisplaySymbols({});
 });

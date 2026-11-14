@@ -31,8 +31,12 @@ export function setDisplaySymbols(symbols) {
 
 export function symbolHtml(value) {
   const raw = String(value);
+  return formatSymbolHtml(displaySymbols.get(raw) ?? raw);
+}
+
+export function formatSymbolHtml(value) {
   return subscriptHtml(
-    escapeHtml(displaySymbols.get(raw) ?? raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
+    escapeHtml(String(value)).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
     SYMBOL_SUBSCRIPT,
   );
 }
@@ -426,6 +430,32 @@ export function compareOptionGroups(definition, { result = null, section = null 
   groups = groups.filter(([label, symbols]) => label == null || symbols.length);
   const offered = groups.some(([, symbols]) => symbols.includes(current));
   return result && current && !offered ? [["Guardada (fuera de alcance)", [current]], ...groups] : groups;
+}
+
+export function formulaScope(definition, kind, { id = "", symbol = "", section = null } = {}) {
+  const scopes = definition?.formula_scopes;
+  if (!scopes) return (definition?.quantities ?? []).map((q) => q.symbol);
+  if (kind === "result") {
+    if (symbol) return scopes.existing_results?.[symbol] ?? [];
+    if (section) return scopes.part_results?.[section.part_id] ?? scopes.results;
+    return [...new Set([scopes.results, ...Object.values(scopes.part_results ?? {})].flat())];
+  }
+  if (kind === "point_result") return scopes.point_results;
+  if (kind === "axis") return scopes.axes;
+  const byId = { intermediate: scopes.intermediates, aggregate: scopes.aggregates }[kind] ?? {};
+  return byId[id ?? ""] ?? [];
+}
+
+export function formulaHelpHtml(symbols, functions = [], known = null) {
+  const chip = (insert, label, title) =>
+    `<button type="button" class="formula-chip" data-insert="${escapeHtml(insert)}" title="${escapeHtml(title)}">${label}</button>`;
+  const all = [...new Set([...symbols, "pi", "e"])];
+  const isKnown = (s) => !known || known.has(s) || s === "pi" || s === "e";
+  const row = (chips) => (chips ? `<div class="formula-chips">${chips}</div>` : "");
+  const symbolChips = all.filter(isKnown).map((s) => chip(s, symbolHtml(s), s)).join("");
+  const derivedChips = all.filter((s) => !isKnown(s)).map((s) => chip(s, `<code>${escapeHtml(s)}</code>`, s)).join("");
+  const functionChips = functions.map(([name, description]) => chip(`${name}()`, escapeHtml(name), description)).join("");
+  return `<details class="formula-help"><summary>Símbolos y funciones</summary>${row(symbolChips)}${row(derivedChips)}${row(functionChips)}</details>`;
 }
 
 export function comparisonPairs(definition) {
