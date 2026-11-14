@@ -11,6 +11,7 @@ export function definitionSections(definition) {
   const sections = definition.sections.map((s) => ({
     id: s.part_id ?? undefined,
     title: s.title,
+    help_text: s.help_text,
     symbols: s.quantities,
     results: s.results,
   }));

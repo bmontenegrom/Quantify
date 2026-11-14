@@ -1746,6 +1746,12 @@ button.back-link {
   font-size: 0.95rem;
 }
 
+.form-help {
+  margin: 0 0 10px;
+  max-width: 75ch;
+  color: var(--muted);
+}
+
 .measurement-section-subtitle {
   margin: 14px 0 8px;
   padding-top: 10px;

@@ -943,8 +943,9 @@ Decisiones:
 4. **`feat(practicas)`: orden completo y textos de ayuda (F7, 4/6).**
    - ▲▼ en intermedias, derivadas por punto y agregados (`Orderable` + `guard_change`, porque el
      orden cambia el alcance).
-   - `help_text` en la práctica, las partes y las secciones: es cosmético, se edita en el admin y
-     se muestra en el formulario del alumno.
+   - `help_text` en las partes y las secciones: es cosmético, se edita en el admin y se muestra en
+     el formulario del alumno. La práctica no suma un campo: el alumno ve su `description` debajo
+     del título.
 5. **`feat(practicas)`: rellenar con datos de ejemplo (F7, 5/6).**
    - Un botón en "Probar el borrador" que completa todo el formulario. La generación es una función
      pura en JS, con tests.

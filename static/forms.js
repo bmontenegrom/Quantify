@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import {
   courseSelect, groupSelect, practiceSelect, tableSelect,
   measurementFields, latestResult, submitStatus, submitButton,
-  practicaTitle, practicePartTabs, submissionForm, studentComment,
+  practicaTitle, practicaSubtitle, practicePartTabs, submissionForm, studentComment,
 } from "./dom.js";
 import { fetchJson, postJson, deleteJson } from "./api.js";
 import { showToast } from "./toast.js";
@@ -107,6 +107,8 @@ export function selectedTableAssignment() {
   );
 }
 
+const DEFAULT_SUBTITLE = "Carga tus medidas y obtene las incertidumbres.";
+
 export async function loadSubmissionForm() {
   if (!measurementFields) return;
   const previewing = Boolean(state.draftPreviewPracticeId);
@@ -121,6 +123,10 @@ export async function loadSubmissionForm() {
     const practiceName =
       selectedCourse()?.practices.find((p) => p.id === practiceId)?.name ?? "Nueva entrega";
     practicaTitle.textContent = state.editingSubmissionId ? `Editar — ${practiceName}` : practiceName;
+  }
+  if (practicaSubtitle) {
+    const practice = (previewing ? state.practices : selectedCourse()?.practices)?.find((p) => p.id === practiceId);
+    practicaSubtitle.textContent = practice?.description || DEFAULT_SUBTITLE;
   }
   if (submitButton) submitButton.textContent = state.editingSubmissionId ? "Guardar cambios" : "Entregar";
   if (previewing) {
@@ -251,6 +257,16 @@ export function renderPartTabs(practiceId) {
 
   practicePartTabs.classList.add("hidden");
   practicePartTabs.innerHTML = "";
+}
+
+function formHelpHtml(text, attrs = "") {
+  return text ? `<p class="form-help"${attrs}>${inlineMathHtml(text)}</p>` : "";
+}
+
+function partHelpHtml(definition) {
+  return (definition.parts ?? [])
+    .map((p) => formHelpHtml(p.help_text, ` data-section="${escapeHtml(p.id)}"`))
+    .join("");
 }
 
 function applyPartVisibility() {
@@ -401,6 +417,7 @@ export function renderMeasurementFields(draft) {
         : "";
       return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+          ${formHelpHtml(sec.help_text)}
           ${rows.map(quantityRowHtml).join("")}
           ${helper}
           ${finalsHtml}
@@ -408,11 +425,11 @@ export function renderMeasurementFields(draft) {
     });
     const leftoverFinals = allFinals.filter((r) => !embedded.has(r.symbol));
     measurementFields.innerHTML =
-      blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
+      partHelpHtml(definition) + blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
     measurementFields.innerHTML =
-      definition.quantities.map(quantityRowHtml).join("") + helper + finalResultSectionHtml(definition);
+      partHelpHtml(definition) + definition.quantities.map(quantityRowHtml).join("") + helper + finalResultSectionHtml(definition);
   }
   wireChronoHelpers();
 
@@ -479,6 +496,7 @@ function seriesFinalResultsHtml(definition) {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
     return `<div class="measurement-section"${secAttr}>
         <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+        ${formHelpHtml(sec.help_text)}
         <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
         ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;

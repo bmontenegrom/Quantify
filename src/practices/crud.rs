@@ -538,6 +538,9 @@ pub enum Orderable {
     Results,
     Parts,
     Sections,
+    Intermediates,
+    PointResults,
+    Aggregates,
 }
 
 impl Orderable {
@@ -548,6 +551,9 @@ impl Orderable {
             Orderable::Results => ("practice_results", "", "position, symbol"),
             Orderable::Parts => ("practice_parts", "", "position, id"),
             Orderable::Sections => ("practice_sections", "", "position, id"),
+            Orderable::Intermediates => ("practice_intermediates", "", "position, id"),
+            Orderable::PointResults => ("practice_point_results", "", "position, id"),
+            Orderable::Aggregates => ("practice_aggregates", "", "position, id"),
         }
     }
 }

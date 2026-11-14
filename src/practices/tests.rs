@@ -2265,6 +2265,7 @@ async fn deleting_parts_and_sections_keeps_the_content() {
         &pool,
         "p2-cc",
         &SectionInput {
+            help_text: String::new(),
             title: "x".into(),
             part_id: Some("hidrostatica-arq".into()),
         },
@@ -2476,6 +2477,7 @@ async fn a_result_used_by_series_artifacts_goes_to_the_series_part() {
         &pool,
         "fluidos-1",
         &PartInput {
+            help_text: String::new(),
             title: "Unica".into(),
         },
     )
@@ -3240,6 +3242,76 @@ async fn reordering_intermediates_stays_structural() {
     let found = draft_changes(&pool, practice).await.unwrap().unwrap();
     assert_eq!(found.kind, DraftChangeKind::Structural);
     assert_eq!(found.changes, ["Cambia el orden de las intermedias"]);
+}
+
+#[tokio::test]
+async fn move_item_reorders_intermediates() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let symbols = |def: &PracticeDefinition| -> Vec<String> {
+        def.intermediates
+            .iter()
+            .map(|it| it.symbol.clone())
+            .collect()
+    };
+    let def = definition(&pool, "filtros").await.unwrap().unwrap();
+    assert_eq!(symbols(&def), ["omega", "razon", "phi"]);
+    let phi = def.intermediates[2].id.clone();
+    assert_eq!(
+        move_item(&pool, Orderable::Intermediates, "filtros", &phi, true)
+            .await
+            .unwrap(),
+        Some(true)
+    );
+    let def = definition(&pool, "filtros").await.unwrap().unwrap();
+    assert_eq!(symbols(&def), ["omega", "phi", "razon"]);
+}
+
+#[tokio::test]
+async fn editing_help_text_updates_the_current_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p3-relajacion";
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    let part = before.definition.parts[0].clone();
+    let section = before.definition.sections[0].clone();
+    update_part(
+        &pool,
+        practice,
+        &part.id,
+        &PartInput {
+            title: part.title.clone(),
+            help_text: "Medí con el osciloscopio.".into(),
+        },
+    )
+    .await
+    .unwrap();
+    update_section(
+        &pool,
+        practice,
+        &section.id,
+        &SectionInput {
+            title: section.title.clone(),
+            part_id: section.part_id.clone(),
+            help_text: "Anotá la escala.".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    assert!(matches!(
+        publish_checked(&pool, practice, None, None, no_problems)
+            .await
+            .unwrap(),
+        Publish::UpdatedCurrent { number } if number == before.number
+    ));
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(
+        after.definition.parts[0].help_text,
+        "Medí con el osciloscopio."
+    );
+    assert_eq!(after.definition.sections[0].help_text, "Anotá la escala.");
 }
 
 #[tokio::test]

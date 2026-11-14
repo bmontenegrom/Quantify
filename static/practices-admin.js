@@ -197,7 +197,7 @@ function renderSymbolFormulaList(kind, def, practiceId) {
   if (items.length === 0) return `<p class="submission-meta">${kind.emptyText}</p>`;
   const flags = kind.flags ?? [];
   const colspan = 3 + flags.length;
-  const rows = items.flatMap((item) => {
+  const rows = items.flatMap((item, i) => {
     const editing = isEditing(kind.kind, item.id);
     const finalCell = flags.map((f) => `<td>${item[f.field] ? "Sí" : "—"}</td>`).join("");
     const baseRow = `
@@ -206,6 +206,7 @@ function renderSymbolFormulaList(kind, def, practiceId) {
         <td><code>${escapeHtml(item.formula)}</code></td>
         ${finalCell}
         <td class="directory-actions">
+          ${moveButtonsHtml(kind.urlSegment, item.id, i, items.length)}
           <button type="button" data-edit-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">${editing ? "Cerrar" : "Editar"}</button>
           <button type="button" class="btn-danger" data-delete-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">Eliminar</button>
         </td>
@@ -751,7 +752,7 @@ function renderPracticeInfoForm(practice) {
     <form id="practice-info-form" class="detail-form detail-form-grid">
       <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
       <label>Nombre <input name="name" value="${escapeHtml(practice.name)}" required /></label>
-      <label>Descripción <input name="description" value="${escapeHtml(practice.description)}" /></label>
+      <label>Descripción (el alumno la ve debajo del título) <input name="description" value="${escapeHtml(practice.description)}" /></label>
       <div class="detail-actions"><button type="submit">Guardar</button></div>
     </form>`;
 }
@@ -1397,6 +1398,7 @@ function renderLayoutSection(practice, def) {
       <td class="directory-primary">
         <form class="layout-inline-form" data-layout-form="parts" data-id="${escapeHtml(p.id)}">
           <input name="title" value="${escapeHtml(p.title)}" required aria-label="Título de la parte" />
+          <input name="help_text" value="${escapeHtml(p.help_text ?? "")}" placeholder="Texto de ayuda para el alumno (opcional)" aria-label="Ayuda de la parte" />
           <button type="submit">Guardar</button>
         </form>
       </td>
@@ -1418,6 +1420,7 @@ function renderLayoutSection(practice, def) {
         <form class="layout-inline-form" data-layout-form="sections" data-id="${escapeHtml(s.id)}">
           <input name="title" value="${escapeHtml(s.title)}" required aria-label="Título de la sección" />
           <select name="part_id" aria-label="Parte">${partOptionsHtml(def, s.part_id)}</select>
+          <input name="help_text" value="${escapeHtml(s.help_text ?? "")}" placeholder="Texto de ayuda para el alumno (opcional)" aria-label="Ayuda de la sección" />
           <button type="submit">Guardar</button>
         </form>
       </td>
@@ -1438,6 +1441,7 @@ function renderLayoutSection(practice, def) {
         <summary>Nueva parte</summary>
         <form id="new-part-form" class="detail-form detail-form-grid" data-layout-form="parts">
           <label>Título <input name="title" required placeholder="Parte 1: Arquímedes" /></label>
+          <label>Ayuda <input name="help_text" placeholder="Texto de ayuda para el alumno (opcional)" /></label>
           <div class="detail-actions"><button type="submit">Agregar</button></div>
         </form>
       </details>
@@ -1448,6 +1452,7 @@ function renderLayoutSection(practice, def) {
         <form id="new-section-form" class="detail-form detail-form-grid" data-layout-form="sections">
           <label>Título <input name="title" required placeholder="Datos comunes" /></label>
           <label>Parte <select name="part_id">${partOptionsHtml(def, null)}</select></label>
+          <label>Ayuda <input name="help_text" placeholder="Texto de ayuda para el alumno (opcional)" /></label>
           <div class="detail-actions"><button type="submit">Agregar</button></div>
         </form>
       </details>
@@ -1460,7 +1465,8 @@ async function saveLayoutItem(event, practiceId) {
   const list = form.dataset.layoutForm;
   const id = form.dataset.id;
   const payload = Object.fromEntries(new FormData(form).entries());
-  const body = list === "parts" ? { title: payload.title } : { title: payload.title, part_id: payload.part_id || null };
+  const body = { title: payload.title, help_text: payload.help_text ?? "" };
+  if (list === "sections") body.part_id = payload.part_id || null;
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/${list}${id ? `/${id}` : ""}`, body);
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);

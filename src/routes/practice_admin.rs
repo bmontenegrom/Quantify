@@ -2137,6 +2137,7 @@ pub(super) async fn create_part(
 fn with_new_part(def: &practices::PracticeDefinition) -> practices::PracticeDefinition {
     let mut after = def.clone();
     after.parts.push(practices::PracticePart {
+        help_text: String::new(),
         id: String::new(),
         practice_id: def.practice_id.clone(),
         title: String::new(),
@@ -2222,17 +2223,113 @@ fn with_part_moved(
     up: bool,
 ) -> practices::PracticeDefinition {
     let mut after = def.clone();
-    if let Some(index) = after.parts.iter().position(|p| p.id == part_id) {
-        let other = if up {
-            index.checked_sub(1)
-        } else {
-            Some(index + 1)
-        };
-        if let Some(other) = other.filter(|o| *o < after.parts.len()) {
-            after.parts.swap(index, other);
+    let index = after.parts.iter().position(|p| p.id == part_id);
+    swap_neighbor(&mut after.parts, index, up);
+    after
+}
+
+fn swap_neighbor<T>(items: &mut [T], index: Option<usize>, up: bool) {
+    let Some(index) = index else { return };
+    let other = if up {
+        index.checked_sub(1)
+    } else {
+        Some(index + 1)
+    };
+    if let Some(other) = other.filter(|o| *o < items.len()) {
+        items.swap(index, other);
+    }
+}
+
+fn with_formula_row_moved(
+    def: &practices::PracticeDefinition,
+    list: practices::Orderable,
+    item_id: &str,
+    up: bool,
+) -> practices::PracticeDefinition {
+    fn reorder<T>(
+        items: &mut [T],
+        id: fn(&T) -> &str,
+        position: fn(&mut T) -> &mut i64,
+        item_id: &str,
+        up: bool,
+    ) {
+        let index = items.iter().position(|it| id(it) == item_id);
+        swap_neighbor(items, index, up);
+        for (i, it) in items.iter_mut().enumerate() {
+            *position(it) = i as i64;
         }
     }
+    let mut after = def.clone();
+    match list {
+        practices::Orderable::Intermediates => reorder(
+            &mut after.intermediates,
+            |it| &it.id,
+            |it| &mut it.position,
+            item_id,
+            up,
+        ),
+        practices::Orderable::PointResults => reorder(
+            &mut after.point_results,
+            |it| &it.id,
+            |it| &mut it.position,
+            item_id,
+            up,
+        ),
+        practices::Orderable::Aggregates => reorder(
+            &mut after.aggregates,
+            |it| &it.id,
+            |it| &mut it.position,
+            item_id,
+            up,
+        ),
+        _ => {}
+    }
     after
+}
+
+async fn move_formula_row(
+    state: &SharedState,
+    headers: &HeaderMap,
+    list: practices::Orderable,
+    practice_id: &str,
+    item_id: &str,
+    up: bool,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(state, headers).await?;
+    let before = load_definition(state, practice_id).await?;
+    let after = with_formula_row_moved(&before, list, item_id, up);
+    guard_change(&before, &after, "cambiar el orden")?;
+    move_in_list(state, headers, list, practice_id, item_id, up).await
+}
+
+pub(super) async fn move_intermediate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, iid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    let list = practices::Orderable::Intermediates;
+    move_formula_row(&state, &headers, list, &id, &iid, body.up).await
+}
+
+pub(super) async fn move_point_result(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    let list = practices::Orderable::PointResults;
+    move_formula_row(&state, &headers, list, &id, &pid, body.up).await
+}
+
+pub(super) async fn move_aggregate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, aid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    let list = practices::Orderable::Aggregates;
+    move_formula_row(&state, &headers, list, &id, &aid, body.up).await
 }
 
 pub(super) async fn update_part(
@@ -2824,6 +2921,28 @@ mod tests {
             let problems = formula_problems(&def);
             assert!(problems.is_empty(), "{}: {problems:?}", def.practice_id);
         }
+    }
+
+    #[tokio::test]
+    async fn moving_an_aggregate_above_what_it_uses_is_rejected() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let def = practices::definition(&pool, "fluidos-2")
+            .await
+            .unwrap()
+            .unwrap();
+        let id_of = |symbol: &str| {
+            def.aggregates
+                .iter()
+                .find(|a| a.symbol == symbol)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let list = practices::Orderable::Aggregates;
+        let swapped = with_formula_row_moved(&def, list, &id_of("Re_max"), false);
+        assert!(guard_change(&def, &swapped, "cambiar el orden").is_ok());
+        let broken = with_formula_row_moved(&def, list, &id_of("Re_medio"), true);
+        assert!(guard_change(&def, &broken, "cambiar el orden").is_err());
     }
 
     #[tokio::test]
@@ -3654,6 +3773,7 @@ mod tests {
             &pool,
             "fluidos-1",
             &practices::PartInput {
+                help_text: String::new(),
                 title: "Unica".into(),
             },
         )
@@ -3720,6 +3840,7 @@ mod tests {
 
         let mut shared_section = fluidos.clone();
         shared_section.sections.push(practices::PracticeSection {
+            help_text: String::new(),
             id: "s".into(),
             practice_id: fluidos.practice_id.clone(),
             part_id: None,
@@ -3816,6 +3937,7 @@ mod tests {
                 &pool,
                 "fluidos-1",
                 &practices::PartInput {
+                    help_text: String::new(),
                     title: title.into(),
                 },
             )
@@ -3881,6 +4003,7 @@ mod tests {
                 &pool,
                 "fluidos-1",
                 &practices::PartInput {
+                    help_text: String::new(),
                     title: title.into(),
                 },
             )
@@ -3899,6 +4022,7 @@ mod tests {
             .map(|q| q.symbol.clone())
             .collect();
         def.sections.push(practices::PracticeSection {
+            help_text: String::new(),
             id: "sa".into(),
             practice_id: def.practice_id.clone(),
             part_id: Some(a.clone()),
@@ -3957,7 +4081,10 @@ mod tests {
         practices::create_part(
             &pool,
             "fluidos-1",
-            &practices::PartInput { title: "A".into() },
+            &practices::PartInput {
+                help_text: String::new(),
+                title: "A".into(),
+            },
         )
         .await
         .unwrap();
@@ -3972,7 +4099,10 @@ mod tests {
         practices::create_part(
             &pool,
             "fluidos-1",
-            &practices::PartInput { title: "B".into() },
+            &practices::PartInput {
+                help_text: String::new(),
+                title: "B".into(),
+            },
         )
         .await
         .unwrap();
@@ -3997,10 +4127,16 @@ mod tests {
             .unwrap();
         let chosen = with_part_kind(&cc, "p2-cc-serie", "estadistico").unwrap();
         practices::save_part_kinds(&pool, &chosen).await.unwrap();
-        let part =
-            practices::create_part(&pool, "p2-cc", &practices::PartInput { title: "C".into() })
-                .await
-                .unwrap();
+        let part = practices::create_part(
+            &pool,
+            "p2-cc",
+            &practices::PartInput {
+                help_text: String::new(),
+                title: "C".into(),
+            },
+        )
+        .await
+        .unwrap();
         let mut after = practices::definition(&pool, "p2-cc")
             .await
             .unwrap()

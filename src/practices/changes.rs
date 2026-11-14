@@ -5,9 +5,10 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 8] = [
+const COSMETIC_KEYS: [&str; 9] = [
     "name",
     "title",
+    "help_text",
     "tolerance",
     "display_symbols",
     "label_mode",

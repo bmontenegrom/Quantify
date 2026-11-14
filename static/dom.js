@@ -53,6 +53,7 @@ export const practiceStatus = document.querySelector("#practice-status");
 export const practicePartTabs = document.querySelector("#practice-part-tabs");
 export const practiceNavChildren = document.querySelector("#practice-nav-children");
 export const practicaTitle = document.querySelector("#practica-title");
+export const practicaSubtitle = document.querySelector("#practica-subtitle");
 export const sidebar = document.querySelector("#sidebar");
 export const navToggle = document.querySelector("#nav-toggle");
 export const themeToggle = document.querySelector("#theme-toggle");
