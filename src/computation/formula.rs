@@ -48,8 +48,7 @@ pub(crate) fn compile_formula(formula: &str, allowed: &[String]) -> anyhow::Resu
     }
 }
 
-/// Funciones que se aceptan en una fórmula, con su descripción. Quedan afuera las escalonadas
-/// (`floor`, `round`, `ceil`), porque la incertidumbre se propaga con una derivada numérica.
+/// Funciones que se aceptan en una fórmula, con su descripción.
 ///
 /// ```
 /// use quantify::computation::FUNCTIONS;
@@ -86,8 +85,7 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
     ("max", "máximo"),
 ];
 
-/// Valida que una fórmula compile, solo use símbolos de `allowed` (o las constantes `pi` y `e`)
-/// y solo llame funciones de [`FUNCTIONS`].
+/// Valida que una fórmula compile, use solo símbolos de `allowed` y funciones de [`FUNCTIONS`].
 ///
 /// ```
 /// use quantify::computation::check_formula;
@@ -100,6 +98,8 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
 /// assert!(err.contains("\"math::foo\""));
 /// let err = check_formula("math::pow(L)", &allowed).unwrap_err().to_string();
 /// assert!(err.contains("cantidad de argumentos"));
+/// let err = check_formula("math::sqrt(L) * \"x\"", &allowed).unwrap_err().to_string();
+/// assert!(!err.contains("cantidad de argumentos"));
 /// let err = check_formula("L > 1", &allowed).unwrap_err().to_string();
 /// assert!(err.contains("no da un número"));
 /// assert!(check_formula("4*pi*1e-7*L", &allowed).is_ok());
@@ -112,12 +112,17 @@ pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
         Err(Unusable::NotANumber) => anyhow::bail!(
             "la fórmula \"{formula}\" no da un número (¿quedó una comparación o una coma de más?)"
         ),
-        Err(Unusable::Failed) if tree.iter_function_identifiers().next().is_some() => {
+        Err(Unusable::Failed(
+            evalexpr::EvalexprError::WrongFunctionArgumentAmount { .. }
+            | evalexpr::EvalexprError::ExpectedTuple { .. }
+            | evalexpr::EvalexprError::ExpectedFixedLengthTuple { .. }
+            | evalexpr::EvalexprError::ExpectedRangedLengthTuple { .. },
+        )) => {
             anyhow::bail!(
                 "la fórmula \"{formula}\" no se puede calcular: revisá que cada función tenga la cantidad de argumentos que pide y que sea una sola expresión"
             )
         }
-        Err(Unusable::Failed) => {
+        Err(Unusable::Failed(_)) => {
             anyhow::bail!("la fórmula \"{formula}\" no se puede calcular")
         }
     }
@@ -125,7 +130,7 @@ pub fn check_formula(formula: &str, allowed: &[String]) -> anyhow::Result<()> {
 
 enum Unusable {
     NotANumber,
-    Failed,
+    Failed(evalexpr::EvalexprError),
 }
 
 pub(crate) fn formula_symbols(formula: &str) -> Vec<String> {
@@ -145,7 +150,7 @@ fn evaluate(tree: &Node, values: &HashMap<&str, f64>) -> Result<f64, Unusable> {
     match tree.eval_with_context(&context) {
         Ok(Value::Float(value)) => Ok(value),
         Ok(_) => Err(Unusable::NotANumber),
-        Err(_) => Err(Unusable::Failed),
+        Err(err) => Err(Unusable::Failed(err)),
     }
 }
 
