@@ -2137,13 +2137,9 @@ pub(super) async fn create_part(
 fn with_new_part(def: &practices::PracticeDefinition) -> practices::PracticeDefinition {
     let mut after = def.clone();
     after.parts.push(practices::PracticePart {
-        help_text: String::new(),
-        id: String::new(),
         practice_id: def.practice_id.clone(),
-        title: String::new(),
         position: i64::MAX,
-        analysis_kind: None,
-        effective_kind: String::new(),
+        ..Default::default()
     });
     after
 }

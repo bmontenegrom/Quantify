@@ -107,7 +107,7 @@ export function selectedTableAssignment() {
   );
 }
 
-const DEFAULT_SUBTITLE = "Carga tus medidas y obtene las incertidumbres.";
+const DEFAULT_SUBTITLE = practicaSubtitle?.textContent ?? "";
 
 export async function loadSubmissionForm() {
   if (!measurementFields) return;
@@ -264,7 +264,9 @@ export function formHelpHtml(text, attrs = "") {
 }
 
 export function partHelpHtml(definition) {
+  const tabs = new Set(definitionParts(definition).map((p) => p.id));
   return (definition.parts ?? [])
+    .filter((p) => tabs.has(p.id))
     .map((p) => formHelpHtml(p.help_text, ` data-section="${escapeHtml(p.id)}"`))
     .join("");
 }
