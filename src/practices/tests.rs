@@ -3287,6 +3287,10 @@ async fn move_item_reorders_point_results() {
         .unwrap();
         ids.push(row.id);
     }
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    publish_checked(&pool, practice, None, None, no_problems)
+        .await
+        .unwrap();
     assert_eq!(
         move_item(&pool, Orderable::PointResults, practice, &ids[1], true)
             .await
@@ -3300,6 +3304,8 @@ async fn move_item_reorders_point_results() {
         .map(|r| r.symbol.as_str())
         .collect();
     assert_eq!(symbols, ["Rb", "Ra"]);
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
 }
 
 #[tokio::test]
