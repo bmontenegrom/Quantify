@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 #[derive(sqlx::FromRow)]
 struct PracticeConfigRow {
+    description: String,
     status: String,
     analysis_kind: Option<String>,
     x_formula: Option<String>,
@@ -29,7 +30,7 @@ pub async fn definition_in(
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
     let row: Option<PracticeConfigRow> = sqlx::query_as(
-        "SELECT status, analysis_kind, x_formula, y_formula, operator_count, \
+        "SELECT description, status, analysis_kind, x_formula, y_formula, operator_count, \
          (SELECT number FROM practice_versions WHERE id = practices.current_version_id) \
          AS current_version FROM practices WHERE id = ?1",
     )
@@ -51,6 +52,7 @@ pub async fn definition_in(
     Ok(Some(
         PracticeDefinition {
             practice_id: practice_id.to_string(),
+            description: row.description,
             status: row.status,
             analysis_kind: row.analysis_kind,
             x_formula: row.x_formula,

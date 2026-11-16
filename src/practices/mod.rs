@@ -110,6 +110,7 @@ impl ResultInput {
 #[serde(default)]
 pub struct PracticeDefinition {
     pub practice_id: String,
+    pub description: String,
     pub status: String,
     pub analysis_kind: Option<String>,
     pub x_formula: Option<String>,

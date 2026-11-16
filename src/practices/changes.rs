@@ -5,7 +5,8 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 9] = [
+const COSMETIC_KEYS: [&str; 10] = [
+    "description",
     "name",
     "title",
     "help_text",
@@ -328,7 +329,11 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
         (old.help_text != new.help_text)
             .then(|| format!("Cambia la ayuda de la sección {}", new.title))
     });
-    symbols
+    let description =
+        (published.description != draft.description).then(|| "Cambia la descripción".to_string());
+    description
+        .into_iter()
+        .chain(symbols)
         .chain(quantities)
         .chain(comparisons)
         .chain(live)

@@ -3411,6 +3411,34 @@ async fn editing_help_text_updates_the_current_version() {
 }
 
 #[tokio::test]
+async fn the_description_waits_for_publish() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p3-relajacion";
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    sqlx::query("UPDATE practices SET description = 'Nueva' WHERE id = ?1")
+        .bind(practice)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let published = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(
+        published.definition.description,
+        before.definition.description
+    );
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(found.changes, ["Cambia la descripción"]);
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    publish_checked(&pool, practice, None, None, no_problems)
+        .await
+        .unwrap();
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(after.number, before.number);
+    assert_eq!(after.definition.description, "Nueva");
+}
+
+#[tokio::test]
 async fn renaming_without_help_text_keeps_it() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();

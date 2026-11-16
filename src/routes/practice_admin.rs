@@ -2563,6 +2563,7 @@ mod tests {
             ..Default::default()
         };
         let def = practices::PracticeDefinition {
+            description: String::new(),
             practice_id: "p".into(),
             status: "borrador".into(),
             analysis_kind: Some("regresion_lineal".into()),
@@ -2641,6 +2642,7 @@ mod tests {
             is_final: false,
         };
         let def = practices::PracticeDefinition {
+            description: String::new(),
             practice_id: "p".into(),
             status: "borrador".into(),
             analysis_kind: Some("regresion_lineal".into()),
@@ -2816,6 +2818,7 @@ mod tests {
     #[test]
     fn validate_result_allows_dimensionless_unit() {
         let def = practices::PracticeDefinition {
+            description: String::new(),
             practice_id: "p".into(),
             status: "borrador".into(),
             analysis_kind: Some("regresion_lineal".into()),

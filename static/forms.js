@@ -128,7 +128,7 @@ export async function loadSubmissionForm() {
     const practiceName = practice?.name ?? "Nueva entrega";
     practicaTitle.textContent = state.editingSubmissionId ? `Editar — ${practiceName}` : practiceName;
   }
-  if (practicaSubtitle) practicaSubtitle.textContent = practice?.description || DEFAULT_SUBTITLE;
+  if (practicaSubtitle) practicaSubtitle.textContent = DEFAULT_SUBTITLE;
   if (submitButton) submitButton.textContent = state.editingSubmissionId ? "Guardar cambios" : "Entregar";
   if (previewing) {
     if (practicaTitle) practicaTitle.textContent = `Probar el borrador — ${practice?.name ?? practiceId}`;
@@ -162,6 +162,7 @@ export async function loadSubmissionForm() {
       courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
     ]);
     state.practiceForm = { definition, instruments };
+    if (practicaSubtitle) practicaSubtitle.textContent = definition.description || DEFAULT_SUBTITLE;
     const draft = applicableDraft();
     restoreChronoDraft(draft?.chrono);
     renderPartTabs(practiceId);
