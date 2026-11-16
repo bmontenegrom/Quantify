@@ -27,40 +27,53 @@ async fn ensure_practice(state: &SharedState, practice_id: &str) -> Result<(), A
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
-static EDIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+type PracticeMutex = std::sync::Arc<tokio::sync::Mutex<()>>;
 
-struct LockedDefinition {
-    _lock: tokio::sync::MutexGuard<'static, ()>,
-    definition: practices::PracticeDefinition,
+static PRACTICE_LOCKS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, PracticeMutex>>,
+> = std::sync::LazyLock::new(Default::default);
+
+fn practice_mutex(practice_id: &str) -> PracticeMutex {
+    let mut locks = PRACTICE_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    locks.entry(practice_id.to_string()).or_default().clone()
 }
 
-impl std::ops::Deref for LockedDefinition {
-    type Target = practices::PracticeDefinition;
-
-    fn deref(&self) -> &Self::Target {
-        &self.definition
+fn release_practice_mutex(practice_id: &str, mutex: PracticeMutex) {
+    let mut locks = PRACTICE_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    if std::sync::Arc::strong_count(&mutex) == 2 {
+        locks.remove(practice_id);
     }
 }
 
-async fn read_definition(
+pub(super) async fn serialize_practice_edits(
+    params: axum::extract::RawPathParams,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let practice_id = params
+        .iter()
+        .find(|(key, _)| *key == "id")
+        .map(|(_, value)| value.to_string());
+    let Some(practice_id) = practice_id.filter(|_| request.method() != axum::http::Method::GET)
+    else {
+        return next.run(request).await;
+    };
+    let mutex = practice_mutex(&practice_id);
+    let response = {
+        let _guard = mutex.lock().await;
+        next.run(request).await
+    };
+    release_practice_mutex(&practice_id, mutex);
+    response
+}
+
+async fn load_definition(
     state: &SharedState,
     practice_id: &str,
 ) -> Result<practices::PracticeDefinition, AppError> {
     practices::definition(&state.pool, practice_id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
-}
-
-async fn load_definition(
-    state: &SharedState,
-    practice_id: &str,
-) -> Result<LockedDefinition, AppError> {
-    let lock = EDIT_LOCK.lock().await;
-    let definition = read_definition(state, practice_id).await?;
-    Ok(LockedDefinition {
-        _lock: lock,
-        definition,
-    })
 }
 
 const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
@@ -185,7 +198,7 @@ pub(super) async fn practice_problems(
     Path(id): Path<String>,
 ) -> Result<Json<Vec<Problem>>, AppError> {
     require_teacher(&state, &headers).await?;
-    let def = read_definition(&state, &id).await?;
+    let def = load_definition(&state, &id).await?;
     Ok(Json(draft_problems(&def)))
 }
 
@@ -402,7 +415,7 @@ pub(super) async fn practice_definition(
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
     if matches!(user.role.as_str(), "docente" | "admin") && !query.published {
-        let definition = read_definition(&state, &id).await?;
+        let definition = load_definition(&state, &id).await?;
         return Ok(Json(DefinitionView {
             compare_options: Some(definition.compare_options()),
             formula_scopes: Some(formula_scopes(&definition)),
@@ -524,7 +537,7 @@ async fn preview_definition(
         require_teacher(state, headers).await?;
     }
     Ok(match &body.submission_id {
-        _ if body.draft => read_definition(state, id).await?,
+        _ if body.draft => load_definition(state, id).await?,
         Some(submission_id) => {
             ensure_submission_access(state, &user, submission_id).await?;
             practices::submission_definition(&state.pool, submission_id)
@@ -2148,7 +2161,7 @@ pub(super) async fn create_part(
     if chosen {
         created.analysis_kind = Some("estadistico".into());
     }
-    let mut after = before.clone();
+    let mut after = before;
     after.parts.push(created.clone());
     if chosen {
         practices::save_part_kinds(&state.pool, &after).await?;
@@ -2244,7 +2257,6 @@ async fn move_guarded(
     up: bool,
     action: &str,
 ) -> Result<(), AppError> {
-    let _lock = EDIT_LOCK.lock().await;
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let not_found = || AppError::not_found("practica no encontrada");
     let before = practices::definition_in(&mut tx, practice_id)
@@ -2873,6 +2885,24 @@ mod tests {
             let problems = formula_problems(&def);
             assert!(problems.is_empty(), "{}: {problems:?}", def.practice_id);
         }
+    }
+
+    #[tokio::test]
+    async fn edits_wait_only_for_the_same_practice() {
+        let held = practice_mutex("lock-a");
+        let guard = held.lock().await;
+        let same = practice_mutex("lock-a");
+        assert!(same.try_lock().is_err());
+        let other = practice_mutex("lock-b");
+        assert!(other.try_lock().is_ok());
+        release_practice_mutex("lock-b", other);
+        drop(guard);
+        release_practice_mutex("lock-a", same);
+        let present = |id: &str| PRACTICE_LOCKS.lock().unwrap().contains_key(id);
+        assert!(present("lock-a"));
+        release_practice_mutex("lock-a", held);
+        assert!(!present("lock-a"));
+        assert!(!present("lock-b"));
     }
 
     #[tokio::test]
