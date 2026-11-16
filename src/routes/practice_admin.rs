@@ -803,6 +803,16 @@ async fn move_in_list(
     up: bool,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(state, headers).await?;
+    move_or_404(state, list, practice_id, item_id, up).await
+}
+
+async fn move_or_404(
+    state: &SharedState,
+    list: practices::Orderable,
+    practice_id: &str,
+    item_id: &str,
+    up: bool,
+) -> Result<Json<Health>, AppError> {
     if practices::move_item(&state.pool, list, practice_id, item_id, up)
         .await?
         .is_none()
@@ -2236,9 +2246,16 @@ fn swap_neighbor<T>(items: &mut [T], index: Option<usize>, up: bool) {
     }
 }
 
+#[derive(Clone, Copy)]
+enum FormulaRows {
+    Intermediates,
+    PointResults,
+    Aggregates,
+}
+
 fn with_formula_row_moved(
     def: &practices::PracticeDefinition,
-    list: practices::Orderable,
+    rows: FormulaRows,
     item_id: &str,
     up: bool,
 ) -> practices::PracticeDefinition {
@@ -2256,29 +2273,28 @@ fn with_formula_row_moved(
         }
     }
     let mut after = def.clone();
-    match list {
-        practices::Orderable::Intermediates => reorder(
+    match rows {
+        FormulaRows::Intermediates => reorder(
             &mut after.intermediates,
             |it| &it.id,
             |it| &mut it.position,
             item_id,
             up,
         ),
-        practices::Orderable::PointResults => reorder(
+        FormulaRows::PointResults => reorder(
             &mut after.point_results,
             |it| &it.id,
             |it| &mut it.position,
             item_id,
             up,
         ),
-        practices::Orderable::Aggregates => reorder(
+        FormulaRows::Aggregates => reorder(
             &mut after.aggregates,
             |it| &it.id,
             |it| &mut it.position,
             item_id,
             up,
         ),
-        _ => {}
     }
     after
 }
@@ -2286,16 +2302,21 @@ fn with_formula_row_moved(
 async fn move_formula_row(
     state: &SharedState,
     headers: &HeaderMap,
-    list: practices::Orderable,
+    rows: FormulaRows,
     practice_id: &str,
     item_id: &str,
     up: bool,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(state, headers).await?;
     let before = load_definition(state, practice_id).await?;
-    let after = with_formula_row_moved(&before, list, item_id, up);
+    let after = with_formula_row_moved(&before, rows, item_id, up);
     guard_change(&before, &after, "cambiar el orden")?;
-    move_in_list(state, headers, list, practice_id, item_id, up).await
+    let list = match rows {
+        FormulaRows::Intermediates => practices::Orderable::Intermediates,
+        FormulaRows::PointResults => practices::Orderable::PointResults,
+        FormulaRows::Aggregates => practices::Orderable::Aggregates,
+    };
+    move_or_404(state, list, practice_id, item_id, up).await
 }
 
 pub(super) async fn move_intermediate(
@@ -2304,7 +2325,7 @@ pub(super) async fn move_intermediate(
     Path((id, iid)): Path<(String, String)>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
-    let list = practices::Orderable::Intermediates;
+    let list = FormulaRows::Intermediates;
     move_formula_row(&state, &headers, list, &id, &iid, body.up).await
 }
 
@@ -2314,7 +2335,7 @@ pub(super) async fn move_point_result(
     Path((id, pid)): Path<(String, String)>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
-    let list = practices::Orderable::PointResults;
+    let list = FormulaRows::PointResults;
     move_formula_row(&state, &headers, list, &id, &pid, body.up).await
 }
 
@@ -2324,7 +2345,7 @@ pub(super) async fn move_aggregate(
     Path((id, aid)): Path<(String, String)>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
-    let list = practices::Orderable::Aggregates;
+    let list = FormulaRows::Aggregates;
     move_formula_row(&state, &headers, list, &id, &aid, body.up).await
 }
 
@@ -2370,15 +2391,7 @@ pub(super) async fn move_part(
         &with_part_moved(&before, &pid, body.up),
         "mover la parte",
     )?;
-    move_in_list(
-        &state,
-        &headers,
-        practices::Orderable::Parts,
-        &id,
-        &pid,
-        body.up,
-    )
-    .await
+    move_or_404(&state, practices::Orderable::Parts, &id, &pid, body.up).await
 }
 
 pub(super) async fn create_section(
@@ -2934,7 +2947,7 @@ mod tests {
                 .id
                 .clone()
         };
-        let list = practices::Orderable::Aggregates;
+        let list = FormulaRows::Aggregates;
         let swapped = with_formula_row_moved(&def, list, &id_of("Re_max"), false);
         assert!(guard_change(&def, &swapped, "cambiar el orden").is_ok());
         let broken = with_formula_row_moved(&def, list, &id_of("Re_medio"), true);
