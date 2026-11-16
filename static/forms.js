@@ -109,9 +109,11 @@ export function selectedTableAssignment() {
 }
 
 const DEFAULT_SUBTITLE = practicaSubtitle?.textContent ?? "";
+let latestFormRequest = 0;
 
 export async function loadSubmissionForm() {
   if (!measurementFields) return;
+  const request = ++latestFormRequest;
   const previewing = Boolean(state.draftPreviewPracticeId);
   if (canReview(state.user) && !previewing) {
     if (practicaSubtitle) practicaSubtitle.textContent = DEFAULT_SUBTITLE;
@@ -143,7 +145,7 @@ export async function loadSubmissionForm() {
 
   if (!state.editingSubmissionId && !previewing) {
     const blocked = await checkExistingReport(practiceId);
-    if (blocked) return;
+    if (blocked || request !== latestFormRequest) return;
   }
 
   const carried =
@@ -161,6 +163,7 @@ export async function loadSubmissionForm() {
       ),
       courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
     ]);
+    if (request !== latestFormRequest) return;
     state.practiceForm = { definition, instruments };
     if (practicaSubtitle) practicaSubtitle.textContent = definition.description || DEFAULT_SUBTITLE;
     const draft = applicableDraft();
@@ -172,6 +175,7 @@ export async function loadSubmissionForm() {
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
   } catch (error) {
+    if (request !== latestFormRequest) return;
     state.practiceForm = null;
     measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
   }
