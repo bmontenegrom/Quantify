@@ -17,7 +17,13 @@ const COSMETIC_KEYS: [&str; 9] = [
     "show_live",
 ];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
-const FREELY_ORDERED: [&str; 4] = ["quantities", "results", "parts", "sections"];
+const FREELY_ORDERED: [&str; 5] = [
+    "quantities",
+    "results",
+    "parts",
+    "sections",
+    "point_results",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
