@@ -123,19 +123,15 @@ export async function loadSubmissionForm() {
   if (state.editingSubmissionId && state.editingPracticeId !== practiceId) exitEditMode();
   if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const courseId = courseSelect.value;
+  const practice = (previewing ? state.practices : selectedCourse()?.practices)?.find((p) => p.id === practiceId);
   if (practicaTitle) {
-    const practiceName =
-      selectedCourse()?.practices.find((p) => p.id === practiceId)?.name ?? "Nueva entrega";
+    const practiceName = practice?.name ?? "Nueva entrega";
     practicaTitle.textContent = state.editingSubmissionId ? `Editar — ${practiceName}` : practiceName;
   }
-  if (practicaSubtitle) {
-    const practice = (previewing ? state.practices : selectedCourse()?.practices)?.find((p) => p.id === practiceId);
-    practicaSubtitle.textContent = practice?.description || DEFAULT_SUBTITLE;
-  }
+  if (practicaSubtitle) practicaSubtitle.textContent = practice?.description || DEFAULT_SUBTITLE;
   if (submitButton) submitButton.textContent = state.editingSubmissionId ? "Guardar cambios" : "Entregar";
   if (previewing) {
-    const practiceName = state.practices.find((p) => p.id === practiceId)?.name ?? practiceId;
-    if (practicaTitle) practicaTitle.textContent = `Probar el borrador — ${practiceName}`;
+    if (practicaTitle) practicaTitle.textContent = `Probar el borrador — ${practice?.name ?? practiceId}`;
     if (submitButton) submitButton.textContent = "Calcular";
   }
   renderPartTabs(practiceId);
@@ -490,7 +486,7 @@ function seriesFinalResultsHtml(definition) {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
     return `<div class="measurement-section"${secAttr}>
         <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
-        ${formHelpHtml(sec.help_text)}
+        ${sec.symbols?.length ? "" : formHelpHtml(sec.help_text)}
         <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
         ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;

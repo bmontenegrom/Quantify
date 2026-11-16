@@ -50,15 +50,10 @@ export function renderSeriesTable(definition) {
   }
   const colSymbols = new Set(cols.map((q) => q.symbol));
   const sharedSymbols = new Set(shared.map((q) => q.symbol));
-  const finalSymbols = new Set((definition.results ?? []).filter((r) => r.is_final).map((r) => r.symbol));
   const seriesHelp = (sections ?? [])
     .filter((sec) => !sec.series && sec.help_text && (sec.symbols ?? []).some((s) => colSymbols.has(s)))
     .filter((sec) => !sec.symbols.some((s) => sharedSymbols.has(s)))
-    .filter((sec) => !(sec.results ?? []).some((r) => finalSymbols.has(r)))
-    .map((sec) => {
-      const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
-      return `<div class="measurement-section"${secAttr}><h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>${formHelpHtml(sec.help_text)}</div>`;
-    })
+    .map((sec) => `<h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>${formHelpHtml(sec.help_text)}`)
     .join("");
   const partsNote = definitionParts(definition).length
     ? `<p class="submission-meta">La entrega es única e incluye todas las partes: completá cada pestaña antes de entregar.</p>`
@@ -69,8 +64,8 @@ export function renderSeriesTable(definition) {
     ${partsNote}
     ${partHelpHtml(definition)}
     ${sharedSection}
-    ${seriesHelp}
     <div${seriesSectionAttr}>
+      ${seriesHelp}
       ${chronoHelper}
       <p class="submission-meta">Cargá un punto por fila. Las filas incompletas se ignoran. ${
         definition.analysis_kind === "curva"
