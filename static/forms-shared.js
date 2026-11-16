@@ -42,6 +42,17 @@ export function definitionParts(definition) {
   return (definition?.parts ?? []).filter((p) => used.has(p.id)).map((p) => ({ id: p.id, label: p.title }));
 }
 
+export function columnSections(definition, sections) {
+  const columns = new Set(definition.quantities.filter((q) => q.per_point && !q.is_given).map((q) => q.symbol));
+  const shared = new Set(definition.quantities.filter((q) => !q.per_point || q.is_given).map((q) => q.symbol));
+  return sections.filter(
+    (sec) =>
+      !sec.series &&
+      (sec.symbols ?? []).some((s) => columns.has(s)) &&
+      !sec.symbols.some((s) => shared.has(s)),
+  );
+}
+
 export function formHelpHtml(text, attrs = "") {
   return text ? `<p class="form-help"${attrs}>${escapeHtml(text)}</p>` : "";
 }

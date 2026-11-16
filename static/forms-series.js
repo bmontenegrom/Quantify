@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
 import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
-import { definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
+import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireReplicaRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
@@ -48,11 +48,7 @@ export function renderSeriesTable(definition) {
   } else if (shared.length) {
     sharedSection = `<div class="shared-quantities"><h4>Medidas</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
   }
-  const colSymbols = new Set(cols.map((q) => q.symbol));
-  const sharedSymbols = new Set(shared.map((q) => q.symbol));
-  const seriesHelp = (sections ?? [])
-    .filter((sec) => !sec.series && (sec.symbols ?? []).some((s) => colSymbols.has(s)))
-    .filter((sec) => !sec.symbols.some((s) => sharedSymbols.has(s)))
+  const seriesHelp = columnSections(definition, sections ?? [])
     .map((sec) => `<h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>${formHelpHtml(sec.help_text)}`)
     .join("");
   const partsNote = definitionParts(definition).length

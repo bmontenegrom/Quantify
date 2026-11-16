@@ -15,7 +15,7 @@ import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
-  formHelpHtml, partHelpHtml,
+  formHelpHtml, partHelpHtml, columnSections,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -487,11 +487,10 @@ function seriesFinalResultsHtml(definition) {
   const embedded = new Set(
     [...withRows, ...titled.map(({ sec }) => sec)].flatMap((sec) => sec.results ?? []),
   );
-  const columns = new Set(definition.quantities.filter((q) => q.per_point && !q.is_given).map((q) => q.symbol));
+  const titledAbove = new Set(columnSections(definition, sections));
   const titledHtml = titled.map(({ sec, rows }) => {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
-    const titledAbove = (sec.symbols ?? []).some((sym) => columns.has(sym));
-    const heading = titledAbove
+    const heading = titledAbove.has(sec)
       ? `<h5 class="measurement-section-subtitle">Resultado final — ${escapeHtml(sec.title)} <span class="submission-meta">— opcional</span></h5>`
       : `<h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
         ${formHelpHtml(sec.help_text)}
