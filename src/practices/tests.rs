@@ -3306,6 +3306,19 @@ async fn move_item_reorders_point_results() {
     assert_eq!(symbols, ["Rb", "Ra"]);
     let found = draft_changes(&pool, practice).await.unwrap().unwrap();
     assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    let published = current_version(&pool, practice)
+        .await
+        .unwrap()
+        .unwrap()
+        .definition;
+    let mut draft = def.clone();
+    draft.results[0].formula.push_str(" + 0");
+    let comparison = compare_definitions(&published, &draft).unwrap();
+    assert_eq!(comparison.kind, DraftChangeKind::Structural);
+    assert_eq!(
+        comparison.changes,
+        [format!("Cambia la fórmula de {}", draft.results[0].symbol)]
+    );
 }
 
 #[tokio::test]

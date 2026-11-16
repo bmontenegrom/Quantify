@@ -244,7 +244,7 @@ fn list_changes(
     )?;
     diff_items(
         "el resultado por punto",
-        Some("los resultados por punto"),
+        None,
         &published.point_results,
         &draft.point_results,
         |p| with_formula(&p.id, &p.symbol, &p.formula),
