@@ -483,12 +483,17 @@ function seriesFinalResultsHtml(definition) {
   const embedded = new Set(
     [...withRows, ...titled.map(({ sec }) => sec)].flatMap((sec) => sec.results ?? []),
   );
+  const columns = new Set(definition.quantities.filter((q) => q.per_point && !q.is_given).map((q) => q.symbol));
   const titledHtml = titled.map(({ sec, rows }) => {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+    const titledAbove = (sec.symbols ?? []).some((sym) => columns.has(sym));
+    const heading = titledAbove
+      ? `<h5 class="measurement-section-subtitle">Resultado final — ${escapeHtml(sec.title)} <span class="submission-meta">— opcional</span></h5>`
+      : `<h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+        ${formHelpHtml(sec.help_text)}
+        <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>`;
     return `<div class="measurement-section"${secAttr}>
-        <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
-        ${sec.symbols?.length ? "" : formHelpHtml(sec.help_text)}
-        <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
+        ${heading}
         ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;
   });

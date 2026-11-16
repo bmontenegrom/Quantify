@@ -51,7 +51,7 @@ export function renderSeriesTable(definition) {
   const colSymbols = new Set(cols.map((q) => q.symbol));
   const sharedSymbols = new Set(shared.map((q) => q.symbol));
   const seriesHelp = (sections ?? [])
-    .filter((sec) => !sec.series && sec.help_text && (sec.symbols ?? []).some((s) => colSymbols.has(s)))
+    .filter((sec) => !sec.series && (sec.symbols ?? []).some((s) => colSymbols.has(s)))
     .filter((sec) => !sec.symbols.some((s) => sharedSymbols.has(s)))
     .map((sec) => `<h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>${formHelpHtml(sec.help_text)}`)
     .join("");
