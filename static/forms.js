@@ -113,7 +113,10 @@ const DEFAULT_SUBTITLE = practicaSubtitle?.textContent ?? "";
 export async function loadSubmissionForm() {
   if (!measurementFields) return;
   const previewing = Boolean(state.draftPreviewPracticeId);
-  if (canReview(state.user) && !previewing) return;
+  if (canReview(state.user) && !previewing) {
+    if (practicaSubtitle) practicaSubtitle.textContent = DEFAULT_SUBTITLE;
+    return;
+  }
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
   const practiceId = practiceSelect.value;
@@ -487,7 +490,7 @@ function seriesFinalResultsHtml(definition) {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
     return `<div class="measurement-section"${secAttr}>
         <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
-        ${sec.symbols?.length ? "" : formHelpHtml(sec.help_text)}
+        ${formHelpHtml(sec.help_text)}
         <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
         ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;
