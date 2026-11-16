@@ -372,6 +372,7 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
 pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajación de un circuito RC medido de dos formas: directamente, con el tiempo de semidescarga, y a partir del desfasaje según la frecuencia.";
 
 const STUDENT_DESCRIPTIONS: &str = "2026-11-descripciones-para-el-alumno";
+const VERSIONED_DESCRIPTIONS: &str = "2026-11-descripcion-en-versiones";
 
 const OLD_SEEDED_DESCRIPTIONS: [(&str, &str); 9] = [
     ("p1-estadistica", "Pendulo simple con hasta 3 operadores independientes: cada uno mide su propia serie de periodos (T1/T2/T3) y determina su g; incertidumbres tipo A y B, calculo indirecto de g = 4*pi^2*L/T^2."),
@@ -492,6 +493,18 @@ pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
                 .await?;
         }
         mark_migration_applied(pool, STUDENT_DESCRIPTIONS).await?;
+    }
+
+    if !migration_applied(pool, VERSIONED_DESCRIPTIONS).await? {
+        sqlx::query(
+            "UPDATE practice_versions SET definition_json = json_set(definition_json, \
+             '$.description', \
+             (SELECT description FROM practices p WHERE p.id = practice_versions.practice_id)) \
+             WHERE json_type(definition_json, '$.description') IS NULL",
+        )
+        .execute(pool)
+        .await?;
+        mark_migration_applied(pool, VERSIONED_DESCRIPTIONS).await?;
     }
 
     for legacy_id in ["p2-serie", "p2-corriente-continua", "p2-potencia"] {

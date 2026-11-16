@@ -3439,6 +3439,45 @@ async fn the_description_waits_for_publish() {
 }
 
 #[tokio::test]
+async fn published_versions_without_description_get_the_practice_one() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let description = |practice: &'static str| {
+        let pool = pool.clone();
+        async move {
+            current_version(&pool, practice)
+                .await
+                .unwrap()
+                .unwrap()
+                .definition
+                .description
+        }
+    };
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = json_remove(definition_json, '$.description') \
+         WHERE practice_id = 'p3-relajacion'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = json_set(definition_json, '$.description', 'Publicada') \
+         WHERE practice_id = 'filtros'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-descripcion-en-versiones'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(description("p3-relajacion").await, "");
+    db::seed_practices(&pool).await.unwrap();
+    assert_eq!(description("p3-relajacion").await, db::P3_DESCRIPTION);
+    assert_eq!(description("filtros").await, "Publicada");
+}
+
+#[tokio::test]
 async fn renaming_without_help_text_keeps_it() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
