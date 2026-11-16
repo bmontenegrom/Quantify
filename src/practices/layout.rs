@@ -62,7 +62,7 @@ pub async fn create_part(
     .bind(practice_id)
     .bind(input.title.trim())
     .bind(position)
-    .bind(input.help_text.trim())
+    .bind(input.help_text.as_deref().unwrap_or_default().trim())
     .execute(pool)
     .await?;
     Ok(PracticePart {
@@ -71,7 +71,12 @@ pub async fn create_part(
         title: input.title.trim().to_string(),
         position,
         analysis_kind: None,
-        help_text: input.help_text.trim().to_string(),
+        help_text: input
+            .help_text
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
         effective_kind: "estadistico".into(),
     })
 }
@@ -135,12 +140,12 @@ pub async fn update_part(
     input: &PartInput,
 ) -> anyhow::Result<bool> {
     let changed = sqlx::query(
-        "UPDATE practice_parts SET title = ?3, help_text = ?4 WHERE id = ?2 AND practice_id = ?1",
+        "UPDATE practice_parts SET title = ?3, help_text = COALESCE(?4, help_text) WHERE id = ?2 AND practice_id = ?1",
     )
     .bind(practice_id)
     .bind(part_id)
     .bind(input.title.trim())
-    .bind(input.help_text.trim())
+    .bind(input.help_text.as_deref().map(str::trim))
     .execute(pool)
     .await?
     .rows_affected();
@@ -195,7 +200,7 @@ pub async fn create_section(
     .bind(part_id)
     .bind(input.title.trim())
     .bind(position)
-    .bind(input.help_text.trim())
+    .bind(input.help_text.as_deref().unwrap_or_default().trim())
     .execute(pool)
     .await?;
     Ok(Some(PracticeSection {
@@ -204,7 +209,12 @@ pub async fn create_section(
         part_id: part_id.map(str::to_string),
         title: input.title.trim().to_string(),
         position,
-        help_text: input.help_text.trim().to_string(),
+        help_text: input
+            .help_text
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
         quantities: vec![],
         results: vec![],
     }))
@@ -221,14 +231,14 @@ pub async fn update_section(
         return Ok(None);
     }
     let changed = sqlx::query(
-        "UPDATE practice_sections SET title = ?3, part_id = ?4, help_text = ?5 \
+        "UPDATE practice_sections SET title = ?3, part_id = ?4, help_text = COALESCE(?5, help_text) \
          WHERE id = ?2 AND practice_id = ?1",
     )
     .bind(practice_id)
     .bind(section_id)
     .bind(input.title.trim())
     .bind(part_id)
-    .bind(input.help_text.trim())
+    .bind(input.help_text.as_deref().map(str::trim))
     .execute(pool)
     .await?
     .rows_affected();

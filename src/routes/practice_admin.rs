@@ -3769,7 +3769,7 @@ mod tests {
             &pool,
             "fluidos-1",
             &practices::PartInput {
-                help_text: String::new(),
+                help_text: None,
                 title: "Unica".into(),
             },
         )
@@ -3933,7 +3933,7 @@ mod tests {
                 &pool,
                 "fluidos-1",
                 &practices::PartInput {
-                    help_text: String::new(),
+                    help_text: None,
                     title: title.into(),
                 },
             )
@@ -3999,7 +3999,7 @@ mod tests {
                 &pool,
                 "fluidos-1",
                 &practices::PartInput {
-                    help_text: String::new(),
+                    help_text: None,
                     title: title.into(),
                 },
             )
@@ -4078,7 +4078,7 @@ mod tests {
             &pool,
             "fluidos-1",
             &practices::PartInput {
-                help_text: String::new(),
+                help_text: None,
                 title: "A".into(),
             },
         )
@@ -4096,7 +4096,7 @@ mod tests {
             &pool,
             "fluidos-1",
             &practices::PartInput {
-                help_text: String::new(),
+                help_text: None,
                 title: "B".into(),
             },
         )
@@ -4127,7 +4127,7 @@ mod tests {
             &pool,
             "p2-cc",
             &practices::PartInput {
-                help_text: String::new(),
+                help_text: None,
                 title: "C".into(),
             },
         )
