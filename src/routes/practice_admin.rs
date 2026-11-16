@@ -2246,19 +2246,12 @@ fn swap_neighbor<T>(items: &mut [T], index: Option<usize>, up: bool) {
     }
 }
 
-#[derive(Clone, Copy)]
-enum FormulaRows {
-    Intermediates,
-    PointResults,
-    Aggregates,
-}
-
 fn with_formula_row_moved(
     def: &practices::PracticeDefinition,
-    rows: FormulaRows,
+    list: practices::Orderable,
     item_id: &str,
     up: bool,
-) -> practices::PracticeDefinition {
+) -> Option<practices::PracticeDefinition> {
     fn reorder<T>(
         items: &mut [T],
         id: fn(&T) -> &str,
@@ -2273,49 +2266,54 @@ fn with_formula_row_moved(
         }
     }
     let mut after = def.clone();
-    match rows {
-        FormulaRows::Intermediates => reorder(
+    match list {
+        practices::Orderable::Intermediates => reorder(
             &mut after.intermediates,
             |it| &it.id,
             |it| &mut it.position,
             item_id,
             up,
         ),
-        FormulaRows::PointResults => reorder(
+        practices::Orderable::PointResults => reorder(
             &mut after.point_results,
             |it| &it.id,
             |it| &mut it.position,
             item_id,
             up,
         ),
-        FormulaRows::Aggregates => reorder(
+        practices::Orderable::Aggregates => reorder(
             &mut after.aggregates,
             |it| &it.id,
             |it| &mut it.position,
             item_id,
             up,
         ),
+        practices::Orderable::Curves
+        | practices::Orderable::Quantities
+        | practices::Orderable::Results
+        | practices::Orderable::Parts
+        | practices::Orderable::Sections => return None,
     }
-    after
+    Some(after)
 }
+
+// ponytail: un lock global alcanza con un solo proceso; uno por práctica si hay contención.
+static MOVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn move_formula_row(
     state: &SharedState,
     headers: &HeaderMap,
-    rows: FormulaRows,
+    list: practices::Orderable,
     practice_id: &str,
     item_id: &str,
     up: bool,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(state, headers).await?;
+    let _lock = MOVE_LOCK.lock().await;
     let before = load_definition(state, practice_id).await?;
-    let after = with_formula_row_moved(&before, rows, item_id, up);
+    let after = with_formula_row_moved(&before, list, item_id, up)
+        .ok_or_else(|| anyhow::anyhow!("{list:?} no es una lista de fórmulas"))?;
     guard_change(&before, &after, "cambiar el orden")?;
-    let list = match rows {
-        FormulaRows::Intermediates => practices::Orderable::Intermediates,
-        FormulaRows::PointResults => practices::Orderable::PointResults,
-        FormulaRows::Aggregates => practices::Orderable::Aggregates,
-    };
     move_or_404(state, list, practice_id, item_id, up).await
 }
 
@@ -2325,7 +2323,7 @@ pub(super) async fn move_intermediate(
     Path((id, iid)): Path<(String, String)>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
-    let list = FormulaRows::Intermediates;
+    let list = practices::Orderable::Intermediates;
     move_formula_row(&state, &headers, list, &id, &iid, body.up).await
 }
 
@@ -2335,7 +2333,7 @@ pub(super) async fn move_point_result(
     Path((id, pid)): Path<(String, String)>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
-    let list = FormulaRows::PointResults;
+    let list = practices::Orderable::PointResults;
     move_formula_row(&state, &headers, list, &id, &pid, body.up).await
 }
 
@@ -2345,7 +2343,7 @@ pub(super) async fn move_aggregate(
     Path((id, aid)): Path<(String, String)>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
-    let list = FormulaRows::Aggregates;
+    let list = practices::Orderable::Aggregates;
     move_formula_row(&state, &headers, list, &id, &aid, body.up).await
 }
 
@@ -2385,6 +2383,7 @@ pub(super) async fn move_part(
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    let _lock = MOVE_LOCK.lock().await;
     let before = load_definition(&state, &id).await?;
     guard_change(
         &before,
@@ -2947,10 +2946,10 @@ mod tests {
                 .id
                 .clone()
         };
-        let list = FormulaRows::Aggregates;
-        let swapped = with_formula_row_moved(&def, list, &id_of("Re_max"), false);
+        let list = practices::Orderable::Aggregates;
+        let swapped = with_formula_row_moved(&def, list, &id_of("Re_max"), false).unwrap();
         assert!(guard_change(&def, &swapped, "cambiar el orden").is_ok());
-        let broken = with_formula_row_moved(&def, list, &id_of("Re_medio"), true);
+        let broken = with_formula_row_moved(&def, list, &id_of("Re_medio"), true).unwrap();
         assert!(guard_change(&def, &broken, "cambiar el orden").is_err());
     }
 
