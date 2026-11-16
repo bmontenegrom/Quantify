@@ -21,26 +21,33 @@ pub async fn definition(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
+    definition_in(&mut *pool.acquire().await?, practice_id).await
+}
+
+pub async fn definition_in(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+) -> anyhow::Result<Option<PracticeDefinition>> {
     let row: Option<PracticeConfigRow> = sqlx::query_as(
         "SELECT status, analysis_kind, x_formula, y_formula, operator_count, \
          (SELECT number FROM practice_versions WHERE id = practices.current_version_id) \
          AS current_version FROM practices WHERE id = ?1",
     )
     .bind(practice_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else {
         return Ok(None);
     };
-    let quantities = quantities_for(pool, practice_id).await?;
-    let results = results_for(pool, practice_id).await?;
-    let curves = curves_for(pool, practice_id).await?;
-    let intermediates = intermediates_for(pool, practice_id).await?;
-    let point_results = point_results_for(pool, practice_id).await?;
-    let aggregates = aggregates_for(pool, practice_id).await?;
-    let parts = super::parts_for(pool, practice_id).await?;
-    let sections = super::sections_for(pool, practice_id).await?;
-    let display_symbols = super::display::display_symbols_for(pool, practice_id).await?;
+    let quantities = quantities_for(conn, practice_id).await?;
+    let results = results_for(conn, practice_id).await?;
+    let curves = curves_for(conn, practice_id).await?;
+    let intermediates = intermediates_for(conn, practice_id).await?;
+    let point_results = point_results_for(conn, practice_id).await?;
+    let aggregates = aggregates_for(conn, practice_id).await?;
+    let parts = super::parts_for(conn, practice_id).await?;
+    let sections = super::sections_for(conn, practice_id).await?;
+    let display_symbols = super::display::display_symbols_for(conn, practice_id).await?;
     Ok(Some(
         PracticeDefinition {
             practice_id: practice_id.to_string(),
@@ -83,7 +90,7 @@ fn flag_columns<T: SymbolFormulaRow>() -> String {
 }
 
 async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<T>> {
     let query = format!(
@@ -94,7 +101,7 @@ async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
     );
     Ok(sqlx::query_as::<_, T>(&query)
         .bind(practice_id)
-        .fetch_all(pool)
+        .fetch_all(conn)
         .await?)
 }
 
@@ -225,10 +232,10 @@ async fn delete_symbol_formula_row<T: SymbolFormulaRow>(
 }
 
 pub async fn point_results_for(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticePointResult>> {
-    symbol_formula_rows_for(pool, practice_id).await
+    symbol_formula_rows_for(conn, practice_id).await
 }
 
 pub async fn create_point_result(
@@ -288,7 +295,7 @@ pub async fn delete_point_result(
 }
 
 pub async fn aggregates_for(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeAggregate>> {
     Ok(sqlx::query_as::<_, PracticeAggregate>(
@@ -296,7 +303,7 @@ pub async fn aggregates_for(
          FROM practice_aggregates WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
-    .fetch_all(pool)
+    .fetch_all(conn)
     .await?)
 }
 
@@ -388,10 +395,10 @@ pub async fn delete_aggregate(
 }
 
 pub async fn intermediates_for(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeIntermediate>> {
-    symbol_formula_rows_for(pool, practice_id).await
+    symbol_formula_rows_for(conn, practice_id).await
 }
 
 pub async fn create_intermediate(
@@ -451,7 +458,7 @@ pub async fn delete_intermediate(
 }
 
 pub async fn curves_for(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeCurve>> {
     Ok(sqlx::query_as::<_, PracticeCurve>(
@@ -459,7 +466,7 @@ pub async fn curves_for(
          FROM practice_curves WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
-    .fetch_all(pool)
+    .fetch_all(conn)
     .await?)
 }
 
@@ -565,13 +572,25 @@ pub async fn move_item(
     item_id: &str,
     up: bool,
 ) -> anyhow::Result<Option<bool>> {
-    let (table, filter, order) = list.table_filter_and_order();
     let mut tx = pool.begin().await?;
+    let moved = move_item_in(&mut tx, list, practice_id, item_id, up).await?;
+    tx.commit().await?;
+    Ok(moved)
+}
+
+pub async fn move_item_in(
+    conn: &mut SqliteConnection,
+    list: Orderable,
+    practice_id: &str,
+    item_id: &str,
+    up: bool,
+) -> anyhow::Result<Option<bool>> {
+    let (table, filter, order) = list.table_filter_and_order();
     let mut ids: Vec<String> = sqlx::query_scalar(&format!(
         "SELECT id FROM {table} WHERE practice_id = ?1 {filter} ORDER BY {order}"
     ))
     .bind(practice_id)
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut *conn)
     .await?;
     let Some(idx) = ids.iter().position(|id| id == item_id) else {
         return Ok(None);
@@ -589,10 +608,9 @@ pub async fn move_item(
         sqlx::query(&format!("UPDATE {table} SET position = ?2 WHERE id = ?1"))
             .bind(id)
             .bind(position as i64)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await?;
     }
-    tx.commit().await?;
     Ok(Some(true))
 }
 
@@ -876,7 +894,7 @@ pub async fn set_result_tolerance(
 }
 
 async fn quantities_for(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeQuantity>> {
     Ok(sqlx::query_as::<_, PracticeQuantity>(
@@ -886,17 +904,20 @@ async fn quantities_for(
          FROM practice_quantities WHERE practice_id = ?1 AND removed = 0 ORDER BY position, symbol",
     )
     .bind(practice_id)
-    .fetch_all(pool)
+    .fetch_all(conn)
     .await?)
 }
 
-async fn results_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticeResult>> {
+async fn results_for(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+) -> anyhow::Result<Vec<PracticeResult>> {
     Ok(sqlx::query_as::<_, PracticeResult>(
         "SELECT id, practice_id, symbol, name, unit, formula, position, tolerance, is_final, has_uncertainty, \
          compare_with FROM practice_results WHERE practice_id = ?1 ORDER BY position, symbol",
     )
     .bind(practice_id)
-    .fetch_all(pool)
+    .fetch_all(conn)
     .await?)
 }
 

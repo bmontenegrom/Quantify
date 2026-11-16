@@ -27,13 +27,40 @@ async fn ensure_practice(state: &SharedState, practice_id: &str) -> Result<(), A
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
-async fn load_definition(
+static EDIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+struct LockedDefinition {
+    _lock: tokio::sync::MutexGuard<'static, ()>,
+    definition: practices::PracticeDefinition,
+}
+
+impl std::ops::Deref for LockedDefinition {
+    type Target = practices::PracticeDefinition;
+
+    fn deref(&self) -> &Self::Target {
+        &self.definition
+    }
+}
+
+async fn read_definition(
     state: &SharedState,
     practice_id: &str,
 ) -> Result<practices::PracticeDefinition, AppError> {
     practices::definition(&state.pool, practice_id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
+}
+
+async fn load_definition(
+    state: &SharedState,
+    practice_id: &str,
+) -> Result<LockedDefinition, AppError> {
+    let lock = EDIT_LOCK.lock().await;
+    let definition = read_definition(state, practice_id).await?;
+    Ok(LockedDefinition {
+        _lock: lock,
+        definition,
+    })
 }
 
 const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
@@ -158,7 +185,7 @@ pub(super) async fn practice_problems(
     Path(id): Path<String>,
 ) -> Result<Json<Vec<Problem>>, AppError> {
     require_teacher(&state, &headers).await?;
-    let def = load_definition(&state, &id).await?;
+    let def = read_definition(&state, &id).await?;
     Ok(Json(draft_problems(&def)))
 }
 
@@ -375,7 +402,7 @@ pub(super) async fn practice_definition(
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
     if matches!(user.role.as_str(), "docente" | "admin") && !query.published {
-        let definition = load_definition(&state, &id).await?;
+        let definition = read_definition(&state, &id).await?;
         return Ok(Json(DefinitionView {
             compare_options: Some(definition.compare_options()),
             formula_scopes: Some(formula_scopes(&definition)),
@@ -497,7 +524,7 @@ async fn preview_definition(
         require_teacher(state, headers).await?;
     }
     Ok(match &body.submission_id {
-        _ if body.draft => load_definition(state, id).await?,
+        _ if body.draft => read_definition(state, id).await?,
         Some(submission_id) => {
             ensure_submission_access(state, &user, submission_id).await?;
             practices::submission_definition(&state.pool, submission_id)
@@ -803,16 +830,6 @@ async fn move_in_list(
     up: bool,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(state, headers).await?;
-    move_or_404(state, list, practice_id, item_id, up).await
-}
-
-async fn move_or_404(
-    state: &SharedState,
-    list: practices::Orderable,
-    practice_id: &str,
-    item_id: &str,
-    up: bool,
-) -> Result<Json<Health>, AppError> {
     if practices::move_item(&state.pool, list, practice_id, item_id, up)
         .await?
         .is_none()
@@ -2135,7 +2152,7 @@ pub(super) async fn create_part(
     if chosen {
         created.analysis_kind = Some("estadistico".into());
     }
-    let mut after = before;
+    let mut after = before.clone();
     after.parts.push(created.clone());
     if chosen {
         practices::save_part_kinds(&state.pool, &after).await?;
@@ -2223,82 +2240,32 @@ fn with_part_deleted(
     after.with_mirrored_kind()
 }
 
-fn with_part_moved(
-    def: &practices::PracticeDefinition,
-    part_id: &str,
-    up: bool,
-) -> practices::PracticeDefinition {
-    let mut after = def.clone();
-    let index = after.parts.iter().position(|p| p.id == part_id);
-    swap_neighbor(&mut after.parts, index, up);
-    after
-}
-
-fn swap_neighbor<T>(items: &mut [T], index: Option<usize>, up: bool) {
-    let Some(index) = index else { return };
-    let other = if up {
-        index.checked_sub(1)
-    } else {
-        Some(index + 1)
-    };
-    if let Some(other) = other.filter(|o| *o < items.len()) {
-        items.swap(index, other);
-    }
-}
-
-fn with_formula_row_moved(
-    def: &practices::PracticeDefinition,
+async fn move_guarded(
+    pool: &sqlx::SqlitePool,
     list: practices::Orderable,
+    practice_id: &str,
     item_id: &str,
     up: bool,
-) -> Option<practices::PracticeDefinition> {
-    fn reorder<T>(
-        items: &mut [T],
-        id: fn(&T) -> &str,
-        position: fn(&mut T) -> &mut i64,
-        item_id: &str,
-        up: bool,
-    ) {
-        let index = items.iter().position(|it| id(it) == item_id);
-        swap_neighbor(items, index, up);
-        for (i, it) in items.iter_mut().enumerate() {
-            *position(it) = i as i64;
-        }
+    action: &str,
+) -> Result<(), AppError> {
+    let _lock = EDIT_LOCK.lock().await;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let not_found = || AppError::not_found("practica no encontrada");
+    let before = practices::definition_in(&mut tx, practice_id)
+        .await?
+        .ok_or_else(not_found)?;
+    match practices::move_item_in(&mut tx, list, practice_id, item_id, up).await? {
+        None => return Err(AppError::not_found("elemento no encontrado en la practica")),
+        Some(false) => return Ok(()),
+        Some(true) => {}
     }
-    let mut after = def.clone();
-    match list {
-        practices::Orderable::Intermediates => reorder(
-            &mut after.intermediates,
-            |it| &it.id,
-            |it| &mut it.position,
-            item_id,
-            up,
-        ),
-        practices::Orderable::PointResults => reorder(
-            &mut after.point_results,
-            |it| &it.id,
-            |it| &mut it.position,
-            item_id,
-            up,
-        ),
-        practices::Orderable::Aggregates => reorder(
-            &mut after.aggregates,
-            |it| &it.id,
-            |it| &mut it.position,
-            item_id,
-            up,
-        ),
-        practices::Orderable::Curves
-        | practices::Orderable::Quantities
-        | practices::Orderable::Results
-        | practices::Orderable::Parts
-        | practices::Orderable::Sections => return None,
-    }
-    Some(after)
+    let after = practices::definition_in(&mut tx, practice_id)
+        .await?
+        .ok_or_else(not_found)?;
+    guard_change(&before, &after, action)?;
+    tx.commit().await?;
+    Ok(())
 }
-
-// ponytail: un lock global alcanza con un solo proceso; uno por práctica si hay contención.
-static MOVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn move_formula_row(
     state: &SharedState,
@@ -2309,12 +2276,16 @@ async fn move_formula_row(
     up: bool,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(state, headers).await?;
-    let _lock = MOVE_LOCK.lock().await;
-    let before = load_definition(state, practice_id).await?;
-    let after = with_formula_row_moved(&before, list, item_id, up)
-        .ok_or_else(|| anyhow::anyhow!("{list:?} no es una lista de fórmulas"))?;
-    guard_change(&before, &after, "cambiar el orden")?;
-    move_or_404(state, list, practice_id, item_id, up).await
+    move_guarded(
+        &state.pool,
+        list,
+        practice_id,
+        item_id,
+        up,
+        "cambiar el orden",
+    )
+    .await?;
+    Ok(Json(Health { status: "ok" }))
 }
 
 pub(super) async fn move_intermediate(
@@ -2383,14 +2354,9 @@ pub(super) async fn move_part(
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    let _lock = MOVE_LOCK.lock().await;
-    let before = load_definition(&state, &id).await?;
-    guard_change(
-        &before,
-        &with_part_moved(&before, &pid, body.up),
-        "mover la parte",
-    )?;
-    move_or_404(&state, practices::Orderable::Parts, &id, &pid, body.up).await
+    let list = practices::Orderable::Parts;
+    move_guarded(&state.pool, list, &id, &pid, body.up, "mover la parte").await?;
+    Ok(Json(Health { status: "ok" }))
 }
 
 pub(super) async fn create_section(
@@ -2947,10 +2913,28 @@ mod tests {
                 .clone()
         };
         let list = practices::Orderable::Aggregates;
-        let swapped = with_formula_row_moved(&def, list, &id_of("Re_max"), false).unwrap();
-        assert!(guard_change(&def, &swapped, "cambiar el orden").is_ok());
-        let broken = with_formula_row_moved(&def, list, &id_of("Re_medio"), true).unwrap();
-        assert!(guard_change(&def, &broken, "cambiar el orden").is_err());
+        let order = || async {
+            let def = practices::definition(&pool, "fluidos-2")
+                .await
+                .unwrap()
+                .unwrap();
+            def.aggregates
+                .iter()
+                .map(|a| a.symbol.clone())
+                .collect::<Vec<_>>()
+        };
+        let moving = |symbol: &str, up: bool| {
+            let id = id_of(symbol);
+            let pool = pool.clone();
+            async move { move_guarded(&pool, list, "fluidos-2", &id, up, "cambiar el orden").await }
+        };
+        assert!(moving("Re_max", false).await.is_ok());
+        let swapped = order().await;
+        assert!(moving("Re_medio", true).await.is_err());
+        assert_eq!(order().await, swapped);
+        let missing = move_guarded(&pool, list, "fluidos-2", "no-existe", true, "x").await;
+        let status = axum::response::IntoResponse::into_response(missing.unwrap_err()).status();
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -3891,15 +3875,8 @@ mod tests {
             "{:?}",
             formula_problems(&unsectioned_series)
         );
-        let first = unsectioned_series.parts[0].id.clone();
-        let last = unsectioned_series.parts.last().unwrap().id.clone();
-        let moved = with_part_moved(&unsectioned_series, &last, true);
-        assert_eq!(moved.parts[0].id, first);
-        let to_front = with_part_moved(
-            &unsectioned_series,
-            &unsectioned_series.parts[1].id.clone(),
-            true,
-        );
+        let mut to_front = unsectioned_series.clone();
+        to_front.parts.swap(0, 1);
         assert!(guard_change(&unsectioned_series, &to_front, "mover la parte").is_err());
     }
 

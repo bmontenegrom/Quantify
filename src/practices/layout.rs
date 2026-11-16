@@ -1,21 +1,24 @@
 use super::{PartInput, PracticePart, PracticeSection, SectionInput};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 const LEGACY_LAYOUT: &str = "2026-11-partes-y-secciones";
 
-pub async fn parts_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticePart>> {
+pub async fn parts_for(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+) -> anyhow::Result<Vec<PracticePart>> {
     Ok(sqlx::query_as::<_, PracticePart>(
         "SELECT id, practice_id, title, position, analysis_kind, help_text FROM practice_parts \
          WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
-    .fetch_all(pool)
+    .fetch_all(conn)
     .await?)
 }
 
 pub async fn sections_for(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeSection>> {
     let mut sections = sqlx::query_as::<_, PracticeSection>(
@@ -23,7 +26,7 @@ pub async fn sections_for(
          WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await?;
     for (table, is_quantity) in [("practice_quantities", true), ("practice_results", false)] {
         let members: Vec<(String, String)> = sqlx::query_as(&format!(
@@ -31,7 +34,7 @@ pub async fn sections_for(
              WHERE practice_id = ?1 AND section_id IS NOT NULL ORDER BY position, symbol"
         ))
         .bind(practice_id)
-        .fetch_all(pool)
+        .fetch_all(&mut *conn)
         .await?;
         for (section_id, symbol) in members {
             if let Some(section) = sections.iter_mut().find(|s| s.id == section_id) {

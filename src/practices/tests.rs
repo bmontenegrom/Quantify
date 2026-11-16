@@ -374,7 +374,9 @@ async fn aggregate_crud_roundtrip() {
         .unwrap();
     assert!(b.position > a.position, "la 2da toma la siguiente posición");
 
-    let listed = aggregates_for(&pool, "p1-estadistica").await.unwrap();
+    let listed = aggregates_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
+        .await
+        .unwrap();
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].symbol, "Re_max", "ordenado por posición");
 
@@ -394,7 +396,10 @@ async fn aggregate_crud_roundtrip() {
         "borrar de nuevo devuelve false"
     );
     assert_eq!(
-        aggregates_for(&pool, "p1-estadistica").await.unwrap().len(),
+        aggregates_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
+            .await
+            .unwrap()
+            .len(),
         1
     );
 }
@@ -617,14 +622,26 @@ async fn deleting_practice_cascades_to_curves() {
     )
     .await
     .unwrap();
-    assert_eq!(curves_for(&pool, "p1-estadistica").await.unwrap().len(), 1);
+    assert_eq!(
+        curves_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 
     sqlx::query("DELETE FROM practices WHERE id = ?1")
         .bind("p1-estadistica")
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(curves_for(&pool, "p1-estadistica").await.unwrap().len(), 0);
+    assert_eq!(
+        curves_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[tokio::test]
@@ -726,7 +743,7 @@ async fn intermediate_crud_roundtrip() {
         .await
         .unwrap());
     assert_eq!(
-        intermediates_for(&pool, "p1-estadistica")
+        intermediates_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
             .await
             .unwrap()
             .len(),

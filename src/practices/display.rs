@@ -14,7 +14,7 @@ const LEGACY_SYMBOL_FIRST: [&str; 22] = [
 ];
 
 pub(super) async fn display_symbols_for(
-    pool: &SqlitePool,
+    conn: &mut sqlx::SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<BTreeMap<String, String>> {
     let selects: Vec<String> = DISPLAY_SYMBOL_TABLES
@@ -33,7 +33,7 @@ pub(super) async fn display_symbols_for(
         .collect();
     let rows: Vec<(String, String)> = sqlx::query_as(&selects.join(" UNION ALL "))
         .bind(practice_id)
-        .fetch_all(pool)
+        .fetch_all(conn)
         .await?;
     Ok(rows.into_iter().collect())
 }
