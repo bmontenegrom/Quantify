@@ -146,7 +146,7 @@ pub fn api_router(state: SharedState) -> Router {
         .route("/practices", get(list_practices).post(create_practice))
         .route("/practices/{id}/analyze-preview", post(analyze_preview))
         .route("/practices/{id}/live-values", post(live_values))
-        .merge(practice_edit_routes())
+        .merge(practice_edit_routes(state.clone()))
         .route(
             "/instruments",
             get(list_instruments).post(create_instrument),
@@ -195,7 +195,7 @@ pub fn api_router(state: SharedState) -> Router {
         .with_state(state)
 }
 
-fn practice_edit_routes() -> Router<SharedState> {
+fn practice_edit_routes(state: SharedState) -> Router<SharedState> {
     Router::new()
         .route(
             "/practices/{id}",
@@ -292,7 +292,10 @@ fn practice_edit_routes() -> Router<SharedState> {
             "/practices/{id}/results/{rid}/tolerance",
             post(set_result_tolerance),
         )
-        .route_layer(axum::middleware::from_fn(serialize_practice_edits))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state,
+            serialize_practice_edits,
+        ))
 }
 
 #[derive(Serialize)]

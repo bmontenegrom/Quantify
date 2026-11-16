@@ -45,11 +45,15 @@ fn release_practice_mutex(practice_id: &str, mutex: PracticeMutex) {
     }
 }
 
+const MAX_EDIT_BODY: usize = 2 * 1024 * 1024;
+
 pub(super) async fn serialize_practice_edits(
+    State(state): State<SharedState>,
     params: axum::extract::RawPathParams,
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
+    use axum::response::IntoResponse;
     let practice_id = params
         .iter()
         .find(|(key, _)| *key == "id")
@@ -58,6 +62,14 @@ pub(super) async fn serialize_practice_edits(
     else {
         return next.run(request).await;
     };
+    let (parts, body) = request.into_parts();
+    if let Err(error) = require_teacher(&state, &parts.headers).await {
+        return error.into_response();
+    }
+    let Ok(body) = axum::body::to_bytes(body, MAX_EDIT_BODY).await else {
+        return AppError::bad_request("no se pudo leer el pedido").into_response();
+    };
+    let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(body));
     let mutex = practice_mutex(&practice_id);
     let response = {
         let _guard = mutex.lock().await;
@@ -2903,6 +2915,75 @@ mod tests {
         release_practice_mutex("lock-a", held);
         assert!(!present("lock-a"));
         assert!(!present("lock-b"));
+    }
+
+    #[tokio::test]
+    async fn the_edit_lock_waits_for_a_teacher_and_a_complete_body() {
+        use tower::ServiceExt;
+        let (pool, dir) = crate::computation::tests::setup().await;
+        let state: SharedState = std::sync::Arc::new(db::AppState {
+            pool: pool.clone(),
+            upload_dir: dir.path().to_path_buf(),
+            secret_key: "secreto".into(),
+            secure_cookies: false,
+            login_attempts: Default::default(),
+        });
+        let session = |role: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let (user_id,): (String,) =
+                    sqlx::query_as("SELECT id FROM users WHERE role = ?1 LIMIT 1")
+                        .bind(role)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                let token = uuid::Uuid::new_v4().to_string();
+                let now = chrono::Utc::now();
+                sqlx::query(
+                    "INSERT INTO sessions (token, user_id, created_at, expires_at) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                )
+                .bind(&token)
+                .bind(user_id)
+                .bind(now)
+                .bind(now + chrono::Duration::hours(1))
+                .execute(&pool)
+                .await
+                .unwrap();
+                token
+            }
+        };
+        let student = session("estudiante").await;
+        let teacher = session("docente").await;
+        let request = |token: Option<&str>| {
+            let endless = futures_util::stream::pending::<Result<Vec<u8>, std::io::Error>>();
+            let mut builder = axum::http::Request::post("/practices/p1-estadistica/quantities")
+                .header("content-type", "application/json");
+            if let Some(token) = token {
+                builder = builder.header("cookie", format!("quantify_session={token}"));
+            }
+            builder
+                .body(axum::body::Body::from_stream(endless))
+                .unwrap()
+        };
+        let app = super::super::practice_edit_routes(state.clone()).with_state(state);
+        let wait = std::time::Duration::from_secs(5);
+        for (token, status) in [
+            (None, axum::http::StatusCode::UNAUTHORIZED),
+            (Some(student.as_str()), axum::http::StatusCode::FORBIDDEN),
+        ] {
+            let response = tokio::time::timeout(wait, app.clone().oneshot(request(token)))
+                .await
+                .expect("no debía esperar el cuerpo")
+                .unwrap();
+            assert_eq!(response.status(), status);
+        }
+        let pending = tokio::spawn(app.oneshot(request(Some(&teacher))));
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let mutex = practice_mutex("p1-estadistica");
+        assert!(mutex.try_lock().is_ok());
+        release_practice_mutex("p1-estadistica", mutex);
+        pending.abort();
     }
 
     #[tokio::test]
