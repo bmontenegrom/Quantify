@@ -3450,6 +3450,42 @@ async fn renaming_without_help_text_keeps_it() {
 }
 
 #[tokio::test]
+async fn the_student_descriptions_migration_runs_once_and_keeps_teacher_texts() {
+    let (pool, _dir) = setup().await;
+    let old = "Viscosidad del agua por la ley de Hagen-Poiseuille: ajuste lineal de h/Q^2 contra 1/Q (Q = caudal medio por altura).";
+    let set = |id: &'static str, description: &'static str| {
+        sqlx::query("UPDATE practices SET description = ?2 WHERE id = ?1")
+            .bind(id)
+            .bind(description)
+            .execute(&pool)
+    };
+    let description = |id: &'static str| {
+        sqlx::query_scalar::<_, String>("SELECT description FROM practices WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+    };
+    sqlx::query("DELETE FROM applied_migrations WHERE name = ?1")
+        .bind("2026-11-descripciones-para-el-alumno")
+        .execute(&pool)
+        .await
+        .unwrap();
+    set("fluidos-1", old).await.unwrap();
+    set("viscosidad", "Texto del docente").await.unwrap();
+    db::seed_practices(&pool).await.unwrap();
+    assert!(description("fluidos-1")
+        .await
+        .unwrap()
+        .starts_with("Viscosidad del agua a partir del caudal"));
+    assert_eq!(
+        description("viscosidad").await.unwrap(),
+        "Texto del docente"
+    );
+    set("fluidos-1", old).await.unwrap();
+    db::seed_practices(&pool).await.unwrap();
+    assert_eq!(description("fluidos-1").await.unwrap(), old);
+}
+
+#[tokio::test]
 async fn reordering_curves_stays_structural() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
