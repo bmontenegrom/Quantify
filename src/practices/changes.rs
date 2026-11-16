@@ -5,9 +5,11 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 8] = [
+const COSMETIC_KEYS: [&str; 10] = [
+    "description",
     "name",
     "title",
+    "help_text",
     "tolerance",
     "display_symbols",
     "label_mode",
@@ -16,7 +18,13 @@ const COSMETIC_KEYS: [&str; 8] = [
     "show_live",
 ];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
-const FREELY_ORDERED: [&str; 4] = ["quantities", "results", "parts", "sections"];
+const FREELY_ORDERED: [&str; 5] = [
+    "quantities",
+    "results",
+    "parts",
+    "sections",
+    "point_results",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -237,7 +245,7 @@ fn list_changes(
     )?;
     diff_items(
         "el resultado por punto",
-        Some("los resultados por punto"),
+        None,
         &published.point_results,
         &draft.point_results,
         |p| with_formula(&p.id, &p.symbol, &p.formula),
@@ -311,10 +319,26 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
         (old.show_live != new.show_live)
             .then(|| format!("Cambia si {} se muestra en vivo", new.symbol))
     });
-    symbols
+    let part_help = draft.parts.iter().filter_map(|new| {
+        let old = published.parts.iter().find(|p| p.id == new.id)?;
+        (old.help_text != new.help_text)
+            .then(|| format!("Cambia la ayuda de la parte {}", new.title))
+    });
+    let section_help = draft.sections.iter().filter_map(|new| {
+        let old = published.sections.iter().find(|s| s.id == new.id)?;
+        (old.help_text != new.help_text)
+            .then(|| format!("Cambia la ayuda de la sección {}", new.title))
+    });
+    let description =
+        (published.description != draft.description).then(|| "Cambia la descripción".to_string());
+    description
+        .into_iter()
+        .chain(symbols)
         .chain(quantities)
         .chain(comparisons)
         .chain(live)
+        .chain(part_help)
+        .chain(section_help)
         .collect()
 }
 

@@ -147,6 +147,7 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
         is_final,
     };
     let definition = PracticeDefinition {
+        description: String::new(),
         practice_id: "viscosidad".into(),
         status: "borrador".into(),
         analysis_kind: Some("regresion_lineal".into()),

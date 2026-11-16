@@ -374,7 +374,9 @@ async fn aggregate_crud_roundtrip() {
         .unwrap();
     assert!(b.position > a.position, "la 2da toma la siguiente posición");
 
-    let listed = aggregates_for(&pool, "p1-estadistica").await.unwrap();
+    let listed = aggregates_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
+        .await
+        .unwrap();
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].symbol, "Re_max", "ordenado por posición");
 
@@ -394,7 +396,10 @@ async fn aggregate_crud_roundtrip() {
         "borrar de nuevo devuelve false"
     );
     assert_eq!(
-        aggregates_for(&pool, "p1-estadistica").await.unwrap().len(),
+        aggregates_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
+            .await
+            .unwrap()
+            .len(),
         1
     );
 }
@@ -617,14 +622,26 @@ async fn deleting_practice_cascades_to_curves() {
     )
     .await
     .unwrap();
-    assert_eq!(curves_for(&pool, "p1-estadistica").await.unwrap().len(), 1);
+    assert_eq!(
+        curves_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 
     sqlx::query("DELETE FROM practices WHERE id = ?1")
         .bind("p1-estadistica")
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(curves_for(&pool, "p1-estadistica").await.unwrap().len(), 0);
+    assert_eq!(
+        curves_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[tokio::test]
@@ -726,7 +743,7 @@ async fn intermediate_crud_roundtrip() {
         .await
         .unwrap());
     assert_eq!(
-        intermediates_for(&pool, "p1-estadistica")
+        intermediates_for(&mut pool.acquire().await.unwrap(), "p1-estadistica")
             .await
             .unwrap()
             .len(),
@@ -2265,6 +2282,7 @@ async fn deleting_parts_and_sections_keeps_the_content() {
         &pool,
         "p2-cc",
         &SectionInput {
+            help_text: None,
             title: "x".into(),
             part_id: Some("hidrostatica-arq".into()),
         },
@@ -2476,6 +2494,7 @@ async fn a_result_used_by_series_artifacts_goes_to_the_series_part() {
         &pool,
         "fluidos-1",
         &PartInput {
+            help_text: None,
             title: "Unica".into(),
         },
     )
@@ -3240,6 +3259,297 @@ async fn reordering_intermediates_stays_structural() {
     let found = draft_changes(&pool, practice).await.unwrap().unwrap();
     assert_eq!(found.kind, DraftChangeKind::Structural);
     assert_eq!(found.changes, ["Cambia el orden de las intermedias"]);
+}
+
+#[tokio::test]
+async fn move_item_reorders_intermediates() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let symbols = |def: &PracticeDefinition| -> Vec<String> {
+        def.intermediates
+            .iter()
+            .map(|it| it.symbol.clone())
+            .collect()
+    };
+    let def = definition(&pool, "filtros").await.unwrap().unwrap();
+    assert_eq!(symbols(&def), ["omega", "razon", "phi"]);
+    let phi = def.intermediates[2].id.clone();
+    assert_eq!(
+        move_item(&pool, Orderable::Intermediates, "filtros", &phi, true)
+            .await
+            .unwrap(),
+        Some(true)
+    );
+    let def = definition(&pool, "filtros").await.unwrap().unwrap();
+    assert_eq!(symbols(&def), ["omega", "phi", "razon"]);
+}
+
+#[tokio::test]
+async fn move_item_reorders_point_results() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let practice = "p1-estadistica";
+    let mut ids = Vec::new();
+    for symbol in ["Ra", "Rb"] {
+        let row = create_point_result(
+            &pool,
+            practice,
+            PointResultInput {
+                display_symbol: None,
+                symbol: symbol.into(),
+                name: symbol.into(),
+                unit: "".into(),
+                formula: "L".into(),
+            },
+        )
+        .await
+        .unwrap();
+        ids.push(row.id);
+    }
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    publish_checked(&pool, practice, None, None, no_problems)
+        .await
+        .unwrap();
+    assert_eq!(
+        move_item(&pool, Orderable::PointResults, practice, &ids[1], true)
+            .await
+            .unwrap(),
+        Some(true)
+    );
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let symbols: Vec<_> = def
+        .point_results
+        .iter()
+        .map(|r| r.symbol.as_str())
+        .collect();
+    assert_eq!(symbols, ["Rb", "Ra"]);
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    let published = current_version(&pool, practice)
+        .await
+        .unwrap()
+        .unwrap()
+        .definition;
+    let mut draft = def.clone();
+    draft.results[0].formula.push_str(" + 0");
+    let comparison = compare_definitions(&published, &draft).unwrap();
+    assert_eq!(comparison.kind, DraftChangeKind::Structural);
+    assert_eq!(
+        comparison.changes,
+        [format!("Cambia la fórmula de {}", draft.results[0].symbol)]
+    );
+}
+
+#[tokio::test]
+async fn move_item_reports_an_unknown_formula_row() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    for list in [
+        Orderable::Intermediates,
+        Orderable::PointResults,
+        Orderable::Aggregates,
+    ] {
+        assert_eq!(
+            move_item(&pool, list, "filtros", "no-existe", true)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+}
+
+#[tokio::test]
+async fn editing_help_text_updates_the_current_version() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p3-relajacion";
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    let part = before.definition.parts[0].clone();
+    let section = before.definition.sections[0].clone();
+    update_part(
+        &pool,
+        practice,
+        &part.id,
+        &PartInput {
+            title: part.title.clone(),
+            help_text: Some("Medí con el osciloscopio.".into()),
+        },
+    )
+    .await
+    .unwrap();
+    update_section(
+        &pool,
+        practice,
+        &section.id,
+        &SectionInput {
+            title: section.title.clone(),
+            part_id: section.part_id.clone(),
+            help_text: Some("Anotá la escala.".into()),
+        },
+    )
+    .await
+    .unwrap();
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(
+        found.changes,
+        [
+            format!("Cambia la ayuda de la parte {}", part.title),
+            format!("Cambia la ayuda de la sección {}", section.title),
+        ]
+    );
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    assert!(matches!(
+        publish_checked(&pool, practice, None, None, no_problems)
+            .await
+            .unwrap(),
+        Publish::UpdatedCurrent { number } if number == before.number
+    ));
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(
+        after.definition.parts[0].help_text,
+        "Medí con el osciloscopio."
+    );
+    assert_eq!(after.definition.sections[0].help_text, "Anotá la escala.");
+}
+
+#[tokio::test]
+async fn the_description_waits_for_publish() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p3-relajacion";
+    let before = current_version(&pool, practice).await.unwrap().unwrap();
+    sqlx::query("UPDATE practices SET description = 'Nueva' WHERE id = ?1")
+        .bind(practice)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let published = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(
+        published.definition.description,
+        before.definition.description
+    );
+    let found = draft_changes(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(found.kind, DraftChangeKind::Cosmetic);
+    assert_eq!(found.changes, ["Cambia la descripción"]);
+    let no_problems = |_: &PracticeDefinition| Vec::new();
+    publish_checked(&pool, practice, None, None, no_problems)
+        .await
+        .unwrap();
+    let after = current_version(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(after.number, before.number);
+    assert_eq!(after.definition.description, "Nueva");
+}
+
+#[tokio::test]
+async fn published_versions_without_description_get_the_practice_one() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let description = |practice: &'static str| {
+        let pool = pool.clone();
+        async move {
+            current_version(&pool, practice)
+                .await
+                .unwrap()
+                .unwrap()
+                .definition
+                .description
+        }
+    };
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = json_remove(definition_json, '$.description') \
+         WHERE practice_id = 'p3-relajacion'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE practice_versions SET definition_json = json_set(definition_json, '$.description', 'Publicada') \
+         WHERE practice_id = 'filtros'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM applied_migrations WHERE name = '2026-11-descripcion-en-versiones'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(description("p3-relajacion").await, "");
+    db::seed_practices(&pool).await.unwrap();
+    assert_eq!(description("p3-relajacion").await, db::P3_DESCRIPTION);
+    assert_eq!(description("filtros").await, "Publicada");
+}
+
+#[tokio::test]
+async fn renaming_without_help_text_keeps_it() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let practice = "p3-relajacion";
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let part = def.parts[0].clone();
+    let section = def.sections[0].clone();
+    for help_text in [Some("Ayuda".to_string()), None] {
+        update_part(
+            &pool,
+            practice,
+            &part.id,
+            &PartInput {
+                title: "Renombrada".into(),
+                help_text: help_text.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        update_section(
+            &pool,
+            practice,
+            &section.id,
+            &SectionInput {
+                title: "Renombrada".into(),
+                part_id: section.part_id.clone(),
+                help_text,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    assert_eq!(def.parts[0].title, "Renombrada");
+    assert_eq!(def.parts[0].help_text, "Ayuda");
+    assert_eq!(def.sections[0].help_text, "Ayuda");
+}
+
+#[tokio::test]
+async fn the_student_descriptions_migration_runs_once_and_keeps_teacher_texts() {
+    let (pool, _dir) = setup().await;
+    let old = "Viscosidad del agua por la ley de Hagen-Poiseuille: ajuste lineal de h/Q^2 contra 1/Q (Q = caudal medio por altura).";
+    let set = |id: &'static str, description: &'static str| {
+        sqlx::query("UPDATE practices SET description = ?2 WHERE id = ?1")
+            .bind(id)
+            .bind(description)
+            .execute(&pool)
+    };
+    let description = |id: &'static str| {
+        sqlx::query_scalar::<_, String>("SELECT description FROM practices WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+    };
+    sqlx::query("DELETE FROM applied_migrations WHERE name = ?1")
+        .bind("2026-11-descripciones-para-el-alumno")
+        .execute(&pool)
+        .await
+        .unwrap();
+    set("fluidos-1", old).await.unwrap();
+    set("viscosidad", "Texto del docente").await.unwrap();
+    db::seed_practices(&pool).await.unwrap();
+    assert!(description("fluidos-1")
+        .await
+        .unwrap()
+        .starts_with("Viscosidad del agua a partir del caudal"));
+    assert_eq!(
+        description("viscosidad").await.unwrap(),
+        "Texto del docente"
+    );
+    set("fluidos-1", old).await.unwrap();
+    db::seed_practices(&pool).await.unwrap();
+    assert_eq!(description("fluidos-1").await.unwrap(), old);
 }
 
 #[tokio::test]

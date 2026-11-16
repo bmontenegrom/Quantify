@@ -96,5 +96,28 @@ await withE2E({ port: PORT, dbName: "quantify-admin-crud.db" }, async ({ login }
     "reordenar no debía agregar ni quitar mensurandos",
   );
 
+  step("docente: subir Re_medio por encima de Re_min, que usa, se rechaza; bajar Re_max sí cambia el orden");
+  const aggregateRow = (symbol) => page.locator(`#practice-workspace tr:has(td:first-child code:text-is("${symbol}"))`);
+  const aggregateOrder = () =>
+    page.$$eval('[data-move="aggregates"][data-dir="up"]', (buttons) => buttons.map((b) => b.dataset.id));
+  const beforeAggregates = await aggregateOrder();
+  await aggregateRow("Re_medio").locator('[data-move="aggregates"][data-dir="up"]').click();
+  await page.waitForFunction(
+    () => /No se puede cambiar el orden/.test(document.querySelector("#practice-workspace .practice-status")?.textContent ?? ""),
+    null,
+    { timeout: 10_000 },
+  );
+  assert(
+    JSON.stringify(await aggregateOrder()) === JSON.stringify(beforeAggregates),
+    "un orden rechazado no debía cambiar los agregados",
+  );
+  await aggregateRow("Re_max").locator('[data-move="aggregates"][data-dir="down"]').click();
+  await page.waitForFunction(
+    (before) =>
+      [...document.querySelectorAll('[data-move="aggregates"][data-dir="up"]')].map((b) => b.dataset.id).join() !== before,
+    beforeAggregates.join(),
+    { timeout: 10_000 },
+  );
+
   console.log("alta de magnitud, mensurando y agregado desde el admin, sin errores JS.");
 });

@@ -177,8 +177,8 @@ pub async fn duplicate_practice(
     for old in parts {
         let new = uuid::Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO practice_parts (id, practice_id, title, position, analysis_kind) \
-             SELECT ?1, ?2, title, position, analysis_kind FROM practice_parts WHERE id = ?3",
+            "INSERT INTO practice_parts (id, practice_id, title, position, analysis_kind, help_text) \
+             SELECT ?1, ?2, title, position, analysis_kind, help_text FROM practice_parts WHERE id = ?3",
         )
         .bind(&new)
         .bind(&id)
@@ -187,23 +187,24 @@ pub async fn duplicate_practice(
         .await?;
         part_map.insert(old, new);
     }
-    let sections: Vec<(String, Option<String>, String, i64)> = sqlx::query_as(
-        "SELECT id, part_id, title, position FROM practice_sections WHERE practice_id = ?1",
+    let sections: Vec<(String, Option<String>, String, i64, String)> = sqlx::query_as(
+        "SELECT id, part_id, title, position, help_text FROM practice_sections WHERE practice_id = ?1",
     )
     .bind(source_id)
     .fetch_all(&mut *tx)
     .await?;
-    for (old, part_id, title, position) in sections {
+    for (old, part_id, title, position, help_text) in sections {
         let new = uuid::Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO practice_sections (id, practice_id, part_id, title, position) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO practice_sections (id, practice_id, part_id, title, position, help_text) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )
         .bind(&new)
         .bind(&id)
         .bind(part_id.and_then(|p| part_map.get(&p).cloned()))
         .bind(title)
         .bind(position)
+        .bind(help_text)
         .execute(&mut *tx)
         .await?;
         for table in ["practice_quantities", "practice_results"] {

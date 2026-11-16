@@ -27,13 +27,40 @@ async fn ensure_practice(state: &SharedState, practice_id: &str) -> Result<(), A
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
-async fn load_definition(
+static EDIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+struct LockedDefinition {
+    _lock: tokio::sync::MutexGuard<'static, ()>,
+    definition: practices::PracticeDefinition,
+}
+
+impl std::ops::Deref for LockedDefinition {
+    type Target = practices::PracticeDefinition;
+
+    fn deref(&self) -> &Self::Target {
+        &self.definition
+    }
+}
+
+async fn read_definition(
     state: &SharedState,
     practice_id: &str,
 ) -> Result<practices::PracticeDefinition, AppError> {
     practices::definition(&state.pool, practice_id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
+}
+
+async fn load_definition(
+    state: &SharedState,
+    practice_id: &str,
+) -> Result<LockedDefinition, AppError> {
+    let lock = EDIT_LOCK.lock().await;
+    let definition = read_definition(state, practice_id).await?;
+    Ok(LockedDefinition {
+        _lock: lock,
+        definition,
+    })
 }
 
 const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
@@ -158,7 +185,7 @@ pub(super) async fn practice_problems(
     Path(id): Path<String>,
 ) -> Result<Json<Vec<Problem>>, AppError> {
     require_teacher(&state, &headers).await?;
-    let def = load_definition(&state, &id).await?;
+    let def = read_definition(&state, &id).await?;
     Ok(Json(draft_problems(&def)))
 }
 
@@ -375,7 +402,7 @@ pub(super) async fn practice_definition(
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
     if matches!(user.role.as_str(), "docente" | "admin") && !query.published {
-        let definition = load_definition(&state, &id).await?;
+        let definition = read_definition(&state, &id).await?;
         return Ok(Json(DefinitionView {
             compare_options: Some(definition.compare_options()),
             formula_scopes: Some(formula_scopes(&definition)),
@@ -497,7 +524,7 @@ async fn preview_definition(
         require_teacher(state, headers).await?;
     }
     Ok(match &body.submission_id {
-        _ if body.draft => load_definition(state, id).await?,
+        _ if body.draft => read_definition(state, id).await?,
         Some(submission_id) => {
             ensure_submission_access(state, &user, submission_id).await?;
             practices::submission_definition(&state.pool, submission_id)
@@ -803,12 +830,8 @@ async fn move_in_list(
     up: bool,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(state, headers).await?;
-    if practices::move_item(&state.pool, list, practice_id, item_id, up)
-        .await?
-        .is_none()
-    {
-        return Err(AppError::not_found("elemento no encontrado en la practica"));
-    }
+    let action = "cambiar el orden";
+    move_guarded(&state.pool, list, practice_id, item_id, up, action).await?;
     Ok(Json(Health { status: "ok" }))
 }
 
@@ -2125,7 +2148,7 @@ pub(super) async fn create_part(
     if chosen {
         created.analysis_kind = Some("estadistico".into());
     }
-    let mut after = before;
+    let mut after = before.clone();
     after.parts.push(created.clone());
     if chosen {
         practices::save_part_kinds(&state.pool, &after).await?;
@@ -2137,12 +2160,9 @@ pub(super) async fn create_part(
 fn with_new_part(def: &practices::PracticeDefinition) -> practices::PracticeDefinition {
     let mut after = def.clone();
     after.parts.push(practices::PracticePart {
-        id: String::new(),
         practice_id: def.practice_id.clone(),
-        title: String::new(),
         position: i64::MAX,
-        analysis_kind: None,
-        effective_kind: String::new(),
+        ..Default::default()
     });
     after
 }
@@ -2216,23 +2236,61 @@ fn with_part_deleted(
     after.with_mirrored_kind()
 }
 
-fn with_part_moved(
-    def: &practices::PracticeDefinition,
-    part_id: &str,
+async fn move_guarded(
+    pool: &sqlx::SqlitePool,
+    list: practices::Orderable,
+    practice_id: &str,
+    item_id: &str,
     up: bool,
-) -> practices::PracticeDefinition {
-    let mut after = def.clone();
-    if let Some(index) = after.parts.iter().position(|p| p.id == part_id) {
-        let other = if up {
-            index.checked_sub(1)
-        } else {
-            Some(index + 1)
-        };
-        if let Some(other) = other.filter(|o| *o < after.parts.len()) {
-            after.parts.swap(index, other);
-        }
+    action: &str,
+) -> Result<(), AppError> {
+    let _lock = EDIT_LOCK.lock().await;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let not_found = || AppError::not_found("practica no encontrada");
+    let before = practices::definition_in(&mut tx, practice_id)
+        .await?
+        .ok_or_else(not_found)?;
+    match practices::move_item_in(&mut tx, list, practice_id, item_id, up).await? {
+        None => return Err(AppError::not_found("elemento no encontrado en la practica")),
+        Some(false) => return Ok(()),
+        Some(true) => {}
     }
-    after
+    let after = practices::definition_in(&mut tx, practice_id)
+        .await?
+        .ok_or_else(not_found)?;
+    guard_change(&before, &after, action)?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub(super) async fn move_intermediate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, iid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    let list = practices::Orderable::Intermediates;
+    move_in_list(&state, &headers, list, &id, &iid, body.up).await
+}
+
+pub(super) async fn move_point_result(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    let list = practices::Orderable::PointResults;
+    move_in_list(&state, &headers, list, &id, &pid, body.up).await
+}
+
+pub(super) async fn move_aggregate(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, aid)): Path<(String, String)>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<Health>, AppError> {
+    let list = practices::Orderable::Aggregates;
+    move_in_list(&state, &headers, list, &id, &aid, body.up).await
 }
 
 pub(super) async fn update_part(
@@ -2271,21 +2329,9 @@ pub(super) async fn move_part(
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    let before = load_definition(&state, &id).await?;
-    guard_change(
-        &before,
-        &with_part_moved(&before, &pid, body.up),
-        "mover la parte",
-    )?;
-    move_in_list(
-        &state,
-        &headers,
-        practices::Orderable::Parts,
-        &id,
-        &pid,
-        body.up,
-    )
-    .await
+    let list = practices::Orderable::Parts;
+    move_guarded(&state.pool, list, &id, &pid, body.up, "mover la parte").await?;
+    Ok(Json(Health { status: "ok" }))
 }
 
 pub(super) async fn create_section(
@@ -2492,6 +2538,7 @@ mod tests {
             ..Default::default()
         };
         let def = practices::PracticeDefinition {
+            description: String::new(),
             practice_id: "p".into(),
             status: "borrador".into(),
             analysis_kind: Some("regresion_lineal".into()),
@@ -2570,6 +2617,7 @@ mod tests {
             is_final: false,
         };
         let def = practices::PracticeDefinition {
+            description: String::new(),
             practice_id: "p".into(),
             status: "borrador".into(),
             analysis_kind: Some("regresion_lineal".into()),
@@ -2745,6 +2793,7 @@ mod tests {
     #[test]
     fn validate_result_allows_dimensionless_unit() {
         let def = practices::PracticeDefinition {
+            description: String::new(),
             practice_id: "p".into(),
             status: "borrador".into(),
             analysis_kind: Some("regresion_lineal".into()),
@@ -2824,6 +2873,72 @@ mod tests {
             let problems = formula_problems(&def);
             assert!(problems.is_empty(), "{}: {problems:?}", def.practice_id);
         }
+    }
+
+    #[tokio::test]
+    async fn every_list_moves_through_the_guard() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let practice = "p3-relajacion";
+        let def = practices::definition(&pool, practice)
+            .await
+            .unwrap()
+            .unwrap();
+        let quantity = def.quantities[1].id.clone();
+        let section = def.sections[1].id.clone();
+        for (list, id) in [
+            (practices::Orderable::Quantities, &quantity),
+            (practices::Orderable::Sections, &section),
+        ] {
+            move_guarded(&pool, list, practice, id, true, "cambiar el orden")
+                .await
+                .unwrap();
+        }
+        let after = practices::definition(&pool, practice)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.quantities[0].id, quantity);
+        assert_eq!(after.sections[0].id, section);
+    }
+
+    #[tokio::test]
+    async fn moving_an_aggregate_above_what_it_uses_is_rejected() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let def = practices::definition(&pool, "fluidos-2")
+            .await
+            .unwrap()
+            .unwrap();
+        let id_of = |symbol: &str| {
+            def.aggregates
+                .iter()
+                .find(|a| a.symbol == symbol)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let list = practices::Orderable::Aggregates;
+        let order = || async {
+            let def = practices::definition(&pool, "fluidos-2")
+                .await
+                .unwrap()
+                .unwrap();
+            def.aggregates
+                .iter()
+                .map(|a| a.symbol.clone())
+                .collect::<Vec<_>>()
+        };
+        let moving = |symbol: &str, up: bool| {
+            let id = id_of(symbol);
+            let pool = pool.clone();
+            async move { move_guarded(&pool, list, "fluidos-2", &id, up, "cambiar el orden").await }
+        };
+        assert!(moving("Re_max", false).await.is_ok());
+        let swapped = order().await;
+        assert!(moving("Re_medio", true).await.is_err());
+        assert_eq!(order().await, swapped);
+        let missing = move_guarded(&pool, list, "fluidos-2", "no-existe", true, "x").await;
+        let status = axum::response::IntoResponse::into_response(missing.unwrap_err()).status();
+        assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -3654,6 +3769,7 @@ mod tests {
             &pool,
             "fluidos-1",
             &practices::PartInput {
+                help_text: None,
                 title: "Unica".into(),
             },
         )
@@ -3720,6 +3836,7 @@ mod tests {
 
         let mut shared_section = fluidos.clone();
         shared_section.sections.push(practices::PracticeSection {
+            help_text: String::new(),
             id: "s".into(),
             practice_id: fluidos.practice_id.clone(),
             part_id: None,
@@ -3762,15 +3879,8 @@ mod tests {
             "{:?}",
             formula_problems(&unsectioned_series)
         );
-        let first = unsectioned_series.parts[0].id.clone();
-        let last = unsectioned_series.parts.last().unwrap().id.clone();
-        let moved = with_part_moved(&unsectioned_series, &last, true);
-        assert_eq!(moved.parts[0].id, first);
-        let to_front = with_part_moved(
-            &unsectioned_series,
-            &unsectioned_series.parts[1].id.clone(),
-            true,
-        );
+        let mut to_front = unsectioned_series.clone();
+        to_front.parts.swap(0, 1);
         assert!(guard_change(&unsectioned_series, &to_front, "mover la parte").is_err());
     }
 
@@ -3816,6 +3926,7 @@ mod tests {
                 &pool,
                 "fluidos-1",
                 &practices::PartInput {
+                    help_text: None,
                     title: title.into(),
                 },
             )
@@ -3881,6 +3992,7 @@ mod tests {
                 &pool,
                 "fluidos-1",
                 &practices::PartInput {
+                    help_text: None,
                     title: title.into(),
                 },
             )
@@ -3899,6 +4011,7 @@ mod tests {
             .map(|q| q.symbol.clone())
             .collect();
         def.sections.push(practices::PracticeSection {
+            help_text: String::new(),
             id: "sa".into(),
             practice_id: def.practice_id.clone(),
             part_id: Some(a.clone()),
@@ -3957,7 +4070,10 @@ mod tests {
         practices::create_part(
             &pool,
             "fluidos-1",
-            &practices::PartInput { title: "A".into() },
+            &practices::PartInput {
+                help_text: None,
+                title: "A".into(),
+            },
         )
         .await
         .unwrap();
@@ -3972,7 +4088,10 @@ mod tests {
         practices::create_part(
             &pool,
             "fluidos-1",
-            &practices::PartInput { title: "B".into() },
+            &practices::PartInput {
+                help_text: None,
+                title: "B".into(),
+            },
         )
         .await
         .unwrap();
@@ -3997,10 +4116,16 @@ mod tests {
             .unwrap();
         let chosen = with_part_kind(&cc, "p2-cc-serie", "estadistico").unwrap();
         practices::save_part_kinds(&pool, &chosen).await.unwrap();
-        let part =
-            practices::create_part(&pool, "p2-cc", &practices::PartInput { title: "C".into() })
-                .await
-                .unwrap();
+        let part = practices::create_part(
+            &pool,
+            "p2-cc",
+            &practices::PartInput {
+                help_text: None,
+                title: "C".into(),
+            },
+        )
+        .await
+        .unwrap();
         let mut after = practices::definition(&pool, "p2-cc")
             .await
             .unwrap()

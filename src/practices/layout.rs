@@ -1,29 +1,32 @@
 use super::{PartInput, PracticePart, PracticeSection, SectionInput};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 const LEGACY_LAYOUT: &str = "2026-11-partes-y-secciones";
 
-pub async fn parts_for(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Vec<PracticePart>> {
+pub async fn parts_for(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+) -> anyhow::Result<Vec<PracticePart>> {
     Ok(sqlx::query_as::<_, PracticePart>(
-        "SELECT id, practice_id, title, position, analysis_kind FROM practice_parts \
+        "SELECT id, practice_id, title, position, analysis_kind, help_text FROM practice_parts \
          WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
-    .fetch_all(pool)
+    .fetch_all(conn)
     .await?)
 }
 
 pub async fn sections_for(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeSection>> {
     let mut sections = sqlx::query_as::<_, PracticeSection>(
-        "SELECT id, practice_id, part_id, title, position FROM practice_sections \
+        "SELECT id, practice_id, part_id, title, position, help_text FROM practice_sections \
          WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await?;
     for (table, is_quantity) in [("practice_quantities", true), ("practice_results", false)] {
         let members: Vec<(String, String)> = sqlx::query_as(&format!(
@@ -31,7 +34,7 @@ pub async fn sections_for(
              WHERE practice_id = ?1 AND section_id IS NOT NULL ORDER BY position, symbol"
         ))
         .bind(practice_id)
-        .fetch_all(pool)
+        .fetch_all(&mut *conn)
         .await?;
         for (section_id, symbol) in members {
             if let Some(section) = sections.iter_mut().find(|s| s.id == section_id) {
@@ -51,16 +54,19 @@ pub async fn create_part(
     practice_id: &str,
     input: &PartInput,
 ) -> anyhow::Result<PracticePart> {
+    let help_text = input.help_text.as_deref().unwrap_or_default().trim();
     let id = Uuid::new_v4().to_string();
     let position =
         crate::db::next_position(pool, "practice_parts", "practice_id", practice_id).await?;
     sqlx::query(
-        "INSERT INTO practice_parts (id, practice_id, title, position) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO practice_parts (id, practice_id, title, position, help_text) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
     )
     .bind(&id)
     .bind(practice_id)
     .bind(input.title.trim())
     .bind(position)
+    .bind(help_text)
     .execute(pool)
     .await?;
     Ok(PracticePart {
@@ -69,6 +75,7 @@ pub async fn create_part(
         title: input.title.trim().to_string(),
         position,
         analysis_kind: None,
+        help_text: help_text.to_string(),
         effective_kind: "estadistico".into(),
     })
 }
@@ -131,14 +138,16 @@ pub async fn update_part(
     part_id: &str,
     input: &PartInput,
 ) -> anyhow::Result<bool> {
-    let changed =
-        sqlx::query("UPDATE practice_parts SET title = ?3 WHERE id = ?2 AND practice_id = ?1")
-            .bind(practice_id)
-            .bind(part_id)
-            .bind(input.title.trim())
-            .execute(pool)
-            .await?
-            .rows_affected();
+    let changed = sqlx::query(
+        "UPDATE practice_parts SET title = ?3, help_text = COALESCE(?4, help_text) WHERE id = ?2 AND practice_id = ?1",
+    )
+    .bind(practice_id)
+    .bind(part_id)
+    .bind(input.title.trim())
+    .bind(input.help_text.as_deref().map(str::trim))
+    .execute(pool)
+    .await?
+    .rows_affected();
     Ok(changed > 0)
 }
 
@@ -174,6 +183,7 @@ pub async fn create_section(
     practice_id: &str,
     input: &SectionInput,
 ) -> anyhow::Result<Option<PracticeSection>> {
+    let help_text = input.help_text.as_deref().unwrap_or_default().trim();
     let part_id = input.part_id.as_deref().filter(|p| !p.is_empty());
     if !part_belongs(pool, practice_id, part_id).await? {
         return Ok(None);
@@ -182,14 +192,15 @@ pub async fn create_section(
     let position =
         crate::db::next_position(pool, "practice_sections", "practice_id", practice_id).await?;
     sqlx::query(
-        "INSERT INTO practice_sections (id, practice_id, part_id, title, position) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO practice_sections (id, practice_id, part_id, title, position, help_text) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )
     .bind(&id)
     .bind(practice_id)
     .bind(part_id)
     .bind(input.title.trim())
     .bind(position)
+    .bind(help_text)
     .execute(pool)
     .await?;
     Ok(Some(PracticeSection {
@@ -198,6 +209,7 @@ pub async fn create_section(
         part_id: part_id.map(str::to_string),
         title: input.title.trim().to_string(),
         position,
+        help_text: help_text.to_string(),
         quantities: vec![],
         results: vec![],
     }))
@@ -214,12 +226,14 @@ pub async fn update_section(
         return Ok(None);
     }
     let changed = sqlx::query(
-        "UPDATE practice_sections SET title = ?3, part_id = ?4 WHERE id = ?2 AND practice_id = ?1",
+        "UPDATE practice_sections SET title = ?3, part_id = ?4, help_text = COALESCE(?5, help_text) \
+         WHERE id = ?2 AND practice_id = ?1",
     )
     .bind(practice_id)
     .bind(section_id)
     .bind(input.title.trim())
     .bind(part_id)
+    .bind(input.help_text.as_deref().map(str::trim))
     .execute(pool)
     .await?
     .rows_affected();

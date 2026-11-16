@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import {
   courseSelect, groupSelect, practiceSelect, tableSelect,
   measurementFields, latestResult, submitStatus, submitButton,
-  practicaTitle, practicePartTabs, submissionForm, studentComment,
+  practicaTitle, practicaSubtitle, practicePartTabs, submissionForm, studentComment,
 } from "./dom.js";
 import { fetchJson, postJson, deleteJson } from "./api.js";
 import { showToast } from "./toast.js";
@@ -15,6 +15,7 @@ import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
+  formHelpHtml, partHelpHtml, columnSections,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -107,25 +108,32 @@ export function selectedTableAssignment() {
   );
 }
 
+const DEFAULT_SUBTITLE = practicaSubtitle?.textContent ?? "";
+let latestFormRequest = 0;
+
 export async function loadSubmissionForm() {
   if (!measurementFields) return;
+  const request = ++latestFormRequest;
   const previewing = Boolean(state.draftPreviewPracticeId);
-  if (canReview(state.user) && !previewing) return;
+  if (canReview(state.user) && !previewing) {
+    if (practicaSubtitle) practicaSubtitle.textContent = DEFAULT_SUBTITLE;
+    return;
+  }
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
   const practiceId = practiceSelect.value;
   if (state.editingSubmissionId && state.editingPracticeId !== practiceId) exitEditMode();
   if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const courseId = courseSelect.value;
+  const practice = (previewing ? state.practices : selectedCourse()?.practices)?.find((p) => p.id === practiceId);
   if (practicaTitle) {
-    const practiceName =
-      selectedCourse()?.practices.find((p) => p.id === practiceId)?.name ?? "Nueva entrega";
+    const practiceName = practice?.name ?? "Nueva entrega";
     practicaTitle.textContent = state.editingSubmissionId ? `Editar — ${practiceName}` : practiceName;
   }
+  if (practicaSubtitle) practicaSubtitle.textContent = DEFAULT_SUBTITLE;
   if (submitButton) submitButton.textContent = state.editingSubmissionId ? "Guardar cambios" : "Entregar";
   if (previewing) {
-    const practiceName = state.practices.find((p) => p.id === practiceId)?.name ?? practiceId;
-    if (practicaTitle) practicaTitle.textContent = `Probar el borrador — ${practiceName}`;
+    if (practicaTitle) practicaTitle.textContent = `Probar el borrador — ${practice?.name ?? practiceId}`;
     if (submitButton) submitButton.textContent = "Calcular";
   }
   renderPartTabs(practiceId);
@@ -137,7 +145,7 @@ export async function loadSubmissionForm() {
 
   if (!state.editingSubmissionId && !previewing) {
     const blocked = await checkExistingReport(practiceId);
-    if (blocked) return;
+    if (blocked || request !== latestFormRequest) return;
   }
 
   const carried =
@@ -155,7 +163,9 @@ export async function loadSubmissionForm() {
       ),
       courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
     ]);
+    if (request !== latestFormRequest) return;
     state.practiceForm = { definition, instruments };
+    if (practicaSubtitle) practicaSubtitle.textContent = definition.description || DEFAULT_SUBTITLE;
     const draft = applicableDraft();
     restoreChronoDraft(draft?.chrono);
     renderPartTabs(practiceId);
@@ -165,6 +175,7 @@ export async function loadSubmissionForm() {
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
   } catch (error) {
+    if (request !== latestFormRequest) return;
     state.practiceForm = null;
     measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
   }
@@ -401,6 +412,7 @@ export function renderMeasurementFields(draft) {
         : "";
       return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+          ${formHelpHtml(sec.help_text)}
           ${rows.map(quantityRowHtml).join("")}
           ${helper}
           ${finalsHtml}
@@ -408,7 +420,7 @@ export function renderMeasurementFields(draft) {
     });
     const leftoverFinals = allFinals.filter((r) => !embedded.has(r.symbol));
     measurementFields.innerHTML =
-      blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
+      partHelpHtml(definition) + blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
     measurementFields.innerHTML =
@@ -475,11 +487,16 @@ function seriesFinalResultsHtml(definition) {
   const embedded = new Set(
     [...withRows, ...titled.map(({ sec }) => sec)].flatMap((sec) => sec.results ?? []),
   );
+  const titledAbove = new Set(columnSections(definition, sections));
   const titledHtml = titled.map(({ sec, rows }) => {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+    const heading = titledAbove.has(sec)
+      ? `<h5 class="measurement-section-subtitle">Resultado final — ${escapeHtml(sec.title)} <span class="submission-meta">— opcional</span></h5>`
+      : `<h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+        ${formHelpHtml(sec.help_text)}
+        <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>`;
     return `<div class="measurement-section"${secAttr}>
-        <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
-        <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
+        ${heading}
         ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;
   });
