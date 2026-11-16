@@ -830,12 +830,8 @@ async fn move_in_list(
     up: bool,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(state, headers).await?;
-    if practices::move_item(&state.pool, list, practice_id, item_id, up)
-        .await?
-        .is_none()
-    {
-        return Err(AppError::not_found("elemento no encontrado en la practica"));
-    }
+    let action = "cambiar el orden";
+    move_guarded(&state.pool, list, practice_id, item_id, up, action).await?;
     Ok(Json(Health { status: "ok" }))
 }
 
@@ -2267,27 +2263,6 @@ async fn move_guarded(
     Ok(())
 }
 
-async fn move_formula_row(
-    state: &SharedState,
-    headers: &HeaderMap,
-    list: practices::Orderable,
-    practice_id: &str,
-    item_id: &str,
-    up: bool,
-) -> Result<Json<Health>, AppError> {
-    require_teacher(state, headers).await?;
-    move_guarded(
-        &state.pool,
-        list,
-        practice_id,
-        item_id,
-        up,
-        "cambiar el orden",
-    )
-    .await?;
-    Ok(Json(Health { status: "ok" }))
-}
-
 pub(super) async fn move_intermediate(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -2295,7 +2270,7 @@ pub(super) async fn move_intermediate(
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
     let list = practices::Orderable::Intermediates;
-    move_formula_row(&state, &headers, list, &id, &iid, body.up).await
+    move_in_list(&state, &headers, list, &id, &iid, body.up).await
 }
 
 pub(super) async fn move_point_result(
@@ -2305,7 +2280,7 @@ pub(super) async fn move_point_result(
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
     let list = practices::Orderable::PointResults;
-    move_formula_row(&state, &headers, list, &id, &pid, body.up).await
+    move_in_list(&state, &headers, list, &id, &pid, body.up).await
 }
 
 pub(super) async fn move_aggregate(
@@ -2315,7 +2290,7 @@ pub(super) async fn move_aggregate(
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Health>, AppError> {
     let list = practices::Orderable::Aggregates;
-    move_formula_row(&state, &headers, list, &id, &aid, body.up).await
+    move_in_list(&state, &headers, list, &id, &aid, body.up).await
 }
 
 pub(super) async fn update_part(
@@ -2898,6 +2873,32 @@ mod tests {
             let problems = formula_problems(&def);
             assert!(problems.is_empty(), "{}: {problems:?}", def.practice_id);
         }
+    }
+
+    #[tokio::test]
+    async fn every_list_moves_through_the_guard() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let practice = "p3-relajacion";
+        let def = practices::definition(&pool, practice)
+            .await
+            .unwrap()
+            .unwrap();
+        let quantity = def.quantities[1].id.clone();
+        let section = def.sections[1].id.clone();
+        for (list, id) in [
+            (practices::Orderable::Quantities, &quantity),
+            (practices::Orderable::Sections, &section),
+        ] {
+            move_guarded(&pool, list, practice, id, true, "cambiar el orden")
+                .await
+                .unwrap();
+        }
+        let after = practices::definition(&pool, practice)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.quantities[0].id, quantity);
+        assert_eq!(after.sections[0].id, section);
     }
 
     #[tokio::test]
