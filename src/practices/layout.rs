@@ -51,6 +51,7 @@ pub async fn create_part(
     practice_id: &str,
     input: &PartInput,
 ) -> anyhow::Result<PracticePart> {
+    let help_text = input.help_text.as_deref().unwrap_or_default().trim();
     let id = Uuid::new_v4().to_string();
     let position =
         crate::db::next_position(pool, "practice_parts", "practice_id", practice_id).await?;
@@ -62,7 +63,7 @@ pub async fn create_part(
     .bind(practice_id)
     .bind(input.title.trim())
     .bind(position)
-    .bind(input.help_text.as_deref().unwrap_or_default().trim())
+    .bind(help_text)
     .execute(pool)
     .await?;
     Ok(PracticePart {
@@ -71,12 +72,7 @@ pub async fn create_part(
         title: input.title.trim().to_string(),
         position,
         analysis_kind: None,
-        help_text: input
-            .help_text
-            .as_deref()
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
+        help_text: help_text.to_string(),
         effective_kind: "estadistico".into(),
     })
 }
@@ -184,6 +180,7 @@ pub async fn create_section(
     practice_id: &str,
     input: &SectionInput,
 ) -> anyhow::Result<Option<PracticeSection>> {
+    let help_text = input.help_text.as_deref().unwrap_or_default().trim();
     let part_id = input.part_id.as_deref().filter(|p| !p.is_empty());
     if !part_belongs(pool, practice_id, part_id).await? {
         return Ok(None);
@@ -200,7 +197,7 @@ pub async fn create_section(
     .bind(part_id)
     .bind(input.title.trim())
     .bind(position)
-    .bind(input.help_text.as_deref().unwrap_or_default().trim())
+    .bind(help_text)
     .execute(pool)
     .await?;
     Ok(Some(PracticeSection {
@@ -209,12 +206,7 @@ pub async fn create_section(
         part_id: part_id.map(str::to_string),
         title: input.title.trim().to_string(),
         position,
-        help_text: input
-            .help_text
-            .as_deref()
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
+        help_text: help_text.to_string(),
         quantities: vec![],
         results: vec![],
     }))
