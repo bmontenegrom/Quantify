@@ -3267,6 +3267,59 @@ async fn move_item_reorders_intermediates() {
 }
 
 #[tokio::test]
+async fn move_item_reorders_point_results() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let practice = "p1-estadistica";
+    let mut ids = Vec::new();
+    for symbol in ["Ra", "Rb"] {
+        let row = create_point_result(
+            &pool,
+            practice,
+            PointResultInput {
+                display_symbol: None,
+                symbol: symbol.into(),
+                name: symbol.into(),
+                unit: "".into(),
+                formula: "L".into(),
+            },
+        )
+        .await
+        .unwrap();
+        ids.push(row.id);
+    }
+    assert_eq!(
+        move_item(&pool, Orderable::PointResults, practice, &ids[1], true)
+            .await
+            .unwrap(),
+        Some(true)
+    );
+    let def = definition(&pool, practice).await.unwrap().unwrap();
+    let symbols: Vec<_> = def
+        .point_results
+        .iter()
+        .map(|r| r.symbol.as_str())
+        .collect();
+    assert_eq!(symbols, ["Rb", "Ra"]);
+}
+
+#[tokio::test]
+async fn move_item_reports_an_unknown_formula_row() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    for list in [
+        Orderable::Intermediates,
+        Orderable::PointResults,
+        Orderable::Aggregates,
+    ] {
+        assert_eq!(
+            move_item(&pool, list, "filtros", "no-existe", true)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+}
+
+#[tokio::test]
 async fn editing_help_text_updates_the_current_version() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
