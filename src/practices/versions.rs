@@ -31,12 +31,19 @@ pub async fn current_version(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeVersion>> {
+    current_version_in(&mut *pool.acquire().await?, practice_id).await
+}
+
+async fn current_version_in(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+) -> anyhow::Result<Option<PracticeVersion>> {
     let row: Option<(String, i64, String, String)> = sqlx::query_as(
         "SELECT v.id, v.number, v.definition_json, p.status FROM practices p \
          JOIN practice_versions v ON v.id = p.current_version_id WHERE p.id = ?1",
     )
     .bind(practice_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
     row.map(|(id, number, json, status)| {
         let mut version = version_from_row((id, number, json))?;
@@ -209,8 +216,6 @@ async fn insert_version(
     })
 }
 
-static PUBLISHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 pub enum Publish {
     Published { number: i64 },
     UpdatedCurrent { number: i64 },
@@ -233,11 +238,10 @@ pub async fn publish_version(
     practice_id: &str,
     published_by: Option<&str>,
 ) -> anyhow::Result<Option<PracticeVersion>> {
-    let _guard = PUBLISHING.lock().await;
-    let Some(definition) = super::definition(pool, practice_id).await? else {
+    let mut tx = crate::db::begin_write(pool).await?;
+    let Some(definition) = super::definition_in(&mut tx, practice_id).await? else {
         return Ok(None);
     };
-    let mut tx = crate::db::begin_write(pool).await?;
     let version = insert_version(&mut tx, &definition, published_by).await?;
     tx.commit().await?;
     Ok(Some(version))
@@ -250,14 +254,14 @@ pub async fn publish_checked(
     expected_fingerprint: Option<&str>,
     problems: impl Fn(&PracticeDefinition) -> Vec<String>,
 ) -> anyhow::Result<Publish> {
-    let _guard = PUBLISHING.lock().await;
-    let Some(definition) = super::definition(pool, practice_id).await? else {
+    let mut tx = crate::db::begin_write(pool).await?;
+    let Some(definition) = super::definition_in(&mut tx, practice_id).await? else {
         return Ok(Publish::NotFound);
     };
     if definition.status == "borrador" {
         return Ok(Publish::IsDraft);
     }
-    if let Some(current) = current_version(pool, practice_id).await? {
+    if let Some(current) = current_version_in(&mut tx, practice_id).await? {
         let number = current.number;
         let kind = super::change_kind(&current.definition, &definition)?;
         if kind == super::DraftChangeKind::None {
@@ -268,7 +272,6 @@ pub async fn publish_checked(
             return Ok(Publish::DraftChanged);
         }
         if kind == super::DraftChangeKind::Cosmetic {
-            let mut tx = crate::db::begin_write(pool).await?;
             sqlx::query(
                 "UPDATE practice_versions \
                      SET definition_json = json_set(?1, '$.current_version', number) \
@@ -296,7 +299,6 @@ pub async fn publish_checked(
     if !found.is_empty() {
         return Ok(Publish::Rejected(found));
     }
-    let mut tx = crate::db::begin_write(pool).await?;
     let version = insert_version(&mut tx, &definition, published_by).await?;
     tx.commit().await?;
     Ok(Publish::Published {
@@ -310,8 +312,8 @@ pub async fn publish_draft(
     published_by: Option<&str>,
     problems: impl Fn(&PracticeDefinition) -> Vec<String>,
 ) -> anyhow::Result<DraftPublish> {
-    let _guard = PUBLISHING.lock().await;
-    let Some(definition) = super::definition(pool, practice_id).await? else {
+    let mut tx = crate::db::begin_write(pool).await?;
+    let Some(definition) = super::definition_in(&mut tx, practice_id).await? else {
         return Ok(DraftPublish::NotFound);
     };
     if definition.status != "borrador" {
@@ -321,7 +323,6 @@ pub async fn publish_draft(
     if !found.is_empty() {
         return Ok(DraftPublish::Rejected(found));
     }
-    let mut tx = crate::db::begin_write(pool).await?;
     let changed = sqlx::query(
         "UPDATE practices SET status = 'publicada' WHERE id = ?1 AND status = 'borrador'",
     )
@@ -363,7 +364,7 @@ pub async fn remove_quantity(
     practice_id: &str,
     quantity_id: &str,
 ) -> anyhow::Result<QuantityRemoval> {
-    let _guard = PUBLISHING.lock().await;
+    let mut tx = crate::db::begin_write(pool).await?;
     let (in_version, measured): (bool, bool) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM practice_versions v, \
          json_each(v.definition_json, '$.quantities') q \
@@ -372,7 +373,7 @@ pub async fn remove_quantity(
     )
     .bind(practice_id)
     .bind(quantity_id)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await?;
     if measured && !in_version {
         return Ok(QuantityRemoval::HasMeasurements);
@@ -384,7 +385,6 @@ pub async fn remove_quantity(
     } else {
         "DELETE FROM practice_quantities WHERE id = ?1 AND practice_id = ?2 AND removed = 0"
     };
-    let mut tx = crate::db::begin_write(pool).await?;
     sqlx::query(
         "UPDATE practice_results SET compare_with = '' \
          WHERE practice_id = ?2 AND compare_with = \
