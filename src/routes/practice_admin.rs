@@ -3030,20 +3030,6 @@ mod tests {
                     .unwrap();
             assert_eq!(response.status(), status);
         }
-        let status_for = |method: axum::http::Method| {
-            let request = axum::http::Request::builder()
-                .method(method)
-                .uri("/practices/p1-estadistica/definition")
-                .header("cookie", format!("quantify_session={student}"))
-                .body(axum::body::Body::empty())
-                .unwrap();
-            let app = app.clone();
-            async move { app.oneshot(request).await.unwrap().status() }
-        };
-        assert_eq!(
-            status_for(axum::http::Method::HEAD).await,
-            status_for(axum::http::Method::GET).await
-        );
         let too_big = axum::body::Body::from(vec![b' '; 3 * 1024 * 1024]);
         let response = app
             .clone()

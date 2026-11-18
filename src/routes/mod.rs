@@ -144,6 +144,9 @@ pub fn api_router(state: SharedState) -> Router {
             post(remove_group_member_path),
         )
         .route("/practices", get(list_practices).post(create_practice))
+        .route("/practices/{id}/definition", get(practice_definition))
+        .route("/practices/{id}/problems", get(practice_problems))
+        .route("/practices/{id}/draft-changes", get(practice_draft_changes))
         .route("/practices/{id}/analyze-preview", post(analyze_preview))
         .route("/practices/{id}/live-values", post(live_values))
         .merge(practice_edit_routes(state.clone()))
@@ -203,7 +206,6 @@ fn practice_edit_routes(state: SharedState) -> Router<SharedState> {
         )
         .route("/practices/{id}/duplicate", post(duplicate_practice))
         .route("/practices/{id}/versions", post(publish_practice_version))
-        .route("/practices/{id}/draft-changes", get(practice_draft_changes))
         .route("/practices/{id}/parts", post(create_part))
         .route(
             "/practices/{id}/parts/{pid}",
@@ -229,8 +231,6 @@ fn practice_edit_routes(state: SharedState) -> Router<SharedState> {
             post(set_result_section),
         )
         .route("/practices/{id}/status", post(set_practice_status))
-        .route("/practices/{id}/definition", get(practice_definition))
-        .route("/practices/{id}/problems", get(practice_problems))
         .route(
             "/practices/{id}/analysis-kind",
             post(set_practice_analysis_kind),
