@@ -839,9 +839,19 @@ pub async fn save_student_results(
     results: &[StudentResultInput],
 ) -> anyhow::Result<()> {
     let mut tx = crate::db::begin_write(pool).await?;
+    save_student_results_in(&mut tx, submission_id, results).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn save_student_results_in(
+    conn: &mut sqlx::SqliteConnection,
+    submission_id: &str,
+    results: &[StudentResultInput],
+) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM submission_student_results WHERE submission_id = ?1")
         .bind(submission_id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
     for input in results {
         if !input.value.is_finite() {
@@ -861,10 +871,9 @@ pub async fn save_student_results(
         .bind(input.value)
         .bind(u)
         .bind(Utc::now())
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
     }
-    tx.commit().await?;
     Ok(())
 }
 
