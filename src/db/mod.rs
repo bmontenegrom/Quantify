@@ -224,7 +224,7 @@ pub async fn begin_write(
 }
 
 pub async fn next_position(
-    pool: &SqlitePool,
+    conn: &mut sqlx::SqliteConnection,
     table: &str,
     scope_col: &str,
     scope_val: &str,
@@ -233,7 +233,7 @@ pub async fn next_position(
         format!("SELECT COALESCE(MAX(position), 0) + 1 FROM {table} WHERE {scope_col} = ?1");
     let position: (i64,) = sqlx::query_as(&query)
         .bind(scope_val)
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await?;
     Ok(position.0)
 }

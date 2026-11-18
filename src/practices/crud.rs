@@ -148,7 +148,8 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     display: Option<&str>,
     flags: &[bool],
 ) -> anyhow::Result<T> {
-    let position = next_position(pool, T::TABLE, "practice_id", practice_id).await?;
+    let mut tx = crate::db::begin_write(pool).await?;
+    let position = next_position(&mut tx, T::TABLE, "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     let query = format!(
         "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula, display_symbol{}) \
@@ -171,7 +172,8 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     for flag in flags {
         insert = insert.bind(*flag);
     }
-    insert.execute(pool).await?;
+    insert.execute(&mut *tx).await?;
+    tx.commit().await?;
     fetch_symbol_formula_row::<T>(pool, &id).await
 }
 
@@ -329,7 +331,9 @@ pub async fn create_aggregate(
     if symbol.is_empty() || formula.is_empty() {
         anyhow::bail!("el mensurando agregado necesita símbolo y fórmula");
     }
-    let position = next_position(pool, "practice_aggregates", "practice_id", practice_id).await?;
+    let mut tx = crate::db::begin_write(pool).await?;
+    let position =
+        next_position(&mut tx, "practice_aggregates", "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_aggregates \
@@ -345,8 +349,9 @@ pub async fn create_aggregate(
     .bind(formula)
     .bind(input.is_final)
     .bind(display_symbol(&input.display_symbol).unwrap_or(""))
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     fetch_aggregate(pool, &id).await
 }
 
@@ -482,7 +487,8 @@ pub async fn create_curve(
     if x.is_empty() || y.is_empty() {
         anyhow::bail!("la curva necesita las fórmulas de ambos ejes");
     }
-    let position = next_position(pool, "practice_curves", "practice_id", practice_id).await?;
+    let mut tx = crate::db::begin_write(pool).await?;
+    let position = next_position(&mut tx, "practice_curves", "practice_id", practice_id).await?;
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_curves (id, practice_id, position, x_formula, y_formula, x_log) \
@@ -494,8 +500,9 @@ pub async fn create_curve(
     .bind(x)
     .bind(y)
     .bind(input.x_log)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     fetch_curve(pool, &id).await
 }
 
@@ -631,11 +638,11 @@ pub async fn create_quantity(
     practice_id: &str,
     input: QuantityInput,
 ) -> anyhow::Result<PracticeQuantity> {
-    let position = next_position(pool, "practice_quantities", "practice_id", practice_id).await?;
-    let id = {
-        let mut conn = pool.acquire().await?;
-        insert_quantity(&mut conn, practice_id, position, &input).await?
-    };
+    let mut tx = crate::db::begin_write(pool).await?;
+    let position =
+        next_position(&mut tx, "practice_quantities", "practice_id", practice_id).await?;
+    let id = insert_quantity(&mut tx, practice_id, position, &input).await?;
+    tx.commit().await?;
     fetch_quantity(pool, &id).await
 }
 
@@ -714,8 +721,8 @@ pub async fn create_result(
     input: ResultInput,
     section_id: Option<&str>,
 ) -> anyhow::Result<PracticeResult> {
-    let position = next_position(pool, "practice_results", "practice_id", practice_id).await?;
     let mut tx = crate::db::begin_write(pool).await?;
+    let position = next_position(&mut tx, "practice_results", "practice_id", practice_id).await?;
     let id = insert_result(&mut tx, practice_id, position, &input).await?;
     if let Some(section_id) = section_id {
         sqlx::query(

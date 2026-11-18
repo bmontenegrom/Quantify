@@ -57,9 +57,10 @@ pub async fn create_part(
     let help_text = input.help_text.as_deref().unwrap_or_default().trim();
     let id = Uuid::new_v4().to_string();
     let mut tx = crate::db::begin_write(pool).await?;
-    let (position, analysis_kind): (i64, Option<String>) = sqlx::query_as(
-        "SELECT COALESCE(MAX(position), 0) + 1, \
-         CASE WHEN COUNT(analysis_kind) > 0 THEN 'estadistico' END \
+    let position =
+        crate::db::next_position(&mut tx, "practice_parts", "practice_id", practice_id).await?;
+    let analysis_kind: Option<String> = sqlx::query_scalar(
+        "SELECT CASE WHEN COUNT(analysis_kind) > 0 THEN 'estadistico' END \
          FROM practice_parts WHERE practice_id = ?1",
     )
     .bind(practice_id)
@@ -199,8 +200,9 @@ pub async fn create_section(
         return Ok(None);
     }
     let id = Uuid::new_v4().to_string();
+    let mut tx = crate::db::begin_write(pool).await?;
     let position =
-        crate::db::next_position(pool, "practice_sections", "practice_id", practice_id).await?;
+        crate::db::next_position(&mut tx, "practice_sections", "practice_id", practice_id).await?;
     sqlx::query(
         "INSERT INTO practice_sections (id, practice_id, part_id, title, position, help_text) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -211,8 +213,9 @@ pub async fn create_section(
     .bind(input.title.trim())
     .bind(position)
     .bind(help_text)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Some(PracticeSection {
         id,
         practice_id: practice_id.to_string(),
