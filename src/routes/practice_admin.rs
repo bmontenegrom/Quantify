@@ -2941,11 +2941,13 @@ mod tests {
     async fn a_cancelled_edit_frees_its_lock_entry() {
         let held = PracticeLock::new("lock-cancel");
         let guard = held.mutex().lock().await;
+        let (waiting, waiter_ready) = tokio::sync::oneshot::channel::<()>();
         let waiter = tokio::spawn(async {
             let lock = PracticeLock::new("lock-cancel");
+            let _ = waiting.send(());
             let _guard = lock.mutex().lock().await;
         });
-        tokio::task::yield_now().await;
+        waiter_ready.await.unwrap();
         assert_eq!(
             practice_locks()
                 .get("lock-cancel")
@@ -4297,17 +4299,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut after = practices::definition(&pool, "p2-cc")
-            .await
-            .unwrap()
-            .unwrap();
-        after
-            .parts
-            .iter_mut()
-            .find(|p| p.id == part.id)
-            .unwrap()
-            .analysis_kind = Some("estadistico".into());
-        practices::save_part_kinds(&pool, &after).await.unwrap();
+        assert_eq!(part.analysis_kind.as_deref(), Some("estadistico"));
         let reloaded = practices::definition(&pool, "p2-cc")
             .await
             .unwrap()
