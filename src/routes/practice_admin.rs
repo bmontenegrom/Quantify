@@ -773,15 +773,6 @@ pub(super) async fn update_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
-    if let Some(n) = input.slot_count {
-        let bad = practices::submissions_off_slots(&state.pool, &qid, n).await?;
-        if bad > 0 {
-            return Err(AppError::bad_request(format!(
-                "Hay {bad} entrega(s) con valores de esta magnitud que no son una ranura de 1 a {n}: \
-                 no se pueden poner las ranuras sin dejarlas imposibles de editar."
-            )));
-        }
-    }
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -798,7 +789,8 @@ pub(super) async fn update_quantity(
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
     guard_change(&before, &after, "guardar la magnitud")?;
     let updated = practices::update_quantity(&state.pool, &qid, input)
-        .await?
+        .await
+        .map_err(AppError::from_domain_or_db)?
         .ok_or_else(|| AppError::not_found("magnitud no encontrada"))?;
     Ok(Json(updated))
 }

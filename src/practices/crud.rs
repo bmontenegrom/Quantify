@@ -652,6 +652,15 @@ pub async fn update_quantity(
     input: QuantityInput,
 ) -> anyhow::Result<Option<PracticeQuantity>> {
     let mut tx = crate::db::begin_write(pool).await?;
+    if let Some(n) = input.slot_count {
+        let bad = submissions_off_slots(&mut tx, quantity_id, n).await?;
+        if bad > 0 {
+            anyhow::bail!(
+                "Hay {bad} entrega(s) con valores de esta magnitud que no son una ranura de 1 a {n}: \
+                 no se pueden poner las ranuras sin dejarlas imposibles de editar."
+            );
+        }
+    }
     sqlx::query(
         "UPDATE practice_results SET compare_with = ?2 \
          WHERE EXISTS (SELECT 1 FROM practice_quantities q WHERE q.id = ?1 AND q.removed = 0 \
@@ -700,7 +709,7 @@ pub async fn update_quantity(
 }
 
 pub async fn submissions_off_slots(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     quantity_id: &str,
     n: i64,
 ) -> anyhow::Result<i64> {
@@ -710,7 +719,7 @@ pub async fn submissions_off_slots(
     )
     .bind(quantity_id)
     .bind(n)
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
     Ok(count)
 }

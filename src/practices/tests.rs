@@ -1985,8 +1985,23 @@ async fn submissions_off_slots_counts_non_slot_readings() {
         .await
         .unwrap();
     }
-    assert_eq!(submissions_off_slots(&pool, &qid, 9).await.unwrap(), 2);
-    assert_eq!(submissions_off_slots(&pool, &qid, 12).await.unwrap(), 1);
+    let mut conn = pool.acquire().await.unwrap();
+    assert_eq!(submissions_off_slots(&mut conn, &qid, 9).await.unwrap(), 2);
+    assert_eq!(submissions_off_slots(&mut conn, &qid, 12).await.unwrap(), 1);
+    drop(conn);
+    let with_slots = QuantityInput {
+        slot_count: Some(9),
+        ..sample_quantity()
+    };
+    let error = update_quantity(&pool, &qid, with_slots).await.unwrap_err();
+    assert!(error.to_string().starts_with("Hay 2 entrega(s)"), "{error}");
+    let (symbol,): (String,) =
+        sqlx::query_as("SELECT symbol FROM practice_quantities WHERE id = ?1")
+            .bind(&qid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(symbol, "dw1");
 }
 
 #[test]
