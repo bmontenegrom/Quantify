@@ -86,7 +86,7 @@ pub(super) async fn migrate_legacy_display_symbols(pool: &SqlitePool) -> anyhow:
     if crate::db::migration_applied(pool, LEGACY_DISPLAY_SYMBOLS).await? {
         return Ok(());
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     for table in DISPLAY_SYMBOL_TABLES {
         let rows: Vec<(String, String)> = sqlx::query_as(&format!(
             "SELECT id, symbol FROM {table} WHERE display_symbol = ''"
@@ -181,7 +181,7 @@ pub(super) async fn migrate_legacy_quantity_presentation(pool: &SqlitePool) -> a
     if crate::db::migration_applied(pool, LEGACY_QUANTITY_PRESENTATION).await? {
         return Ok(());
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     type Row = (
         String,
         String,
@@ -300,7 +300,7 @@ pub(super) async fn migrate_legacy_compare_with(pool: &SqlitePool) -> anyhow::Re
             drafts.push(definition);
         }
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     for definition in &drafts {
         for result in definition
             .results
@@ -399,7 +399,7 @@ pub(super) async fn migrate_legacy_live_columns(pool: &SqlitePool) -> anyhow::Re
             drafts.push(definition);
         }
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     for definition in &drafts {
         for intermediate in definition
             .intermediates

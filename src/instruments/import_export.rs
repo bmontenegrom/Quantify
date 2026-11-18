@@ -45,7 +45,7 @@ pub async fn import_course(
     payload: CatalogExport,
 ) -> anyhow::Result<usize> {
     let count = payload.instruments.len();
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     for instrument in &payload.instruments {
         let create = CreateInstrument {
             course_id: course_id.to_string(),

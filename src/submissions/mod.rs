@@ -838,7 +838,7 @@ pub async fn save_student_results(
     submission_id: &str,
     results: &[StudentResultInput],
 ) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query("DELETE FROM submission_student_results WHERE submission_id = ?1")
         .bind(submission_id)
         .execute(&mut *tx)
@@ -869,7 +869,7 @@ pub async fn save_student_results(
 }
 
 pub async fn delete_submission(pool: &SqlitePool, id: &str) -> anyhow::Result<bool> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query("DELETE FROM submission_measurements WHERE submission_id = ?1")
         .bind(id)
         .execute(&mut *tx)

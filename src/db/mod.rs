@@ -259,7 +259,7 @@ async fn seed_initial_accounts(
     }
     let admin = admin_account(demo_data, admin_password)?;
     let demo = demo_data.then(demo_accounts);
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     insert_accounts(&mut tx, &[admin]).await?;
     if let Some(accounts) = &demo {
         insert_accounts(&mut tx, accounts).await?;

@@ -84,7 +84,7 @@ pub async fn save_part_kinds(
     pool: &SqlitePool,
     definition: &super::PracticeDefinition,
 ) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     write_kinds(&mut tx, definition).await?;
     tx.commit().await?;
     Ok(())
@@ -95,7 +95,7 @@ pub async fn delete_part_saving_kinds(
     part_id: &str,
     after: &super::PracticeDefinition,
 ) -> anyhow::Result<bool> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let deleted = sqlx::query("DELETE FROM practice_parts WHERE id = ?1 AND practice_id = ?2")
         .bind(part_id)
         .bind(&after.practice_id)
@@ -524,7 +524,7 @@ pub(super) async fn migrate_legacy_layout(pool: &SqlitePool) -> anyhow::Result<(
     if done > 0 {
         return Ok(());
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     for layout in legacy_layouts() {
         apply_layout_if_empty(&mut tx, &layout).await?;
     }
@@ -575,7 +575,7 @@ pub(super) async fn migrate_shared_results_to_parts(pool: &SqlitePool) -> anyhow
             moves.push((result.id.clone(), section));
         }
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     for (result_id, section_id) in moves {
         sqlx::query("UPDATE practice_results SET section_id = ?1 WHERE id = ?2")
             .bind(section_id)
