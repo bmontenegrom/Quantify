@@ -80,12 +80,16 @@ pub(super) async fn serialize_practice_edits(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use axum::{extract::FromRequest, response::IntoResponse};
-    let practice_id = params
+    let Some(practice_id) = params
         .iter()
         .find(|(key, _)| *key == "id")
-        .map(|(_, value)| value.to_string());
-    let Some(practice_id) = practice_id.filter(|_| !request.method().is_safe()) else {
-        return next.run(request).await;
+        .map(|(_, value)| value.to_string())
+    else {
+        return AppError::from(anyhow::anyhow!(
+            "ruta de edición sin {{id}}: {}",
+            request.uri().path()
+        ))
+        .into_response();
     };
     let (parts, body) = request.into_parts();
     if let Err(error) = require_teacher(&state, &parts.headers).await {
@@ -2951,6 +2955,37 @@ mod tests {
         drop(guard);
         drop(held);
         assert!(!practice_locks().contains_key("lock-cancel"));
+    }
+
+    #[tokio::test]
+    async fn an_edit_route_without_an_id_fails_instead_of_skipping_the_lock() {
+        use tower::ServiceExt;
+        let (pool, dir) = crate::computation::tests::setup().await;
+        let state: SharedState = std::sync::Arc::new(db::AppState {
+            pool,
+            upload_dir: dir.path().to_path_buf(),
+            secret_key: "secreto".into(),
+            secure_cookies: false,
+            login_attempts: Default::default(),
+        });
+        let app = axum::Router::new()
+            .route(
+                "/practices/{practice_id}/x",
+                axum::routing::post(|| async { "sin lock" }),
+            )
+            .route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                serialize_practice_edits,
+            ))
+            .with_state(state);
+        let request = axum::http::Request::post("/practices/p1/x")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[tokio::test]
