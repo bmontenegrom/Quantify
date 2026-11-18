@@ -33,19 +33,45 @@ static PRACTICE_LOCKS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<String, PracticeMutex>>,
 > = std::sync::LazyLock::new(Default::default);
 
-fn practice_mutex(practice_id: &str) -> PracticeMutex {
-    let mut locks = PRACTICE_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
-    locks.entry(practice_id.to_string()).or_default().clone()
+fn practice_locks(
+) -> std::sync::MutexGuard<'static, std::collections::HashMap<String, PracticeMutex>> {
+    PRACTICE_LOCKS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn release_practice_mutex(practice_id: &str, mutex: PracticeMutex) {
-    let mut locks = PRACTICE_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
-    if std::sync::Arc::strong_count(&mutex) == 2 {
-        locks.remove(practice_id);
+struct PracticeLock {
+    practice_id: String,
+    mutex: Option<PracticeMutex>,
+}
+
+impl PracticeLock {
+    fn new(practice_id: &str) -> Self {
+        let mutex = practice_locks()
+            .entry(practice_id.to_string())
+            .or_default()
+            .clone();
+        Self {
+            practice_id: practice_id.to_string(),
+            mutex: Some(mutex),
+        }
+    }
+
+    fn mutex(&self) -> &tokio::sync::Mutex<()> {
+        self.mutex.as_ref().expect("el mutex vive hasta el drop")
     }
 }
 
-const MAX_EDIT_BODY: usize = 2 * 1024 * 1024;
+impl Drop for PracticeLock {
+    fn drop(&mut self) {
+        let mut locks = practice_locks();
+        drop(self.mutex.take());
+        if locks
+            .get(&self.practice_id)
+            .is_some_and(|mutex| std::sync::Arc::strong_count(mutex) == 1)
+        {
+            locks.remove(&self.practice_id);
+        }
+    }
+}
 
 pub(super) async fn serialize_practice_edits(
     State(state): State<SharedState>,
@@ -53,30 +79,31 @@ pub(super) async fn serialize_practice_edits(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
+    use axum::{extract::FromRequest, response::IntoResponse};
     let practice_id = params
         .iter()
         .find(|(key, _)| *key == "id")
         .map(|(_, value)| value.to_string());
-    let Some(practice_id) = practice_id.filter(|_| request.method() != axum::http::Method::GET)
-    else {
+    let Some(practice_id) = practice_id.filter(|_| !request.method().is_safe()) else {
         return next.run(request).await;
     };
     let (parts, body) = request.into_parts();
     if let Err(error) = require_teacher(&state, &parts.headers).await {
         return error.into_response();
     }
-    let Ok(body) = axum::body::to_bytes(body, MAX_EDIT_BODY).await else {
-        return AppError::bad_request("no se pudo leer el pedido").into_response();
+    let mut buffered = axum::extract::Request::new(body);
+    *buffered.extensions_mut() = parts.extensions.clone();
+    let body = match axum::body::Bytes::from_request(buffered, &()).await {
+        Ok(body) => body,
+        Err(rejection) if rejection.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE => {
+            return AppError::payload_too_large("el pedido es demasiado grande").into_response();
+        }
+        Err(_) => return AppError::bad_request("no se pudo leer el pedido").into_response(),
     };
     let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(body));
-    let mutex = practice_mutex(&practice_id);
-    let response = {
-        let _guard = mutex.lock().await;
-        next.run(request).await
-    };
-    release_practice_mutex(&practice_id, mutex);
-    response
+    let lock = PracticeLock::new(&practice_id);
+    let _guard = lock.mutex().lock().await;
+    next.run(request).await
 }
 
 async fn load_definition(
@@ -2901,20 +2928,42 @@ mod tests {
 
     #[tokio::test]
     async fn edits_wait_only_for_the_same_practice() {
-        let held = practice_mutex("lock-a");
-        let guard = held.lock().await;
-        let same = practice_mutex("lock-a");
-        assert!(same.try_lock().is_err());
-        let other = practice_mutex("lock-b");
-        assert!(other.try_lock().is_ok());
-        release_practice_mutex("lock-b", other);
-        drop(guard);
-        release_practice_mutex("lock-a", same);
-        let present = |id: &str| PRACTICE_LOCKS.lock().unwrap().contains_key(id);
-        assert!(present("lock-a"));
-        release_practice_mutex("lock-a", held);
-        assert!(!present("lock-a"));
+        let present = |id: &str| practice_locks().contains_key(id);
+        let held = PracticeLock::new("lock-a");
+        let guard = held.mutex().lock().await;
+        let same = PracticeLock::new("lock-a");
+        assert!(same.mutex().try_lock().is_err());
+        let other = PracticeLock::new("lock-b");
+        assert!(other.mutex().try_lock().is_ok());
+        drop(other);
         assert!(!present("lock-b"));
+        drop(guard);
+        drop(same);
+        assert!(present("lock-a"));
+        drop(held);
+        assert!(!present("lock-a"));
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_edit_frees_its_lock_entry() {
+        let held = PracticeLock::new("lock-cancel");
+        let guard = held.mutex().lock().await;
+        let waiter = tokio::spawn(async {
+            let lock = PracticeLock::new("lock-cancel");
+            let _guard = lock.mutex().lock().await;
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(
+            practice_locks()
+                .get("lock-cancel")
+                .map(std::sync::Arc::strong_count),
+            Some(3)
+        );
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        drop(guard);
+        drop(held);
+        assert!(!practice_locks().contains_key("lock-cancel"));
     }
 
     #[tokio::test]
@@ -2955,16 +3004,18 @@ mod tests {
         };
         let student = session("estudiante").await;
         let teacher = session("docente").await;
-        let request = |token: Option<&str>| {
-            let endless = futures_util::stream::pending::<Result<Vec<u8>, std::io::Error>>();
-            let mut builder = axum::http::Request::post("/practices/p1-estadistica/quantities")
+        let request = |token: Option<&str>, body: axum::body::Body| {
+            let mut builder = axum::http::Request::post("/practices/lock-body/quantities")
                 .header("content-type", "application/json");
             if let Some(token) = token {
                 builder = builder.header("cookie", format!("quantify_session={token}"));
             }
-            builder
-                .body(axum::body::Body::from_stream(endless))
-                .unwrap()
+            builder.body(body).unwrap()
+        };
+        let endless = || {
+            axum::body::Body::from_stream(futures_util::stream::pending::<
+                Result<Vec<u8>, std::io::Error>,
+            >())
         };
         let app = super::super::practice_edit_routes(state.clone()).with_state(state);
         let wait = std::time::Duration::from_secs(5);
@@ -2972,17 +3023,47 @@ mod tests {
             (None, axum::http::StatusCode::UNAUTHORIZED),
             (Some(student.as_str()), axum::http::StatusCode::FORBIDDEN),
         ] {
-            let response = tokio::time::timeout(wait, app.clone().oneshot(request(token)))
-                .await
-                .expect("no debía esperar el cuerpo")
-                .unwrap();
+            let response =
+                tokio::time::timeout(wait, app.clone().oneshot(request(token, endless())))
+                    .await
+                    .expect("no debía esperar el cuerpo")
+                    .unwrap();
             assert_eq!(response.status(), status);
         }
-        let pending = tokio::spawn(app.oneshot(request(Some(&teacher))));
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        let mutex = practice_mutex("p1-estadistica");
-        assert!(mutex.try_lock().is_ok());
-        release_practice_mutex("p1-estadistica", mutex);
+        let status_for = |method: axum::http::Method| {
+            let request = axum::http::Request::builder()
+                .method(method)
+                .uri("/practices/p1-estadistica/definition")
+                .header("cookie", format!("quantify_session={student}"))
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let app = app.clone();
+            async move { app.oneshot(request).await.unwrap().status() }
+        };
+        assert_eq!(
+            status_for(axum::http::Method::HEAD).await,
+            status_for(axum::http::Method::GET).await
+        );
+        let too_big = axum::body::Body::from(vec![b' '; 3 * 1024 * 1024]);
+        let response = app
+            .clone()
+            .oneshot(request(Some(&teacher), too_big))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+        let (polled, body_polled) = tokio::sync::oneshot::channel::<()>();
+        let body = futures_util::stream::once(async move {
+            let _ = polled.send(());
+            std::future::pending::<Result<Vec<u8>, std::io::Error>>().await
+        });
+        let pending =
+            tokio::spawn(app.oneshot(request(Some(&teacher), axum::body::Body::from_stream(body))));
+        tokio::time::timeout(wait, body_polled)
+            .await
+            .expect("el middleware debía empezar a leer el cuerpo")
+            .unwrap();
+        let lock = PracticeLock::new("lock-body");
+        assert!(lock.mutex().try_lock().is_ok());
         pending.abort();
     }
 
