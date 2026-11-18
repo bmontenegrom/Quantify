@@ -574,7 +574,7 @@ pub async fn move_item(
     item_id: &str,
     up: bool,
 ) -> anyhow::Result<Option<bool>> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let moved = move_item_in(&mut tx, list, practice_id, item_id, up).await?;
     tx.commit().await?;
     Ok(moved)
@@ -644,7 +644,7 @@ pub async fn update_quantity(
     quantity_id: &str,
     input: QuantityInput,
 ) -> anyhow::Result<Option<PracticeQuantity>> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     sqlx::query(
         "UPDATE practice_results SET compare_with = ?2 \
          WHERE EXISTS (SELECT 1 FROM practice_quantities q WHERE q.id = ?1 AND q.removed = 0 \
@@ -715,7 +715,7 @@ pub async fn create_result(
     section_id: Option<&str>,
 ) -> anyhow::Result<PracticeResult> {
     let position = next_position(pool, "practice_results", "practice_id", practice_id).await?;
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let id = insert_result(&mut tx, practice_id, position, &input).await?;
     if let Some(section_id) = section_id {
         sqlx::query(

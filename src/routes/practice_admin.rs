@@ -2296,7 +2296,7 @@ async fn move_guarded(
     up: bool,
     action: &str,
 ) -> Result<(), AppError> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let not_found = || AppError::not_found("practica no encontrada");
     let before = practices::definition_in(&mut tx, practice_id)
         .await?

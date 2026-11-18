@@ -216,6 +216,13 @@ pub struct InstrumentScale {
     pub position: i64,
 }
 
+pub async fn begin_write(
+    pool: &SqlitePool,
+) -> sqlx::Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    #[allow(clippy::disallowed_methods)]
+    pool.begin_with("BEGIN IMMEDIATE").await
+}
+
 pub async fn next_position(
     pool: &SqlitePool,
     table: &str,
@@ -259,7 +266,7 @@ async fn seed_initial_accounts(
     }
     let admin = admin_account(demo_data, admin_password)?;
     let demo = demo_data.then(demo_accounts);
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     insert_accounts(&mut tx, &[admin]).await?;
     if let Some(accounts) = &demo {
         insert_accounts(&mut tx, accounts).await?;

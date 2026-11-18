@@ -79,7 +79,7 @@ pub async fn create_practice(
     input: &NewPracticeInput,
     created_by: &str,
 ) -> anyhow::Result<Practice> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let id = free_practice_id(&mut tx, &slugify(&input.name)).await?;
     sqlx::query(
         "INSERT INTO practices (id, name, description, analysis_kind, status, created_by, created_at) \
@@ -119,7 +119,7 @@ pub async fn duplicate_practice(
     name: &str,
     created_by: &str,
 ) -> anyhow::Result<Option<Practice>> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM practices WHERE id = ?1")
         .bind(source_id)
         .fetch_optional(&mut *tx)

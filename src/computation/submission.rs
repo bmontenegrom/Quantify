@@ -181,7 +181,7 @@ pub async fn create_form_submission(
     let id = Uuid::new_v4().to_string();
     let now = Utc::now();
 
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let inserted = sqlx::query(
         r#"
         INSERT INTO submissions (
@@ -374,7 +374,7 @@ pub async fn update_form_submission(
         None => None,
     };
 
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     sqlx::query(
         "UPDATE submissions SET analysis_json = ?2, measurement_meta_json = ?3, \
          student_comment = ?4 WHERE id = ?1",

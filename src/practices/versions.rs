@@ -237,7 +237,7 @@ pub async fn publish_version(
     let Some(definition) = super::definition(pool, practice_id).await? else {
         return Ok(None);
     };
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let version = insert_version(&mut tx, &definition, published_by).await?;
     tx.commit().await?;
     Ok(Some(version))
@@ -268,7 +268,7 @@ pub async fn publish_checked(
             return Ok(Publish::DraftChanged);
         }
         if kind == super::DraftChangeKind::Cosmetic {
-            let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+            let mut tx = crate::db::begin_write(pool).await?;
             sqlx::query(
                 "UPDATE practice_versions \
                      SET definition_json = json_set(?1, '$.current_version', number) \
@@ -296,7 +296,7 @@ pub async fn publish_checked(
     if !found.is_empty() {
         return Ok(Publish::Rejected(found));
     }
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let version = insert_version(&mut tx, &definition, published_by).await?;
     tx.commit().await?;
     Ok(Publish::Published {
@@ -321,7 +321,7 @@ pub async fn publish_draft(
     if !found.is_empty() {
         return Ok(DraftPublish::Rejected(found));
     }
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let changed = sqlx::query(
         "UPDATE practices SET status = 'publicada' WHERE id = ?1 AND status = 'borrador'",
     )
@@ -384,7 +384,7 @@ pub async fn remove_quantity(
     } else {
         "DELETE FROM practice_quantities WHERE id = ?1 AND practice_id = ?2 AND removed = 0"
     };
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     sqlx::query(
         "UPDATE practice_results SET compare_with = '' \
          WHERE practice_id = ?2 AND compare_with = \

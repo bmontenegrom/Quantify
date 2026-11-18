@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "sqlx::Pool::begin", reason = "usar db::begin_write: una transacción diferida falla con 'database is locked' sin esperar" },
+    { path = "sqlx::Pool::begin_with", reason = "usar db::begin_write" },
+]
