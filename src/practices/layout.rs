@@ -56,25 +56,35 @@ pub async fn create_part(
 ) -> anyhow::Result<PracticePart> {
     let help_text = input.help_text.as_deref().unwrap_or_default().trim();
     let id = Uuid::new_v4().to_string();
-    let position =
-        crate::db::next_position(pool, "practice_parts", "practice_id", practice_id).await?;
+    let mut tx = crate::db::begin_write(pool).await?;
+    let (position, analysis_kind): (i64, Option<String>) = sqlx::query_as(
+        "SELECT COALESCE(MAX(position), 0) + 1, \
+         CASE WHEN COUNT(analysis_kind) > 0 THEN 'estadistico' END \
+         FROM practice_parts WHERE practice_id = ?1",
+    )
+    .bind(practice_id)
+    .fetch_one(&mut *tx)
+    .await?;
     sqlx::query(
-        "INSERT INTO practice_parts (id, practice_id, title, position, help_text) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO practice_parts \
+         (id, practice_id, title, position, help_text, analysis_kind) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )
     .bind(&id)
     .bind(practice_id)
     .bind(input.title.trim())
     .bind(position)
     .bind(help_text)
-    .execute(pool)
+    .bind(&analysis_kind)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(PracticePart {
         id,
         practice_id: practice_id.to_string(),
         title: input.title.trim().to_string(),
         position,
-        analysis_kind: None,
+        analysis_kind,
         help_text: help_text.to_string(),
         effective_kind: "estadistico".into(),
     })

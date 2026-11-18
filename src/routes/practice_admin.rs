@@ -2196,15 +2196,8 @@ pub(super) async fn create_part(
     let before = load_definition(&state, &id).await?;
     guard_change(&before, &with_new_part(&before), "agregar la parte")?;
     let mut created = practices::create_part(&state.pool, &id, &input).await?;
-    let chosen = before.parts.iter().any(|p| p.analysis_kind.is_some());
-    if chosen {
-        created.analysis_kind = Some("estadistico".into());
-    }
     let mut after = before;
     after.parts.push(created.clone());
-    if chosen {
-        practices::save_part_kinds(&state.pool, &after).await?;
-    }
     created.effective_kind = after.part_kind(&created).to_string();
     Ok(Json(created))
 }

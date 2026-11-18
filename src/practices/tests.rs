@@ -2513,6 +2513,29 @@ async fn a_result_used_by_series_artifacts_goes_to_the_series_part() {
 }
 
 #[tokio::test]
+async fn a_new_part_gets_a_kind_only_when_the_others_have_one() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let input = PartInput {
+        help_text: None,
+        title: "Nueva".into(),
+    };
+    let first = create_part(&pool, "fluidos-1", &input).await.unwrap();
+    assert_eq!(first.analysis_kind, None);
+    sqlx::query("UPDATE practice_parts SET analysis_kind = 'curva' WHERE id = ?1")
+        .bind(&first.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let second = create_part(&pool, "fluidos-1", &input).await.unwrap();
+    assert_eq!(second.analysis_kind.as_deref(), Some("estadistico"));
+    assert_eq!(second.position, first.position + 1);
+    let saved = definition(&pool, "fluidos-1").await.unwrap().unwrap();
+    let stored = saved.parts.iter().find(|p| p.id == second.id).unwrap();
+    assert_eq!(stored.analysis_kind.as_deref(), Some("estadistico"));
+}
+
+#[tokio::test]
 async fn the_two_old_p3_practices_become_one() {
     let (pool, _dir) = setup().await;
     seed_definitions(&pool).await.unwrap();
