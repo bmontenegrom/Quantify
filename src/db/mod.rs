@@ -851,6 +851,50 @@ mod tests {
         assert!(map.contains_key("blocked@x"));
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_writers_that_read_first_take_turns() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = format!("sqlite:{}", dir.path().join("t.db").to_string_lossy());
+        let opts = SqliteConnectOptions::from_str(&url)
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE t (id TEXT, v INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO t VALUES ('x', 0), ('y', 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let both_read = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let write = |id: &'static str| {
+            let pool = pool.clone();
+            let both_read = both_read.clone();
+            async move {
+                let mut tx = begin_write(&pool).await?;
+                sqlx::query("SELECT v FROM t WHERE id = ?1")
+                    .bind(id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                let wait = std::time::Duration::from_millis(300);
+                let _ = tokio::time::timeout(wait, both_read.wait()).await;
+                sqlx::query("UPDATE t SET v = v + 1 WHERE id = ?1")
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await
+            }
+        };
+        let (x, y) = tokio::join!(write("x"), write("y"));
+        x.unwrap();
+        y.unwrap();
+    }
+
     async fn pool() -> (SqlitePool, TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
