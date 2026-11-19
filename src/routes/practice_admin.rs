@@ -27,6 +27,7 @@ async fn ensure_practice(state: &SharedState, practice_id: &str) -> Result<(), A
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
+// ponytail: lock en memoria, vale con un solo proceso; con varios, leer y validar dentro de begin_write.
 type PracticeMutex = std::sync::Arc<tokio::sync::Mutex<()>>;
 
 static PRACTICE_LOCKS: std::sync::LazyLock<
@@ -2203,6 +2204,11 @@ fn with_new_part(def: &practices::PracticeDefinition) -> practices::PracticeDefi
     after.parts.push(practices::PracticePart {
         practice_id: def.practice_id.clone(),
         position: i64::MAX,
+        analysis_kind: def
+            .parts
+            .iter()
+            .any(|p| p.analysis_kind.is_some())
+            .then(|| "estadistico".into()),
         ..Default::default()
     });
     after
@@ -4316,6 +4322,7 @@ mod tests {
             .unwrap();
         let chosen = with_part_kind(&cc, "p2-cc-serie", "estadistico").unwrap();
         practices::save_part_kinds(&pool, &chosen).await.unwrap();
+        let draft = with_new_part(&chosen);
         let part = practices::create_part(
             &pool,
             "p2-cc",
@@ -4327,6 +4334,10 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(part.analysis_kind.as_deref(), Some("estadistico"));
+        assert_eq!(
+            draft.parts.last().unwrap().analysis_kind,
+            part.analysis_kind
+        );
         let reloaded = practices::definition(&pool, "p2-cc")
             .await
             .unwrap()
