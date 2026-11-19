@@ -1985,8 +1985,23 @@ async fn submissions_off_slots_counts_non_slot_readings() {
         .await
         .unwrap();
     }
-    assert_eq!(submissions_off_slots(&pool, &qid, 9).await.unwrap(), 2);
-    assert_eq!(submissions_off_slots(&pool, &qid, 12).await.unwrap(), 1);
+    let mut conn = pool.acquire().await.unwrap();
+    assert_eq!(submissions_off_slots(&mut conn, &qid, 9).await.unwrap(), 2);
+    assert_eq!(submissions_off_slots(&mut conn, &qid, 12).await.unwrap(), 1);
+    drop(conn);
+    let with_slots = QuantityInput {
+        slot_count: Some(9),
+        ..sample_quantity()
+    };
+    let error = update_quantity(&pool, &qid, with_slots).await.unwrap_err();
+    assert!(error.to_string().starts_with("Hay 2 entrega(s)"), "{error}");
+    let (symbol,): (String,) =
+        sqlx::query_as("SELECT symbol FROM practice_quantities WHERE id = ?1")
+            .bind(&qid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(symbol, "dw1");
 }
 
 #[test]
@@ -2510,6 +2525,29 @@ async fn a_result_used_by_series_artifacts_goes_to_the_series_part() {
     assert_eq!(def.result_part("k"), None);
     def.point_results[0].formula = format!("{} * k", def.point_results[0].formula);
     assert_eq!(def.result_part("k"), Some(series.as_str()));
+}
+
+#[tokio::test]
+async fn a_new_part_gets_a_kind_only_when_the_others_have_one() {
+    let (pool, _dir) = setup().await;
+    seed_definitions(&pool).await.unwrap();
+    let input = PartInput {
+        help_text: None,
+        title: "Nueva".into(),
+    };
+    let first = create_part(&pool, "fluidos-1", &input).await.unwrap();
+    assert_eq!(first.analysis_kind, None);
+    sqlx::query("UPDATE practice_parts SET analysis_kind = 'curva' WHERE id = ?1")
+        .bind(&first.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let second = create_part(&pool, "fluidos-1", &input).await.unwrap();
+    assert_eq!(second.analysis_kind.as_deref(), Some("estadistico"));
+    assert_eq!(second.position, first.position + 1);
+    let saved = definition(&pool, "fluidos-1").await.unwrap().unwrap();
+    let stored = saved.parts.iter().find(|p| p.id == second.id).unwrap();
+    assert_eq!(stored.analysis_kind.as_deref(), Some("estadistico"));
 }
 
 #[tokio::test]

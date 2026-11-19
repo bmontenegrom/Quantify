@@ -56,25 +56,36 @@ pub async fn create_part(
 ) -> anyhow::Result<PracticePart> {
     let help_text = input.help_text.as_deref().unwrap_or_default().trim();
     let id = Uuid::new_v4().to_string();
+    let mut tx = crate::db::begin_write(pool).await?;
     let position =
-        crate::db::next_position(pool, "practice_parts", "practice_id", practice_id).await?;
+        crate::db::next_position(&mut tx, "practice_parts", "practice_id", practice_id).await?;
+    let analysis_kind: Option<String> = sqlx::query_scalar(
+        "SELECT CASE WHEN COUNT(analysis_kind) > 0 THEN 'estadistico' END \
+         FROM practice_parts WHERE practice_id = ?1",
+    )
+    .bind(practice_id)
+    .fetch_one(&mut *tx)
+    .await?;
     sqlx::query(
-        "INSERT INTO practice_parts (id, practice_id, title, position, help_text) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO practice_parts \
+         (id, practice_id, title, position, help_text, analysis_kind) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )
     .bind(&id)
     .bind(practice_id)
     .bind(input.title.trim())
     .bind(position)
     .bind(help_text)
-    .execute(pool)
+    .bind(&analysis_kind)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(PracticePart {
         id,
         practice_id: practice_id.to_string(),
         title: input.title.trim().to_string(),
         position,
-        analysis_kind: None,
+        analysis_kind,
         help_text: help_text.to_string(),
         effective_kind: "estadistico".into(),
     })
@@ -84,7 +95,7 @@ pub async fn save_part_kinds(
     pool: &SqlitePool,
     definition: &super::PracticeDefinition,
 ) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     write_kinds(&mut tx, definition).await?;
     tx.commit().await?;
     Ok(())
@@ -95,7 +106,7 @@ pub async fn delete_part_saving_kinds(
     part_id: &str,
     after: &super::PracticeDefinition,
 ) -> anyhow::Result<bool> {
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let deleted = sqlx::query("DELETE FROM practice_parts WHERE id = ?1 AND practice_id = ?2")
         .bind(part_id)
         .bind(&after.practice_id)
@@ -189,8 +200,9 @@ pub async fn create_section(
         return Ok(None);
     }
     let id = Uuid::new_v4().to_string();
+    let mut tx = crate::db::begin_write(pool).await?;
     let position =
-        crate::db::next_position(pool, "practice_sections", "practice_id", practice_id).await?;
+        crate::db::next_position(&mut tx, "practice_sections", "practice_id", practice_id).await?;
     sqlx::query(
         "INSERT INTO practice_sections (id, practice_id, part_id, title, position, help_text) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -201,8 +213,9 @@ pub async fn create_section(
     .bind(input.title.trim())
     .bind(position)
     .bind(help_text)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Some(PracticeSection {
         id,
         practice_id: practice_id.to_string(),
@@ -524,7 +537,7 @@ pub(super) async fn migrate_legacy_layout(pool: &SqlitePool) -> anyhow::Result<(
     if done > 0 {
         return Ok(());
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     for layout in legacy_layouts() {
         apply_layout_if_empty(&mut tx, &layout).await?;
     }
@@ -575,7 +588,7 @@ pub(super) async fn migrate_shared_results_to_parts(pool: &SqlitePool) -> anyhow
             moves.push((result.id.clone(), section));
         }
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     for (result_id, section_id) in moves {
         sqlx::query("UPDATE practice_results SET section_id = ?1 WHERE id = ?2")
             .bind(section_id)

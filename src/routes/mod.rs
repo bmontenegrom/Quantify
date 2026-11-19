@@ -144,13 +144,68 @@ pub fn api_router(state: SharedState) -> Router {
             post(remove_group_member_path),
         )
         .route("/practices", get(list_practices).post(create_practice))
+        .route("/practices/{id}/definition", get(practice_definition))
+        .route("/practices/{id}/problems", get(practice_problems))
+        .route("/practices/{id}/draft-changes", get(practice_draft_changes))
+        .route("/practices/{id}/analyze-preview", post(analyze_preview))
+        .route("/practices/{id}/live-values", post(live_values))
+        .merge(practice_edit_routes(state.clone()))
+        .route(
+            "/instruments",
+            get(list_instruments).post(create_instrument),
+        )
+        .route("/instruments/export", get(export_instruments))
+        .route("/instruments/import", post(import_instruments))
+        .route(
+            "/instruments/{id}",
+            post(update_instrument).delete(delete_instrument),
+        )
+        .route("/instruments/{id}/scales", post(create_scale))
+        .route(
+            "/instruments/{id}/scales/{scale_id}",
+            post(update_scale).delete(delete_scale),
+        )
+        .route("/submissions", get(submissions).post(create_submission))
+        .route("/submissions/form", post(create_form_submission))
+        .route("/submissions/invitations", get(submission_invitations))
+        .route("/submissions/existing", get(existing_report))
+        .route("/submissions/{id}/edit", post(edit_form_submission))
+        .route("/submissions/{id}/definition", get(submission_definition))
+        .route(
+            "/submissions/{id}",
+            get(submission_detail).delete(cancel_submission),
+        )
+        .route("/submissions/{id}/review", post(review_submission))
+        .route(
+            "/submissions/{id}/student-results",
+            post(set_student_results),
+        )
+        .route("/submissions/{id}/accept", post(accept_invitation))
+        .route("/submissions/{id}/decline", post(decline_invitation))
+        .route(
+            "/submissions/{id}/members",
+            get(submission_members).post(add_submission_member),
+        )
+        .route(
+            "/submissions/{id}/members/remove",
+            post(remove_submission_member),
+        )
+        .route("/submissions/{id}/report", post(update_report_meta))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            csrf_middleware,
+        ))
+        .with_state(state)
+}
+
+fn practice_edit_routes(state: SharedState) -> Router<SharedState> {
+    Router::new()
         .route(
             "/practices/{id}",
             post(update_practice).delete(delete_practice),
         )
         .route("/practices/{id}/duplicate", post(duplicate_practice))
         .route("/practices/{id}/versions", post(publish_practice_version))
-        .route("/practices/{id}/draft-changes", get(practice_draft_changes))
         .route("/practices/{id}/parts", post(create_part))
         .route(
             "/practices/{id}/parts/{pid}",
@@ -176,10 +231,6 @@ pub fn api_router(state: SharedState) -> Router {
             post(set_result_section),
         )
         .route("/practices/{id}/status", post(set_practice_status))
-        .route("/practices/{id}/definition", get(practice_definition))
-        .route("/practices/{id}/analyze-preview", post(analyze_preview))
-        .route("/practices/{id}/live-values", post(live_values))
-        .route("/practices/{id}/problems", get(practice_problems))
         .route(
             "/practices/{id}/analysis-kind",
             post(set_practice_analysis_kind),
@@ -241,52 +292,10 @@ pub fn api_router(state: SharedState) -> Router {
             "/practices/{id}/results/{rid}/tolerance",
             post(set_result_tolerance),
         )
-        .route(
-            "/instruments",
-            get(list_instruments).post(create_instrument),
-        )
-        .route("/instruments/export", get(export_instruments))
-        .route("/instruments/import", post(import_instruments))
-        .route(
-            "/instruments/{id}",
-            post(update_instrument).delete(delete_instrument),
-        )
-        .route("/instruments/{id}/scales", post(create_scale))
-        .route(
-            "/instruments/{id}/scales/{scale_id}",
-            post(update_scale).delete(delete_scale),
-        )
-        .route("/submissions", get(submissions).post(create_submission))
-        .route("/submissions/form", post(create_form_submission))
-        .route("/submissions/invitations", get(submission_invitations))
-        .route("/submissions/existing", get(existing_report))
-        .route("/submissions/{id}/edit", post(edit_form_submission))
-        .route("/submissions/{id}/definition", get(submission_definition))
-        .route(
-            "/submissions/{id}",
-            get(submission_detail).delete(cancel_submission),
-        )
-        .route("/submissions/{id}/review", post(review_submission))
-        .route(
-            "/submissions/{id}/student-results",
-            post(set_student_results),
-        )
-        .route("/submissions/{id}/accept", post(accept_invitation))
-        .route("/submissions/{id}/decline", post(decline_invitation))
-        .route(
-            "/submissions/{id}/members",
-            get(submission_members).post(add_submission_member),
-        )
-        .route(
-            "/submissions/{id}/members/remove",
-            post(remove_submission_member),
-        )
-        .route("/submissions/{id}/report", post(update_report_meta))
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            csrf_middleware,
+        .route_layer(axum::middleware::from_fn_with_state(
+            state,
+            serialize_practice_edits,
         ))
-        .with_state(state)
 }
 
 #[derive(Serialize)]

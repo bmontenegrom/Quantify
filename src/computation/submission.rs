@@ -181,7 +181,7 @@ pub async fn create_form_submission(
     let id = Uuid::new_v4().to_string();
     let now = Utc::now();
 
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let inserted = sqlx::query(
         r#"
         INSERT INTO submissions (
@@ -266,11 +266,10 @@ pub async fn create_form_submission(
     .await?;
 
     insert_measurements(&mut tx, &id, &input.measurements, &series).await?;
-    tx.commit().await?;
-
     if !input.student_results.is_empty() {
-        db::save_student_results(pool, &id, &input.student_results).await?;
+        db::save_student_results_in(&mut tx, &id, &input.student_results).await?;
     }
+    tx.commit().await?;
 
     if let Some(t) = table_number {
         let _ = db::invite_table_members(
@@ -374,7 +373,7 @@ pub async fn update_form_submission(
         None => None,
     };
 
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     sqlx::query(
         "UPDATE submissions SET analysis_json = ?2, measurement_meta_json = ?3, \
          student_comment = ?4 WHERE id = ?1",
@@ -391,11 +390,10 @@ pub async fn update_form_submission(
         .await?;
 
     insert_measurements(&mut tx, submission_id, measurements, &series).await?;
-    tx.commit().await?;
-
     if let Some(results) = student_results {
-        db::save_student_results(pool, submission_id, results).await?;
+        db::save_student_results_in(&mut tx, submission_id, results).await?;
     }
+    tx.commit().await?;
 
     db::submission_detail(pool, submission_id)
         .await?

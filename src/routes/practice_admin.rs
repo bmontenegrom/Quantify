@@ -27,40 +27,97 @@ async fn ensure_practice(state: &SharedState, practice_id: &str) -> Result<(), A
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
-static EDIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+// ponytail: lock en memoria, vale con un solo proceso; con varios, leer y validar dentro de begin_write.
+type PracticeMutex = std::sync::Arc<tokio::sync::Mutex<()>>;
 
-struct LockedDefinition {
-    _lock: tokio::sync::MutexGuard<'static, ()>,
-    definition: practices::PracticeDefinition,
+static PRACTICE_LOCKS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, PracticeMutex>>,
+> = std::sync::LazyLock::new(Default::default);
+
+fn practice_locks(
+) -> std::sync::MutexGuard<'static, std::collections::HashMap<String, PracticeMutex>> {
+    PRACTICE_LOCKS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-impl std::ops::Deref for LockedDefinition {
-    type Target = practices::PracticeDefinition;
+struct PracticeLock {
+    practice_id: String,
+    mutex: Option<PracticeMutex>,
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.definition
+impl PracticeLock {
+    fn new(practice_id: &str) -> Self {
+        let mutex = practice_locks()
+            .entry(practice_id.to_string())
+            .or_default()
+            .clone();
+        Self {
+            practice_id: practice_id.to_string(),
+            mutex: Some(mutex),
+        }
+    }
+
+    fn mutex(&self) -> &tokio::sync::Mutex<()> {
+        self.mutex.as_ref().expect("el mutex vive hasta el drop")
     }
 }
 
-async fn read_definition(
+impl Drop for PracticeLock {
+    fn drop(&mut self) {
+        let mut locks = practice_locks();
+        drop(self.mutex.take());
+        if locks
+            .get(&self.practice_id)
+            .is_some_and(|mutex| std::sync::Arc::strong_count(mutex) == 1)
+        {
+            locks.remove(&self.practice_id);
+        }
+    }
+}
+
+pub(super) async fn serialize_practice_edits(
+    State(state): State<SharedState>,
+    params: axum::extract::RawPathParams,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::{extract::FromRequest, response::IntoResponse};
+    let Some(practice_id) = params
+        .iter()
+        .find(|(key, _)| *key == "id")
+        .map(|(_, value)| value.to_string())
+    else {
+        return AppError::from(anyhow::anyhow!(
+            "ruta de edición sin {{id}}: {}",
+            request.uri().path()
+        ))
+        .into_response();
+    };
+    let (parts, body) = request.into_parts();
+    if let Err(error) = require_teacher(&state, &parts.headers).await {
+        return error.into_response();
+    }
+    let mut buffered = axum::extract::Request::new(body);
+    *buffered.extensions_mut() = parts.extensions.clone();
+    let body = match axum::body::Bytes::from_request(buffered, &()).await {
+        Ok(body) => body,
+        Err(rejection) if rejection.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE => {
+            return AppError::payload_too_large("el pedido es demasiado grande").into_response();
+        }
+        Err(_) => return AppError::bad_request("no se pudo leer el pedido").into_response(),
+    };
+    let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(body));
+    let lock = PracticeLock::new(&practice_id);
+    let _guard = lock.mutex().lock().await;
+    next.run(request).await
+}
+
+async fn load_definition(
     state: &SharedState,
     practice_id: &str,
 ) -> Result<practices::PracticeDefinition, AppError> {
     practices::definition(&state.pool, practice_id)
         .await?
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
-}
-
-async fn load_definition(
-    state: &SharedState,
-    practice_id: &str,
-) -> Result<LockedDefinition, AppError> {
-    let lock = EDIT_LOCK.lock().await;
-    let definition = read_definition(state, practice_id).await?;
-    Ok(LockedDefinition {
-        _lock: lock,
-        definition,
-    })
 }
 
 const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
@@ -185,7 +242,7 @@ pub(super) async fn practice_problems(
     Path(id): Path<String>,
 ) -> Result<Json<Vec<Problem>>, AppError> {
     require_teacher(&state, &headers).await?;
-    let def = read_definition(&state, &id).await?;
+    let def = load_definition(&state, &id).await?;
     Ok(Json(draft_problems(&def)))
 }
 
@@ -402,7 +459,7 @@ pub(super) async fn practice_definition(
     let user = current_user(&state, &headers).await?;
     ensure_student_can_see(&state, &user, &id, &["publicada", "archivada"]).await?;
     if matches!(user.role.as_str(), "docente" | "admin") && !query.published {
-        let definition = read_definition(&state, &id).await?;
+        let definition = load_definition(&state, &id).await?;
         return Ok(Json(DefinitionView {
             compare_options: Some(definition.compare_options()),
             formula_scopes: Some(formula_scopes(&definition)),
@@ -524,7 +581,7 @@ async fn preview_definition(
         require_teacher(state, headers).await?;
     }
     Ok(match &body.submission_id {
-        _ if body.draft => read_definition(state, id).await?,
+        _ if body.draft => load_definition(state, id).await?,
         Some(submission_id) => {
             ensure_submission_access(state, &user, submission_id).await?;
             practices::submission_definition(&state.pool, submission_id)
@@ -721,15 +778,6 @@ pub(super) async fn update_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     validate_quantity(&input)?;
-    if let Some(n) = input.slot_count {
-        let bad = practices::submissions_off_slots(&state.pool, &qid, n).await?;
-        if bad > 0 {
-            return Err(AppError::bad_request(format!(
-                "Hay {bad} entrega(s) con valores de esta magnitud que no son una ranura de 1 a {n}: \
-                 no se pueden poner las ranuras sin dejarlas imposibles de editar."
-            )));
-        }
-    }
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -746,7 +794,8 @@ pub(super) async fn update_quantity(
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
     guard_change(&before, &after, "guardar la magnitud")?;
     let updated = practices::update_quantity(&state.pool, &qid, input)
-        .await?
+        .await
+        .map_err(AppError::from_domain_or_db)?
         .ok_or_else(|| AppError::not_found("magnitud no encontrada"))?;
     Ok(Json(updated))
 }
@@ -2144,15 +2193,8 @@ pub(super) async fn create_part(
     let before = load_definition(&state, &id).await?;
     guard_change(&before, &with_new_part(&before), "agregar la parte")?;
     let mut created = practices::create_part(&state.pool, &id, &input).await?;
-    let chosen = before.parts.iter().any(|p| p.analysis_kind.is_some());
-    if chosen {
-        created.analysis_kind = Some("estadistico".into());
-    }
-    let mut after = before.clone();
+    let mut after = before;
     after.parts.push(created.clone());
-    if chosen {
-        practices::save_part_kinds(&state.pool, &after).await?;
-    }
     created.effective_kind = after.part_kind(&created).to_string();
     Ok(Json(created))
 }
@@ -2162,6 +2204,11 @@ fn with_new_part(def: &practices::PracticeDefinition) -> practices::PracticeDefi
     after.parts.push(practices::PracticePart {
         practice_id: def.practice_id.clone(),
         position: i64::MAX,
+        analysis_kind: def
+            .parts
+            .iter()
+            .any(|p| p.analysis_kind.is_some())
+            .then(|| "estadistico".into()),
         ..Default::default()
     });
     after
@@ -2244,8 +2291,7 @@ async fn move_guarded(
     up: bool,
     action: &str,
 ) -> Result<(), AppError> {
-    let _lock = EDIT_LOCK.lock().await;
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let not_found = || AppError::not_found("practica no encontrada");
     let before = practices::definition_in(&mut tx, practice_id)
         .await?
@@ -2873,6 +2919,166 @@ mod tests {
             let problems = formula_problems(&def);
             assert!(problems.is_empty(), "{}: {problems:?}", def.practice_id);
         }
+    }
+
+    #[tokio::test]
+    async fn edits_wait_only_for_the_same_practice() {
+        let present = |id: &str| practice_locks().contains_key(id);
+        let held = PracticeLock::new("lock-a");
+        let guard = held.mutex().lock().await;
+        let same = PracticeLock::new("lock-a");
+        assert!(same.mutex().try_lock().is_err());
+        let other = PracticeLock::new("lock-b");
+        assert!(other.mutex().try_lock().is_ok());
+        drop(other);
+        assert!(!present("lock-b"));
+        drop(guard);
+        drop(same);
+        assert!(present("lock-a"));
+        drop(held);
+        assert!(!present("lock-a"));
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_edit_frees_its_lock_entry() {
+        let held = PracticeLock::new("lock-cancel");
+        let guard = held.mutex().lock().await;
+        let (waiting, waiter_ready) = tokio::sync::oneshot::channel::<()>();
+        let waiter = tokio::spawn(async {
+            let lock = PracticeLock::new("lock-cancel");
+            let _ = waiting.send(());
+            let _guard = lock.mutex().lock().await;
+        });
+        waiter_ready.await.unwrap();
+        assert_eq!(
+            practice_locks()
+                .get("lock-cancel")
+                .map(std::sync::Arc::strong_count),
+            Some(3)
+        );
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        drop(guard);
+        drop(held);
+        assert!(!practice_locks().contains_key("lock-cancel"));
+    }
+
+    #[tokio::test]
+    async fn an_edit_route_without_an_id_fails_instead_of_skipping_the_lock() {
+        use tower::ServiceExt;
+        let (pool, dir) = crate::computation::tests::setup().await;
+        let state: SharedState = std::sync::Arc::new(db::AppState {
+            pool,
+            upload_dir: dir.path().to_path_buf(),
+            secret_key: "secreto".into(),
+            secure_cookies: false,
+            login_attempts: Default::default(),
+        });
+        let app = axum::Router::new()
+            .route(
+                "/practices/{practice_id}/x",
+                axum::routing::post(|| async { "sin lock" }),
+            )
+            .route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                serialize_practice_edits,
+            ))
+            .with_state(state);
+        let request = axum::http::Request::post("/practices/p1/x")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[tokio::test]
+    async fn the_edit_lock_waits_for_a_teacher_and_a_complete_body() {
+        use tower::ServiceExt;
+        let (pool, dir) = crate::computation::tests::setup().await;
+        let state: SharedState = std::sync::Arc::new(db::AppState {
+            pool: pool.clone(),
+            upload_dir: dir.path().to_path_buf(),
+            secret_key: "secreto".into(),
+            secure_cookies: false,
+            login_attempts: Default::default(),
+        });
+        let session = |role: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let (user_id,): (String,) =
+                    sqlx::query_as("SELECT id FROM users WHERE role = ?1 LIMIT 1")
+                        .bind(role)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                let token = uuid::Uuid::new_v4().to_string();
+                let now = chrono::Utc::now();
+                sqlx::query(
+                    "INSERT INTO sessions (token, user_id, created_at, expires_at) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                )
+                .bind(&token)
+                .bind(user_id)
+                .bind(now)
+                .bind(now + chrono::Duration::hours(1))
+                .execute(&pool)
+                .await
+                .unwrap();
+                token
+            }
+        };
+        let student = session("estudiante").await;
+        let teacher = session("docente").await;
+        let request = |token: Option<&str>, body: axum::body::Body| {
+            let mut builder = axum::http::Request::post("/practices/lock-body/quantities")
+                .header("content-type", "application/json");
+            if let Some(token) = token {
+                builder = builder.header("cookie", format!("quantify_session={token}"));
+            }
+            builder.body(body).unwrap()
+        };
+        let endless = || {
+            axum::body::Body::from_stream(futures_util::stream::pending::<
+                Result<Vec<u8>, std::io::Error>,
+            >())
+        };
+        let app = super::super::practice_edit_routes(state.clone()).with_state(state);
+        let wait = std::time::Duration::from_secs(5);
+        for (token, status) in [
+            (None, axum::http::StatusCode::UNAUTHORIZED),
+            (Some(student.as_str()), axum::http::StatusCode::FORBIDDEN),
+        ] {
+            let response =
+                tokio::time::timeout(wait, app.clone().oneshot(request(token, endless())))
+                    .await
+                    .expect("no debía esperar el cuerpo")
+                    .unwrap();
+            assert_eq!(response.status(), status);
+        }
+        let too_big = axum::body::Body::from(vec![b' '; 3 * 1024 * 1024]);
+        let response = app
+            .clone()
+            .oneshot(request(Some(&teacher), too_big))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+        let (polled, body_polled) = tokio::sync::oneshot::channel::<()>();
+        let body = futures_util::stream::once(async move {
+            let _ = polled.send(());
+            std::future::pending::<Result<Vec<u8>, std::io::Error>>().await
+        });
+        let pending =
+            tokio::spawn(app.oneshot(request(Some(&teacher), axum::body::Body::from_stream(body))));
+        tokio::time::timeout(wait, body_polled)
+            .await
+            .expect("el middleware debía empezar a leer el cuerpo")
+            .unwrap();
+        let lock = PracticeLock::new("lock-body");
+        assert!(lock.mutex().try_lock().is_ok());
+        pending.abort();
     }
 
     #[tokio::test]
@@ -4116,6 +4322,7 @@ mod tests {
             .unwrap();
         let chosen = with_part_kind(&cc, "p2-cc-serie", "estadistico").unwrap();
         practices::save_part_kinds(&pool, &chosen).await.unwrap();
+        let draft = with_new_part(&chosen);
         let part = practices::create_part(
             &pool,
             "p2-cc",
@@ -4126,17 +4333,11 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut after = practices::definition(&pool, "p2-cc")
-            .await
-            .unwrap()
-            .unwrap();
-        after
-            .parts
-            .iter_mut()
-            .find(|p| p.id == part.id)
-            .unwrap()
-            .analysis_kind = Some("estadistico".into());
-        practices::save_part_kinds(&pool, &after).await.unwrap();
+        assert_eq!(part.analysis_kind.as_deref(), Some("estadistico"));
+        assert_eq!(
+            draft.parts.last().unwrap().analysis_kind,
+            part.analysis_kind
+        );
         let reloaded = practices::definition(&pool, "p2-cc")
             .await
             .unwrap()

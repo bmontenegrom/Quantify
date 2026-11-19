@@ -82,7 +82,9 @@ pub async fn create_grade_component(
     input: CreateGradeComponent,
 ) -> anyhow::Result<GradeComponent> {
     let id = Uuid::new_v4().to_string();
-    let position = next_position(pool, "grade_components", "course_id", &input.course_id).await?;
+    let mut tx = crate::db::begin_write(pool).await?;
+    let position =
+        next_position(&mut tx, "grade_components", "course_id", &input.course_id).await?;
 
     sqlx::query(
         r#"
@@ -100,8 +102,9 @@ pub async fn create_grade_component(
     .bind(input.weight_points)
     .bind(position)
     .bind(Utc::now())
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     Ok(sqlx::query_as::<_, GradeComponent>(
         r#"

@@ -216,8 +216,15 @@ pub struct InstrumentScale {
     pub position: i64,
 }
 
-pub async fn next_position(
+pub async fn begin_write(
     pool: &SqlitePool,
+) -> sqlx::Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    #[allow(clippy::disallowed_methods)]
+    pool.begin_with("BEGIN IMMEDIATE").await
+}
+
+pub async fn next_position(
+    conn: &mut sqlx::SqliteConnection,
     table: &str,
     scope_col: &str,
     scope_val: &str,
@@ -226,7 +233,7 @@ pub async fn next_position(
         format!("SELECT COALESCE(MAX(position), 0) + 1 FROM {table} WHERE {scope_col} = ?1");
     let position: (i64,) = sqlx::query_as(&query)
         .bind(scope_val)
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await?;
     Ok(position.0)
 }
@@ -259,7 +266,7 @@ async fn seed_initial_accounts(
     }
     let admin = admin_account(demo_data, admin_password)?;
     let demo = demo_data.then(demo_accounts);
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     insert_accounts(&mut tx, &[admin]).await?;
     if let Some(accounts) = &demo {
         insert_accounts(&mut tx, accounts).await?;
@@ -842,6 +849,50 @@ mod tests {
         assert!(!map.contains_key("stale@x"));
         assert!(map.contains_key("recent@x"));
         assert!(map.contains_key("blocked@x"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_writers_that_read_first_take_turns() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = format!("sqlite:{}", dir.path().join("t.db").to_string_lossy());
+        let opts = SqliteConnectOptions::from_str(&url)
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(opts)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE t (id TEXT, v INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO t VALUES ('x', 0), ('y', 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let both_read = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let write = |id: &'static str| {
+            let pool = pool.clone();
+            let both_read = both_read.clone();
+            async move {
+                let mut tx = begin_write(&pool).await?;
+                sqlx::query("SELECT v FROM t WHERE id = ?1")
+                    .bind(id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                let wait = std::time::Duration::from_millis(300);
+                let _ = tokio::time::timeout(wait, both_read.wait()).await;
+                sqlx::query("UPDATE t SET v = v + 1 WHERE id = ?1")
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await
+            }
+        };
+        let (x, y) = tokio::join!(write("x"), write("y"));
+        x.unwrap();
+        y.unwrap();
     }
 
     async fn pool() -> (SqlitePool, TempDir) {
