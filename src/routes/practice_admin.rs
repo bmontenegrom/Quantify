@@ -2029,8 +2029,12 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
             "Las ranuras solo aplican a un dato de cátedra (elegí ese rol o dejá las ranuras vacías).",
         ));
     }
-    if input.replicas_per_point.is_some_and(|n| n > 0)
-        && (!input.per_point || !input.repeated || input.is_given)
+    if input.replicas_per_point.is_some_and(|n| n < 1) {
+        return Err(AppError::bad_request(
+            "Las réplicas por punto tienen que ser un entero de 1 en adelante (vacío = sin réplicas).",
+        ));
+    }
+    if input.replicas_per_point.is_some() && (!input.per_point || !input.repeated || input.is_given)
     {
         return Err(AppError::bad_request(
             "Las réplicas por punto solo aplican a una magnitud medida en serie y repetida, no a \
@@ -2040,7 +2044,7 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     if !input.has_uncertainty && !input.is_given {
         return Err(AppError::bad_request(
             "Solo una constante puede ir sin incertidumbre (elegí el rol \"Constante\" o \
-             marcá que tiene incertidumbre).",
+             cualquier otro rol, que lleva incertidumbre).",
         ));
     }
     if input
@@ -2800,6 +2804,13 @@ mod tests {
         assert!(validate_quantity(&replicas(false, true, false)).is_err());
         assert!(validate_quantity(&replicas(true, false, false)).is_err());
         assert!(validate_quantity(&replicas(true, true, true)).is_err());
+        for n in [0, -3] {
+            assert!(validate_quantity(&QuantityInput {
+                replicas_per_point: Some(n),
+                ..replicas(true, true, false)
+            })
+            .is_err());
+        }
         let without_u = |is_given| QuantityInput {
             has_uncertainty: false,
             ..timed(is_given, "longitud", "teclado")

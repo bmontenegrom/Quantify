@@ -165,7 +165,7 @@ export async function loadSubmissionForm() {
       courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
     ]);
     if (request !== latestFormRequest) return;
-    state.practiceForm = { definition, instruments };
+    state.practiceForm = { definition, instruments, courseId };
     if (practicaSubtitle) practicaSubtitle.textContent = definition.description || DEFAULT_SUBTITLE;
     const draft = applicableDraft();
     restoreChronoDraft(draft?.chrono);
@@ -1036,6 +1036,7 @@ function fillInstrument(el, e) {
   populateScaleOptions(el);
   scale.value = e.scale_id ?? "";
   if (scale.selectedIndex < 0) scale.value = "";
+  if (!state.editingSubmissionId || !state.practiceForm?.courseId) return;
   const offered = new Set([...inst.options].map((o) => o.value));
   const instruments = (state.practiceForm?.instruments ?? []).filter((i) => offered.has(i.id));
   const note = retiredInstrumentNote(instruments, e);
