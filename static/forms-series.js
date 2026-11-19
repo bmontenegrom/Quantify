@@ -1,8 +1,8 @@
 import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, compatibleInstruments, canReview, hasUncertainty, analysisSections } from "./lib.js";
-import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, canReview, hasUncertainty, analysisSections } from "./lib.js";
+import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, instrumentSelectorsHtml, wireInstrumentSelectors, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireReplicaRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
@@ -79,14 +79,9 @@ export function renderSeriesTable(definition) {
     </div>
   `;
   measurementFields.querySelectorAll(".shared-quantities .measurement-row:not([data-final-result])").forEach((row) => {
-    if (row.dataset.isGiven === "1") return;
-    const inst = row.querySelector(".measure-instrument");
-    if (inst) {
-      inst.addEventListener("change", () => populateScaleOptions(row));
-      populateScaleOptions(row);
-    }
-    wireReplicaRow(row);
+    if (row.dataset.isGiven !== "1") wireReplicaRow(row);
   });
+  wireInstrumentSelectors(measurementFields);
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
     wireSeriesRemove();
@@ -274,19 +269,11 @@ function sharedRowHtml(q) {
         </div>
       </fieldset>`;
   }
-  const instruments = state.practiceForm?.instruments ?? [];
-  const options = compatibleInstruments(instruments, q.quantity);
-  const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
-    .concat(options.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.name)}</option>`))
-    .join("");
   return `
     <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}">
       <legend>${quantityNameHtml(q)}</legend>
       <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
-        <div class="measure-selectors">
-          <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
-          <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
-        </div>
+        ${instrumentSelectorsHtml(state.practiceForm?.instruments ?? [], q)}
         <div class="measure-sep"></div>
         <div class="measure-right">
           <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">${renderReplicaInput(q.unit, q.default_value)}</div>
