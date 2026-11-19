@@ -2029,10 +2029,18 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
             "Las ranuras solo aplican a un dato de cátedra (elegí ese rol o dejá las ranuras vacías).",
         ));
     }
-    if input.replicas_per_point.is_some_and(|n| n > 0) && !input.per_point {
+    if input.replicas_per_point.is_some_and(|n| n > 0)
+        && (!input.per_point || !input.repeated || input.is_given)
+    {
         return Err(AppError::bad_request(
             "Las réplicas por punto solo aplican a una serie (elegí \"Serie con réplicas por \
              punto\" o dejá las réplicas vacías).",
+        ));
+    }
+    if !input.has_uncertainty && !input.is_given {
+        return Err(AppError::bad_request(
+            "Solo una constante puede ir sin incertidumbre (elegí el rol \"Constante\" o \
+             marcá que tiene incertidumbre).",
         ));
     }
     if input
@@ -2781,13 +2789,23 @@ mod tests {
             ..timed(false, "tiempo", "teclado")
         })
         .is_err());
-        let replicas = |per_point| QuantityInput {
+        let replicas = |per_point, repeated, is_given| QuantityInput {
             replicas_per_point: Some(3),
             per_point,
+            repeated,
+            is_given,
             ..timed(false, "tiempo", "teclado")
         };
-        assert!(validate_quantity(&replicas(true)).is_ok());
-        assert!(validate_quantity(&replicas(false)).is_err());
+        assert!(validate_quantity(&replicas(true, true, false)).is_ok());
+        assert!(validate_quantity(&replicas(false, true, false)).is_err());
+        assert!(validate_quantity(&replicas(true, false, false)).is_err());
+        assert!(validate_quantity(&replicas(true, true, true)).is_err());
+        let without_u = |is_given| QuantityInput {
+            has_uncertainty: false,
+            ..timed(is_given, "longitud", "teclado")
+        };
+        assert!(validate_quantity(&without_u(true)).is_ok());
+        assert!(validate_quantity(&without_u(false)).is_err());
     }
 
     #[test]
