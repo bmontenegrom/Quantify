@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   analysisSections,
+  exampleMeasurements,
   escapeHtml,
   symbolHtml,
   setDisplaySymbols,
@@ -917,4 +918,52 @@ test("formatSymbolHtml no busca en los símbolos a mostrar", () => {
   assert.equal(formatSymbolHtml("V_R_PP"), "V<sub>R,PP</sub>");
   assert.equal(formatSymbolHtml("rho_1"), "ρ<sub>1</sub>");
   setDisplaySymbols({});
+});
+
+test("exampleMeasurements: estadística con datos dados, repetidas, únicas y operadores", () => {
+  const definition = {
+    analysis_kind: "estadistico",
+    operator_count: 2,
+    quantities: [
+      { id: "g", is_given: true, default_value: 9.8 },
+      { id: "c", is_given: true, has_uncertainty: false },
+      { id: "s", is_given: true, slot_count: 4 },
+      { id: "t", repeated: true },
+      { id: "L", repeated: false },
+    ],
+  };
+  const [g, c, s, t, L] = exampleMeasurements(definition);
+  assert.deepEqual(g.values, [9.8]);
+  assert.equal(g.given_u, 0.098);
+  assert.equal(c.given_u, null);
+  assert.deepEqual(s.values, [1]);
+  assert.equal(t.operator_replicas.length, 2);
+  assert.equal(t.operator_replicas[0].length, 3);
+  assert.ok(new Set(t.operator_replicas[0]).size === 3, "las réplicas difieren");
+  assert.deepEqual(L.values, [5]);
+});
+
+test("exampleMeasurements: sin operadores una repetida da réplicas parecidas", () => {
+  const [t] = exampleMeasurements({ quantities: [{ id: "t", repeated: true }] }, { replicas: 4 });
+  assert.equal(t.values.length, 4);
+  assert.ok(Math.max(...t.values) / Math.min(...t.values) < 1.05);
+});
+
+test("exampleMeasurements: regresión con serie simple y con réplicas por punto", () => {
+  const definition = {
+    analysis_kind: "regresion_lineal",
+    operator_count: 3,
+    quantities: [
+      { id: "x", per_point: true },
+      { id: "y", per_point: true, repeated: true, replicas_per_point: 2 },
+      { id: "D", per_point: false },
+    ],
+  };
+  const [x, y, D] = exampleMeasurements(definition, { points: 4 });
+  assert.equal(x.values.length, 4);
+  assert.ok(x.values.every((v, k) => k === 0 || v > x.values[k - 1]), "la serie crece");
+  assert.equal(y.point_replicas.length, 4);
+  assert.ok(y.point_replicas.every((reps) => reps.length === 2 && reps[0] !== reps[1]));
+  assert.deepEqual(D.values, [3]);
+  assert.equal(x.operator_replicas, undefined);
 });

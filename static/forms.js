@@ -9,7 +9,7 @@ import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   prefixFactor, validateMeasurements,
-  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs,
+  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -793,6 +793,15 @@ async function calculateDraftPreview(measurements) {
   }
 }
 
+function fillExampleData() {
+  if (!state.practiceForm) return;
+  const draft = { measurements: exampleMeasurements(state.practiceForm.definition), finalResults: [] };
+  restoreChronoDraft(null);
+  renderMeasurementFields(draft);
+  applyDraftPrefill(draft);
+  applyPartVisibility();
+}
+
 function selectDraftPreviewPractice() {
   const option = document.createElement("option");
   option.value = state.draftPreviewPracticeId;
@@ -816,7 +825,9 @@ export async function openDraftPreview(practiceId) {
   const banner = document.querySelector("#draft-preview-banner");
   banner.innerHTML = `
     <div>Estás probando el borrador. No se crea ninguna versión ni se guarda ninguna entrega. Los resultados finales que cargues acá no se comparan.</div>
+    <button type="button" id="draft-preview-fill">Rellenar con datos de ejemplo</button>
     <button type="button" id="draft-preview-back">Volver al editor</button>`;
+  banner.querySelector("#draft-preview-fill").addEventListener("click", fillExampleData);
   banner.querySelector("#draft-preview-back").addEventListener("click", async () => {
     exitEditMode();
     const { selectView } = await import("./navigation.js");
