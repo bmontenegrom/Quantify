@@ -821,10 +821,14 @@ export async function openDraftPreview(practiceId) {
   await loadSubmissionForm();
 }
 
+function knownCourseId(courseId) {
+  return state.academic?.courses.some((c) => c.id === courseId) ? courseId : null;
+}
+
 export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
   state.editingPracticeId = submission.practice_id;
-  state.prefillCourseId = submission.course_id ?? null;
+  state.prefillCourseId = knownCourseId(submission.course_id);
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
@@ -861,7 +865,7 @@ export async function cancelSubmission(submission, banner) {
   }
 
   state.restoringCancelledSubmission = true;
-  state.prefillCourseId = submission.course_id ?? null;
+  state.prefillCourseId = knownCourseId(submission.course_id);
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";

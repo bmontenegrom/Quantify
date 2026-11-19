@@ -144,6 +144,9 @@ export function retiredInstrumentNote(instruments, e) {
   }
   const scales = instrument.scales ?? [];
   if (e.scale_id && !scales.some((s) => s.id === e.scale_id)) {
+    if (scales.length === 0) {
+      return "El instrumento ya no tiene escalas: la medición se guarda sin escala y no se suma su incertidumbre.";
+    }
     if (scales.length === 1) {
       return "La escala con la que cargaste esta medición ya no está en el instrumento; se eligió la única que queda. Revisá que sea la que usaste.";
     }

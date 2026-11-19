@@ -710,7 +710,7 @@ pub(super) async fn create_quantity(
     Json(input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_quantity_in(&load_definition(&state, &id).await?, &input)?;
+    validate_quantity_in(&load_definition(&state, &id).await?, &input, None)?;
     guard_symbol(
         &state.pool,
         &id,
@@ -778,7 +778,7 @@ pub(super) async fn update_quantity(
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
     let before = load_definition(&state, &practice_id).await?;
-    validate_quantity_in(&before, &input)?;
+    validate_quantity_in(&before, &input, Some(&qid))?;
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -1368,7 +1368,7 @@ fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem>
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
             };
-            let error = validate_quantity_in(def, &input).err()?;
+            let error = validate_quantity(&input).err()?;
             Some(ElementProblem {
                 check: "la magnitud",
                 element: format!("la magnitud {}", q.symbol),
@@ -1586,6 +1586,7 @@ fn guard_change(
         }
     }
     let key = |p: &ElementProblem| match &p.id {
+        Some(id) if p.kind == "quantity" => format!("{}#{id}#{}", p.check, p.message),
         Some(id) => format!("{}#{id}", p.check),
         None => p.element.clone(),
     };
@@ -2078,11 +2079,18 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
 fn validate_quantity_in(
     def: &practices::PracticeDefinition,
     input: &QuantityInput,
+    quantity_id: Option<&str>,
 ) -> Result<(), AppError> {
     validate_quantity(input)?;
-    if input.replicas_per_point.is_some()
-        && !practices::is_point_based(def.analysis_kind.as_deref())
-    {
+    let part = quantity_id
+        .and_then(|id| def.quantities.iter().find(|q| q.id == id))
+        .and_then(|q| def.quantity_part(&q.symbol))
+        .and_then(|id| def.parts.iter().find(|p| p.id == id));
+    let point_based = match part {
+        Some(part) => practices::is_point_based(Some(def.part_kind(part))),
+        None => practices::is_point_based(def.analysis_kind.as_deref()),
+    };
+    if input.replicas_per_point.is_some() && !point_based {
         return Err(AppError::bad_request(
             "Las réplicas por punto solo aplican en una práctica con serie de puntos \
              (regresión lineal o curva); dejá las réplicas vacías.",
@@ -2848,9 +2856,77 @@ mod tests {
             analysis_kind: Some(kind.into()),
             ..Default::default()
         };
-        assert!(validate_quantity_in(&def("regresion_lineal"), &input).is_ok());
-        assert!(validate_quantity_in(&def("curva"), &input).is_ok());
-        assert!(validate_quantity_in(&def("estadistico"), &input).is_err());
+        assert!(validate_quantity_in(&def("regresion_lineal"), &input, None).is_ok());
+        assert!(validate_quantity_in(&def("curva"), &input, None).is_ok());
+        assert!(validate_quantity_in(&def("estadistico"), &input, None).is_err());
+    }
+
+    #[tokio::test]
+    async fn replicas_per_point_follow_the_quantity_part() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let quantity_in = |part: &str| {
+            let symbol = cc
+                .quantities
+                .iter()
+                .find(|q| cc.quantity_part(&q.symbol) == Some(part) && !q.is_given)
+                .unwrap();
+            symbol.id.clone()
+        };
+        let input = QuantityInput {
+            symbol: "x".into(),
+            name: "x".into(),
+            repeated: true,
+            replicas_per_point: Some(3),
+            ..Default::default()
+        };
+        let curve = quantity_in("p2-cc-potencia");
+        let stat = quantity_in("p2-cc-serie");
+        assert!(validate_quantity_in(&cc, &input, Some(&curve)).is_ok());
+        assert!(validate_quantity_in(&cc, &input, Some(&stat)).is_err());
+    }
+
+    #[test]
+    fn a_new_problem_on_an_already_broken_quantity_is_still_caught() {
+        let quantity = |slot_count: Option<i64>, has_uncertainty: bool| db::PracticeQuantity {
+            id: "q".into(),
+            symbol: "h".into(),
+            name: "Altura".into(),
+            is_given: false,
+            has_uncertainty,
+            slot_count,
+            ..Default::default()
+        };
+        let def = |q| practices::PracticeDefinition {
+            quantities: vec![q],
+            ..Default::default()
+        };
+        let before = def(quantity(Some(3), true));
+        let after = def(quantity(None, false));
+        assert!(guard_change(&before, &after, "probar").is_err());
+        assert!(guard_change(&before, &before, "probar").is_ok());
+    }
+
+    #[test]
+    fn a_series_with_replicas_can_become_statistical() {
+        let def = |kind: &str| practices::PracticeDefinition {
+            analysis_kind: Some(kind.into()),
+            quantities: vec![db::PracticeQuantity {
+                id: "q".into(),
+                symbol: "x".into(),
+                name: "x".into(),
+                repeated: true,
+                per_point: true,
+                has_uncertainty: true,
+                replicas_per_point: Some(3),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(guard_change(&def("regresion_lineal"), &def("estadistico"), "probar").is_ok());
     }
 
     #[test]
