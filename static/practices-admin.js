@@ -984,11 +984,11 @@ function seriesPractice() {
 function pointBasedFor(qty) {
   const def = state.practiceDefinition;
   if (!seriesPractice()) return false;
-  if (!def.parts?.length || !qty) return true;
-  const section = def.sections?.find((sec) => sec.quantities?.includes(qty.symbol));
-  if (!section?.part_id) return true;
-  const part = def.parts.find((p) => p.id === section.part_id);
-  return !part || POINT_KINDS.includes(part.effective_kind);
+  if (!def.parts?.length) return true;
+  const hasSeries = def.parts.some((p) => POINT_KINDS.includes(p.effective_kind));
+  const section = qty && def.sections?.find((sec) => sec.quantities?.includes(qty.symbol));
+  const part = section?.part_id && def.parts.find((p) => p.id === section.part_id);
+  return part ? POINT_KINDS.includes(part.effective_kind) : hasSeries;
 }
 
 function roleSelectHtml(qty) {

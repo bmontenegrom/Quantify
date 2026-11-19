@@ -164,10 +164,16 @@ export async function loadSubmissionForm() {
             ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
             : `/api/practices/${encodeURIComponent(practiceId)}/definition?published=true`,
       ),
-      instrumentsCourseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(instrumentsCourseId)}`) : [],
+      instrumentsCourseId
+        ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(instrumentsCourseId)}`).catch(() => null)
+        : null,
     ]);
     if (request !== latestFormRequest) return;
-    state.practiceForm = { definition, instruments, courseId: instrumentsCourseId };
+    state.practiceForm = {
+      definition,
+      instruments: instruments ?? [],
+      courseId: instruments ? instrumentsCourseId : null,
+    };
     if (practicaSubtitle) practicaSubtitle.textContent = definition.description || DEFAULT_SUBTITLE;
     const draft = applicableDraft();
     restoreChronoDraft(draft?.chrono);
@@ -1047,7 +1053,8 @@ function fillInstrument(el, e) {
   const autoScale = scale.value;
   scale.value = e.scale_id ?? "";
   if (scale.selectedIndex < 0) scale.value = autoScale;
-  if (!(state.editingSubmissionId || state.restoringCancelledSubmission) || !state.practiceForm?.courseId) return;
+  const prefilling = state.editingSubmissionId || state.restoringCancelledSubmission;
+  if (!prefilling || !state.prefillCourseId || state.practiceForm?.courseId !== state.prefillCourseId) return;
   const offered = new Set([...inst.options].map((o) => o.value));
   const instruments = (state.practiceForm?.instruments ?? []).filter((i) => offered.has(i.id));
   const note = retiredInstrumentNote(instruments, e);
