@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor } from "./lib.js";
+import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor, compatibleInstruments } from "./lib.js";
 
 export function formPracticeVersion(practiceId) {
   const definition = state.practiceForm?.definition;
@@ -114,6 +114,45 @@ export function populateScaleOptions(row) {
     .concat(scales.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.label)} (${escapeHtml(s.unit)})</option>`))
     .join("");
   if (scales.length === 1) scaleSelect.value = scales[0].id;
+}
+
+export function instrumentSelectorsHtml(instruments, q, preselectChrono = false) {
+  const options = compatibleInstruments(instruments, q.quantity);
+  const preferred = preselectChrono ? options.find((i) => /cron[oó]metro/i.test(i.name)) ?? options[0] : null;
+  const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
+    .concat(options.map((i) => `<option value="${escapeHtml(i.id)}"${preferred && i.id === preferred.id ? " selected" : ""}>${escapeHtml(i.name)}</option>`))
+    .join("");
+  return `
+    <div class="measure-selectors">
+      <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
+      <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
+    </div>`;
+}
+
+export function wireInstrumentSelectors(root) {
+  root.querySelectorAll(".measure-selectors").forEach((selectors) => {
+    selectors.querySelector(".measure-instrument").addEventListener("change", () => populateScaleOptions(selectors));
+    populateScaleOptions(selectors);
+  });
+}
+
+export function retiredInstrumentNote(instruments, e) {
+  if (!e.instrument_id) return null;
+  const instrument = instruments.find((i) => i.id === e.instrument_id);
+  if (!instrument) {
+    return "El instrumento con el que cargaste esta medición ya no está disponible en el curso para esta magnitud. Elegí otro: si la guardás sin instrumento, no se suma su incertidumbre.";
+  }
+  const scales = instrument.scales ?? [];
+  if (e.scale_id && !scales.some((s) => s.id === e.scale_id)) {
+    if (scales.length === 0) {
+      return "El instrumento ya no tiene escalas: la medición se guarda sin escala y no se suma su incertidumbre.";
+    }
+    if (scales.length === 1) {
+      return "La escala con la que cargaste esta medición ya no está en el instrumento; se eligió la única que queda. Revisá que sea la que usaste.";
+    }
+    return "La escala con la que cargaste esta medición ya no está en el instrumento. Elegí otra: si la guardás sin escala, no se suma su incertidumbre.";
+  }
+  return null;
 }
 
 export function replicaInputHtml(quantityId, k) {

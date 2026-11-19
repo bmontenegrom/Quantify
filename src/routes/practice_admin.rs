@@ -710,7 +710,7 @@ pub(super) async fn create_quantity(
     Json(input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_quantity(&input)?;
+    validate_quantity_in(&load_definition(&state, &id).await?, &input, None)?;
     guard_symbol(
         &state.pool,
         &id,
@@ -777,7 +777,10 @@ pub(super) async fn update_quantity(
     Json(input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_quantity(&input)?;
+    let before = load_definition(&state, &practice_id).await?;
+    let after = with_updated_quantity(&before, &qid, &input)
+        .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
+    validate_quantity_in(&after, &input, Some(&qid))?;
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -789,9 +792,6 @@ pub(super) async fn update_quantity(
         None,
     )
     .await?;
-    let before = load_definition(&state, &practice_id).await?;
-    let after = with_updated_quantity(&before, &qid, &input)
-        .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
     guard_change(&before, &after, "guardar la magnitud")?;
     let updated = practices::update_quantity(&state.pool, &qid, input)
         .await
@@ -1586,6 +1586,7 @@ fn guard_change(
         }
     }
     let key = |p: &ElementProblem| match &p.id {
+        Some(id) if p.kind == "quantity" => format!("{}#{id}#{}", p.check, p.message),
         Some(id) => format!("{}#{id}", p.check),
         None => p.element.clone(),
     };
@@ -2029,10 +2030,22 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
             "Las ranuras solo aplican a un dato de cátedra (elegí ese rol o dejá las ranuras vacías).",
         ));
     }
-    if input.replicas_per_point.is_some_and(|n| n > 0) && !input.per_point {
+    if input.replicas_per_point.is_some_and(|n| n < 1) {
         return Err(AppError::bad_request(
-            "Las réplicas por punto solo aplican a una serie (elegí \"Serie con réplicas por \
-             punto\" o dejá las réplicas vacías).",
+            "Las réplicas por punto tienen que ser un entero de 1 en adelante (vacío = sin réplicas).",
+        ));
+    }
+    if input.replicas_per_point.is_some() && (!input.per_point || !input.repeated || input.is_given)
+    {
+        return Err(AppError::bad_request(
+            "Las réplicas por punto solo aplican a una magnitud medida en serie y repetida, no a \
+             un dato de cátedra (elegí \"Serie con réplicas por punto\" o dejá las réplicas vacías).",
+        ));
+    }
+    if !input.has_uncertainty && !input.is_given {
+        return Err(AppError::bad_request(
+            "Solo una constante puede ir sin incertidumbre (elegí el rol \"Constante\" o \
+             cualquier otro rol, que lleva incertidumbre).",
         ));
     }
     if input
@@ -2058,6 +2071,30 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     {
         return Err(AppError::bad_request(
             "El cronómetro solo aplica a una magnitud física \"tiempo\" que no sea un dato dado.",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_quantity_in(
+    def: &practices::PracticeDefinition,
+    input: &QuantityInput,
+    quantity_id: Option<&str>,
+) -> Result<(), AppError> {
+    validate_quantity(input)?;
+    let part = quantity_id
+        .and_then(|id| def.quantities.iter().find(|q| q.id == id))
+        .and_then(|q| def.quantity_part(&q.symbol))
+        .and_then(|id| def.parts.iter().find(|p| p.id == id));
+    let point_based = match part {
+        Some(part) => practices::is_point_based(Some(def.part_kind(part))),
+        None if !def.parts.is_empty() => def.series_part().is_some(),
+        None => practices::is_point_based(def.analysis_kind.as_deref()),
+    };
+    if input.replicas_per_point.is_some() && !point_based {
+        return Err(AppError::bad_request(
+            "Las réplicas por punto solo aplican en una práctica con serie de puntos \
+             (regresión lineal o curva); dejá las réplicas vacías.",
         ));
     }
     Ok(())
@@ -2781,13 +2818,182 @@ mod tests {
             ..timed(false, "tiempo", "teclado")
         })
         .is_err());
-        let replicas = |per_point| QuantityInput {
+        let replicas = |per_point, repeated, is_given| QuantityInput {
             replicas_per_point: Some(3),
             per_point,
+            repeated,
+            is_given,
             ..timed(false, "tiempo", "teclado")
         };
-        assert!(validate_quantity(&replicas(true)).is_ok());
-        assert!(validate_quantity(&replicas(false)).is_err());
+        assert!(validate_quantity(&replicas(true, true, false)).is_ok());
+        assert!(validate_quantity(&replicas(false, true, false)).is_err());
+        assert!(validate_quantity(&replicas(true, false, false)).is_err());
+        assert!(validate_quantity(&replicas(true, true, true)).is_err());
+        for n in [0, -3] {
+            assert!(validate_quantity(&QuantityInput {
+                replicas_per_point: Some(n),
+                ..replicas(true, true, false)
+            })
+            .is_err());
+        }
+        let without_u = |is_given| QuantityInput {
+            has_uncertainty: false,
+            ..timed(is_given, "longitud", "teclado")
+        };
+        assert!(validate_quantity(&without_u(true)).is_ok());
+        assert!(validate_quantity(&without_u(false)).is_err());
+    }
+
+    #[test]
+    fn replicas_per_point_need_a_series_practice() {
+        let input = QuantityInput {
+            symbol: "x".into(),
+            name: "x".into(),
+            repeated: true,
+            replicas_per_point: Some(3),
+            ..Default::default()
+        };
+        let def = |kind: &str| practices::PracticeDefinition {
+            analysis_kind: Some(kind.into()),
+            ..Default::default()
+        };
+        assert!(validate_quantity_in(&def("regresion_lineal"), &input, None).is_ok());
+        assert!(validate_quantity_in(&def("curva"), &input, None).is_ok());
+        assert!(validate_quantity_in(&def("estadistico"), &input, None).is_err());
+    }
+
+    #[tokio::test]
+    async fn replicas_per_point_follow_the_quantity_part() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let cc = practices::definition(&pool, "p2-cc")
+            .await
+            .unwrap()
+            .unwrap();
+        let quantity_in = |part: &str| {
+            let symbol = cc
+                .quantities
+                .iter()
+                .find(|q| cc.quantity_part(&q.symbol) == Some(part) && !q.is_given)
+                .unwrap();
+            symbol.id.clone()
+        };
+        let input = QuantityInput {
+            symbol: "x".into(),
+            name: "x".into(),
+            repeated: true,
+            replicas_per_point: Some(3),
+            ..Default::default()
+        };
+        let curve = quantity_in("p2-cc-potencia");
+        let stat = quantity_in("p2-cc-serie");
+        assert!(validate_quantity_in(&cc, &input, Some(&curve)).is_ok());
+        assert!(validate_quantity_in(&cc, &input, Some(&stat)).is_err());
+    }
+
+    #[test]
+    fn replicas_without_a_part_need_some_series_part() {
+        let part = |id: &str, kind: Option<&str>| practices::PracticePart {
+            id: id.into(),
+            analysis_kind: kind.map(Into::into),
+            ..Default::default()
+        };
+        let def = |kinds: [Option<&str>; 2]| practices::PracticeDefinition {
+            analysis_kind: Some("regresion_lineal".into()),
+            parts: vec![part("a", kinds[0]), part("b", kinds[1])],
+            ..Default::default()
+        };
+        let input = QuantityInput {
+            symbol: "x".into(),
+            name: "x".into(),
+            repeated: true,
+            replicas_per_point: Some(3),
+            ..Default::default()
+        };
+        let stat = Some("estadistico");
+        assert!(validate_quantity_in(&def([stat, stat]), &input, None).is_err());
+        assert!(validate_quantity_in(&def([stat, Some("regresion_lineal")]), &input, None).is_ok());
+    }
+
+    #[test]
+    fn replicas_are_judged_on_the_practice_after_the_edit() {
+        let quantity = |id: &str, per_point: bool| db::PracticeQuantity {
+            id: id.into(),
+            symbol: id.into(),
+            name: id.into(),
+            per_point,
+            has_uncertainty: true,
+            ..Default::default()
+        };
+        let before = practices::PracticeDefinition {
+            analysis_kind: Some("curva".into()),
+            parts: ["p1", "p2"]
+                .map(|id| practices::PracticePart {
+                    id: id.into(),
+                    ..Default::default()
+                })
+                .to_vec(),
+            sections: [("s1", "p1", "a"), ("s2", "p2", "b")]
+                .map(|(id, part, symbol)| practices::PracticeSection {
+                    id: id.into(),
+                    part_id: Some(part.into()),
+                    quantities: vec![symbol.into()],
+                    ..Default::default()
+                })
+                .to_vec(),
+            quantities: vec![quantity("a", false), quantity("b", false)],
+            ..Default::default()
+        };
+        let input = QuantityInput {
+            symbol: "b".into(),
+            name: "b".into(),
+            repeated: true,
+            per_point: true,
+            replicas_per_point: Some(3),
+            ..Default::default()
+        };
+        let after = with_updated_quantity(&before, "b", &input).unwrap();
+        assert!(validate_quantity_in(&before, &input, Some("b")).is_err());
+        assert!(validate_quantity_in(&after, &input, Some("b")).is_ok());
+    }
+
+    #[test]
+    fn a_new_problem_on_an_already_broken_quantity_is_still_caught() {
+        let quantity = |slot_count: Option<i64>, has_uncertainty: bool| db::PracticeQuantity {
+            id: "q".into(),
+            symbol: "h".into(),
+            name: "Altura".into(),
+            is_given: false,
+            has_uncertainty,
+            slot_count,
+            ..Default::default()
+        };
+        let def = |q| practices::PracticeDefinition {
+            quantities: vec![q],
+            ..Default::default()
+        };
+        let before = def(quantity(Some(3), true));
+        let after = def(quantity(None, false));
+        assert!(guard_change(&before, &after, "probar").is_err());
+        assert!(guard_change(&before, &before, "probar").is_ok());
+    }
+
+    #[test]
+    fn a_series_with_replicas_can_become_statistical() {
+        let def = |kind: &str| practices::PracticeDefinition {
+            analysis_kind: Some(kind.into()),
+            quantities: vec![db::PracticeQuantity {
+                id: "q".into(),
+                symbol: "x".into(),
+                name: "x".into(),
+                repeated: true,
+                per_point: true,
+                has_uncertainty: true,
+                replicas_per_point: Some(3),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(guard_change(&def("regresion_lineal"), &def("estadistico"), "probar").is_ok());
     }
 
     #[test]

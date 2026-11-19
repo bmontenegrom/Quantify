@@ -8,14 +8,15 @@ import { fetchJson, postJson, deleteJson } from "./api.js";
 import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
-  compatibleInstruments, prefixFactor, validateMeasurements,
+  prefixFactor, validateMeasurements,
   draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
-  formHelpHtml, partHelpHtml, columnSections,
+  formHelpHtml, partHelpHtml, columnSections, instrumentSelectorsHtml, wireInstrumentSelectors,
+  retiredInstrumentNote,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -125,6 +126,8 @@ export async function loadSubmissionForm() {
   if (state.editingSubmissionId && state.editingPracticeId !== practiceId) exitEditMode();
   if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const courseId = courseSelect.value;
+  const prefilling = state.editingSubmissionId || state.restoringCancelledSubmission;
+  const instrumentsCourseId = (prefilling && state.prefillCourseId) || courseId;
   const practice = (previewing ? state.practices : selectedCourse()?.practices)?.find((p) => p.id === practiceId);
   if (practicaTitle) {
     const practiceName = practice?.name ?? "Nueva entrega";
@@ -161,10 +164,16 @@ export async function loadSubmissionForm() {
             ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
             : `/api/practices/${encodeURIComponent(practiceId)}/definition?published=true`,
       ),
-      courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
+      instrumentsCourseId
+        ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(instrumentsCourseId)}`).catch(() => null)
+        : null,
     ]);
     if (request !== latestFormRequest) return;
-    state.practiceForm = { definition, instruments };
+    state.practiceForm = {
+      definition,
+      instruments: instruments ?? [],
+      courseId: instruments ? instrumentsCourseId : null,
+    };
     if (practicaSubtitle) practicaSubtitle.textContent = definition.description || DEFAULT_SUBTITLE;
     const draft = applicableDraft();
     restoreChronoDraft(draft?.chrono);
@@ -313,19 +322,6 @@ export function renderMeasurementFields(draft) {
     !state.editingSubmissionId &&
     (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id));
 
-  const instrumentSelectorsHtml = (q, preselectChrono) => {
-    const options = compatibleInstruments(instruments, q.quantity);
-    const preferred = preselectChrono ? options.find((i) => /cron[oó]metro/i.test(i.name)) ?? options[0] : null;
-    const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
-      .concat(options.map((i) => `<option value="${escapeHtml(i.id)}"${preferred && i.id === preferred.id ? " selected" : ""}>${escapeHtml(i.name)}</option>`))
-      .join("");
-    return `
-      <div class="measure-selectors">
-        <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
-        <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
-      </div>`;
-  };
-
   const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
     if (q.is_given) {
@@ -358,7 +354,7 @@ export function renderMeasurementFields(draft) {
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
           <legend>${legendHtml(q)}</legend>
-          ${opIndex == null ? instrumentSelectorsHtml(q, true) : ""}
+          ${opIndex == null ? instrumentSelectorsHtml(instruments, q, true) : ""}
           ${chronoWidgetInnerHtml()}
           <div class="series-debug"></div>
         </fieldset>
@@ -368,7 +364,7 @@ export function renderMeasurementFields(draft) {
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
         <legend>${legendHtml(q)}</legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
-          ${opIndex == null ? `${instrumentSelectorsHtml(q, false)}<div class="measure-sep"></div>` : ""}
+          ${opIndex == null ? `${instrumentSelectorsHtml(instruments, q)}<div class="measure-sep"></div>` : ""}
           <div class="measure-right">
             <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
               ${renderReplicaInput(q.unit, q.default_value)}
@@ -389,7 +385,7 @@ export function renderMeasurementFields(draft) {
     return `
       <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
         <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por operador</span></h4>
-        ${instrumentSelectorsHtml(q, chrono.some(Boolean))}
+        ${instrumentSelectorsHtml(instruments, q, chrono.some(Boolean))}
         ${blocks}
       </div>
     `;
@@ -428,10 +424,7 @@ export function renderMeasurementFields(draft) {
   }
   wireChronoHelpers();
 
-  measurementFields.querySelectorAll(".measure-selectors").forEach((selectors) => {
-    selectors.querySelector(".measure-instrument").addEventListener("change", () => populateScaleOptions(selectors));
-    populateScaleOptions(selectors);
-  });
+  wireInstrumentSelectors(measurementFields);
 
   measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
     if (row.dataset.isChrono === "1") {
@@ -834,13 +827,18 @@ export async function openDraftPreview(practiceId) {
   await loadSubmissionForm();
 }
 
+function knownCourseId(courseId) {
+  return state.academic?.courses.some((c) => c.id === courseId) ? courseId : null;
+}
+
 export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
   state.editingPracticeId = submission.practice_id;
+  state.prefillCourseId = knownCourseId(submission.course_id);
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
-  import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id));
+  import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id, submission.course_id));
 }
 
 export function exitEditMode() {
@@ -851,6 +849,7 @@ export function exitEditMode() {
   state.draftPreviewPracticeId = null;
   state.editingSubmissionId = null;
   state.editingPracticeId = null;
+  state.prefillCourseId = null;
   state.editPrefillComment = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;
@@ -872,6 +871,7 @@ export async function cancelSubmission(submission, banner) {
   }
 
   state.restoringCancelledSubmission = true;
+  state.prefillCourseId = knownCourseId(submission.course_id);
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
@@ -887,6 +887,7 @@ export async function cancelSubmission(submission, banner) {
   await loadSubmissionForm();
 
   state.restoringCancelledSubmission = false;
+  state.prefillCourseId = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;
   state.editPrefillComment = null;
@@ -1045,9 +1046,25 @@ function prefillStandaloneRow(row, byQ) {
 function fillInstrument(el, e) {
   const inst = el.querySelector(".measure-instrument");
   if (!inst) return;
+  const scale = el.querySelector(".measure-scale");
   inst.value = e.instrument_id ?? "";
+  if (inst.selectedIndex < 0) inst.value = "";
   populateScaleOptions(el);
-  el.querySelector(".measure-scale").value = e.scale_id ?? "";
+  const autoScale = scale.value;
+  scale.value = e.scale_id ?? "";
+  if (scale.selectedIndex < 0) scale.value = autoScale;
+  const prefilling = state.editingSubmissionId || state.restoringCancelledSubmission;
+  if (!prefilling || !state.prefillCourseId || state.practiceForm?.courseId !== state.prefillCourseId) return;
+  const offered = new Set([...inst.options].map((o) => o.value));
+  const instruments = (state.practiceForm?.instruments ?? []).filter((i) => offered.has(i.id));
+  const note = retiredInstrumentNote(instruments, e);
+  if (!note) return;
+  const p = document.createElement("p");
+  p.className = "warnings";
+  p.textContent = note;
+  const selectors = inst.closest(".measure-selectors");
+  (selectors.closest(".measure-body") ?? selectors).after(p);
+  selectors.addEventListener("change", () => p.remove(), { once: true });
 }
 
 function fillReplicaRow(row, values) {
