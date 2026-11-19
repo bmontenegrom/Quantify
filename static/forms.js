@@ -1030,16 +1030,22 @@ function prefillStandaloneRow(row, byQ) {
 function fillInstrument(el, e) {
   const inst = el.querySelector(".measure-instrument");
   if (!inst) return;
+  const scale = el.querySelector(".measure-scale");
   inst.value = e.instrument_id ?? "";
+  if (inst.selectedIndex < 0) inst.value = "";
   populateScaleOptions(el);
-  el.querySelector(".measure-scale").value = e.scale_id ?? "";
-  const note = retiredInstrumentNote(state.practiceForm?.instruments ?? [], e);
+  scale.value = e.scale_id ?? "";
+  if (scale.selectedIndex < 0) scale.value = "";
+  const offered = new Set([...inst.options].map((o) => o.value));
+  const instruments = (state.practiceForm?.instruments ?? []).filter((i) => offered.has(i.id));
+  const note = retiredInstrumentNote(instruments, e);
   if (!note) return;
   const p = document.createElement("p");
   p.className = "warnings";
   p.textContent = note;
-  inst.closest(".measure-selectors").after(p);
-  inst.addEventListener("change", () => p.remove(), { once: true });
+  const selectors = inst.closest(".measure-selectors");
+  (selectors.closest(".measure-body") ?? selectors).after(p);
+  selectors.addEventListener("change", () => p.remove(), { once: true });
 }
 
 function fillReplicaRow(row, values) {

@@ -2033,8 +2033,8 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
         && (!input.per_point || !input.repeated || input.is_given)
     {
         return Err(AppError::bad_request(
-            "Las réplicas por punto solo aplican a una serie (elegí \"Serie con réplicas por \
-             punto\" o dejá las réplicas vacías).",
+            "Las réplicas por punto solo aplican a una magnitud medida en serie y repetida, no a \
+             un dato de cátedra (elegí \"Serie con réplicas por punto\" o dejá las réplicas vacías).",
         ));
     }
     if !input.has_uncertainty && !input.is_given {

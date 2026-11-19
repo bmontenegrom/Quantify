@@ -140,7 +140,7 @@ export function retiredInstrumentNote(instruments, e) {
   if (!e.instrument_id) return null;
   const instrument = instruments.find((i) => i.id === e.instrument_id);
   if (!instrument) {
-    return "El instrumento con el que cargaste esta medición ya no está en el curso. Elegí otro: si la guardás sin instrumento, no se suma su incertidumbre.";
+    return "El instrumento con el que cargaste esta medición ya no está disponible en el curso para esta magnitud. Elegí otro: si la guardás sin instrumento, no se suma su incertidumbre.";
   }
   if (e.scale_id && !(instrument.scales ?? []).some((s) => s.id === e.scale_id)) {
     return "La escala con la que cargaste esta medición ya no está en el instrumento. Elegí otra: si la guardás sin escala, no se suma su incertidumbre.";
