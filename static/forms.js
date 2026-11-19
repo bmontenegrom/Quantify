@@ -825,7 +825,7 @@ export function startEditSubmission(submission) {
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
-  import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id));
+  import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id, submission.course_id));
 }
 
 export function exitEditMode() {
@@ -1034,9 +1034,10 @@ function fillInstrument(el, e) {
   inst.value = e.instrument_id ?? "";
   if (inst.selectedIndex < 0) inst.value = "";
   populateScaleOptions(el);
+  const autoScale = scale.value;
   scale.value = e.scale_id ?? "";
-  if (scale.selectedIndex < 0) scale.value = "";
-  if (!state.editingSubmissionId || !state.practiceForm?.courseId) return;
+  if (scale.selectedIndex < 0) scale.value = autoScale;
+  if (!(state.editingSubmissionId || state.restoringCancelledSubmission) || !state.practiceForm?.courseId) return;
   const offered = new Set([...inst.options].map((o) => o.value));
   const instruments = (state.practiceForm?.instruments ?? []).filter((i) => offered.has(i.id));
   const note = retiredInstrumentNote(instruments, e);
