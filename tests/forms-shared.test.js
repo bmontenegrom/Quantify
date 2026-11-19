@@ -42,5 +42,7 @@ test("retiredInstrumentNote: avisa si el instrumento o la escala guardados ya no
   assert.equal(retiredInstrumentNote(instruments, { instrument_id: null }), null);
   assert.equal(retiredInstrumentNote(instruments, { instrument_id: "regla", scale_id: "mm" }), null);
   assert.match(retiredInstrumentNote(instruments, { instrument_id: "calibre" }), /instrumento/);
-  assert.match(retiredInstrumentNote(instruments, { instrument_id: "regla", scale_id: "cm" }), /escala/);
+  assert.match(retiredInstrumentNote(instruments, { instrument_id: "regla", scale_id: "cm" }), /única que queda/);
+  const twoScales = [{ id: "regla", scales: [{ id: "mm" }, { id: "dm" }] }];
+  assert.match(retiredInstrumentNote(twoScales, { instrument_id: "regla", scale_id: "cm" }), /sin escala/);
 });

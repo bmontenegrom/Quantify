@@ -69,7 +69,10 @@ export async function selectPracticeFromNav(practiceId, courseId = null) {
   const withPractice = (state.academic?.courses ?? []).filter((c) =>
     (c.practices ?? []).some((p) => p.id === practiceId)
   );
-  const course = withPractice.find((c) => c.id === courseId) ?? withPractice[0];
+  const course =
+    withPractice.find((c) => c.id === courseId) ??
+    withPractice.find((c) => c.id === courseSelect.value) ??
+    withPractice[0];
   if (course && course.id !== courseSelect.value) {
     courseSelect.value = course.id;
     const { updateStudentSelectors } = await import("./forms.js");

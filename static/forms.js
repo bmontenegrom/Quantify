@@ -126,6 +126,8 @@ export async function loadSubmissionForm() {
   if (state.editingSubmissionId && state.editingPracticeId !== practiceId) exitEditMode();
   if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const courseId = courseSelect.value;
+  const prefilling = state.editingSubmissionId || state.restoringCancelledSubmission;
+  const instrumentsCourseId = (prefilling && state.prefillCourseId) || courseId;
   const practice = (previewing ? state.practices : selectedCourse()?.practices)?.find((p) => p.id === practiceId);
   if (practicaTitle) {
     const practiceName = practice?.name ?? "Nueva entrega";
@@ -162,10 +164,10 @@ export async function loadSubmissionForm() {
             ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
             : `/api/practices/${encodeURIComponent(practiceId)}/definition?published=true`,
       ),
-      courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
+      instrumentsCourseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(instrumentsCourseId)}`) : [],
     ]);
     if (request !== latestFormRequest) return;
-    state.practiceForm = { definition, instruments, courseId };
+    state.practiceForm = { definition, instruments, courseId: instrumentsCourseId };
     if (practicaSubtitle) practicaSubtitle.textContent = definition.description || DEFAULT_SUBTITLE;
     const draft = applicableDraft();
     restoreChronoDraft(draft?.chrono);
@@ -822,6 +824,7 @@ export async function openDraftPreview(practiceId) {
 export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
   state.editingPracticeId = submission.practice_id;
+  state.prefillCourseId = submission.course_id ?? null;
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
@@ -836,6 +839,7 @@ export function exitEditMode() {
   state.draftPreviewPracticeId = null;
   state.editingSubmissionId = null;
   state.editingPracticeId = null;
+  state.prefillCourseId = null;
   state.editPrefillComment = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;
@@ -857,6 +861,7 @@ export async function cancelSubmission(submission, banner) {
   }
 
   state.restoringCancelledSubmission = true;
+  state.prefillCourseId = submission.course_id ?? null;
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
@@ -872,6 +877,7 @@ export async function cancelSubmission(submission, banner) {
   await loadSubmissionForm();
 
   state.restoringCancelledSubmission = false;
+  state.prefillCourseId = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;
   state.editPrefillComment = null;

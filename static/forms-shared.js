@@ -142,7 +142,11 @@ export function retiredInstrumentNote(instruments, e) {
   if (!instrument) {
     return "El instrumento con el que cargaste esta medición ya no está disponible en el curso para esta magnitud. Elegí otro: si la guardás sin instrumento, no se suma su incertidumbre.";
   }
-  if (e.scale_id && !(instrument.scales ?? []).some((s) => s.id === e.scale_id)) {
+  const scales = instrument.scales ?? [];
+  if (e.scale_id && !scales.some((s) => s.id === e.scale_id)) {
+    if (scales.length === 1) {
+      return "La escala con la que cargaste esta medición ya no está en el instrumento; se eligió la única que queda. Revisá que sea la que usaste.";
+    }
     return "La escala con la que cargaste esta medición ya no está en el instrumento. Elegí otra: si la guardás sin escala, no se suma su incertidumbre.";
   }
   return null;

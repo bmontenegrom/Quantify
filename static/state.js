@@ -32,6 +32,7 @@ export const state = {
   chronoModes: new Map(),
   editingSubmissionId: null,
   editingPracticeId: null,
+  prefillCourseId: null,
   draftPreviewPracticeId: null,
   editPrefill: null,
   invitations: [],

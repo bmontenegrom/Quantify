@@ -710,7 +710,7 @@ pub(super) async fn create_quantity(
     Json(input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_quantity(&input)?;
+    validate_quantity_in(&load_definition(&state, &id).await?, &input)?;
     guard_symbol(
         &state.pool,
         &id,
@@ -777,7 +777,8 @@ pub(super) async fn update_quantity(
     Json(input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
-    validate_quantity(&input)?;
+    let before = load_definition(&state, &practice_id).await?;
+    validate_quantity_in(&before, &input)?;
     guard_symbol(
         &state.pool,
         &practice_id,
@@ -789,7 +790,6 @@ pub(super) async fn update_quantity(
         None,
     )
     .await?;
-    let before = load_definition(&state, &practice_id).await?;
     let after = with_updated_quantity(&before, &qid, &input)
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
     guard_change(&before, &after, "guardar la magnitud")?;
@@ -1368,7 +1368,7 @@ fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem>
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
             };
-            let error = validate_quantity(&input).err()?;
+            let error = validate_quantity_in(def, &input).err()?;
             Some(ElementProblem {
                 check: "la magnitud",
                 element: format!("la magnitud {}", q.symbol),
@@ -2070,6 +2070,22 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     {
         return Err(AppError::bad_request(
             "El cronómetro solo aplica a una magnitud física \"tiempo\" que no sea un dato dado.",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_quantity_in(
+    def: &practices::PracticeDefinition,
+    input: &QuantityInput,
+) -> Result<(), AppError> {
+    validate_quantity(input)?;
+    if input.replicas_per_point.is_some()
+        && !practices::is_point_based(def.analysis_kind.as_deref())
+    {
+        return Err(AppError::bad_request(
+            "Las réplicas por punto solo aplican en una práctica con serie de puntos \
+             (regresión lineal o curva); dejá las réplicas vacías.",
         ));
     }
     Ok(())
@@ -2817,6 +2833,24 @@ mod tests {
         };
         assert!(validate_quantity(&without_u(true)).is_ok());
         assert!(validate_quantity(&without_u(false)).is_err());
+    }
+
+    #[test]
+    fn replicas_per_point_need_a_series_practice() {
+        let input = QuantityInput {
+            symbol: "x".into(),
+            name: "x".into(),
+            repeated: true,
+            replicas_per_point: Some(3),
+            ..Default::default()
+        };
+        let def = |kind: &str| practices::PracticeDefinition {
+            analysis_kind: Some(kind.into()),
+            ..Default::default()
+        };
+        assert!(validate_quantity_in(&def("regresion_lineal"), &input).is_ok());
+        assert!(validate_quantity_in(&def("curva"), &input).is_ok());
+        assert!(validate_quantity_in(&def("estadistico"), &input).is_err());
     }
 
     #[test]
