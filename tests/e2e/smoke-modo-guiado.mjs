@@ -95,6 +95,7 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   await next(page, "Partes");
   await next(page, "Secciones");
   await next(page, "Magnitudes");
+  assert(dialogs === 0, "cambiar de paso sin datos escritos no debía pedir confirmación");
 
   step("Fluidos I: magnitudes (serie, serie con réplicas, datos de cátedra y medida única)");
   await addQuantity(page, { symbol: "h", name: "Altura del Mariotte", unit: "m", role: "serie" });
@@ -104,12 +105,18 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   for (const symbol of ["R", "L", "g"]) await addQuantity(page, { symbol, name: symbol, unit: "", role: "catedra" });
   await addQuantity(page, { symbol: "rho", name: "Densidad del agua", unit: "kg/m3", role: "unica" });
 
-  step("Fluidos I: cambiar de paso con una fila en edición pide confirmación");
+  step("Fluidos I: cambiar de paso con datos sin guardar pide confirmación");
   await page.locator(`${row("h")} [data-edit-quantity]`).click();
-  await page.waitForSelector("#edit-quantity-form");
-  const before = dialogs;
+  await page.locator('#edit-quantity-form [name="unit"]').fill("cm");
+  let before = dialogs;
   await next(page, "Serie y ejes");
   assert(dialogs === before + 1, "cambiar de paso con una magnitud en edición debía pedir confirmación");
+  await page.locator('#practice-regression-form [name="x_formula"]').fill("h");
+  before = dialogs;
+  await page.click("#practice-workspace [data-guide-exit]");
+  assert(dialogs === before + 1, "Ver todo con los ejes escritos sin guardar debía pedir confirmación");
+  await page.click("#practice-workspace [data-guide-start]");
+  await expectStep(page, "Serie y ejes");
 
   step("Fluidos I: ejes del ajuste e intermedia Q; el alta cerrada no se vuelve a abrir sola");
   const intermediatePanel = page.locator('#practice-workspace details[data-add-panel="intermediate"]');

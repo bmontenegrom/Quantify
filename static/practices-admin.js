@@ -413,6 +413,7 @@ export function renderPracticesPage() {
     btn.addEventListener("click", () => goToGuideStep(practice.id, btn.dataset.guideGo));
   });
   practiceWorkspace.querySelector("[data-guide-exit]")?.addEventListener("click", () => {
+    if (!confirmDiscardForms()) return;
     state.practiceGuideLastStep = state.practiceGuide?.step ?? null;
     state.practiceGuide = null;
     renderPracticesPage();
@@ -558,12 +559,21 @@ function guideFor(practiceId, def) {
   return { steps, index };
 }
 
+function fieldChanged(el) {
+  if (el.type === "hidden" || el.disabled) return false;
+  if (el.tagName === "SELECT") return el.selectedIndex !== Math.max([...el.options].findIndex((o) => o.defaultSelected), 0);
+  if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
+  return el.value !== el.defaultValue;
+}
+
+function confirmDiscardForms() {
+  const dirty = [...practiceWorkspace.querySelectorAll("form input, form select, form textarea")].some(fieldChanged);
+  return !dirty || window.confirm("Hay datos sin guardar en un formulario. ¿Descartarlos?");
+}
+
 function goToGuideStep(practiceId, step) {
-  const editing = state.editing.kind;
-  if (editing && GUIDE_STEP_OF_PROBLEM[editing] !== step) {
-    if (!window.confirm("Hay una fila en edición sin guardar. ¿Descartar la edición y cambiar de paso?")) return;
-    state.editing = { kind: null, id: null };
-  }
+  if (!confirmDiscardForms()) return;
+  if (state.editing.kind && GUIDE_STEP_OF_PROBLEM[state.editing.kind] !== step) state.editing = { kind: null, id: null };
   state.practiceGuide = { practiceId, step };
   renderPracticesPage();
   openStepPanels(step);
@@ -759,6 +769,7 @@ function problemItemHtml({ message }, k) {
 }
 
 function goToProblem({ kind, id }) {
+  if (!confirmDiscardForms()) return;
   const guided = state.practiceGuide;
   const step = GUIDE_STEP_OF_PROBLEM[kind];
   if (guided && step && guided.step !== step) {
