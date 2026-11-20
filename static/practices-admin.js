@@ -576,7 +576,7 @@ function goToGuideStep(practiceId, step) {
   if (state.editing.kind && GUIDE_STEP_OF_PROBLEM[state.editing.kind] !== step) state.editing = { kind: null, id: null };
   state.practiceGuide = { practiceId, step };
   renderPracticesPage();
-  openStepPanels(step);
+  openStepPanels(state.practiceGuide.step);
   practiceWorkspace.scrollIntoView({ block: "start" });
 }
 
@@ -785,6 +785,10 @@ function goToProblem({ kind, id }) {
     if (cell) return cell.scrollIntoView({ block: "center" });
     state.editing = { kind: null, id: null };
     target = parts;
+    if (guided) {
+      guided.step = "partes";
+      renderPracticesPage();
+    }
   }
   const el = practiceWorkspace.querySelector(target) ?? practiceWorkspace.querySelector(parts);
   if (el?.tagName === "DETAILS" && el.matches(`[data-add-panel="${kind}"]`)) el.open = true;
