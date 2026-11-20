@@ -800,7 +800,8 @@ async function calculateDraftPreview(measurements) {
 function hasTypedReadings() {
   return (
     [...state.chronometers.values()].some((c) => c.count > 0) ||
-    [...measurementFields.querySelectorAll("input")].some((i) => i.value.trim() !== i.defaultValue.trim())
+    [...measurementFields.querySelectorAll("input")].some((i) => i.value.trim() !== i.defaultValue.trim()) ||
+    [...measurementFields.querySelectorAll(".prefix-select")].some((s) => !s.options[s.selectedIndex]?.defaultSelected)
   );
 }
 

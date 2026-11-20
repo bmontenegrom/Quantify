@@ -28,12 +28,11 @@ async function tryWithExampleData(page, practiceId) {
   let askedIncomplete = false;
   const incomplete = page.locator("#measurement-fields .series-value:visible").first();
   const seriesRow = (await incomplete.count()) > 0;
-  if (seriesRow) {
-    await incomplete.fill("12345");
-    page.once("dialog", (d) => { askedIncomplete = true; return d.accept(); });
-  }
+  if (seriesRow) await incomplete.fill("12345");
+  else await page.locator("#measurement-fields .prefix-select:visible").first().selectOption("m");
+  page.once("dialog", (d) => { askedIncomplete = true; return d.accept(); });
   await page.click("#draft-preview-fill");
-  assert(!seriesRow || askedIncomplete, `${practiceId}: una fila de serie incompleta debía pedir confirmación`);
+  assert(askedIncomplete, `${practiceId}: ${seriesRow ? "una fila de serie incompleta" : "un cambio de prefijo"} debía pedir confirmación`);
   const response = page.waitForResponse((r) => r.url().includes("/analyze-preview"));
   await page.click("#submit-button");
   const analysis = await (await response).json();
