@@ -24,8 +24,7 @@ async function tryWithExampleData(page, practiceId) {
   await page.click(`[data-practice-open][data-practice-id="${practiceId}"]`);
   await page.click("[data-practice-try-draft]");
   await page.waitForSelector("#draft-preview-banner:not(.hidden)");
-  await page.waitForSelector("#measurement-fields .measurement-row, #measurement-fields .series-table");
-  await page.click("#draft-preview-fill");
+  await page.click("#draft-preview-fill:not([disabled])");
   const response = page.waitForResponse((r) => r.url().includes("/analyze-preview"));
   await page.click("#submit-button");
   const analysis = await (await response).json();
@@ -42,6 +41,14 @@ async function tryWithExampleData(page, practiceId) {
   assert(result.trim().length > 0, `${practiceId}: la prueba debía mostrar un resultado`);
   assert(!result.includes("NaN"), `${practiceId}: el resultado no debía tener NaN: ${result.slice(0, 400)}`);
   await page.screenshot({ path: join(ARTIFACTS, `datos-ejemplo-${practiceId}.png`), fullPage: true });
+  let asked = false;
+  page.once("dialog", (d) => { asked = true; return d.dismiss(); });
+  await page.click("#draft-preview-fill");
+  assert(asked, `${practiceId}: rellenar sobre valores cargados debía pedir confirmación`);
+  assert(await page.locator("#latest-result").isVisible(), `${practiceId}: cancelar no debía tocar el resultado`);
+  page.once("dialog", (d) => d.accept());
+  await page.click("#draft-preview-fill");
+  assert(await page.locator("#latest-result").isHidden(), `${practiceId}: rellenar debía ocultar el resultado anterior`);
   await page.click("#draft-preview-back");
 }
 

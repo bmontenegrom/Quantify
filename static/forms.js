@@ -773,7 +773,10 @@ export async function submitFormSubmission() {
   }
 }
 
+let draftPreviewRequest = 0;
+
 async function calculateDraftPreview(measurements) {
+  const request = ++draftPreviewRequest;
   if (submitButton) submitButton.disabled = true;
   submitStatus.textContent = "Calculando...";
   try {
@@ -781,21 +784,44 @@ async function calculateDraftPreview(measurements) {
       `/api/practices/${encodeURIComponent(state.draftPreviewPracticeId)}/analyze-preview`,
       { measurements, draft: true },
     );
+    if (request !== draftPreviewRequest) return;
     const { formAnalysisMarkup } = await import("./analysis.js");
     setDisplaySymbols(state.practiceForm?.definition?.display_symbols);
     latestResult.innerHTML = formAnalysisMarkup(analysis, comparisonPairs(state.practiceForm?.definition));
     latestResult.classList.remove("hidden");
     submitStatus.textContent = "Calculado con el borrador: no se guardó nada.";
   } catch (error) {
-    submitStatus.textContent = error.message;
+    if (request === draftPreviewRequest) submitStatus.textContent = error.message;
   } finally {
     if (submitButton) submitButton.disabled = false;
   }
 }
 
+function hasTypedReadings(definition, current) {
+  const defaults = new Map(definition.quantities.map((q) => [q.id, q.default_value ?? null]));
+  const readings = (m) => [...(m.values ?? []), ...(m.point_replicas ?? []).flat(), ...(m.operator_replicas ?? []).flat()];
+  return (
+    [...state.chronometers.values()].some((c) => c.count > 0) ||
+    current.some((m) => readings(m).some((v) => v !== defaults.get(m.quantity_id))) ||
+    [...measurementFields.querySelectorAll("[data-final-result] input")].some((i) => i.value.trim() !== "")
+  );
+}
+
 function fillExampleData() {
   if (!state.practiceForm) return;
-  const draft = { measurements: exampleMeasurements(state.practiceForm.definition), finalResults: [] };
+  const { definition, instruments } = state.practiceForm;
+  const current = collectMeasurements();
+  if (hasTypedReadings(definition, current) && !window.confirm("¿Reemplazar los valores cargados por datos de ejemplo?")) return;
+  const chosen = new Map(current.filter((m) => m.instrument_id).map((m) => [m.quantity_id, m]));
+  const measurements = exampleMeasurements(definition, { instruments }).map((m) => {
+    const c = chosen.get(m.quantity_id);
+    return c ? { ...m, instrument_id: c.instrument_id, scale_id: c.scale_id } : m;
+  });
+  const draft = { measurements, finalResults: [] };
+  draftPreviewRequest++;
+  latestResult.classList.add("hidden");
+  submitStatus.textContent = "";
+  for (const chrono of state.chronometers.values()) if (chrono.state === "running") chrono.stop();
   restoreChronoDraft(null);
   renderMeasurementFields(draft);
   applyDraftPrefill(draft);
@@ -825,7 +851,7 @@ export async function openDraftPreview(practiceId) {
   const banner = document.querySelector("#draft-preview-banner");
   banner.innerHTML = `
     <div>Estás probando el borrador. No se crea ninguna versión ni se guarda ninguna entrega. Los resultados finales que cargues acá no se comparan.</div>
-    <button type="button" id="draft-preview-fill">Rellenar con datos de ejemplo</button>
+    <button type="button" id="draft-preview-fill" disabled>Rellenar con datos de ejemplo</button>
     <button type="button" id="draft-preview-back">Volver al editor</button>`;
   banner.querySelector("#draft-preview-fill").addEventListener("click", fillExampleData);
   banner.querySelector("#draft-preview-back").addEventListener("click", async () => {
@@ -836,6 +862,9 @@ export async function openDraftPreview(practiceId) {
   const { selectView } = await import("./navigation.js");
   selectView("practica");
   await loadSubmissionForm();
+  if (state.draftPreviewPracticeId === practiceId && state.practiceForm) {
+    banner.querySelector("#draft-preview-fill").disabled = false;
+  }
 }
 
 function knownCourseId(courseId) {

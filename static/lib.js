@@ -357,7 +357,7 @@ export function hasUncertainty(entity) {
   return entity?.has_uncertainty !== false;
 }
 
-export function exampleMeasurements(definition, { points = 5, replicas = 3 } = {}) {
+export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
   const kind = definition?.analysis_kind;
   const pointBased = kind === "regresion_lineal" || kind === "curva";
   const operators = !pointBased && (definition?.operator_count ?? 0) >= 2 ? definition.operator_count : 0;
@@ -366,7 +366,8 @@ export function exampleMeasurements(definition, { points = 5, replicas = 3 } = {
   const quantities = definition?.quantities ?? [];
   return quantities.map((q, i) => {
     const base = q.default_value != null && (q.is_given || q.default_value !== 0) ? q.default_value : quantities.length - i;
-    const m = { quantity_id: q.id, instrument_id: null, scale_id: null, values: [], given_u: null };
+    const instrument = q.quantity && !q.is_given ? compatibleInstruments(instruments, q.quantity).find((x) => x.scales?.length) : null;
+    const m = { quantity_id: q.id, instrument_id: instrument?.id ?? null, scale_id: instrument?.scales[0].id ?? null, values: [], given_u: null };
     if (q.is_given) {
       const value = q.slot_count ? 1 : base;
       return { ...m, values: [value], given_u: hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null };

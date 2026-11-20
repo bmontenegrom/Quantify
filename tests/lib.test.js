@@ -982,6 +982,22 @@ test("exampleMeasurements: un 0 por defecto en una medida no se usa (divisor de 
   assert.deepEqual(b.values, [0]);
 });
 
+test("exampleMeasurements: elige el primer instrumento compatible con escala", () => {
+  const instruments = [
+    { id: "vacio", quantity: "longitud", scales: [] },
+    { id: "regla", quantity: "longitud", scales: [{ id: "mm" }, { id: "cm" }] },
+    { id: "balanza", quantity: "masa", scales: [{ id: "g" }] },
+  ];
+  const [L, g, x] = exampleMeasurements(
+    { quantities: [{ id: "L", quantity: "longitud" }, { id: "g", quantity: "longitud", is_given: true }, { id: "x" }] },
+    { instruments },
+  );
+  assert.equal(L.instrument_id, "regla");
+  assert.equal(L.scale_id, "mm");
+  assert.equal(g.instrument_id, null);
+  assert.equal(x.instrument_id, null);
+});
+
 test("exampleMeasurements: el cociente entre dos series varía entre puntos (eje V/t)", () => {
   const def = {
     analysis_kind: "regresion_lineal",
