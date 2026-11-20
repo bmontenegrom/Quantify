@@ -373,6 +373,13 @@ export function practiceGuideSteps(definition) {
   return GUIDE_STEPS.filter((s) => s.id !== "serie" || series);
 }
 
+export function guideStepOrNext(definition, step) {
+  const steps = practiceGuideSteps(definition);
+  const order = GUIDE_STEPS.map((s) => s.id);
+  const from = order.indexOf(step);
+  return (steps.find((s) => s.id === step) ?? steps.find((s) => order.indexOf(s.id) > from) ?? steps[0]).id;
+}
+
 export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
   const kind = definition?.analysis_kind;
   const pointBased = kind === "regresion_lineal" || kind === "curva";

@@ -1,4 +1,4 @@
-import { TEACHER, assert, assignSection, fillAndSubmit, openAddForm, step, waitForStatus, withE2E } from "./lib.mjs";
+import { TEACHER, apiPost, assert, assignSection, fillAndSubmit, openAddForm, step, waitForStatus, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8183";
 
@@ -155,8 +155,19 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   await page.click('#practice-workspace .practice-guide [data-guide-go="revisar"]');
   await page.waitForSelector("#practice-draft-changes [data-practice-publish-version]");
 
-  step("Hidrostática: un problema del panel lleva a su paso");
+  step("Hidrostática: en la ficha completa, un problema que solo hace scroll no pide confirmación");
   await createGuided(page, "Hidrostatica guiada", "estadistico");
+  await page.click("#practice-workspace [data-guide-exit]");
+  await openAddForm(page, "#new-quantity-form");
+  await page.locator('#new-quantity-form [name="symbol"]').fill("zz");
+  before = dialogs;
+  await page.locator("#practice-problems [data-problem]", { hasText: "magnitudes de entrada" }).click();
+  assert(dialogs === before, "ir a un problema sin volver a dibujar la ficha no debía pedir confirmación");
+  await page.locator('#new-quantity-form [name="symbol"]').fill("");
+  await page.click("#practice-workspace [data-guide-start]");
+  await expectStep(page, "Datos");
+
+  step("Hidrostática: un problema del panel lleva a su paso");
   await page.locator("#practice-problems [data-problem]", { hasText: "magnitudes de entrada" }).click();
   await expectStep(page, "Magnitudes");
   assert(
@@ -212,6 +223,24 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   await next(page, "Revisar");
   await reviewTryAndPublish(page, "Hidrostática");
   assert((await currentStep(page)).includes("Revisar"), "publicar debía dejar el modo guiado en Revisar");
+
+  step("Hidrostática: una descripción con salto de línea no cuenta como dato sin guardar");
+  const practiceId = await page.locator("[data-practice-try-draft]").getAttribute("data-practice-id");
+  await apiPost(page, `/api/practices/${practiceId}`, { name: "Hidrostatica guiada", description: "linea 1\nlinea 2" });
+  await page.click("#practice-workspace-back");
+  await page.click(`[data-practice-open][data-practice-id="${practiceId}"]`);
+  await page.click("#practice-workspace [data-guide-start]");
+  before = dialogs;
+  await next(page, "Partes");
+  await next(page, "Secciones");
+  assert(dialogs === before, "cambiar de paso sin escribir nada no debía pedir confirmación");
+
+  step("Hidrostática: volver al listado con un alta a medio escribir pide confirmación");
+  await openAddForm(page, "#new-section-form");
+  await page.locator('#new-section-form [name="title"]').fill("Sin guardar");
+  await page.click("#practice-workspace-back");
+  assert(dialogs === before + 1, "volver al listado con datos sin guardar debía pedir confirmación");
+  await page.waitForSelector("#practice-catalog [data-practice-open]");
 
   console.log("modo guiado: Fluidos I y una Hidrostática de dos partes creadas desde la UI, probadas y publicadas.");
 });

@@ -17,6 +17,7 @@ import {
   quantityRole,
   roleFlags,
   practiceGuideSteps,
+  guideStepOrNext,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -405,7 +406,9 @@ export function renderPracticesPage() {
   practiceWorkspace.classList.remove("hidden");
   practiceCatalog?.closest(".panel")?.classList.add("hidden");
 
-  practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", closePracticeWorkspace);
+  practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", () => {
+    if (confirmDiscardForms()) closePracticeWorkspace();
+  });
   practiceWorkspace.querySelector("[data-guide-start]")?.addEventListener("click", () => {
     goToGuideStep(practice.id, state.practiceGuideLastStep ?? "datos");
   });
@@ -423,6 +426,7 @@ export function renderPracticesPage() {
     btn.addEventListener("click", () => setPracticeStatus(btn.dataset.practiceId, btn.dataset.practiceStatus));
   });
   practiceWorkspace.querySelector("[data-practice-try-draft]")?.addEventListener("click", async (e) => {
+    if (!confirmDiscardForms()) return;
     const practiceId = e.currentTarget.dataset.practiceId;
     const { openDraftPreview } = await import("./forms.js");
     await openDraftPreview(practiceId);
@@ -554,19 +558,19 @@ const GUIDE_STEP_OF_PROBLEM = {
 function guideFor(practiceId, def) {
   if (state.practiceGuide?.practiceId !== practiceId) return null;
   const steps = practiceGuideSteps(def);
-  const index = Math.max(steps.findIndex((s) => s.id === state.practiceGuide.step), 0);
-  state.practiceGuide.step = steps[index].id;
-  return { steps, index };
+  state.practiceGuide.step = guideStepOrNext(def, state.practiceGuide.step);
+  return { steps, index: steps.findIndex((s) => s.id === state.practiceGuide.step) };
 }
 
 function fieldChanged(el) {
   if (el.type === "hidden" || el.disabled) return false;
   if (el.tagName === "SELECT") return el.selectedIndex !== Math.max([...el.options].findIndex((o) => o.defaultSelected), 0);
   if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
-  return el.value !== el.defaultValue;
+  const initial = el.tagName === "INPUT" ? el.defaultValue.replace(/[\r\n]/g, "") : el.defaultValue;
+  return el.value !== initial;
 }
 
-function confirmDiscardForms() {
+export function confirmDiscardForms() {
   const dirty = [...practiceWorkspace.querySelectorAll("form input, form select, form textarea")].some(fieldChanged);
   return !dirty || window.confirm("Hay datos sin guardar en un formulario. ¿Descartarlos?");
 }
@@ -769,10 +773,12 @@ function problemItemHtml({ message }, k) {
 }
 
 function goToProblem({ kind, id }) {
-  if (!confirmDiscardForms()) return;
   const guided = state.practiceGuide;
-  const step = GUIDE_STEP_OF_PROBLEM[kind];
-  if (guided && step && guided.step !== step) {
+  const steps = guided ? practiceGuideSteps(state.practiceDefinition).map((s) => s.id) : [];
+  const step = steps.includes(GUIDE_STEP_OF_PROBLEM[kind]) ? GUIDE_STEP_OF_PROBLEM[kind] : null;
+  const rerenders = (step && guided.step !== step) || (id && EDITABLE_KINDS.has(kind));
+  if (rerenders && !confirmDiscardForms()) return;
+  if (step && guided.step !== step) {
     guided.step = step;
     renderPracticesPage();
   }

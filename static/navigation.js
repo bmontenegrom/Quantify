@@ -116,8 +116,11 @@ document.querySelectorAll(".tab").forEach((tab) => {
       return;
     }
     if (tab.dataset.view === "practices" && state.activePracticeId) {
-      import("./practices-admin.js").then(({ closePracticeWorkspace }) => closePracticeWorkspace());
-      selectView("practices");
+      import("./practices-admin.js").then(({ closePracticeWorkspace, confirmDiscardForms }) => {
+        if (!confirmDiscardForms()) return;
+        closePracticeWorkspace();
+        selectView("practices");
+      });
       return;
     }
     if (tab.dataset.view === "submissions" && state.activeSubmissionId) {

@@ -5,6 +5,7 @@ import {
   analysisSections,
   exampleMeasurements,
   practiceGuideSteps,
+  guideStepOrNext,
   escapeHtml,
   symbolHtml,
   setDisplaySymbols,
@@ -1024,4 +1025,12 @@ test("practiceGuideSteps: el paso de serie aparece solo con regresión o curva",
   assert.deepEqual(ids({ analysis_kind: "regresion_lineal" }), ["datos", "partes", "secciones", "magnitudes", "serie", "mensurandos", "revisar"]);
   assert.ok(ids({ analysis_kind: "estadistico", parts: [{ effective_kind: "estadistico" }, { effective_kind: "curva" }] }).includes("serie"));
   assert.deepEqual(ids(null), ["datos", "partes", "secciones", "magnitudes", "mensurandos", "revisar"]);
+});
+
+test("guideStepOrNext: un paso que ya no aplica cae al siguiente que sí", () => {
+  const estadistica = { analysis_kind: "estadistico", parts: [] };
+  assert.equal(guideStepOrNext(estadistica, "serie"), "mensurandos");
+  assert.equal(guideStepOrNext(estadistica, "magnitudes"), "magnitudes");
+  assert.equal(guideStepOrNext({ analysis_kind: "curva" }, "serie"), "serie");
+  assert.equal(guideStepOrNext(estadistica, "desconocido"), "datos");
 });
