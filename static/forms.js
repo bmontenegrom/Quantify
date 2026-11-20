@@ -797,13 +797,10 @@ async function calculateDraftPreview(measurements) {
   }
 }
 
-function hasTypedReadings(definition, current) {
-  const defaults = new Map(definition.quantities.map((q) => [q.id, q.default_value ?? null]));
-  const readings = (m) => [...(m.values ?? []), ...(m.point_replicas ?? []).flat(), ...(m.operator_replicas ?? []).flat()];
+function hasTypedReadings() {
   return (
     [...state.chronometers.values()].some((c) => c.count > 0) ||
-    current.some((m) => readings(m).some((v) => v !== defaults.get(m.quantity_id))) ||
-    [...measurementFields.querySelectorAll("[data-final-result] input")].some((i) => i.value.trim() !== "")
+    [...measurementFields.querySelectorAll("input")].some((i) => i.value.trim() !== i.defaultValue.trim())
   );
 }
 
@@ -811,7 +808,7 @@ function fillExampleData() {
   if (!state.practiceForm) return;
   const { definition, instruments } = state.practiceForm;
   const current = collectMeasurements();
-  if (hasTypedReadings(definition, current) && !window.confirm("¿Reemplazar los valores cargados por datos de ejemplo?")) return;
+  if (hasTypedReadings() && !window.confirm("¿Reemplazar los valores cargados por datos de ejemplo?")) return;
   const chosen = new Map(current.filter((m) => m.instrument_id).map((m) => [m.quantity_id, m]));
   const measurements = exampleMeasurements(definition, { instruments }).map((m) => {
     const c = chosen.get(m.quantity_id);

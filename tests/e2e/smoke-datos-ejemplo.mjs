@@ -24,7 +24,16 @@ async function tryWithExampleData(page, practiceId) {
   await page.click(`[data-practice-open][data-practice-id="${practiceId}"]`);
   await page.click("[data-practice-try-draft]");
   await page.waitForSelector("#draft-preview-banner:not(.hidden)");
-  await page.click("#draft-preview-fill:not([disabled])");
+  await page.waitForSelector("#draft-preview-fill:not([disabled])");
+  let askedIncomplete = false;
+  const incomplete = page.locator("#measurement-fields .series-value:visible").first();
+  const seriesRow = (await incomplete.count()) > 0;
+  if (seriesRow) {
+    await incomplete.fill("12345");
+    page.once("dialog", (d) => { askedIncomplete = true; return d.accept(); });
+  }
+  await page.click("#draft-preview-fill");
+  assert(!seriesRow || askedIncomplete, `${practiceId}: una fila de serie incompleta debía pedir confirmación`);
   const response = page.waitForResponse((r) => r.url().includes("/analyze-preview"));
   await page.click("#submit-button");
   const analysis = await (await response).json();
