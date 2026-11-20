@@ -982,6 +982,12 @@ test("exampleMeasurements: un 0 por defecto en una medida no se usa (divisor de 
   assert.deepEqual(b.values, [0]);
 });
 
+test("exampleMeasurements: una ranura usa su valor por defecto", () => {
+  const [a, b] = exampleMeasurements({ quantities: [{ id: "a", is_given: true, slot_count: 9, default_value: 3 }, { id: "b", is_given: true, slot_count: 9 }] });
+  assert.deepEqual(a.values, [3]);
+  assert.deepEqual(b.values, [1]);
+});
+
 test("exampleMeasurements: elige el primer instrumento compatible con escala", () => {
   const instruments = [
     { id: "vacio", quantity: "longitud", scales: [] },

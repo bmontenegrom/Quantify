@@ -19,12 +19,23 @@ function collect(node, key, out = []) {
   return out;
 }
 
-async function tryWithExampleData(page, practiceId) {
+async function openPreview(page, practiceId) {
   await page.click('.tab.teacher-only[data-view="practices"]');
   await page.click(`[data-practice-open][data-practice-id="${practiceId}"]`);
   await page.click("[data-practice-try-draft]");
   await page.waitForSelector("#draft-preview-banner:not(.hidden)");
   await page.waitForSelector("#draft-preview-fill:not([disabled])");
+}
+
+async function tryWithExampleData(page, practiceId) {
+  await openPreview(page, practiceId);
+  let askedFresh = false;
+  page.once("dialog", (d) => { askedFresh = true; return d.dismiss(); });
+  await page.click("#draft-preview-fill");
+  assert(!askedFresh, `${practiceId}: rellenar un formulario sin tocar no debía pedir confirmación`);
+  page.removeAllListeners("dialog");
+  await page.click("#draft-preview-back");
+  await openPreview(page, practiceId);
   let askedIncomplete = false;
   const incomplete = page.locator("#measurement-fields .series-value:visible").first();
   const seriesRow = (await incomplete.count()) > 0;

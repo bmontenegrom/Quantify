@@ -122,6 +122,8 @@ export async function loadSubmissionForm() {
   }
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
+  const fillButton = document.querySelector("#draft-preview-fill");
+  if (fillButton) fillButton.disabled = true;
   const practiceId = practiceSelect.value;
   if (state.editingSubmissionId && state.editingPracticeId !== practiceId) exitEditMode();
   if (!state.editingSubmissionId && studentComment) studentComment.value = "";
@@ -183,6 +185,7 @@ export async function loadSubmissionForm() {
     applyDraftPrefill(draft);
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
+    if (fillButton && previewing) fillButton.disabled = false;
   } catch (error) {
     if (request !== latestFormRequest) return;
     state.practiceForm = null;
@@ -784,8 +787,8 @@ async function calculateDraftPreview(measurements) {
       `/api/practices/${encodeURIComponent(state.draftPreviewPracticeId)}/analyze-preview`,
       { measurements, draft: true },
     );
-    if (request !== draftPreviewRequest) return;
     const { formAnalysisMarkup } = await import("./analysis.js");
+    if (request !== draftPreviewRequest) return;
     setDisplaySymbols(state.practiceForm?.definition?.display_symbols);
     latestResult.innerHTML = formAnalysisMarkup(analysis, comparisonPairs(state.practiceForm?.definition));
     latestResult.classList.remove("hidden");
@@ -793,15 +796,20 @@ async function calculateDraftPreview(measurements) {
   } catch (error) {
     if (request === draftPreviewRequest) submitStatus.textContent = error.message;
   } finally {
-    if (submitButton) submitButton.disabled = false;
+    if (submitButton && request === draftPreviewRequest) submitButton.disabled = false;
   }
+}
+
+function changedFromRender(el) {
+  if (el.tagName === "SELECT") return el.selectedIndex !== Math.max([...el.options].findIndex((o) => o.defaultSelected), 0);
+  if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
+  return el.validity.badInput || el.value.trim() !== el.defaultValue.trim();
 }
 
 function hasTypedReadings() {
   return (
     [...state.chronometers.values()].some((c) => c.count > 0) ||
-    [...measurementFields.querySelectorAll("input")].some((i) => i.value.trim() !== i.defaultValue.trim()) ||
-    [...measurementFields.querySelectorAll(".prefix-select")].some((s) => !s.options[s.selectedIndex]?.defaultSelected)
+    [...measurementFields.querySelectorAll("input, select:not(.measure-instrument):not(.measure-scale)")].some(changedFromRender)
   );
 }
 
@@ -860,9 +868,6 @@ export async function openDraftPreview(practiceId) {
   const { selectView } = await import("./navigation.js");
   selectView("practica");
   await loadSubmissionForm();
-  if (state.draftPreviewPracticeId === practiceId && state.practiceForm) {
-    banner.querySelector("#draft-preview-fill").disabled = false;
-  }
 }
 
 function knownCourseId(courseId) {

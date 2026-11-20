@@ -369,7 +369,7 @@ export function exampleMeasurements(definition, { points = 5, replicas = 3, inst
     const instrument = q.quantity && !q.is_given ? compatibleInstruments(instruments, q.quantity).find((x) => x.scales?.length) : null;
     const m = { quantity_id: q.id, instrument_id: instrument?.id ?? null, scale_id: instrument?.scales[0].id ?? null, values: [], given_u: null };
     if (q.is_given) {
-      const value = q.slot_count ? 1 : base;
+      const value = q.slot_count ? q.default_value ?? 1 : base;
       return { ...m, values: [value], given_u: hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null };
     }
     if (pointBased && q.per_point) {
