@@ -331,7 +331,7 @@ export function renderPracticesPage() {
     <div class="workspace-head">
       <div>
         <button type="button" class="back-link" id="practice-workspace-back">Volver al listado</button>
-        ${guide ? "" : `<button type="button" class="back-link" data-guide-start>Modo guiado</button>`}
+        ${guide ? "" : `<button type="button" class="link-button" data-guide-start>Modo guiado</button>`}
         <h3>${escapeHtml(practice.name)}</h3>
         <p class="submission-meta">${escapeHtml(practice.description)}</p>
         ${practiceLifecycleActions(practice, def)}
@@ -595,7 +595,8 @@ function applyGuide({ steps, index }) {
     const add = block.matches("details") ? block : block.querySelector("details.add-panel");
     if (add && (empty || block.matches("details"))) add.open = true;
   }
-  practiceWorkspace.querySelector(".practice-lifecycle")?.classList.toggle("hidden", step !== "revisar");
+  const lifecycle = practiceWorkspace.querySelector(".practice-lifecycle");
+  if (lifecycle) lifecycle.style.display = step === "revisar" ? "" : "none";
 }
 
 const STATUS_LABELS = { borrador: "Borrador", publicada: "Publicada", archivada: "Archivada" };

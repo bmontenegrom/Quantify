@@ -31,6 +31,50 @@ export async function openAddForm(page, formSelector) {
   await page.waitForSelector(formSelector);
 }
 
+export async function fillAndSubmit(page, formSelector, fields, checks = {}) {
+  const form = page.locator(formSelector);
+  for (const [name, value] of Object.entries(fields)) {
+    const field = form.locator(`[name="${name}"]`);
+    if ((await field.evaluate((el) => el.tagName)) === "SELECT") await field.selectOption(value);
+    else await field.fill(value);
+  }
+  for (const [name, checked] of Object.entries(checks)) {
+    await form.locator(`[name="${name}"]`).setChecked(checked);
+  }
+  await form.locator('button[type="submit"]').click();
+}
+
+export async function assignSection(page, list, symbol, label) {
+  const select = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="${list}"]`);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await select.selectOption({ label });
+    await page.waitForLoadState("networkidle");
+    const ok = await page
+      .waitForFunction(
+        ([list, symbol, label]) => {
+          const row = [...document.querySelectorAll("#practice-workspace tr")].find(
+            (tr) => tr.querySelector("code")?.textContent === symbol,
+          );
+          const sel = row?.querySelector(`[data-section-select="${list}"]`);
+          return sel?.selectedOptions[0]?.textContent === label;
+        },
+        [list, symbol, label],
+        { timeout: 3_000 },
+      )
+      .then(() => true, () => false);
+    if (ok) return;
+  }
+  throw new Error(`no se pudo asignar ${symbol} a ${label}`);
+}
+
+export async function waitForStatus(page, text) {
+  await page.waitForFunction(
+    (t) => (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes(t),
+    text,
+    { timeout: 10_000 },
+  );
+}
+
 export async function apiPost(page, url, body) {
   return page.evaluate(
     async ({ url, body }) => {

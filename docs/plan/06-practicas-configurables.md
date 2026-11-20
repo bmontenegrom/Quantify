@@ -846,7 +846,7 @@ Cada PR de implementación sigue el mismo patrón:
    - **E2E**: la potencia sigue dando 25 y fluidos-1 muestra Q_1, Q_2 y Q_medio.
    - **Doc**: F6 queda marcada como hecha.
 
-### F7 — Editor completo en la UI
+### F7 — Editor completo en la UI ✅ HECHA
 
 Sobre la ficha actual (bloques apilados de `practices-admin.js`, #69):
 
@@ -951,8 +951,10 @@ Decisiones:
      pura en JS, con tests.
    - Un E2E prueba el borrador de una práctica de regresión con datos de ejemplo.
 6. **`feat(practicas)`: modo guiado para crear prácticas (F7, 6/6).**
-   - Pasos: datos → partes → magnitudes → intermedias, curvas y ejes → mensurandos → secciones →
-     revisar y publicar (panel de problemas, probar con datos de ejemplo, publicar).
+   - Pasos: datos → partes → secciones → magnitudes → intermedias, curvas y ejes → mensurandos →
+     revisar y publicar (panel de problemas, probar con datos de ejemplo, publicar). Las secciones
+     van antes de las magnitudes porque cada magnitud y mensurando elige su sección en su tabla.
+     El paso de serie aparece solo si alguna parte es de regresión o curva (`practiceGuideSteps`).
    - "Nueva práctica" abre la ficha en modo guiado, y "Ver todo" vuelve a la ficha completa.
    - E2E de aceptación: crear desde la UI una réplica de Fluidos I (regresión, réplicas por punto,
      intermedia, derivada por punto) y una de Hidrostática con dos partes y datos compartidos.
