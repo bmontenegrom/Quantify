@@ -120,6 +120,7 @@ export async function loadSubmissionForm() {
     if (practicaSubtitle) practicaSubtitle.textContent = DEFAULT_SUBTITLE;
     return;
   }
+  draftPreviewRequest++;
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
   const fillButton = document.querySelector("#draft-preview-fill");
@@ -816,13 +817,18 @@ function hasTypedReadings() {
 function fillExampleData() {
   if (!state.practiceForm) return;
   const { definition, instruments } = state.practiceForm;
-  const current = collectMeasurements();
   if (hasTypedReadings() && !window.confirm("¿Reemplazar los valores cargados por datos de ejemplo?")) return;
-  const chosen = new Map(current.filter((m) => m.instrument_id).map((m) => [m.quantity_id, m]));
-  const measurements = exampleMeasurements(definition, { instruments }).map((m) => {
-    const c = chosen.get(m.quantity_id);
-    return c ? { ...m, instrument_id: c.instrument_id, scale_id: c.scale_id } : m;
-  });
+  const chosen = new Map();
+  for (const select of measurementFields.querySelectorAll(".measure-instrument")) {
+    if (!select.value && !changedFromRender(select)) continue;
+    const instrument = instruments.find((i) => i.id === select.value);
+    const scale = select.closest(".measure-selectors").querySelector(".measure-scale").value;
+    chosen.set(select.closest("[data-quantity-id]").dataset.quantityId, {
+      instrument_id: instrument?.id ?? null,
+      scale_id: instrument ? scale || instrument.scales?.[0]?.id || null : null,
+    });
+  }
+  const measurements = exampleMeasurements(definition, { instruments }).map((m) => ({ ...m, ...chosen.get(m.quantity_id) }));
   const draft = { measurements, finalResults: [] };
   draftPreviewRequest++;
   latestResult.classList.add("hidden");
@@ -885,6 +891,7 @@ export function startEditSubmission(submission) {
 }
 
 export function exitEditMode() {
+  draftPreviewRequest++;
   if (state.draftPreviewPracticeId) {
     showDraftPreviewChrome(false);
     state.practiceForm = null;

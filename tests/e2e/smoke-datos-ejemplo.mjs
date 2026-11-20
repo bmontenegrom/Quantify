@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { ARTIFACTS, TEACHER, assert, step, withE2E } from "./lib.mjs";
+import { ARTIFACTS, TEACHER, apiPost, assert, step, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8181";
 
@@ -44,6 +44,9 @@ async function tryWithExampleData(page, practiceId) {
   page.once("dialog", (d) => { askedIncomplete = true; return d.accept(); });
   await page.click("#draft-preview-fill");
   assert(askedIncomplete, `${practiceId}: ${seriesRow ? "una fila de serie incompleta" : "un cambio de prefijo"} debía pedir confirmación`);
+  const scaleless = await page.$$eval("#measurement-fields .measure-selectors", (all) =>
+    all.filter((sel) => sel.querySelector(".measure-instrument").value && !sel.querySelector(".measure-scale").value).length);
+  assert(scaleless === 0, `${practiceId}: ${scaleless} medidas quedaron con instrumento y sin escala`);
   const response = page.waitForResponse((r) => r.url().includes("/analyze-preview"));
   await page.click("#submit-button");
   const analysis = await (await response).json();
@@ -74,6 +77,18 @@ async function tryWithExampleData(page, practiceId) {
 await withE2E({ port: PORT, dbName: "quantify-datos-ejemplo.db" }, async ({ login }) => {
   step("docente: login");
   const { page } = await login(TEACHER, "docente");
+
+  step("docente: los cronómetros tienen dos escalas (el preseleccionado queda sin escala elegida)");
+  const chronos = await page.evaluate(async () => {
+    const { courses } = await (await fetch("/api/academic/context")).json();
+    const lists = await Promise.all(courses.map(async (c) => (await fetch(`/api/instruments?course_id=${encodeURIComponent(c.id)}`)).json()));
+    return lists.flat().filter((i) => /cron[oó]metro/i.test(i.name) && i.scales.length === 1);
+  });
+  assert(chronos.length > 0, "debía haber algún cronómetro sembrado");
+  for (const chrono of chronos) {
+    const { id, instrument_id, position, ...scale } = chrono.scales[0];
+    await apiPost(page, `/api/instruments/${chrono.id}/scales`, { ...scale, label: `${scale.label} (bis)` });
+  }
   for (const practiceId of PRACTICES) {
     step(`docente: prueba ${practiceId} con datos de ejemplo`);
     await tryWithExampleData(page, practiceId);
