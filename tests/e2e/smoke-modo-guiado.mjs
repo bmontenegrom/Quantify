@@ -84,7 +84,11 @@ async function reviewTryAndPublish(page, label) {
 await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login }) => {
   step("docente: login");
   const { page } = await login(TEACHER, "docente");
-  page.on("dialog", (dialog) => dialog.accept());
+  let dialogs = 0;
+  page.on("dialog", (dialog) => {
+    dialogs++;
+    return dialog.accept();
+  });
 
   step("Fluidos I: Nueva práctica abre el modo guiado en Datos");
   await createGuided(page, "Fluidos guiada", "regresion_lineal");
@@ -100,13 +104,25 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   for (const symbol of ["R", "L", "g"]) await addQuantity(page, { symbol, name: symbol, unit: "", role: "catedra" });
   await addQuantity(page, { symbol: "rho", name: "Densidad del agua", unit: "kg/m3", role: "unica" });
 
-  step("Fluidos I: intermedia Q y ejes del ajuste");
+  step("Fluidos I: cambiar de paso con una fila en edición pide confirmación");
+  await page.locator(`${row("h")} [data-edit-quantity]`).click();
+  await page.waitForSelector("#edit-quantity-form");
+  const before = dialogs;
   await next(page, "Serie y ejes");
+  assert(dialogs === before + 1, "cambiar de paso con una magnitud en edición debía pedir confirmación");
+
+  step("Fluidos I: ejes del ajuste e intermedia Q; el alta cerrada no se vuelve a abrir sola");
+  const intermediatePanel = page.locator('#practice-workspace details[data-add-panel="intermediate"]');
+  assert(await intermediatePanel.evaluate((d) => d.open), "al entrar al paso, el alta vacía debía estar abierta");
+  await intermediatePanel.locator("> summary").click();
+  await fillAndSubmit(page, "#practice-regression-form", { x_formula: "h", y_formula: "h" });
+  await waitForStatus(page, "Fórmulas de ajuste guardadas");
+  assert(!(await intermediatePanel.evaluate((d) => d.open)), "guardar los ejes no debía reabrir el alta de intermedias");
   await openAddForm(page, "#new-intermediate-form");
   await fillAndSubmit(page, "#new-intermediate-form", { symbol: "Q", name: "Caudal medio", unit: "m3/s", formula: "V/t" });
   await waitForStatus(page, "Intermedia agregada");
   await fillAndSubmit(page, "#practice-regression-form", { x_formula: "1/Q", y_formula: "h/(Q*Q)" });
-  await waitForStatus(page, "Fórmulas de ajuste guardadas");
+  await page.waitForSelector('#practice-regression-form [name="x_formula"][value="1/Q"]');
 
   step("Fluidos I: mensurando mu y derivada por punto Re");
   await next(page, "Mensurandos");
@@ -118,6 +134,19 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   step("Fluidos I: revisar, probar con datos de ejemplo y publicar");
   await next(page, "Revisar");
   await reviewTryAndPublish(page, "Fluidos I");
+
+  step("Fluidos I: con cambios sin publicar, publicar la versión nueva queda en Revisar");
+  await page.click('#practice-workspace .practice-guide [data-guide-go="datos"]');
+  await expectStep(page, "Datos");
+  await fillAndSubmit(page, "#practice-info-form", { description: "Fluidos guiada, descripción nueva" });
+  await waitForStatus(page, "Datos de la práctica guardados");
+  await page.waitForSelector("#practice-draft-changes [data-practice-publish-version]", { state: "attached" });
+  assert(
+    !(await page.locator("#practice-draft-changes [data-practice-publish-version]").isVisible()),
+    "Publicar la versión nueva no debía verse fuera de Revisar",
+  );
+  await page.click('#practice-workspace .practice-guide [data-guide-go="revisar"]');
+  await page.waitForSelector("#practice-draft-changes [data-practice-publish-version]");
 
   step("Hidrostática: un problema del panel lleva a su paso");
   await createGuided(page, "Hidrostatica guiada", "estadistico");

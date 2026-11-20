@@ -540,7 +540,7 @@ export function renderPracticesPage() {
 }
 
 const GUIDE_STEP_OF_PROBLEM = {
-  layout: "partes",
+  layout: "magnitudes",
   quantity: "magnitudes",
   intermediate: "serie",
   curve: "serie",
@@ -559,10 +559,27 @@ function guideFor(practiceId, def) {
 }
 
 function goToGuideStep(practiceId, step) {
+  const editing = state.editing.kind;
+  if (editing && GUIDE_STEP_OF_PROBLEM[editing] !== step) {
+    if (!window.confirm("Hay una fila en edición sin guardar. ¿Descartar la edición y cambiar de paso?")) return;
+    state.editing = { kind: null, id: null };
+  }
   state.practiceGuide = { practiceId, step };
-  state.editing = { kind: null, id: null };
   renderPracticesPage();
+  openStepPanels(step);
   practiceWorkspace.scrollIntoView({ block: "start" });
+}
+
+function openStepPanels(step) {
+  for (const block of practiceWorkspace.querySelectorAll(`[data-guide-step="${step}"]`)) {
+    if (block.matches("details")) {
+      block.open = true;
+      continue;
+    }
+    const empty = block.querySelector(".count-badge")?.textContent.trim() === "0";
+    const add = block.querySelector("details.add-panel");
+    if (add && empty) add.open = true;
+  }
 }
 
 function guideBarHtml({ steps, index }) {
@@ -588,15 +605,11 @@ function guideBarHtml({ steps, index }) {
 function applyGuide({ steps, index }) {
   const step = steps[index].id;
   for (const block of practiceWorkspace.querySelectorAll("[data-guide-step]")) {
-    const here = block.dataset.guideStep === step;
-    block.classList.toggle("hidden", !here);
-    if (!here) continue;
-    const empty = block.querySelector(".count-badge")?.textContent.trim() === "0";
-    const add = block.matches("details") ? block : block.querySelector("details.add-panel");
-    if (add && (empty || block.matches("details"))) add.open = true;
+    block.classList.toggle("hidden", block.dataset.guideStep !== step);
   }
-  const lifecycle = practiceWorkspace.querySelector(".practice-lifecycle");
-  if (lifecycle) lifecycle.style.display = step === "revisar" ? "" : "none";
+  for (const el of practiceWorkspace.querySelectorAll(".practice-lifecycle, #practice-draft-changes")) {
+    el.style.display = step === "revisar" ? "" : "none";
+  }
 }
 
 const STATUS_LABELS = { borrador: "Borrador", publicada: "Publicada", archivada: "Archivada" };
@@ -753,7 +766,7 @@ function goToProblem({ kind, id }) {
     renderPracticesPage();
   }
   const parts = '[data-add-panel="part"]';
-  let target = { axes: "#practice-regression-form", layout: parts }[kind] ?? `[data-add-panel="${kind}"]`;
+  let target = { axes: "#practice-regression-form", layout: '[data-add-panel="quantity"]' }[kind] ?? `[data-add-panel="${kind}"]`;
   if (id && EDITABLE_KINDS.has(kind)) {
     state.editing = { kind, id };
     renderPracticesPage();
@@ -1283,6 +1296,7 @@ export async function openPracticeWorkspace(practiceId, { guided = false } = {})
   try {
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     renderPracticesPage();
+    if (state.practiceGuide) openStepPanels(state.practiceGuide.step);
   } catch (error) {
     withPracticeStatus(error.message);
   }
