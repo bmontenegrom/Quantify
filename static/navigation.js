@@ -10,7 +10,7 @@ import { closeStudentWorkspace } from "./students.js";
 import { closeGroupWorkspace } from "./groups.js";
 import { closeCourseWorkspace } from "./courses.js";
 
-export function selectView(view) {
+export function selectView(view, { render = true } = {}) {
   document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
   document.querySelector(`#${view}-view`).classList.add("active");
@@ -23,7 +23,7 @@ export function selectView(view) {
   if (view === "groups") renderGroupsPage();
   if (view === "courses") renderCoursesPage();
   if (view === "instruments") import("./instruments.js").then(({ renderInstrumentsPage, refreshInstruments }) => { renderInstrumentsPage(); refreshInstruments(); });
-  if (view === "practices") import("./practices-admin.js").then(({ renderPracticesPage }) => renderPracticesPage());
+  if (view === "practices" && render) import("./practices-admin.js").then(({ renderPracticesPage }) => renderPracticesPage());
   if (view === "practica") highlightPracticeNav();
   if (view === "account") renderAccount();
 }
@@ -117,9 +117,9 @@ document.querySelectorAll(".tab").forEach((tab) => {
     }
     if (tab.dataset.view === "practices" && state.activePracticeId) {
       import("./practices-admin.js").then(({ closePracticeWorkspace, confirmDiscardForms }) => {
-        if (!confirmDiscardForms()) return;
-        closePracticeWorkspace();
-        selectView("practices");
+        const discard = confirmDiscardForms();
+        if (discard) closePracticeWorkspace();
+        selectView("practices", { render: discard });
       });
       return;
     }

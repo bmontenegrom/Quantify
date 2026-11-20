@@ -85,9 +85,10 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   step("docente: login");
   const { page } = await login(TEACHER, "docente");
   let dialogs = 0;
+  let acceptDialogs = true;
   page.on("dialog", (dialog) => {
     dialogs++;
-    return dialog.accept();
+    return acceptDialogs ? dialog.accept() : dialog.dismiss();
   });
 
   step("Fluidos I: Nueva práctica abre el modo guiado en Datos");
@@ -238,8 +239,18 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   step("Hidrostática: volver al listado con un alta a medio escribir pide confirmación");
   await openAddForm(page, "#new-section-form");
   await page.locator('#new-section-form [name="title"]').fill("Sin guardar");
+  await page.click('.tab.teacher-only[data-view="submissions"]');
+  acceptDialogs = false;
+  await page.click('.tab.teacher-only[data-view="practices"]');
+  await page.waitForSelector('#new-section-form [name="title"]');
+  acceptDialogs = true;
+  assert(dialogs === before + 1, "volver por la pestaña con datos sin guardar debía pedir confirmación");
+  assert(
+    (await page.locator('#new-section-form [name="title"]').inputValue()) === "Sin guardar",
+    "cancelar debía volver a la ficha con lo escrito",
+  );
   await page.click("#practice-workspace-back");
-  assert(dialogs === before + 1, "volver al listado con datos sin guardar debía pedir confirmación");
+  assert(dialogs === before + 2, "volver al listado con datos sin guardar debía pedir confirmación");
   await page.waitForSelector("#practice-catalog [data-practice-open]");
 
   console.log("modo guiado: Fluidos I y una Hidrostática de dos partes creadas desde la UI, probadas y publicadas.");

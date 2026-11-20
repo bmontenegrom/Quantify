@@ -1372,7 +1372,10 @@ function syncQuantityForm(form) {
   const given = roleFlags(role, seriesPractice()).is_given;
   const option = elements.input_widget.querySelector('option[value="cronometro"]');
   option.disabled = elements.quantity.value !== "tiempo" || given;
-  if (option.disabled && option.selected) elements.input_widget.value = "teclado";
+  if (option.disabled && option.selected) {
+    elements.input_widget.value = "teclado";
+    if (option.defaultSelected) elements.input_widget.selectedOptions[0].defaultSelected = true;
+  }
   form.querySelectorAll("[data-for-roles]").forEach((label) => {
     const applies = label.dataset.forRoles.split(" ").includes(role);
     label.hidden = !applies;
