@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   analysisSections,
   exampleMeasurements,
+  practiceGuideSteps,
   escapeHtml,
   symbolHtml,
   setDisplaySymbols,
@@ -1015,4 +1016,12 @@ test("exampleMeasurements: el cociente entre dos series varía entre puntos (eje
   const [V, t] = exampleMeasurements(def);
   const q = V.point_replicas.map((reps, p) => 1 / (reps[0] / t.point_replicas[p][0]));
   assert.ok((Math.max(...q) - Math.min(...q)) / Math.max(...q) > 0.1, `1/Q casi constante: ${q}`);
+});
+
+test("practiceGuideSteps: el paso de serie aparece solo con regresión o curva", () => {
+  const ids = (def) => practiceGuideSteps(def).map((s) => s.id);
+  assert.deepEqual(ids({ analysis_kind: "estadistico", parts: [] }), ["datos", "partes", "magnitudes", "mensurandos", "secciones", "revisar"]);
+  assert.deepEqual(ids({ analysis_kind: "regresion_lineal" }), ["datos", "partes", "magnitudes", "serie", "mensurandos", "secciones", "revisar"]);
+  assert.ok(ids({ analysis_kind: "estadistico", parts: [{ effective_kind: "estadistico" }, { effective_kind: "curva" }] }).includes("serie"));
+  assert.deepEqual(ids(null), ["datos", "partes", "magnitudes", "mensurandos", "secciones", "revisar"]);
 });

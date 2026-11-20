@@ -87,6 +87,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await page.click('.tab.teacher-only[data-view="practices"]');
   await page.click('details[data-add-panel="practice"] > summary');
   await fillAndSubmit(page, "#new-practice-form", { name: NAME, description: "Prueba E2E" });
+  await page.click("#practice-workspace [data-guide-exit]");
   await page.waitForSelector("#practice-workspace .practice-state--borrador");
 
   step("docente: el panel lista lo que falta y lleva a donde se arregla");
