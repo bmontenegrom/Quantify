@@ -9,7 +9,7 @@ import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   prefixFactor, validateMeasurements,
-  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs,
+  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -120,8 +120,11 @@ export async function loadSubmissionForm() {
     if (practicaSubtitle) practicaSubtitle.textContent = DEFAULT_SUBTITLE;
     return;
   }
+  draftPreviewRequest++;
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
+  const fillButton = document.querySelector("#draft-preview-fill");
+  if (fillButton) fillButton.disabled = true;
   const practiceId = practiceSelect.value;
   if (state.editingSubmissionId && state.editingPracticeId !== practiceId) exitEditMode();
   if (!state.editingSubmissionId && studentComment) studentComment.value = "";
@@ -183,6 +186,7 @@ export async function loadSubmissionForm() {
     applyDraftPrefill(draft);
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
+    if (fillButton && previewing) fillButton.disabled = false;
   } catch (error) {
     if (request !== latestFormRequest) return;
     state.practiceForm = null;
@@ -773,7 +777,10 @@ export async function submitFormSubmission() {
   }
 }
 
+let draftPreviewRequest = 0;
+
 async function calculateDraftPreview(measurements) {
+  const request = ++draftPreviewRequest;
   if (submitButton) submitButton.disabled = true;
   submitStatus.textContent = "Calculando...";
   try {
@@ -782,15 +789,55 @@ async function calculateDraftPreview(measurements) {
       { measurements, draft: true },
     );
     const { formAnalysisMarkup } = await import("./analysis.js");
+    if (request !== draftPreviewRequest) return;
     setDisplaySymbols(state.practiceForm?.definition?.display_symbols);
     latestResult.innerHTML = formAnalysisMarkup(analysis, comparisonPairs(state.practiceForm?.definition));
     latestResult.classList.remove("hidden");
     submitStatus.textContent = "Calculado con el borrador: no se guardó nada.";
   } catch (error) {
-    submitStatus.textContent = error.message;
+    if (request === draftPreviewRequest) submitStatus.textContent = error.message;
   } finally {
-    if (submitButton) submitButton.disabled = false;
+    if (submitButton && request === draftPreviewRequest) submitButton.disabled = false;
   }
+}
+
+function changedFromRender(el) {
+  if (el.tagName === "SELECT") return el.selectedIndex !== Math.max([...el.options].findIndex((o) => o.defaultSelected), 0);
+  if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
+  return el.validity.badInput || el.value.trim() !== el.defaultValue.trim();
+}
+
+function hasTypedReadings() {
+  return (
+    [...state.chronometers.values()].some((c) => c.count > 0) ||
+    [...measurementFields.querySelectorAll("input, select:not(.measure-instrument):not(.measure-scale)")].some(changedFromRender)
+  );
+}
+
+function fillExampleData() {
+  if (!state.practiceForm) return;
+  const { definition, instruments } = state.practiceForm;
+  if (hasTypedReadings() && !window.confirm("¿Reemplazar los valores cargados por datos de ejemplo?")) return;
+  const chosen = new Map();
+  for (const select of measurementFields.querySelectorAll(".measure-instrument")) {
+    if (!select.value && !changedFromRender(select)) continue;
+    const instrument = instruments.find((i) => i.id === select.value);
+    const scale = select.closest(".measure-selectors").querySelector(".measure-scale").value;
+    chosen.set(select.closest("[data-quantity-id]").dataset.quantityId, {
+      instrument_id: instrument?.id ?? null,
+      scale_id: instrument ? scale || instrument.scales?.[0]?.id || null : null,
+    });
+  }
+  const measurements = exampleMeasurements(definition, { instruments }).map((m) => ({ ...m, ...chosen.get(m.quantity_id) }));
+  const draft = { measurements, finalResults: [] };
+  draftPreviewRequest++;
+  latestResult.classList.add("hidden");
+  submitStatus.textContent = "";
+  for (const chrono of state.chronometers.values()) if (chrono.state === "running") chrono.stop();
+  restoreChronoDraft(null);
+  renderMeasurementFields(draft);
+  applyDraftPrefill(draft);
+  applyPartVisibility();
 }
 
 function selectDraftPreviewPractice() {
@@ -816,7 +863,9 @@ export async function openDraftPreview(practiceId) {
   const banner = document.querySelector("#draft-preview-banner");
   banner.innerHTML = `
     <div>Estás probando el borrador. No se crea ninguna versión ni se guarda ninguna entrega. Los resultados finales que cargues acá no se comparan.</div>
+    <button type="button" id="draft-preview-fill" disabled>Rellenar con datos de ejemplo</button>
     <button type="button" id="draft-preview-back">Volver al editor</button>`;
+  banner.querySelector("#draft-preview-fill").addEventListener("click", fillExampleData);
   banner.querySelector("#draft-preview-back").addEventListener("click", async () => {
     exitEditMode();
     const { selectView } = await import("./navigation.js");
@@ -842,6 +891,7 @@ export function startEditSubmission(submission) {
 }
 
 export function exitEditMode() {
+  draftPreviewRequest++;
   if (state.draftPreviewPracticeId) {
     showDraftPreviewChrome(false);
     state.practiceForm = null;

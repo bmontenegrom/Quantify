@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   analysisSections,
+  exampleMeasurements,
   escapeHtml,
   symbolHtml,
   setDisplaySymbols,
@@ -917,4 +918,101 @@ test("formatSymbolHtml no busca en los símbolos a mostrar", () => {
   assert.equal(formatSymbolHtml("V_R_PP"), "V<sub>R,PP</sub>");
   assert.equal(formatSymbolHtml("rho_1"), "ρ<sub>1</sub>");
   setDisplaySymbols({});
+});
+
+test("exampleMeasurements: estadística con datos dados, repetidas, únicas y operadores", () => {
+  const definition = {
+    analysis_kind: "estadistico",
+    operator_count: 2,
+    quantities: [
+      { id: "g", is_given: true, default_value: 9.8 },
+      { id: "c", is_given: true, has_uncertainty: false },
+      { id: "s", is_given: true, slot_count: 4 },
+      { id: "t", repeated: true },
+      { id: "L", repeated: false },
+    ],
+  };
+  const [g, c, s, t, L] = exampleMeasurements(definition);
+  assert.deepEqual(g.values, [9.8]);
+  assert.equal(g.given_u, 0.098);
+  assert.equal(c.given_u, null);
+  assert.deepEqual(s.values, [1]);
+  assert.equal(t.operator_replicas.length, 2);
+  assert.equal(t.operator_replicas[0].length, 3);
+  assert.ok(new Set(t.operator_replicas[0]).size === 3, "las réplicas difieren");
+  assert.deepEqual(L.values, [1]);
+});
+
+test("exampleMeasurements: sin operadores una repetida da réplicas parecidas", () => {
+  const [t] = exampleMeasurements({ quantities: [{ id: "t", repeated: true }] }, { replicas: 4 });
+  assert.equal(t.values.length, 4);
+  assert.ok(Math.max(...t.values) / Math.min(...t.values) < 1.05);
+});
+
+test("exampleMeasurements: regresión con serie simple y con réplicas por punto", () => {
+  const definition = {
+    analysis_kind: "regresion_lineal",
+    operator_count: 3,
+    quantities: [
+      { id: "x", per_point: true },
+      { id: "y", per_point: true, repeated: true, replicas_per_point: 2 },
+      { id: "D", per_point: false },
+    ],
+  };
+  const [x, y, D] = exampleMeasurements(definition, { points: 4 });
+  assert.equal(x.values.length, 4);
+  assert.ok(x.values.every((v, k) => k === 0 || v > x.values[k - 1]), "la serie crece");
+  assert.equal(y.point_replicas.length, 4);
+  assert.ok(y.point_replicas.every((reps) => reps.length === 2 && reps[0] !== reps[1]));
+  assert.deepEqual(D.values, [1]);
+  assert.equal(x.operator_replicas, undefined);
+});
+
+test("exampleMeasurements: una magnitud posterior queda por debajo de la anterior (asin(b/a))", () => {
+  const def = { analysis_kind: "curva", quantities: [{ id: "a", per_point: true }, { id: "b", per_point: true }] };
+  const [a, b] = exampleMeasurements(def);
+  assert.ok(a.values.every((v, k) => b.values[k] / v < 1));
+  const [sa, sb] = exampleMeasurements({ quantities: [{ id: "a" }, { id: "b" }] });
+  assert.ok(sb.values[0] / sa.values[0] < 1);
+});
+
+test("exampleMeasurements: un 0 por defecto en una medida no se usa (divisor de hidrostática)", () => {
+  const [m, b] = exampleMeasurements({ quantities: [{ id: "m", default_value: 0 }, { id: "b", is_given: true, default_value: 0 }] });
+  assert.ok(m.values[0] > 0);
+  assert.deepEqual(b.values, [0]);
+});
+
+test("exampleMeasurements: una ranura usa su valor por defecto", () => {
+  const [a, b] = exampleMeasurements({ quantities: [{ id: "a", is_given: true, slot_count: 9, default_value: 3 }, { id: "b", is_given: true, slot_count: 9 }] });
+  assert.deepEqual(a.values, [3]);
+  assert.deepEqual(b.values, [1]);
+});
+
+test("exampleMeasurements: elige el primer instrumento compatible con escala", () => {
+  const instruments = [
+    { id: "vacio", quantity: "longitud", scales: [] },
+    { id: "regla", quantity: "longitud", scales: [{ id: "mm" }, { id: "cm" }] },
+    { id: "balanza", quantity: "masa", scales: [{ id: "g" }] },
+  ];
+  const [L, g, x] = exampleMeasurements(
+    { quantities: [{ id: "L", quantity: "longitud" }, { id: "g", quantity: "longitud", is_given: true }, { id: "x" }] },
+    { instruments },
+  );
+  assert.equal(L.instrument_id, "regla");
+  assert.equal(L.scale_id, "mm");
+  assert.equal(g.instrument_id, null);
+  assert.equal(x.instrument_id, null);
+});
+
+test("exampleMeasurements: el cociente entre dos series varía entre puntos (eje V/t)", () => {
+  const def = {
+    analysis_kind: "regresion_lineal",
+    quantities: [
+      { id: "V", per_point: true, repeated: true, replicas_per_point: 2 },
+      { id: "t", per_point: true, repeated: true, replicas_per_point: 2 },
+    ],
+  };
+  const [V, t] = exampleMeasurements(def);
+  const q = V.point_replicas.map((reps, p) => 1 / (reps[0] / t.point_replicas[p][0]));
+  assert.ok((Math.max(...q) - Math.min(...q)) / Math.max(...q) > 0.1, `1/Q casi constante: ${q}`);
 });

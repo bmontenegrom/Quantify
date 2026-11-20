@@ -357,6 +357,35 @@ export function hasUncertainty(entity) {
   return entity?.has_uncertainty !== false;
 }
 
+export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
+  const kind = definition?.analysis_kind;
+  const pointBased = kind === "regresion_lineal" || kind === "curva";
+  const operators = !pointBased && (definition?.operator_count ?? 0) >= 2 ? definition.operator_count : 0;
+  const round = (x) => Number(x.toPrecision(6));
+  const series = (n, v) => Array.from({ length: n }, (_, k) => round(v * (1 + 0.01 * (k - (n - 1) / 2))));
+  const quantities = definition?.quantities ?? [];
+  return quantities.map((q, i) => {
+    const base = q.default_value != null && (q.is_given || q.default_value !== 0) ? q.default_value : quantities.length - i;
+    const instrument = q.quantity && !q.is_given ? compatibleInstruments(instruments, q.quantity).find((x) => x.scales?.length) : null;
+    const m = { quantity_id: q.id, instrument_id: instrument?.id ?? null, scale_id: instrument?.scales[0].id ?? null, values: [], given_u: null };
+    if (q.is_given) {
+      const value = q.slot_count ? q.default_value ?? 1 : base;
+      return { ...m, values: [value], given_u: hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null };
+    }
+    if (pointBased && q.per_point) {
+      const at = (p) => base * (1 + p / (i + 2));
+      if (q.repeated && q.replicas_per_point > 0) {
+        return { ...m, point_replicas: Array.from({ length: points }, (_, p) => series(q.replicas_per_point, at(p))) };
+      }
+      return { ...m, values: Array.from({ length: points }, (_, p) => round(at(p))) };
+    }
+    if (q.repeated && operators) {
+      return { ...m, operator_replicas: Array.from({ length: operators }, (_, o) => series(replicas, base * (1 + 0.02 * o))) };
+    }
+    return { ...m, values: q.repeated ? series(replicas, base) : [base] };
+  });
+}
+
 export function compareResults(autoDerived, studentResults, tolerances = {}) {
   const auto = autoDerived ?? [];
   const byStudent = new Map((studentResults ?? []).map((s) => [s.symbol, s]));
