@@ -940,7 +940,7 @@ test("exampleMeasurements: estadística con datos dados, repetidas, únicas y op
   assert.equal(t.operator_replicas.length, 2);
   assert.equal(t.operator_replicas[0].length, 3);
   assert.ok(new Set(t.operator_replicas[0]).size === 3, "las réplicas difieren");
-  assert.deepEqual(L.values, [5]);
+  assert.deepEqual(L.values, [1]);
 });
 
 test("exampleMeasurements: sin operadores una repetida da réplicas parecidas", () => {
@@ -964,6 +964,33 @@ test("exampleMeasurements: regresión con serie simple y con réplicas por punto
   assert.ok(x.values.every((v, k) => k === 0 || v > x.values[k - 1]), "la serie crece");
   assert.equal(y.point_replicas.length, 4);
   assert.ok(y.point_replicas.every((reps) => reps.length === 2 && reps[0] !== reps[1]));
-  assert.deepEqual(D.values, [3]);
+  assert.deepEqual(D.values, [1]);
   assert.equal(x.operator_replicas, undefined);
+});
+
+test("exampleMeasurements: una magnitud posterior queda por debajo de la anterior (asin(b/a))", () => {
+  const def = { analysis_kind: "curva", quantities: [{ id: "a", per_point: true }, { id: "b", per_point: true }] };
+  const [a, b] = exampleMeasurements(def);
+  assert.ok(a.values.every((v, k) => b.values[k] / v < 1));
+  const [sa, sb] = exampleMeasurements({ quantities: [{ id: "a" }, { id: "b" }] });
+  assert.ok(sb.values[0] / sa.values[0] < 1);
+});
+
+test("exampleMeasurements: un 0 por defecto en una medida no se usa (divisor de hidrostática)", () => {
+  const [m, b] = exampleMeasurements({ quantities: [{ id: "m", default_value: 0 }, { id: "b", is_given: true, default_value: 0 }] });
+  assert.ok(m.values[0] > 0);
+  assert.deepEqual(b.values, [0]);
+});
+
+test("exampleMeasurements: el cociente entre dos series varía entre puntos (eje V/t)", () => {
+  const def = {
+    analysis_kind: "regresion_lineal",
+    quantities: [
+      { id: "V", per_point: true, repeated: true, replicas_per_point: 2 },
+      { id: "t", per_point: true, repeated: true, replicas_per_point: 2 },
+    ],
+  };
+  const [V, t] = exampleMeasurements(def);
+  const q = V.point_replicas.map((reps, p) => 1 / (reps[0] / t.point_replicas[p][0]));
+  assert.ok((Math.max(...q) - Math.min(...q)) / Math.max(...q) > 0.1, `1/Q casi constante: ${q}`);
 });
