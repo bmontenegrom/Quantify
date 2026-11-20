@@ -1,22 +1,9 @@
 
-import { STUDENT, TEACHER, assert, openAddForm, step, withE2E } from "./lib.mjs";
+import { STUDENT, TEACHER, assert, assignSection, fillAndSubmit, openAddForm, step, waitForStatus, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8163";
 const NAME = "Péndulo de prueba";
 const ID = "pendulo-de-prueba";
-
-async function fillAndSubmit(page, formSelector, fields, checks = {}) {
-  const form = page.locator(formSelector);
-  for (const [name, value] of Object.entries(fields)) {
-    const field = form.locator(`[name="${name}"]`);
-    if ((await field.evaluate((el) => el.tagName)) === "SELECT") await field.selectOption(value);
-    else await field.fill(value);
-  }
-  for (const [name, checked] of Object.entries(checks)) {
-    await form.locator(`[name="${name}"]`).setChecked(checked);
-  }
-  await form.locator('button[type="submit"]').click();
-}
 
 async function buildFormulaWithHelp(page, expected) {
   const form = page.locator("#new-result-form");
@@ -49,37 +36,6 @@ async function buildFormulaWithHelp(page, expected) {
   assert(value === expected, `la fórmula armada con la ayuda debía ser ${expected} (quedó ${value})`);
 }
 
-async function assignSection(page, list, symbol, label) {
-  const select = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="${list}"]`);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await select.selectOption({ label });
-    await page.waitForLoadState("networkidle");
-    const ok = await page
-      .waitForFunction(
-        ([list, symbol, label]) => {
-          const row = [...document.querySelectorAll("#practice-workspace tr")].find(
-            (tr) => tr.querySelector("code")?.textContent === symbol,
-          );
-          const sel = row?.querySelector(`[data-section-select="${list}"]`);
-          return sel?.selectedOptions[0]?.textContent === label;
-        },
-        [list, symbol, label],
-        { timeout: 3_000 },
-      )
-      .then(() => true, () => false);
-    if (ok) return;
-  }
-  throw new Error(`no se pudo asignar ${symbol} a ${label}`);
-}
-
-async function waitForStatus(page, text) {
-  await page.waitForFunction(
-    (t) => (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes(t),
-    text,
-    { timeout: 10_000 },
-  );
-}
-
 await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ login }) => {
   step("docente: crea la práctica en borrador");
   const { page } = await login(TEACHER, "docente");
@@ -87,6 +43,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await page.click('.tab.teacher-only[data-view="practices"]');
   await page.click('details[data-add-panel="practice"] > summary');
   await fillAndSubmit(page, "#new-practice-form", { name: NAME, description: "Prueba E2E" });
+  await page.click("#practice-workspace [data-guide-exit]");
   await page.waitForSelector("#practice-workspace .practice-state--borrador");
 
   step("docente: el panel lista lo que falta y lleva a donde se arregla");

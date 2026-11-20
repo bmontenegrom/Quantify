@@ -16,6 +16,8 @@ import {
   QUANTITY_ROLES,
   quantityRole,
   roleFlags,
+  practiceGuideSteps,
+  guideStepOrNext,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -325,10 +327,12 @@ export function renderPracticesPage() {
   const openPanels = new Set(
     [...practiceWorkspace.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel),
   );
+  const guide = guideFor(practice.id, def);
   practiceWorkspace.innerHTML = `
     <div class="workspace-head">
       <div>
         <button type="button" class="back-link" id="practice-workspace-back">Volver al listado</button>
+        ${guide ? "" : `<button type="button" class="link-button" data-guide-start>Modo guiado</button>`}
         <h3>${escapeHtml(practice.name)}</h3>
         <p class="submission-meta">${escapeHtml(practice.description)}</p>
         ${practiceLifecycleActions(practice, def)}
@@ -350,23 +354,24 @@ export function renderPracticesPage() {
     </div>
 
     ${state.practiceActionStatus ? `<p class="inline-status practice-status" role="status">${escapeHtml(state.practiceActionStatus)}</p>` : ""}
+    ${guide ? guideBarHtml(guide) : ""}
 
-    <details class="panel workspace-panel add-panel" data-add-panel="practice-info">
+    <details class="panel workspace-panel add-panel" data-add-panel="practice-info" data-guide-step="datos">
       <summary>Datos de la práctica</summary>
       ${renderPracticeInfoForm(practice)}
     </details>
 
-    <section class="panel workspace-panel">
+    <section class="panel workspace-panel" data-guide-step="datos">
       <h3 class="admin-section-title">Configuración del análisis</h3>
       ${def?.parts?.length
-        ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes y secciones».</p>`
+        ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes».</p>`
         : renderAnalysisKindForm(practice, def)}
-      ${kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
       ${kind == null || kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
     </section>
 
     ${renderLayoutSection(practice, def)}
     ${adminSection({
+      step: "magnitudes",
       id: "quantity",
       title: "Magnitudes de entrada",
       count: def?.quantities?.length ?? 0,
@@ -375,8 +380,14 @@ export function renderPracticesPage() {
       form: renderQuantityForm(null, practice.id),
     })}
     ${pointBased ? renderIntermediatesSection(practice, def) : ""}
+    ${kind === "regresion_lineal" ? `
+      <section class="panel workspace-panel" data-guide-step="serie">
+        <h3 class="admin-section-title">Ejes del ajuste</h3>
+        ${renderRegressionFormulasForm(practice, def)}
+      </section>` : ""}
     ${kind === "curva" ? renderCurvesSection(practice, def) : ""}
     ${adminSection({
+      step: "mensurandos",
       id: "result",
       title: "Mensurandos derivados",
       count: def?.results?.length ?? 0,
@@ -390,16 +401,32 @@ export function renderPracticesPage() {
   for (const details of practiceWorkspace.querySelectorAll("details[data-add-panel]")) {
     if (openPanels.has(details.dataset.addPanel)) details.open = true;
   }
+  if (guide) applyGuide(guide);
 
   practiceWorkspace.classList.remove("hidden");
   practiceCatalog?.closest(".panel")?.classList.add("hidden");
 
-  practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", closePracticeWorkspace);
+  practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", () => {
+    if (confirmDiscardForms()) closePracticeWorkspace();
+  });
+  practiceWorkspace.querySelector("[data-guide-start]")?.addEventListener("click", () => {
+    goToGuideStep(practice.id, state.practiceGuideLastStep ?? "datos");
+  });
+  practiceWorkspace.querySelectorAll("[data-guide-go]").forEach((btn) => {
+    btn.addEventListener("click", () => goToGuideStep(practice.id, btn.dataset.guideGo));
+  });
+  practiceWorkspace.querySelector("[data-guide-exit]")?.addEventListener("click", () => {
+    if (!confirmDiscardForms()) return;
+    state.practiceGuideLastStep = state.practiceGuide?.step ?? null;
+    state.practiceGuide = null;
+    renderPracticesPage();
+  });
   practiceWorkspace.querySelector("#practice-info-form")?.addEventListener("submit", savePracticeInfo);
   practiceWorkspace.querySelectorAll("[data-practice-status]").forEach((btn) => {
     btn.addEventListener("click", () => setPracticeStatus(btn.dataset.practiceId, btn.dataset.practiceStatus));
   });
   practiceWorkspace.querySelector("[data-practice-try-draft]")?.addEventListener("click", async (e) => {
+    if (!confirmDiscardForms()) return;
     const practiceId = e.currentTarget.dataset.practiceId;
     const { openDraftPreview } = await import("./forms.js");
     await openDraftPreview(practiceId);
@@ -517,6 +544,88 @@ export function renderPracticesPage() {
   });
 }
 
+const GUIDE_STEP_OF_PROBLEM = {
+  layout: "magnitudes",
+  quantity: "magnitudes",
+  intermediate: "serie",
+  curve: "serie",
+  axes: "serie",
+  result: "mensurandos",
+  pointResult: "mensurandos",
+  aggregate: "mensurandos",
+};
+
+function guideFor(practiceId, def) {
+  if (state.practiceGuide?.practiceId !== practiceId) return null;
+  const steps = practiceGuideSteps(def);
+  state.practiceGuide.step = guideStepOrNext(def, state.practiceGuide.step);
+  return { steps, index: steps.findIndex((s) => s.id === state.practiceGuide.step) };
+}
+
+function fieldChanged(el) {
+  if (el.type === "hidden" || el.disabled) return false;
+  if (el.tagName === "SELECT") return el.selectedIndex !== Math.max([...el.options].findIndex((o) => o.defaultSelected), 0);
+  if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
+  const initial = el.tagName === "INPUT" ? el.defaultValue.replace(/[\r\n]/g, "") : el.defaultValue;
+  return el.value !== initial;
+}
+
+export function confirmDiscardForms() {
+  const dirty = [...practiceWorkspace.querySelectorAll("form input, form select, form textarea")].some(fieldChanged);
+  return !dirty || window.confirm("Hay datos sin guardar en un formulario. ¿Descartarlos?");
+}
+
+function goToGuideStep(practiceId, step) {
+  if (!confirmDiscardForms()) return;
+  if (state.editing.kind && GUIDE_STEP_OF_PROBLEM[state.editing.kind] !== step) state.editing = { kind: null, id: null };
+  state.practiceGuide = { practiceId, step };
+  renderPracticesPage();
+  openStepPanels(state.practiceGuide.step);
+  practiceWorkspace.scrollIntoView({ block: "start" });
+}
+
+function openStepPanels(step) {
+  for (const block of practiceWorkspace.querySelectorAll(`[data-guide-step="${step}"]`)) {
+    if (block.matches("details")) {
+      block.open = true;
+      continue;
+    }
+    const empty = block.querySelector(".count-badge")?.textContent.trim() === "0";
+    const add = block.querySelector("details.add-panel");
+    if (add && empty) add.open = true;
+  }
+}
+
+function guideBarHtml({ steps, index }) {
+  const current = steps[index];
+  const prev = steps[index - 1];
+  const next = steps[index + 1];
+  const item = (s, i) => {
+    const here = i === index;
+    return `<li><button type="button" class="link-button${here ? " practice-guide-current" : ""}" data-guide-go="${s.id}"${here ? ' aria-current="step"' : ""}>${i + 1}. ${escapeHtml(s.title)}</button></li>`;
+  };
+  return `
+    <nav class="panel workspace-panel practice-guide" aria-label="Pasos para crear la práctica">
+      <ol class="practice-guide-steps">${steps.map(item).join("")}</ol>
+      <p class="submission-meta">${escapeHtml(current.help)}</p>
+      <div class="detail-actions">
+        ${prev ? `<button type="button" data-guide-go="${prev.id}">Anterior</button>` : ""}
+        ${next ? `<button type="button" data-guide-go="${next.id}">Siguiente: ${escapeHtml(next.title)}</button>` : ""}
+        <button type="button" class="link-button" data-guide-exit>Ver todo</button>
+      </div>
+    </nav>`;
+}
+
+function applyGuide({ steps, index }) {
+  const step = steps[index].id;
+  for (const block of practiceWorkspace.querySelectorAll("[data-guide-step]")) {
+    block.classList.toggle("hidden", block.dataset.guideStep !== step);
+  }
+  for (const el of practiceWorkspace.querySelectorAll(".practice-lifecycle, #practice-draft-changes")) {
+    el.style.display = step === "revisar" ? "" : "none";
+  }
+}
+
 const STATUS_LABELS = { borrador: "Borrador", publicada: "Publicada", archivada: "Archivada" };
 
 function practiceStatusChip(status) {
@@ -600,7 +709,7 @@ async function createPractice(event) {
   try {
     const created = await postJson("/api/practices", payload);
     await refreshPractices();
-    await openPracticeWorkspace(created.id);
+    await openPracticeWorkspace(created.id, { guided: true });
     state.practiceActionStatus = "Práctica creada en borrador";
     renderPracticesPage();
   } catch (error) {
@@ -664,8 +773,17 @@ function problemItemHtml({ message }, k) {
 }
 
 function goToProblem({ kind, id }) {
+  const guided = state.practiceGuide;
+  const steps = guided ? practiceGuideSteps(state.practiceDefinition).map((s) => s.id) : [];
+  const step = steps.includes(GUIDE_STEP_OF_PROBLEM[kind]) ? GUIDE_STEP_OF_PROBLEM[kind] : null;
+  const rerenders = (step && guided.step !== step) || (id && EDITABLE_KINDS.has(kind));
+  if (rerenders && !confirmDiscardForms()) return;
+  if (step && guided.step !== step) {
+    guided.step = step;
+    renderPracticesPage();
+  }
   const parts = '[data-add-panel="part"]';
-  let target = { axes: "#practice-regression-form", layout: parts }[kind] ?? `[data-add-panel="${kind}"]`;
+  let target = { axes: "#practice-regression-form", layout: '[data-add-panel="quantity"]' }[kind] ?? `[data-add-panel="${kind}"]`;
   if (id && EDITABLE_KINDS.has(kind)) {
     state.editing = { kind, id };
     renderPracticesPage();
@@ -673,6 +791,10 @@ function goToProblem({ kind, id }) {
     if (cell) return cell.scrollIntoView({ block: "center" });
     state.editing = { kind: null, id: null };
     target = parts;
+    if (guided) {
+      guided.step = "partes";
+      renderPracticesPage();
+    }
   }
   const el = practiceWorkspace.querySelector(target) ?? practiceWorkspace.querySelector(parts);
   if (el?.tagName === "DETAILS" && el.matches(`[data-add-panel="${kind}"]`)) el.open = true;
@@ -855,9 +977,9 @@ function renderOperatorCountForm(practice, def) {
   `;
 }
 
-function adminSection({ id, title, count, help = "", list, addLabel, form }) {
+function adminSection({ step, id, title, count, help = "", list, addLabel, form }) {
   return `
-    <section class="panel workspace-panel admin-section">
+    <section class="panel workspace-panel admin-section" data-guide-step="${step}">
       <h3 class="admin-section-title">${title} <span class="count-badge">${count}</span></h3>
       ${help ? `<p class="submission-meta">${help}</p>` : ""}
       ${list}
@@ -871,6 +993,7 @@ function adminSection({ id, title, count, help = "", list, addLabel, form }) {
 function symbolFormulaSection(kindKey, practice, def, { title, help, addLabel }) {
   const kind = SYMBOL_FORMULA_KINDS[kindKey];
   return adminSection({
+    step: kindKey === "intermediate" ? "serie" : "mensurandos",
     id: kindKey,
     title,
     count: kind.listOf(def).length,
@@ -907,6 +1030,7 @@ function renderIntermediatesSection(practice, def) {
 
 function renderCurvesSection(practice, def) {
   return adminSection({
+    step: "serie",
     id: "curve",
     title: "Curvas",
     count: def?.curves?.length ?? 0,
@@ -1181,8 +1305,10 @@ function renderResultsList(def, practiceId) {
   `;
 }
 
-export async function openPracticeWorkspace(practiceId) {
+export async function openPracticeWorkspace(practiceId, { guided = false } = {}) {
   state.activePracticeId = practiceId;
+  state.practiceGuide = guided ? { practiceId, step: "datos" } : null;
+  state.practiceGuideLastStep = null;
   state.practiceActionStatus = "";
   state.editing = { kind: null, id: null };
   state.practiceDefinition = null;
@@ -1191,6 +1317,7 @@ export async function openPracticeWorkspace(practiceId) {
   try {
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     renderPracticesPage();
+    if (state.practiceGuide) openStepPanels(state.practiceGuide.step);
   } catch (error) {
     withPracticeStatus(error.message);
   }
@@ -1198,6 +1325,7 @@ export async function openPracticeWorkspace(practiceId) {
 
 export function closePracticeWorkspace() {
   state.activePracticeId = null;
+  state.practiceGuide = null;
   state.practiceDefinition = null;
   state.practiceActionStatus = "";
   state.editing = { kind: null, id: null };
@@ -1244,7 +1372,10 @@ function syncQuantityForm(form) {
   const given = roleFlags(role, seriesPractice()).is_given;
   const option = elements.input_widget.querySelector('option[value="cronometro"]');
   option.disabled = elements.quantity.value !== "tiempo" || given;
-  if (option.disabled && option.selected) elements.input_widget.value = "teclado";
+  if (option.disabled && option.selected) {
+    elements.input_widget.value = "teclado";
+    if (option.defaultSelected) elements.input_widget.selectedOptions[0].defaultSelected = true;
+  }
   form.querySelectorAll("[data-for-roles]").forEach((label) => {
     const applies = label.dataset.forRoles.split(" ").includes(role);
     label.hidden = !applies;
@@ -1431,11 +1562,9 @@ function renderLayoutSection(practice, def) {
       </td>
     </tr>`);
   return `
-    <section class="panel workspace-panel admin-section">
-      <h3 class="admin-section-title">Partes y secciones <span class="count-badge">${parts.length}</span></h3>
-      <p class="submission-meta">Cada parte es una pestaña del formulario del alumno. Una sección agrupa magnitudes y resultados bajo un título; sin parte, se ve en todas las pestañas (datos compartidos). La sección de cada magnitud y mensurando se elige en sus tablas.</p>
-      <h4>Partes</h4>
-      <p class="submission-meta">Cada parte elige su análisis. Solo una puede ser de regresión o curva: es la que lleva la serie de datos (sus magnitudes por punto, intermedias, curvas y ajuste).</p>
+    <section class="panel workspace-panel admin-section" data-guide-step="partes">
+      <h3 class="admin-section-title">Partes <span class="count-badge">${parts.length}</span></h3>
+      <p class="submission-meta">Cada parte es una pestaña del formulario del alumno y elige su análisis. Solo una puede ser de regresión o curva: es la que lleva la serie de datos (sus magnitudes por punto, intermedias, curvas y ajuste).</p>
       ${layoutTable("<th>Título</th><th>Análisis</th><th>Acciones</th>", partRows, "Sin partes: el formulario va en una sola pestaña.")}
       <details class="add-panel" data-add-panel="part">
         <summary>Nueva parte</summary>
@@ -1445,7 +1574,10 @@ function renderLayoutSection(practice, def) {
           <div class="detail-actions"><button type="submit">Agregar</button></div>
         </form>
       </details>
-      <h4>Secciones</h4>
+    </section>
+    <section class="panel workspace-panel admin-section" data-guide-step="secciones">
+      <h3 class="admin-section-title">Secciones <span class="count-badge">${sections.length}</span></h3>
+      <p class="submission-meta">Una sección agrupa magnitudes y resultados bajo un título; sin parte, se ve en todas las pestañas (datos compartidos). La sección de cada magnitud y mensurando se elige en sus tablas.</p>
       ${layoutTable("<th>Título y parte</th><th>Elementos</th><th>Acciones</th>", sectionRows, "Sin secciones.")}
       <details class="add-panel" data-add-panel="section">
         <summary>Nueva sección</summary>

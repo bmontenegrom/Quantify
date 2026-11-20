@@ -26,6 +26,8 @@ export const state = {
   practiceDefinition: null,
   practiceActionStatus: "",
   editing: { kind: null, id: null },
+  practiceGuide: null,
+  practiceGuideLastStep: null,
   practiceForm: null,
   chronometers: new Map(),
   seriesDebug: new Map(),
