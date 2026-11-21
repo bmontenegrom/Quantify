@@ -22,6 +22,9 @@ import {
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 
+let dropped = new Set();
+practiceWorkspace.addEventListener("submit", (e) => dropped.add(formKey(e.target)), true);
+
 const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
 
 function adminSymbolHtml(symbol) {
@@ -296,6 +299,8 @@ async function deleteSymbolFormulaRow(kind, id, practiceId) {
 }
 
 export function renderPracticesPage() {
+  const discarded = dropped;
+  dropped = new Set();
   renderPracticeDirectory();
   if (!practiceWorkspace) return;
 
@@ -330,7 +335,7 @@ export function renderPracticesPage() {
   const openPanels = new Set(
     [...practiceWorkspace.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel),
   );
-  const typed = practiceWorkspace.dataset.practiceId === practice.id ? typedFields() : [];
+  const typed = practiceWorkspace.dataset.practiceId === practice.id ? typedFields(discarded) : [];
   const guide = guideFor(practice.id, def);
   practiceWorkspace.dataset.practiceId = practice.id;
   practiceWorkspace.innerHTML = `
@@ -542,12 +547,7 @@ function formKey(form) {
   return [form.id, ...Object.entries(form.dataset).map(([k, v]) => `${k}=${v}`)].join("&");
 }
 
-let dropped = new Set();
-practiceWorkspace.addEventListener("submit", (e) => dropped.add(formKey(e.target)), true);
-
-function typedFields() {
-  const skip = dropped;
-  dropped = new Set();
+function typedFields(skip) {
   return [...practiceWorkspace.querySelectorAll("form")]
     .filter((form) => !skip.has(formKey(form)))
     .flatMap((form) => formFields(form)
