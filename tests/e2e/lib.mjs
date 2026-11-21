@@ -47,8 +47,9 @@ export async function fillAndSubmit(page, formSelector, fields, checks = {}) {
 export async function assignSection(page, list, symbol, label) {
   const select = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="${list}"]`);
   for (let attempt = 0; attempt < 3; attempt++) {
+    const old = await select.elementHandle();
     await select.selectOption({ label });
-    await page.waitForLoadState("networkidle");
+    await page.waitForFunction((el) => !el.isConnected, old, { timeout: 10_000 }).catch(() => {});
     const ok = await page
       .waitForFunction(
         ([list, symbol, label]) => {
