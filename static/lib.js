@@ -367,9 +367,10 @@ const GUIDE_STEPS = [
   { id: "revisar", title: "Revisar y publicar", help: "Resolvé los problemas que queden, probá el borrador con datos de ejemplo y publicá." },
 ];
 
+export const POINT_KINDS = ["regresion_lineal", "curva"];
+
 export function practiceGuideSteps(definition) {
-  const pointBased = (kind) => kind === "regresion_lineal" || kind === "curva";
-  const series = pointBased(definition?.analysis_kind) || (definition?.parts ?? []).some((p) => pointBased(p.effective_kind));
+  const series = POINT_KINDS.includes(definition?.analysis_kind);
   return GUIDE_STEPS.filter((s) => s.id !== "serie" || series);
 }
 
@@ -381,8 +382,7 @@ export function guideStepOrNext(definition, step) {
 }
 
 export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
-  const kind = definition?.analysis_kind;
-  const pointBased = kind === "regresion_lineal" || kind === "curva";
+  const pointBased = POINT_KINDS.includes(definition?.analysis_kind);
   const operators = !pointBased && (definition?.operator_count ?? 0) >= 2 ? definition.operator_count : 0;
   const round = (x) => Number(x.toPrecision(6));
   const series = (n, v) => Array.from({ length: n }, (_, k) => round(v * (1 + 0.01 * (k - (n - 1) / 2))));
@@ -538,7 +538,7 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
 }
 
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
-  if (analysisKind === "regresion_lineal" || analysisKind === "curva") {
+  if (POINT_KINDS.includes(analysisKind)) {
     const pointCount = (m) => m.point_replicas?.length ?? m.values.length;
     const isSeries = (m) => metaMap[m.quantity_id]?.perPoint !== false && !metaMap[m.quantity_id]?.isGiven;
     const points = Math.max(0, ...measurements.filter(isSeries).map(pointCount));

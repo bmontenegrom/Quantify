@@ -213,7 +213,14 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
     ["l", "catedra", "Wilhelmy — Tension"],
   ];
   for (const [symbol, role] of quantities) await addQuantity(page, { symbol, name: symbol, unit: "", role });
+  await openAddForm(page, "#new-quantity-form");
+  await page.locator('#new-quantity-form [name="symbol"]').fill("a_medias");
   for (const [symbol, , section] of quantities) await assignSection(page, "quantities", symbol, section);
+  assert(
+    (await page.locator('#new-quantity-form [name="symbol"]').inputValue()) === "a_medias",
+    "asignar una sección no debía borrar el alta a medio escribir",
+  );
+  await page.locator('#new-quantity-form [name="symbol"]').fill("");
 
   step("Hidrostática: un mensurando en cada parte");
   await next(page, "Mensurandos");

@@ -18,6 +18,7 @@ import {
   roleFlags,
   practiceGuideSteps,
   guideStepOrNext,
+  POINT_KINDS,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -248,6 +249,7 @@ async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) 
     state.practiceActionStatus = typeof message === "string" ? message : successMsg;
   } catch (error) {
     state.practiceActionStatus = error.message;
+    dropped.clear();
   }
   renderPracticesPage();
 }
@@ -299,6 +301,7 @@ export function renderPracticesPage() {
 
   const practice = state.practices.find((p) => p.id === state.activePracticeId);
   if (!practice) {
+    delete practiceWorkspace.dataset.practiceId;
     practiceWorkspace.innerHTML = "";
     practiceWorkspace.classList.add("hidden");
     practiceCatalog?.closest(".panel")?.classList.remove("hidden");
@@ -323,11 +326,13 @@ export function renderPracticesPage() {
   }
 
   const kind = def?.analysis_kind;
-  const pointBased = kind === "regresion_lineal" || kind === "curva";
+  const pointBased = POINT_KINDS.includes(kind);
   const openPanels = new Set(
     [...practiceWorkspace.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel),
   );
+  const typed = practiceWorkspace.dataset.practiceId === practice.id ? typedFields() : [];
   const guide = guideFor(practice.id, def);
+  practiceWorkspace.dataset.practiceId = practice.id;
   practiceWorkspace.innerHTML = `
     <div class="workspace-head">
       <div>
@@ -457,11 +462,7 @@ export function renderPracticesPage() {
       .querySelector(`#new-${kind.dataAttr}-form`)
       ?.addEventListener("submit", (event) => saveNewSymbolFormulaRow(kind, event));
     practiceWorkspace.querySelectorAll(`[data-edit-${kind.dataAttr}]`).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset[kind.idParam];
-        state.editing = isEditing(kind.kind, id) ? { kind: null, id: null } : { kind: kind.kind, id };
-        renderPracticesPage();
-      });
+      btn.addEventListener("click", () => toggleEditing(kind.kind, btn.dataset[kind.idParam]));
     });
     practiceWorkspace.querySelectorAll(`[data-delete-${kind.dataAttr}]`).forEach((btn) => {
       btn.addEventListener("click", () => deleteSymbolFormulaRow(kind, btn.dataset[kind.idParam], practice.id));
@@ -475,11 +476,7 @@ export function renderPracticesPage() {
   }
 
   practiceWorkspace.querySelectorAll("[data-edit-curve]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.cid;
-      state.editing = isEditing("curve", id) ? { kind: null, id: null } : { kind: "curve", id };
-      renderPracticesPage();
-    });
+    btn.addEventListener("click", () => toggleEditing("curve", btn.dataset.cid));
   });
   practiceWorkspace.querySelectorAll("[data-delete-curve]").forEach((btn) => {
     btn.addEventListener("click", () => deletePracticeCurve(btn.dataset.cid, practice.id));
@@ -507,11 +504,7 @@ export function renderPracticesPage() {
   });
 
   practiceWorkspace.querySelectorAll("[data-edit-quantity]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.qid;
-      state.editing = isEditing("quantity", id) ? { kind: null, id: null } : { kind: "quantity", id };
-      renderPracticesPage();
-    });
+    btn.addEventListener("click", () => toggleEditing("quantity", btn.dataset.qid));
   });
   practiceWorkspace.querySelectorAll("[data-delete-quantity]").forEach((btn) => {
     btn.addEventListener("click", () => deletePracticeQuantity(btn.dataset.qid, practice.id));
@@ -523,15 +516,11 @@ export function renderPracticesPage() {
     form.addEventListener("submit", saveEditQuantity);
   });
   practiceWorkspace.querySelectorAll("#new-quantity-form, [data-edit-quantity-form]").forEach((form) => {
-    syncQuantityForm(form);
+    syncQuantityForm(form, { initial: true });
     form.addEventListener("input", () => syncQuantityForm(form));
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.rid;
-      state.editing = isEditing("result", id) ? { kind: null, id: null } : { kind: "result", id };
-      renderPracticesPage();
-    });
+    btn.addEventListener("click", () => toggleEditing("result", btn.dataset.rid));
   });
   practiceWorkspace.querySelectorAll("[data-delete-result]").forEach((btn) => {
     btn.addEventListener("click", () => deletePracticeResult(btn.dataset.rid, practice.id));
@@ -542,6 +531,39 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("[data-edit-result-form]").forEach((form) => {
     form.addEventListener("submit", saveEditResult);
   });
+  restoreTypedFields(typed);
+}
+
+function formFields(form) {
+  return [...form.querySelectorAll("input, select, textarea")];
+}
+
+function formKey(form) {
+  return [form.id, ...Object.entries(form.dataset).map(([k, v]) => `${k}=${v}`)].join("&");
+}
+
+let dropped = new Set();
+practiceWorkspace.addEventListener("submit", (e) => dropped.add(formKey(e.target)), true);
+
+function typedFields() {
+  const skip = dropped;
+  dropped = new Set();
+  return [...practiceWorkspace.querySelectorAll("form")]
+    .filter((form) => !skip.has(formKey(form)))
+    .flatMap((form) => formFields(form)
+      .filter((el) => el.name && fieldChanged(el))
+      .map((el) => ({ form: formKey(form), name: el.name, value: el.value, checked: el.checked })));
+}
+
+function restoreTypedFields(typed) {
+  const forms = new Map([...practiceWorkspace.querySelectorAll("form")].map((form) => [formKey(form), form]));
+  for (const { form, name, value, checked } of typed) {
+    const el = (forms.has(form) ? formFields(forms.get(form)) : []).find((e) => e.name === name && (e.type !== "radio" || e.value === value));
+    if (!el || (el.tagName === "SELECT" && ![...el.options].some((o) => o.value === value))) continue;
+    if (el.type === "checkbox" || el.type === "radio") el.checked = checked;
+    else el.value = value;
+    for (const type of ["input", "change"]) el.dispatchEvent(new Event(type, { bubbles: true }));
+  }
 }
 
 const GUIDE_STEP_OF_PROBLEM = {
@@ -564,21 +586,41 @@ function guideFor(practiceId, def) {
 
 function fieldChanged(el) {
   if (el.type === "hidden" || el.disabled) return false;
-  if (el.tagName === "SELECT") return el.selectedIndex !== Math.max([...el.options].findIndex((o) => o.defaultSelected), 0);
+  if (el.tagName === "SELECT") {
+    const options = [...el.options];
+    const marked = options.findLastIndex((o) => o.defaultSelected);
+    return el.selectedIndex !== (marked >= 0 ? marked : options.findIndex((o) => !o.disabled));
+  }
   if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
   const initial = el.tagName === "INPUT" ? el.defaultValue.replace(/[\r\n]/g, "") : el.defaultValue;
   return el.value !== initial;
 }
 
-export function confirmDiscardForms() {
-  const dirty = [...practiceWorkspace.querySelectorAll("form input, form select, form textarea")].some(fieldChanged);
-  return !dirty || window.confirm("Hay datos sin guardar en un formulario. ¿Descartarlos?");
+export function confirmDiscardForms(scope = "form") {
+  const dirty = [...practiceWorkspace.querySelectorAll(scope)].filter((form) => formFields(form).some(fieldChanged));
+  if (!dirty.length) return true;
+  if (!window.confirm("Hay datos sin guardar en un formulario. ¿Descartarlos?")) return false;
+  dirty.forEach((form) => dropped.add(formKey(form)));
+  return true;
+}
+
+function toggleEditing(kind, id) {
+  if (!confirmDiscardForms(".scale-edit-cell form")) return;
+  state.editing = isEditing(kind, id) ? { kind: null, id: null } : { kind, id };
+  renderPracticesPage();
+}
+
+function setGuideStep(step) {
+  state.practiceGuide.step = guideStepOrNext(state.practiceDefinition, step);
+  if (state.editing.kind && GUIDE_STEP_OF_PROBLEM[state.editing.kind] !== state.practiceGuide.step) {
+    state.editing = { kind: null, id: null };
+  }
 }
 
 function goToGuideStep(practiceId, step) {
   if (!confirmDiscardForms()) return;
-  if (state.editing.kind && GUIDE_STEP_OF_PROBLEM[state.editing.kind] !== step) state.editing = { kind: null, id: null };
   state.practiceGuide = { practiceId, step };
+  setGuideStep(step);
   renderPracticesPage();
   openStepPanels(state.practiceGuide.step);
   practiceWorkspace.scrollIntoView({ block: "start" });
@@ -622,7 +664,7 @@ function applyGuide({ steps, index }) {
     block.classList.toggle("hidden", block.dataset.guideStep !== step);
   }
   for (const el of practiceWorkspace.querySelectorAll(".practice-lifecycle, #practice-draft-changes")) {
-    el.style.display = step === "revisar" ? "" : "none";
+    el.classList.toggle("hidden", step !== "revisar");
   }
 }
 
@@ -776,23 +818,21 @@ function goToProblem({ kind, id }) {
   const guided = state.practiceGuide;
   const steps = guided ? practiceGuideSteps(state.practiceDefinition).map((s) => s.id) : [];
   const step = steps.includes(GUIDE_STEP_OF_PROBLEM[kind]) ? GUIDE_STEP_OF_PROBLEM[kind] : null;
-  const rerenders = (step && guided.step !== step) || (id && EDITABLE_KINDS.has(kind));
-  if (rerenders && !confirmDiscardForms()) return;
-  if (step && guided.step !== step) {
-    guided.step = step;
-    renderPracticesPage();
-  }
+  const moves = step && guided.step !== step;
+  const editable = id && EDITABLE_KINDS.has(kind);
+  if ((moves || editable) && !confirmDiscardForms()) return;
+  if (moves) setGuideStep(step);
+  if (editable) state.editing = { kind, id };
+  if (moves || editable) renderPracticesPage();
   const parts = '[data-add-panel="part"]';
   let target = { axes: "#practice-regression-form", layout: '[data-add-panel="quantity"]' }[kind] ?? `[data-add-panel="${kind}"]`;
-  if (id && EDITABLE_KINDS.has(kind)) {
-    state.editing = { kind, id };
-    renderPracticesPage();
+  if (editable) {
     const cell = practiceWorkspace.querySelector(".scale-edit-cell");
     if (cell) return cell.scrollIntoView({ block: "center" });
     state.editing = { kind: null, id: null };
     target = parts;
     if (guided) {
-      guided.step = "partes";
+      setGuideStep("partes");
       renderPracticesPage();
     }
   }
@@ -1099,8 +1139,6 @@ function renderCurvesList(def, practiceId) {
   `;
 }
 
-const POINT_KINDS = ["regresion_lineal", "curva"];
-
 function seriesPractice() {
   return POINT_KINDS.includes(state.practiceDefinition?.analysis_kind);
 }
@@ -1323,12 +1361,16 @@ export async function openPracticeWorkspace(practiceId, { guided = false } = {})
   }
 }
 
-export function closePracticeWorkspace() {
+export function resetPracticeWorkspace() {
   state.activePracticeId = null;
   state.practiceGuide = null;
   state.practiceDefinition = null;
   state.practiceActionStatus = "";
   state.editing = { kind: null, id: null };
+}
+
+export function closePracticeWorkspace() {
+  resetPracticeWorkspace();
   renderPracticesPage();
 }
 
@@ -1366,7 +1408,7 @@ async function savePracticeRegressionFormulas(event) {
   }, "Fórmulas de ajuste guardadas");
 }
 
-function syncQuantityForm(form) {
+function syncQuantityForm(form, { initial = false } = {}) {
   const { elements } = form;
   const role = elements.role.value;
   const given = roleFlags(role, seriesPractice()).is_given;
@@ -1374,7 +1416,10 @@ function syncQuantityForm(form) {
   option.disabled = elements.quantity.value !== "tiempo" || given;
   if (option.disabled && option.selected) {
     elements.input_widget.value = "teclado";
-    if (option.defaultSelected) elements.input_widget.selectedOptions[0].defaultSelected = true;
+    if (initial) {
+      option.defaultSelected = false;
+      elements.input_widget.selectedOptions[0].defaultSelected = true;
+    }
   }
   form.querySelectorAll("[data-for-roles]").forEach((label) => {
     const applies = label.dataset.forRoles.split(" ").includes(role);

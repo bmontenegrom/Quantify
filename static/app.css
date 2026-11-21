@@ -1312,6 +1312,10 @@ button.back-link {
   margin-top: 8px;
 }
 
+.practice-lifecycle.hidden {
+  display: none;
+}
+
 .course-catalog {
   display: grid;
   gap: 12px;

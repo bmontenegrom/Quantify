@@ -1023,7 +1023,7 @@ test("practiceGuideSteps: el paso de serie aparece solo con regresión o curva",
   const ids = (def) => practiceGuideSteps(def).map((s) => s.id);
   assert.deepEqual(ids({ analysis_kind: "estadistico", parts: [] }), ["datos", "partes", "secciones", "magnitudes", "mensurandos", "revisar"]);
   assert.deepEqual(ids({ analysis_kind: "regresion_lineal" }), ["datos", "partes", "secciones", "magnitudes", "serie", "mensurandos", "revisar"]);
-  assert.ok(ids({ analysis_kind: "estadistico", parts: [{ effective_kind: "estadistico" }, { effective_kind: "curva" }] }).includes("serie"));
+  assert.ok(ids({ analysis_kind: "curva", parts: [{ effective_kind: "estadistico" }, { effective_kind: "curva" }] }).includes("serie"));
   assert.deepEqual(ids(null), ["datos", "partes", "secciones", "magnitudes", "mensurandos", "revisar"]);
 });
 
