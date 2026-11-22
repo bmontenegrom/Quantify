@@ -6,7 +6,7 @@ macro_rules! library {
     };
 }
 
-pub const LIBRARY: [(&str, &str); 9] = library!(
+pub const LIBRARY: &[(&str, &str)] = &library!(
     "p1-estadistica",
     "p2-cc",
     "p3-relajacion",
@@ -26,5 +26,5 @@ pub const LIBRARY: [(&str, &str); 9] = library!(
 /// ```
 pub fn library_template(key: &str) -> Option<PracticeTemplate> {
     let (_, json) = LIBRARY.iter().find(|(k, _)| *k == key)?;
-    Some(serde_json::from_str(json).expect("las plantillas del repo son JSON válido"))
+    serde_json::from_str(json).ok()
 }

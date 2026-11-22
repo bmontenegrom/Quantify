@@ -5004,7 +5004,8 @@ async fn the_library_matches_the_seeded_practices() {
     keys.sort();
     assert_eq!(
         keys, seeded,
-        "cada práctica sembrada necesita su plantilla en el repo"
+        "cada práctica sembrada necesita su plantilla: creá templates/practices/<id>.json con {{}}, \
+         agregala a LIBRARY y regenerala con QUANTIFY_UPDATE_TEMPLATES=1 cargo test library"
     );
     let mut stale = Vec::new();
     for (key, json) in LIBRARY {
@@ -5013,9 +5014,7 @@ async fn the_library_matches_the_seeded_practices() {
             .unwrap()
             .unwrap();
         if update {
-            let pretty = serde_json::to_string_pretty(&exported).unwrap()
-                + "
-";
+            let pretty = serde_json::to_string_pretty(&exported).unwrap() + "\n";
             std::fs::write(dir.join(format!("{key}.json")), pretty).unwrap();
             continue;
         }

@@ -274,8 +274,10 @@ pub(super) async fn create_from_library(
     Path(key): Path<String>,
 ) -> Result<Json<db::Practice>, AppError> {
     let user = require_teacher(&state, &headers).await?;
-    let template = practices::library_template(&key)
+    let mut template = practices::library_template(&key)
         .ok_or_else(|| AppError::not_found("plantilla no encontrada"))?;
+    validate_template_items(&template)?;
+    template.name = format!("{} (desde plantilla)", template.name);
     Ok(Json(
         practices::import_template(&state.pool, &template, &user.id).await?,
     ))
@@ -4977,6 +4979,7 @@ mod tests {
         .unwrap()
         .0;
         assert_eq!(from_library.status, "borrador");
+        assert_eq!(from_library.name, "Fluidos I (desde plantilla)");
         assert!(create_from_library(
             State(state.clone()),
             teacher.clone(),

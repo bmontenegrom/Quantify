@@ -115,8 +115,9 @@ await withE2E({ port: PORT, dbName: "quantify-exportar-importar.db" }, async ({ 
   await page.click('details[data-add-panel="template"] > summary');
   await page.waitForSelector("#practice-library [data-template-key]");
   const templates = await page.locator("#practice-library [data-template-key]").count();
-  assert(templates === 9, `la biblioteca debía tener las 9 plantillas (tiene ${templates})`);
-  await page.click('#practice-library [data-template-key="fluidos-1"]');
+  const listed = await page.evaluate(async () => (await (await fetch("/api/practice-templates")).json()).length);
+  assert(templates === listed, `la biblioteca debía mostrar las ${listed} plantillas (muestra ${templates})`);
+  await page.dblclick('#practice-library [data-template-key="fluidos-1"]');
   await waitForStatus(page, "Práctica creada desde plantilla");
   await page.waitForSelector("#practice-workspace .practice-state--borrador");
   assert(
