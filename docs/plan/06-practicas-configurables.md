@@ -960,7 +960,7 @@ Decisiones:
      intermedia, derivada por punto) y una de Hidrostática con dos partes y datos compartidos.
    - Doc: F7 queda marcada como hecha.
 
-### F8 — Plantillas y compartir
+### F8 — Plantillas y compartir ✅ HECHA
 
 1. Formato de intercambio JSON con `schema_version` (definición completa, sin ids internos).
 2. `GET /practices/{id}/export`, `POST /practices/import` (crea un borrador; resuelve choques de id
@@ -1071,6 +1071,10 @@ Decisiones:
      - las migraciones legacy de `display.rs` y el backfill de `schema.rs` (R3).
    - Los `setup()` de los tests y el golden cargan las plantillas.
    - Doc: F8 queda marcada como hecha.
+   - Hecho: las partes con id legible (`p2-cc-serie`, `p1-estadistica-op1`…) llevan en la plantilla
+     una clave opcional (`key`), y al importar su id queda `<id de la práctica>-<clave>`; así los
+     golden, tests y E2E siguen usando los mismos ids. `seed_library` importa la biblioteca con los
+     ids de `LIBRARY` solo en una base sin prácticas; las plantillas pasan a ser la fuente.
 
 Pendiente (revisión de #139): las acciones asíncronas de la ficha comprueban por su cuenta si la
 práctica sigue abierta (`reloadDefinition`, `runPracticeAction`, `createAndOpen`,

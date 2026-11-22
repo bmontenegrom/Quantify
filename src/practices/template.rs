@@ -52,6 +52,8 @@ pub struct PracticeTemplate {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TemplatePart {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
     pub title: String,
     pub analysis_kind: Option<String>,
     pub help_text: String,
@@ -112,6 +114,13 @@ impl PracticeTemplate {
     }
 }
 
+fn is_part_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 pub fn axis(formula: Option<&str>) -> Option<String> {
     formula
         .map(str::trim)
@@ -159,6 +168,11 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
             .parts
             .iter()
             .map(|p| TemplatePart {
+                key: p
+                    .id
+                    .strip_prefix(&format!("{}-", def.practice_id))
+                    .filter(|key| is_part_key(key))
+                    .map(str::to_string),
                 title: p.title.clone(),
                 analysis_kind: p.analysis_kind.clone(),
                 help_text: p.help_text.clone(),
@@ -306,6 +320,14 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     if series_parts > 1 {
         return Err("Solo una parte puede tener una serie de puntos (regresión o curva).".into());
     }
+    let mut keys = HashSet::new();
+    for key in t.parts.iter().filter_map(|p| p.key.as_deref()) {
+        if !is_part_key(key.trim()) || !keys.insert(key.trim()) {
+            return Err(format!(
+                "La clave de parte \"{key}\" tiene que ser única y usar solo minúsculas, dígitos y guiones."
+            ));
+        }
+    }
     if t.operator_count.is_some_and(|n| n > MAX_OPERATORS) {
         return Err(format!(
             "La cantidad de operadores no puede superar {MAX_OPERATORS}."
@@ -389,18 +411,37 @@ pub async fn import_template(
     created_by: &str,
 ) -> anyhow::Result<Practice> {
     let mut tx = crate::db::begin_write(pool).await?;
-    let id = write_template(&mut tx, t, created_by).await?;
+    let id = super::lifecycle::free_practice_id(&mut tx, &super::slugify(&t.name)).await?;
+    write_template(&mut tx, t, &id, "borrador", Some(created_by)).await?;
     tx.commit().await?;
     super::practice(pool, &id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("la práctica recién importada no aparece"))
 }
 
+pub async fn seed_library(pool: &SqlitePool) -> anyhow::Result<()> {
+    let mut tx = crate::db::begin_write(pool).await?;
+    let (empty,): (bool,) = sqlx::query_as("SELECT NOT EXISTS (SELECT 1 FROM practices)")
+        .fetch_one(&mut *tx)
+        .await?;
+    if empty {
+        for (key, _) in super::LIBRARY {
+            let template = super::library_template(key)
+                .ok_or_else(|| anyhow::anyhow!("la plantilla {key} no se puede leer"))?;
+            write_template(&mut tx, &template, key, "publicada", None).await?;
+        }
+    }
+    tx.commit().await?;
+    super::ensure_versions(pool).await
+}
+
 async fn write_template(
     tx: &mut SqliteConnection,
     t: &PracticeTemplate,
-    created_by: &str,
-) -> anyhow::Result<String> {
+    id: &str,
+    status: &str,
+    created_by: Option<&str>,
+) -> anyhow::Result<()> {
     check_template(t).map_err(anyhow::Error::msg)?;
     let trimmed = |k: &Option<String>| k.as_deref().map(|k| k.trim().to_string());
     let has_part_kinds = t.parts.iter().any(|p| p.analysis_kind.is_some());
@@ -422,32 +463,35 @@ async fn write_template(
     } else {
         trimmed(&t.analysis_kind)
     };
-    let id = super::lifecycle::free_practice_id(tx, &super::slugify(&t.name)).await?;
     sqlx::query(
         "INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula, \
          operator_count, status, created_by, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'borrador', ?8, ?9)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
-    .bind(&id)
+    .bind(id)
     .bind(t.name.trim())
     .bind(t.description.trim())
     .bind(&kind)
     .bind(axis(t.x_formula.as_deref()))
     .bind(axis(t.y_formula.as_deref()))
     .bind(t.operator_count.filter(|n| *n > 1))
+    .bind(status)
     .bind(created_by)
     .bind(chrono::Utc::now())
     .execute(&mut *tx)
     .await?;
     let mut parts = Vec::new();
     for (position, (part, part_kind)) in t.parts.iter().zip(&part_kinds).enumerate() {
-        let part_id = Uuid::new_v4().to_string();
+        let part_id = match &part.key {
+            Some(key) => format!("{id}-{}", key.trim()),
+            None => Uuid::new_v4().to_string(),
+        };
         sqlx::query(
             "INSERT INTO practice_parts (id, practice_id, title, position, analysis_kind, help_text) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )
         .bind(&part_id)
-        .bind(&id)
+        .bind(id)
         .bind(part.title.trim())
         .bind(position as i64)
         .bind(part_kind)
@@ -457,22 +501,22 @@ async fn write_template(
         parts.push(part_id);
     }
     for (position, q) in t.quantities.iter().enumerate() {
-        insert_quantity(tx, &id, position as i64, q).await?;
+        insert_quantity(tx, id, position as i64, q).await?;
     }
     for (position, r) in t.results.iter().enumerate() {
-        insert_result(tx, &id, position as i64, r).await?;
+        insert_result(tx, id, position as i64, r).await?;
     }
     for (position, i) in t.intermediates.iter().enumerate() {
-        insert_intermediate(tx, &id, position as i64, i).await?;
+        insert_intermediate(tx, id, position as i64, i).await?;
     }
     for (position, p) in t.point_results.iter().enumerate() {
-        insert_point_result(tx, &id, position as i64, p).await?;
+        insert_point_result(tx, id, position as i64, p).await?;
     }
     for (position, a) in t.aggregates.iter().enumerate() {
-        insert_aggregate(tx, &id, position as i64, a).await?;
+        insert_aggregate(tx, id, position as i64, a).await?;
     }
     for (position, c) in t.curves.iter().enumerate() {
-        insert_curve(tx, &id, position as i64, c).await?;
+        insert_curve(tx, id, position as i64, c).await?;
     }
     for (position, section) in t.sections.iter().enumerate() {
         let section_id = Uuid::new_v4().to_string();
@@ -481,7 +525,7 @@ async fn write_template(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )
         .bind(&section_id)
-        .bind(&id)
+        .bind(id)
         .bind(section.part.map(|p| &parts[p]))
         .bind(section.title.trim())
         .bind(position as i64)
@@ -497,12 +541,12 @@ async fn write_template(
                     "UPDATE {table} SET section_id = ?1 WHERE practice_id = ?2 AND symbol = ?3"
                 ))
                 .bind(&section_id)
-                .bind(&id)
+                .bind(id)
                 .bind(symbol.trim())
                 .execute(&mut *tx)
                 .await?;
             }
         }
     }
-    Ok(id)
+    Ok(())
 }

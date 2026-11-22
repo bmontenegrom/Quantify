@@ -49,9 +49,8 @@ pub(crate) async fn setup() -> (SqlitePool, TempDir) {
         .await
         .unwrap();
     db::migrate(&pool).await.unwrap();
-    db::seed_practices(&pool).await.unwrap();
+    crate::practices::seed_library(&pool).await.unwrap();
     db::seed_users(&pool).await.unwrap();
-    crate::practices::seed_definitions(&pool).await.unwrap();
     (pool, dir)
 }
 

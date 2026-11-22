@@ -8,11 +8,13 @@
   "operator_count": null,
   "parts": [
     {
+      "key": "directa",
       "title": "Parte 1: Relajación directa",
       "analysis_kind": null,
       "help_text": ""
     },
     {
+      "key": "desfasaje",
       "title": "Parte 2: Desfasaje",
       "analysis_kind": null,
       "help_text": ""
