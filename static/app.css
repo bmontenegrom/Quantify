@@ -425,6 +425,10 @@ label {
   gap: 7px;
 }
 
+label[hidden] {
+  display: none;
+}
+
 input,
 select,
 textarea {
@@ -1200,9 +1204,57 @@ button.back-link {
   margin-top: 4px;
 }
 
+.detail-form-grid .wide-field {
+  grid-column: span 2;
+}
+
 .detail-form-grid .detail-actions,
 .detail-form.compact .detail-actions {
   grid-column: 1 / -1;
+}
+
+.formula-field {
+  display: grid;
+  gap: 6px;
+}
+
+.formula-help summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.formula-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.formula-help .formula-chip {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 500;
+  min-height: 0;
+  padding: 3px 10px;
+}
+
+.formula-help .formula-chip:hover {
+  border-color: var(--accent);
+}
+
+.display-symbol-field {
+  display: grid;
+  gap: 4px;
+}
+
+.symbol-preview {
+  color: var(--muted);
+  font-size: 0.95rem;
+  min-height: 1.2em;
 }
 
 .status-chip {
@@ -1258,6 +1310,10 @@ button.back-link {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
+}
+
+.practice-lifecycle.hidden {
+  display: none;
 }
 
 .course-catalog {
@@ -1484,6 +1540,10 @@ button.back-link {
     grid-template-columns: 1fr;
   }
 
+  .detail-form-grid .wide-field {
+    grid-column: auto;
+  }
+
   .workspace-head {
     flex-direction: column;
   }
@@ -1690,6 +1750,12 @@ button.back-link {
   font-size: 0.95rem;
 }
 
+.form-help {
+  margin: 0 0 10px;
+  max-width: 75ch;
+  color: var(--muted);
+}
+
 .measurement-section-subtitle {
   margin: 14px 0 8px;
   padding-top: 10px;
@@ -1808,6 +1874,27 @@ button.back-link {
 
 .edit-banner.hidden {
   display: none;
+}
+
+.practice-problems {
+  border-color: var(--warn);
+  background: var(--panel);
+}
+
+.practice-problems ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-strong);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .edit-banner-actions {
@@ -2018,4 +2105,18 @@ button.back-link {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+.practice-guide-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+.practice-guide-current {
+  font-weight: 700;
+  text-decoration: none;
 }

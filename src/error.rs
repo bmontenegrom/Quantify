@@ -83,6 +83,20 @@ impl AppError {
         }
     }
 
+    /// Crea un error 413 Payload Too Large con el mensaje dado.
+    ///
+    /// ```
+    /// use axum::response::IntoResponse;
+    /// let resp = quantify::error::AppError::payload_too_large("muy grande").into_response();
+    /// assert_eq!(resp.status().as_u16(), 413);
+    /// ```
+    pub fn payload_too_large(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::PAYLOAD_TOO_LARGE,
+            message: message.into(),
+        }
+    }
+
     /// Crea un error 429 Too Many Requests con el mensaje dado (rate-limiting).
     ///
     /// ```

@@ -308,7 +308,7 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .await?;
     if quantity_missing(pool, "p1-estadistica", "T1").await? {
-        let mut tx = pool.begin().await?;
+        let mut tx = crate::db::begin_write(pool).await?;
         sqlx::query(
             "DELETE FROM submission_measurements WHERE quantity_id IN \
              (SELECT id FROM practice_quantities WHERE practice_id = 'p1-estadistica' AND symbol = 'T')",
@@ -351,7 +351,7 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
         tx.commit().await?;
     }
     if result_missing(pool, "p1-estadistica", "g1").await? {
-        let mut tx = pool.begin().await?;
+        let mut tx = crate::db::begin_write(pool).await?;
         sqlx::query(
             "DELETE FROM practice_results WHERE practice_id = 'p1-estadistica' \
              AND symbol IN ('g', 'Tmedio', 'delta')",
@@ -420,7 +420,7 @@ async fn seed_p1_estadistica(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 async fn seed_p3_relajacion(pool: &SqlitePool) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let fresh = seed_practice_in(
         &mut tx,
         "p3-relajacion",
@@ -479,7 +479,7 @@ async fn seed_p2_cc(pool: &SqlitePool) -> anyhow::Result<()> {
     if !quantity_missing(pool, "p2-cc", "R").await?
         && quantity_missing(pool, "p2-cc", "Vg_s").await?
     {
-        let mut tx = pool.begin().await?;
+        let mut tx = crate::db::begin_write(pool).await?;
         wipe_practice_definition(&mut tx, "p2-cc").await?;
         tx.commit().await?;
     }
@@ -885,7 +885,7 @@ async fn seed_filtros(pool: &SqlitePool) -> anyhow::Result<()> {
         .await?;
         let missing_exp = quantity_missing(pool, "filtros", "fpasaje_exp").await?;
         if given_r.0 > 0 || missing_exp {
-            let mut tx = pool.begin().await?;
+            let mut tx = crate::db::begin_write(pool).await?;
             wipe_practice_definition(&mut tx, "filtros").await?;
             tx.commit().await?;
         }
@@ -1205,7 +1205,7 @@ pub(super) async fn chain_seeded_formulas(pool: &SqlitePool) -> anyhow::Result<(
     if done.0 > 0 {
         return Ok(());
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     for (practice, expanded, chained_formulas) in [
         ("ca-rlc", ca_rlc_expanded(), ca_rlc_chained()),
         ("hidrostatica", hidro_expanded(), hidro_chained()),
@@ -1355,7 +1355,7 @@ pub(super) async fn reset_legacy_hidrostatica(pool: &SqlitePool) -> anyhow::Resu
     .fetch_one(pool)
     .await?;
     let seeded = seeded.0 > 0;
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     if seeded {
         for sql in [
             "DELETE FROM submission_measurements WHERE submission_id IN \
@@ -1411,7 +1411,7 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         quantity_missing(pool, "ca-rlc", "f_res_exp").await?,
         f_trabajo,
     ) {
-        let mut tx = pool.begin().await?;
+        let mut tx = crate::db::begin_write(pool).await?;
         sqlx::query(
             "UPDATE practice_quantities SET position = position + 1 \
              WHERE practice_id = 'ca-rlc' AND position >= ?1",
@@ -1434,7 +1434,7 @@ pub(super) async fn fix_ca_rlc_labels(pool: &SqlitePool) -> anyhow::Result<()> {
         tx.commit().await?;
     }
 
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     {
         let stray_position: Option<(i64, i64)> = sqlx::query_as(concat!(
             "SELECT fre.position, ft.position ",
@@ -1552,7 +1552,7 @@ pub(super) async fn unify_p3(pool: &SqlitePool) -> anyhow::Result<()> {
     if done > 0 {
         return Ok(());
     }
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::begin_write(pool).await?;
     let (legacy,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM practices WHERE id = 'p3-relajacion-desfasaje') \
          OR (EXISTS (SELECT 1 FROM practice_quantities WHERE practice_id = 'p3-relajacion') \

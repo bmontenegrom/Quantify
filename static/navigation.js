@@ -65,10 +65,14 @@ export function renderPracticeNav() {
   });
 }
 
-export async function selectPracticeFromNav(practiceId) {
-  const course = state.academic?.courses.find((c) =>
+export async function selectPracticeFromNav(practiceId, courseId = null) {
+  const withPractice = (state.academic?.courses ?? []).filter((c) =>
     (c.practices ?? []).some((p) => p.id === practiceId)
   );
+  const course =
+    withPractice.find((c) => c.id === courseId) ??
+    withPractice.find((c) => c.id === courseSelect.value) ??
+    withPractice[0];
   if (course && course.id !== courseSelect.value) {
     courseSelect.value = course.id;
     const { updateStudentSelectors } = await import("./forms.js");
@@ -112,8 +116,11 @@ document.querySelectorAll(".tab").forEach((tab) => {
       return;
     }
     if (tab.dataset.view === "practices" && state.activePracticeId) {
-      import("./practices-admin.js").then(({ closePracticeWorkspace }) => closePracticeWorkspace());
-      selectView("practices");
+      const onPractices = document.querySelector("#practices-view").classList.contains("active");
+      import("./practices-admin.js").then(({ resetPracticeWorkspace, confirmDiscardForms }) => {
+        if (onPractices && confirmDiscardForms()) resetPracticeWorkspace();
+        selectView("practices");
+      });
       return;
     }
     if (tab.dataset.view === "submissions" && state.activeSubmissionId) {

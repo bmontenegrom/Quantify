@@ -213,6 +213,23 @@ pub async fn disable_course_practice(
     Ok(result.rows_affected() > 0)
 }
 
+pub async fn user_sees_course(
+    pool: &SqlitePool,
+    user: &AuthUser,
+    course_id: &str,
+) -> anyhow::Result<bool> {
+    if matches!(user.role.as_str(), "docente" | "admin") {
+        return Ok(true);
+    }
+    let member: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM course_members WHERE course_id = ?1 AND user_id = ?2")
+            .bind(course_id)
+            .bind(&user.id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(member.is_some())
+}
+
 pub async fn user_can_submit(
     pool: &SqlitePool,
     user: &AuthUser,
@@ -414,6 +431,17 @@ mod tests {
         assert!(!student_ctx.courses.is_empty());
         assert!(student_ctx.students.is_empty());
         assert!(student_ctx.users.is_empty());
+    }
+
+    #[tokio::test]
+    async fn only_members_and_teachers_see_a_course() {
+        let (pool, _dir) = seeded().await;
+        let teacher = find_user(&pool, TEACHER).await;
+        let student = find_user(&pool, STUDENT).await;
+        let enrolled = "fisica-experimental-i-2026";
+        assert!(user_sees_course(&pool, &student, enrolled).await.unwrap());
+        assert!(!user_sees_course(&pool, &student, "otro").await.unwrap());
+        assert!(user_sees_course(&pool, &teacher, "otro").await.unwrap());
     }
 
     #[tokio::test]

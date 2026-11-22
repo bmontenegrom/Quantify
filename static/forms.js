@@ -2,19 +2,21 @@ import { state } from "./state.js";
 import {
   courseSelect, groupSelect, practiceSelect, tableSelect,
   measurementFields, latestResult, submitStatus, submitButton,
-  practicaTitle, practicePartTabs, submissionForm, studentComment,
+  practicaTitle, practicaSubtitle, practicePartTabs, submissionForm, studentComment,
 } from "./dom.js";
 import { fetchJson, postJson, deleteJson } from "./api.js";
 import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
-  compatibleInstruments, prefixFactor, validateMeasurements,
-  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs,
+  prefixFactor, validateMeasurements,
+  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements, POINT_KINDS,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
   givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
+  formHelpHtml, partHelpHtml, columnSections, instrumentSelectorsHtml, wireInstrumentSelectors,
+  retiredInstrumentNote,
 } from "./forms-shared.js";
 import {
   chronoHelperSectionHtml, wireChronoHelpers, needsChronoHelper, chronoKeyFor,
@@ -107,25 +109,37 @@ export function selectedTableAssignment() {
   );
 }
 
+const DEFAULT_SUBTITLE = practicaSubtitle?.textContent ?? "";
+let latestFormRequest = 0;
+
 export async function loadSubmissionForm() {
   if (!measurementFields) return;
+  const request = ++latestFormRequest;
   const previewing = Boolean(state.draftPreviewPracticeId);
-  if (canReview(state.user) && !previewing) return;
+  if (canReview(state.user) && !previewing) {
+    if (practicaSubtitle) practicaSubtitle.textContent = DEFAULT_SUBTITLE;
+    return;
+  }
+  draftPreviewRequest++;
   latestResult.classList.add("hidden");
   submitStatus.textContent = "";
+  const fillButton = document.querySelector("#draft-preview-fill");
+  if (fillButton) fillButton.disabled = true;
   const practiceId = practiceSelect.value;
   if (state.editingSubmissionId && state.editingPracticeId !== practiceId) exitEditMode();
   if (!state.editingSubmissionId && studentComment) studentComment.value = "";
   const courseId = courseSelect.value;
+  const prefilling = state.editingSubmissionId || state.restoringCancelledSubmission;
+  const instrumentsCourseId = (prefilling && state.prefillCourseId) || courseId;
+  const practice = (previewing ? state.practices : selectedCourse()?.practices)?.find((p) => p.id === practiceId);
   if (practicaTitle) {
-    const practiceName =
-      selectedCourse()?.practices.find((p) => p.id === practiceId)?.name ?? "Nueva entrega";
+    const practiceName = practice?.name ?? "Nueva entrega";
     practicaTitle.textContent = state.editingSubmissionId ? `Editar — ${practiceName}` : practiceName;
   }
+  if (practicaSubtitle) practicaSubtitle.textContent = DEFAULT_SUBTITLE;
   if (submitButton) submitButton.textContent = state.editingSubmissionId ? "Guardar cambios" : "Entregar";
   if (previewing) {
-    const practiceName = state.practices.find((p) => p.id === practiceId)?.name ?? practiceId;
-    if (practicaTitle) practicaTitle.textContent = `Probar el borrador — ${practiceName}`;
+    if (practicaTitle) practicaTitle.textContent = `Probar el borrador — ${practice?.name ?? practiceId}`;
     if (submitButton) submitButton.textContent = "Calcular";
   }
   renderPartTabs(practiceId);
@@ -137,7 +151,7 @@ export async function loadSubmissionForm() {
 
   if (!state.editingSubmissionId && !previewing) {
     const blocked = await checkExistingReport(practiceId);
-    if (blocked) return;
+    if (blocked || request !== latestFormRequest) return;
   }
 
   const carried =
@@ -153,9 +167,17 @@ export async function loadSubmissionForm() {
             ? `/api/submissions/${encodeURIComponent(state.editingSubmissionId)}/definition`
             : `/api/practices/${encodeURIComponent(practiceId)}/definition?published=true`,
       ),
-      courseId ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(courseId)}`) : [],
+      instrumentsCourseId
+        ? fetchJson(`/api/instruments?course_id=${encodeURIComponent(instrumentsCourseId)}`).catch(() => null)
+        : null,
     ]);
-    state.practiceForm = { definition, instruments };
+    if (request !== latestFormRequest) return;
+    state.practiceForm = {
+      definition,
+      instruments: instruments ?? [],
+      courseId: instruments ? instrumentsCourseId : null,
+    };
+    if (practicaSubtitle) practicaSubtitle.textContent = definition.description || DEFAULT_SUBTITLE;
     const draft = applicableDraft();
     restoreChronoDraft(draft?.chrono);
     renderPartTabs(practiceId);
@@ -164,7 +186,9 @@ export async function loadSubmissionForm() {
     applyDraftPrefill(draft);
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
+    if (fillButton && previewing) fillButton.disabled = false;
   } catch (error) {
+    if (request !== latestFormRequest) return;
     state.practiceForm = null;
     measurementFields.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
   }
@@ -279,7 +303,7 @@ export function renderMeasurementFields(draft) {
     return;
   }
 
-  if (definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva") {
+  if (POINT_KINDS.includes(definition.analysis_kind)) {
     renderSeriesTable(definition);
     measurementFields.insertAdjacentHTML("beforeend", seriesFinalResultsHtml(definition));
     return;
@@ -301,19 +325,6 @@ export function renderMeasurementFields(draft) {
     q.input_widget === "cronometro" &&
     !state.editingSubmissionId &&
     (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id));
-
-  const instrumentSelectorsHtml = (q, preselectChrono) => {
-    const options = compatibleInstruments(instruments, q.quantity);
-    const preferred = preselectChrono ? options.find((i) => /cron[oó]metro/i.test(i.name)) ?? options[0] : null;
-    const instrumentOptions = [`<option value="">— sin instrumento —</option>`]
-      .concat(options.map((i) => `<option value="${escapeHtml(i.id)}"${preferred && i.id === preferred.id ? " selected" : ""}>${escapeHtml(i.name)}</option>`))
-      .join("");
-    return `
-      <div class="measure-selectors">
-        <select class="measure-instrument" title="Instrumento" aria-label="Instrumento">${instrumentOptions}</select>
-        <select class="measure-scale" title="Escala" aria-label="Escala"><option value="">sin escala</option></select>
-      </div>`;
-  };
 
   const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
@@ -347,7 +358,7 @@ export function renderMeasurementFields(draft) {
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
           <legend>${legendHtml(q)}</legend>
-          ${opIndex == null ? instrumentSelectorsHtml(q, true) : ""}
+          ${opIndex == null ? instrumentSelectorsHtml(instruments, q, true) : ""}
           ${chronoWidgetInnerHtml()}
           <div class="series-debug"></div>
         </fieldset>
@@ -357,7 +368,7 @@ export function renderMeasurementFields(draft) {
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
         <legend>${legendHtml(q)}</legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
-          ${opIndex == null ? `${instrumentSelectorsHtml(q, false)}<div class="measure-sep"></div>` : ""}
+          ${opIndex == null ? `${instrumentSelectorsHtml(instruments, q)}<div class="measure-sep"></div>` : ""}
           <div class="measure-right">
             <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
               ${renderReplicaInput(q.unit, q.default_value)}
@@ -378,7 +389,7 @@ export function renderMeasurementFields(draft) {
     return `
       <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
         <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por operador</span></h4>
-        ${instrumentSelectorsHtml(q, chrono.some(Boolean))}
+        ${instrumentSelectorsHtml(instruments, q, chrono.some(Boolean))}
         ${blocks}
       </div>
     `;
@@ -401,6 +412,7 @@ export function renderMeasurementFields(draft) {
         : "";
       return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+          ${formHelpHtml(sec.help_text)}
           ${rows.map(quantityRowHtml).join("")}
           ${helper}
           ${finalsHtml}
@@ -408,7 +420,7 @@ export function renderMeasurementFields(draft) {
     });
     const leftoverFinals = allFinals.filter((r) => !embedded.has(r.symbol));
     measurementFields.innerHTML =
-      blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
+      partHelpHtml(definition) + blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
     measurementFields.innerHTML =
@@ -416,10 +428,7 @@ export function renderMeasurementFields(draft) {
   }
   wireChronoHelpers();
 
-  measurementFields.querySelectorAll(".measure-selectors").forEach((selectors) => {
-    selectors.querySelector(".measure-instrument").addEventListener("change", () => populateScaleOptions(selectors));
-    populateScaleOptions(selectors);
-  });
+  wireInstrumentSelectors(measurementFields);
 
   measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
     if (row.dataset.isChrono === "1") {
@@ -427,12 +436,7 @@ export function renderMeasurementFields(draft) {
       return;
     }
     if (row.dataset.isGiven === "1") return;
-    row.querySelector(".add-replica")?.addEventListener("click", () => {
-      const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
-      row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(unit));
-      wireRemoveReplica(row);
-    });
-    wireRemoveReplica(row);
+    wireReplicaRow(row);
   });
 }
 
@@ -480,11 +484,16 @@ function seriesFinalResultsHtml(definition) {
   const embedded = new Set(
     [...withRows, ...titled.map(({ sec }) => sec)].flatMap((sec) => sec.results ?? []),
   );
+  const titledAbove = new Set(columnSections(definition, sections));
   const titledHtml = titled.map(({ sec, rows }) => {
     const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
+    const heading = titledAbove.has(sec)
+      ? `<h5 class="measurement-section-subtitle">Resultado final — ${escapeHtml(sec.title)} <span class="submission-meta">— opcional</span></h5>`
+      : `<h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
+        ${formHelpHtml(sec.help_text)}
+        <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>`;
     return `<div class="measurement-section"${secAttr}>
-        <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
-        <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
+        ${heading}
         ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;
   });
@@ -525,12 +534,23 @@ export function collectFinalResults() {
   return [...scalar, ...collectSeriesPointResults()];
 }
 
-export function wireRemoveReplica(row) {
+export function wireReplicaRow(row) {
+  row.querySelector(".add-replica")?.addEventListener("click", () => {
+    const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
+    row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+    wireRemoveReplica(row);
+  });
+  wireRemoveReplica(row);
+}
+
+function wireRemoveReplica(row) {
   const replicas = row.querySelectorAll(".replica");
   row.querySelectorAll(".remove-replica").forEach((btn) => {
     btn.onclick = () => {
       if (row.querySelectorAll(".replica").length <= 1) return;
       btn.closest(".replica").remove();
+      wireRemoveReplica(row);
+      row.dispatchEvent(new Event("input", { bubbles: true }));
     };
   });
   if (replicas.length === 1) {
@@ -757,7 +777,10 @@ export async function submitFormSubmission() {
   }
 }
 
+let draftPreviewRequest = 0;
+
 async function calculateDraftPreview(measurements) {
+  const request = ++draftPreviewRequest;
   if (submitButton) submitButton.disabled = true;
   submitStatus.textContent = "Calculando...";
   try {
@@ -766,15 +789,55 @@ async function calculateDraftPreview(measurements) {
       { measurements, draft: true },
     );
     const { formAnalysisMarkup } = await import("./analysis.js");
+    if (request !== draftPreviewRequest) return;
     setDisplaySymbols(state.practiceForm?.definition?.display_symbols);
     latestResult.innerHTML = formAnalysisMarkup(analysis, comparisonPairs(state.practiceForm?.definition));
     latestResult.classList.remove("hidden");
     submitStatus.textContent = "Calculado con el borrador: no se guardó nada.";
   } catch (error) {
-    submitStatus.textContent = error.message;
+    if (request === draftPreviewRequest) submitStatus.textContent = error.message;
   } finally {
-    if (submitButton) submitButton.disabled = false;
+    if (submitButton && request === draftPreviewRequest) submitButton.disabled = false;
   }
+}
+
+function changedFromRender(el) {
+  if (el.tagName === "SELECT") return el.selectedIndex !== Math.max([...el.options].findIndex((o) => o.defaultSelected), 0);
+  if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
+  return el.validity.badInput || el.value.trim() !== el.defaultValue.trim();
+}
+
+function hasTypedReadings() {
+  return (
+    [...state.chronometers.values()].some((c) => c.count > 0) ||
+    [...measurementFields.querySelectorAll("input, select:not(.measure-instrument):not(.measure-scale)")].some(changedFromRender)
+  );
+}
+
+function fillExampleData() {
+  if (!state.practiceForm) return;
+  const { definition, instruments } = state.practiceForm;
+  if (hasTypedReadings() && !window.confirm("¿Reemplazar los valores cargados por datos de ejemplo?")) return;
+  const chosen = new Map();
+  for (const select of measurementFields.querySelectorAll(".measure-instrument")) {
+    if (!select.value && !changedFromRender(select)) continue;
+    const instrument = instruments.find((i) => i.id === select.value);
+    const scale = select.closest(".measure-selectors").querySelector(".measure-scale").value;
+    chosen.set(select.closest("[data-quantity-id]").dataset.quantityId, {
+      instrument_id: instrument?.id ?? null,
+      scale_id: instrument ? scale || instrument.scales?.[0]?.id || null : null,
+    });
+  }
+  const measurements = exampleMeasurements(definition, { instruments }).map((m) => ({ ...m, ...chosen.get(m.quantity_id) }));
+  const draft = { measurements, finalResults: [] };
+  draftPreviewRequest++;
+  latestResult.classList.add("hidden");
+  submitStatus.textContent = "";
+  for (const chrono of state.chronometers.values()) if (chrono.state === "running") chrono.stop();
+  restoreChronoDraft(null);
+  renderMeasurementFields(draft);
+  applyDraftPrefill(draft);
+  applyPartVisibility();
 }
 
 function selectDraftPreviewPractice() {
@@ -800,7 +863,9 @@ export async function openDraftPreview(practiceId) {
   const banner = document.querySelector("#draft-preview-banner");
   banner.innerHTML = `
     <div>Estás probando el borrador. No se crea ninguna versión ni se guarda ninguna entrega. Los resultados finales que cargues acá no se comparan.</div>
+    <button type="button" id="draft-preview-fill" disabled>Rellenar con datos de ejemplo</button>
     <button type="button" id="draft-preview-back">Volver al editor</button>`;
+  banner.querySelector("#draft-preview-fill").addEventListener("click", fillExampleData);
   banner.querySelector("#draft-preview-back").addEventListener("click", async () => {
     exitEditMode();
     const { selectView } = await import("./navigation.js");
@@ -811,16 +876,22 @@ export async function openDraftPreview(practiceId) {
   await loadSubmissionForm();
 }
 
+function knownCourseId(courseId) {
+  return state.academic?.courses.some((c) => c.id === courseId) ? courseId : null;
+}
+
 export function startEditSubmission(submission) {
   state.editingSubmissionId = submission.id;
   state.editingPracticeId = submission.practice_id;
+  state.prefillCourseId = knownCourseId(submission.course_id);
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
-  import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id));
+  import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id, submission.course_id));
 }
 
 export function exitEditMode() {
+  draftPreviewRequest++;
   if (state.draftPreviewPracticeId) {
     showDraftPreviewChrome(false);
     state.practiceForm = null;
@@ -828,6 +899,7 @@ export function exitEditMode() {
   state.draftPreviewPracticeId = null;
   state.editingSubmissionId = null;
   state.editingPracticeId = null;
+  state.prefillCourseId = null;
   state.editPrefillComment = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;
@@ -849,6 +921,7 @@ export async function cancelSubmission(submission, banner) {
   }
 
   state.restoringCancelledSubmission = true;
+  state.prefillCourseId = knownCourseId(submission.course_id);
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
@@ -864,6 +937,7 @@ export async function cancelSubmission(submission, banner) {
   await loadSubmissionForm();
 
   state.restoringCancelledSubmission = false;
+  state.prefillCourseId = null;
   state.editPrefill = null;
   state.editPrefillStudentResults = null;
   state.editPrefillComment = null;
@@ -1022,9 +1096,25 @@ function prefillStandaloneRow(row, byQ) {
 function fillInstrument(el, e) {
   const inst = el.querySelector(".measure-instrument");
   if (!inst) return;
+  const scale = el.querySelector(".measure-scale");
   inst.value = e.instrument_id ?? "";
+  if (inst.selectedIndex < 0) inst.value = "";
   populateScaleOptions(el);
-  el.querySelector(".measure-scale").value = e.scale_id ?? "";
+  const autoScale = scale.value;
+  scale.value = e.scale_id ?? "";
+  if (scale.selectedIndex < 0) scale.value = autoScale;
+  const prefilling = state.editingSubmissionId || state.restoringCancelledSubmission;
+  if (!prefilling || !state.prefillCourseId || state.practiceForm?.courseId !== state.prefillCourseId) return;
+  const offered = new Set([...inst.options].map((o) => o.value));
+  const instruments = (state.practiceForm?.instruments ?? []).filter((i) => offered.has(i.id));
+  const note = retiredInstrumentNote(instruments, e);
+  if (!note) return;
+  const p = document.createElement("p");
+  p.className = "warnings";
+  p.textContent = note;
+  const selectors = inst.closest(".measure-selectors");
+  (selectors.closest(".measure-body") ?? selectors).after(p);
+  selectors.addEventListener("change", () => p.remove(), { once: true });
 }
 
 function fillReplicaRow(row, values) {

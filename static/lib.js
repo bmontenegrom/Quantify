@@ -31,8 +31,12 @@ export function setDisplaySymbols(symbols) {
 
 export function symbolHtml(value) {
   const raw = String(value);
+  return formatSymbolHtml(displaySymbols.get(raw) ?? raw);
+}
+
+export function formatSymbolHtml(value) {
   return subscriptHtml(
-    escapeHtml(displaySymbols.get(raw) ?? raw).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
+    escapeHtml(String(value)).replace(GREEK_PREFIX, (name) => GREEK_NAMES[name]),
     SYMBOL_SUBSCRIPT,
   );
 }
@@ -320,8 +324,89 @@ function relPct(b, a) {
   return ((b - a) / a) * 100;
 }
 
+export const QUANTITY_ROLES = [
+  { id: "catedra", label: "Dato de cátedra (valor ± U)", short: "Dato de cátedra", series: false },
+  { id: "constante", label: "Dato de cátedra sin incertidumbre / constante", short: "Constante", series: false },
+  { id: "unica", label: "Medida única con instrumento", short: "Medida única", series: false },
+  { id: "replicas", label: "Medida con réplicas (tipo A)", short: "Con réplicas", series: false },
+  { id: "serie", label: "Serie de datos (un valor por punto)", short: "Serie", series: true },
+  { id: "serie_replicas", label: "Serie con réplicas por punto", short: "Serie con réplicas", series: true },
+];
+
+export function quantityRole(quantity, pointBased) {
+  if (quantity.is_given) return quantity.has_uncertainty === false ? "constante" : "catedra";
+  if (pointBased && quantity.per_point) {
+    return quantity.repeated && quantity.replicas_per_point > 0 ? "serie_replicas" : "serie";
+  }
+  return quantity.repeated ? "replicas" : "unica";
+}
+
+export function roleFlags(role, pointBased, current = {}) {
+  const given = role === "catedra" || role === "constante";
+  const series = role === "serie" || role === "serie_replicas";
+  const wasSerie = !current.is_given && current.per_point && !(current.replicas_per_point > 0);
+  return {
+    is_given: given,
+    has_uncertainty: role !== "constante",
+    repeated: given || (role === "serie" && wasSerie) ? Boolean(current.repeated) : role === "replicas" || role === "serie_replicas",
+    per_point: series || (!pointBased && (current.per_point ?? true)),
+  };
+}
+
 export function hasUncertainty(entity) {
   return entity?.has_uncertainty !== false;
+}
+
+const GUIDE_STEPS = [
+  { id: "datos", title: "Datos", help: "Nombre, descripción y tipo de análisis. Si la práctica va a tener partes, el análisis se elige en cada una en el paso siguiente." },
+  { id: "partes", title: "Partes", help: "Cada parte es una pestaña del formulario del alumno, con su propio análisis. Sin partes, el formulario va en una sola pestaña." },
+  { id: "secciones", title: "Secciones", help: "Agrupan magnitudes y resultados bajo un título. Una sección sin parte se ve en todas las pestañas (datos compartidos). Cada magnitud y mensurando elige su sección en su tabla, en los pasos siguientes." },
+  { id: "magnitudes", title: "Magnitudes", help: "Lo que carga el alumno o da la cátedra. El rol dice cómo se ingresa cada una." },
+  { id: "serie", title: "Serie y ejes", help: "Intermedias que se calculan en cada punto, curvas y los ejes del ajuste." },
+  { id: "mensurandos", title: "Mensurandos", help: "Lo que se calcula a partir de las magnitudes, con sus fórmulas." },
+  { id: "revisar", title: "Revisar y publicar", help: "Resolvé los problemas que queden, probá el borrador con datos de ejemplo y publicá." },
+];
+
+export const POINT_KINDS = ["regresion_lineal", "curva"];
+
+export function practiceGuideSteps(definition) {
+  const series = POINT_KINDS.includes(definition?.analysis_kind);
+  return GUIDE_STEPS.filter((s) => s.id !== "serie" || series);
+}
+
+export function guideStepOrNext(definition, step) {
+  const steps = practiceGuideSteps(definition);
+  const order = GUIDE_STEPS.map((s) => s.id);
+  const from = order.indexOf(step);
+  return (steps.find((s) => s.id === step) ?? steps.find((s) => order.indexOf(s.id) > from) ?? steps[0]).id;
+}
+
+export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
+  const pointBased = POINT_KINDS.includes(definition?.analysis_kind);
+  const operators = !pointBased && (definition?.operator_count ?? 0) >= 2 ? definition.operator_count : 0;
+  const round = (x) => Number(x.toPrecision(6));
+  const series = (n, v) => Array.from({ length: n }, (_, k) => round(v * (1 + 0.01 * (k - (n - 1) / 2))));
+  const quantities = definition?.quantities ?? [];
+  return quantities.map((q, i) => {
+    const base = q.default_value != null && (q.is_given || q.default_value !== 0) ? q.default_value : quantities.length - i;
+    const instrument = q.quantity && !q.is_given ? compatibleInstruments(instruments, q.quantity).find((x) => x.scales?.length) : null;
+    const m = { quantity_id: q.id, instrument_id: instrument?.id ?? null, scale_id: instrument?.scales[0].id ?? null, values: [], given_u: null };
+    if (q.is_given) {
+      const value = q.slot_count ? q.default_value ?? 1 : base;
+      return { ...m, values: [value], given_u: hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null };
+    }
+    if (pointBased && q.per_point) {
+      const at = (p) => base * (1 + p / (i + 2));
+      if (q.repeated && q.replicas_per_point > 0) {
+        return { ...m, point_replicas: Array.from({ length: points }, (_, p) => series(q.replicas_per_point, at(p))) };
+      }
+      return { ...m, values: Array.from({ length: points }, (_, p) => round(at(p))) };
+    }
+    if (q.repeated && operators) {
+      return { ...m, operator_replicas: Array.from({ length: operators }, (_, o) => series(replicas, base * (1 + 0.02 * o))) };
+    }
+    return { ...m, values: q.repeated ? series(replicas, base) : [base] };
+  });
 }
 
 export function compareResults(autoDerived, studentResults, tolerances = {}) {
@@ -399,6 +484,32 @@ export function compareOptionGroups(definition, { result = null, section = null 
   return result && current && !offered ? [["Guardada (fuera de alcance)", [current]], ...groups] : groups;
 }
 
+export function formulaScope(definition, kind, { id = "", symbol = "", section = null } = {}) {
+  const scopes = definition?.formula_scopes;
+  if (!scopes) return (definition?.quantities ?? []).map((q) => q.symbol);
+  if (kind === "result") {
+    if (symbol) return scopes.existing_results?.[symbol] ?? [];
+    if (section) return scopes.part_results?.[section.part_id] ?? scopes.results;
+    return [...new Set([scopes.results, ...Object.values(scopes.part_results ?? {})].flat())];
+  }
+  if (kind === "point_result") return scopes.point_results;
+  if (kind === "axis") return scopes.axes;
+  const byId = { intermediate: scopes.intermediates, aggregate: scopes.aggregates }[kind] ?? {};
+  return byId[id ?? ""] ?? [];
+}
+
+export function formulaHelpHtml(symbols, functions = [], known = null) {
+  const chip = (insert, label, title) =>
+    `<button type="button" class="formula-chip" data-insert="${escapeHtml(insert)}" title="${escapeHtml(title)}">${label}</button>`;
+  const all = [...new Set([...symbols, "pi", "e"])];
+  const isKnown = (s) => !known || known.has(s) || s === "pi" || s === "e";
+  const row = (chips) => (chips ? `<div class="formula-chips">${chips}</div>` : "");
+  const symbolChips = all.filter(isKnown).map((s) => chip(s, symbolHtml(s), s)).join("");
+  const derivedChips = all.filter((s) => !isKnown(s)).map((s) => chip(s, `<code>${escapeHtml(s)}</code>`, s)).join("");
+  const functionChips = functions.map(([name, description]) => chip(`${name}()`, escapeHtml(name), description)).join("");
+  return `<details class="formula-help"><summary>Símbolos y funciones</summary>${row(symbolChips)}${row(derivedChips)}${row(functionChips)}</details>`;
+}
+
 export function comparisonPairs(definition) {
   return new Map((definition?.results ?? []).filter((r) => r.compare_with).map((r) => [r.symbol, r.compare_with]));
 }
@@ -427,9 +538,10 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
 }
 
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
-  if (analysisKind === "regresion_lineal" || analysisKind === "curva") {
+  if (POINT_KINDS.includes(analysisKind)) {
     const pointCount = (m) => m.point_replicas?.length ?? m.values.length;
-    const points = Math.max(0, ...measurements.map(pointCount));
+    const isSeries = (m) => metaMap[m.quantity_id]?.perPoint !== false && !metaMap[m.quantity_id]?.isGiven;
+    const points = Math.max(0, ...measurements.filter(isSeries).map(pointCount));
     if (points < 2) {
       return analysisKind === "curva"
         ? "Cargá al menos 2 puntos completos para graficar la curva."

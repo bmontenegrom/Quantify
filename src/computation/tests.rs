@@ -1,4 +1,4 @@
-use super::formula::compile_formula;
+use super::formula::{compile_formula, eval_compiled};
 use super::*;
 use crate::db::{self, InstrumentScale, PracticeQuantity, PracticeResult};
 use crate::practices::{PracticeAggregate, PracticeIntermediate, PracticePointResult};
@@ -147,6 +147,7 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
         is_final,
     };
     let definition = PracticeDefinition {
+        description: String::new(),
         practice_id: "viscosidad".into(),
         status: "borrador".into(),
         analysis_kind: Some("regresion_lineal".into()),
@@ -304,6 +305,34 @@ fn compile_formula_rejects_unknown_symbol() {
     assert!(compile_formula("l*a", &symbols).is_ok());
     assert!(compile_formula("l*z", &symbols).is_err());
     assert!(compile_formula("(l*a", &symbols).is_err());
+}
+
+#[test]
+fn an_integer_result_counts_as_a_number() {
+    let symbols = vec!["L".to_string()];
+    let tree = compile_formula("max(L, 0)", &symbols).unwrap();
+    assert_eq!(eval_compiled(&tree, &HashMap::from([("L", -2.0)])), 0.0);
+    assert_eq!(eval_compiled(&tree, &HashMap::from([("L", 3.5)])), 3.5);
+    let tree = compile_formula("min(L, 5)", &symbols).unwrap();
+    assert_eq!(eval_compiled(&tree, &HashMap::from([("L", 9.0)])), 5.0);
+}
+
+#[test]
+fn integer_literals_divide_as_decimals() {
+    let symbols = vec!["L".to_string(), "T1".to_string()];
+    let eval = |formula: &str| {
+        let tree = compile_formula(formula, &symbols).unwrap();
+        eval_compiled(&tree, &HashMap::from([("L", 4.0), ("T1", 3.0)]))
+    };
+    assert_eq!(eval("1/2"), 0.5);
+    assert_eq!(eval("math::pow(L, 1/2)"), 2.0);
+    assert_eq!(eval("T1/2"), 1.5);
+    assert_eq!(eval("2.5*2"), 5.0);
+    assert!((eval("1e-3*2") - 0.002).abs() < 1e-15);
+    assert!((eval("2.5E-3*L") - 0.01).abs() < 1e-15);
+    assert_eq!(eval("6e+2/L"), 150.0);
+    assert!((eval("2*e-1") - (2.0 * std::f64::consts::E - 1.0)).abs() < 1e-12);
+    assert!((eval("math::log10(100)") - 2.0).abs() < 1e-12);
 }
 
 #[test]
@@ -881,6 +910,13 @@ async fn point_based_submission_stores_point_index_per_point() {
     )
     .await
     .unwrap();
+    sqlx::query(
+        "UPDATE practice_quantities SET per_point = 0 \
+         WHERE practice_id = 'p1-estadistica' AND symbol = 'T3'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let def = crate::practices::definition(&pool, "p1-estadistica")
         .await
         .unwrap()
@@ -903,6 +939,15 @@ async fn point_based_submission_stores_point_index_per_point() {
                 instrument_id: None,
                 scale_id: None,
                 values: vec![1.0, 2.0, 3.0],
+                given_u: None,
+                point_replicas: None,
+                operator_replicas: None,
+            },
+            MeasurementInput {
+                quantity_id: qid("T3"),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![7.0, 7.1, 7.2, 7.3],
                 given_u: None,
                 point_replicas: None,
                 operator_replicas: None,
@@ -946,6 +991,17 @@ async fn point_based_submission_stores_point_index_per_point() {
     assert!(tmed_rows
         .iter()
         .any(|m| m.point_index == 2 && m.replicate_index == 0 && close(m.value, 6.0, 1e-9)));
+
+    let shared: Vec<_> = rows.iter().filter(|m| m.quantity_id == qid("T3")).collect();
+    assert_eq!(shared.len(), 4);
+    assert!(shared.iter().all(|m| m.point_index == 0));
+    let mut reps: Vec<_> = shared.iter().map(|m| m.replicate_index).collect();
+    reps.sort();
+    assert_eq!(
+        reps,
+        vec![0, 1, 2, 3],
+        "las réplicas de una compartida no son puntos"
+    );
 }
 
 #[tokio::test]

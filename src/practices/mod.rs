@@ -12,7 +12,7 @@ where
 pub const LABEL_MODES: [&str; 3] = [DEFAULT_LABEL_MODE, "simbolo", "nombre_simbolo"];
 pub const INPUT_WIDGETS: [&str; 2] = [DEFAULT_INPUT_WIDGET, "cronometro"];
 const DEFAULT_LABEL_MODE: &str = "nombre";
-const DEFAULT_INPUT_WIDGET: &str = "teclado";
+pub const DEFAULT_INPUT_WIDGET: &str = "teclado";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct QuantityInput {
@@ -110,6 +110,7 @@ impl ResultInput {
 #[serde(default)]
 pub struct PracticeDefinition {
     pub practice_id: String,
+    pub description: String,
     pub status: String,
     pub analysis_kind: Option<String>,
     pub x_formula: Option<String>,
@@ -135,6 +136,7 @@ pub struct PracticePart {
     pub title: String,
     pub position: i64,
     pub analysis_kind: Option<String>,
+    pub help_text: String,
     #[sqlx(skip)]
     pub effective_kind: String,
 }
@@ -147,6 +149,7 @@ pub struct PracticeSection {
     pub part_id: Option<String>,
     pub title: String,
     pub position: i64,
+    pub help_text: String,
     #[sqlx(skip)]
     pub quantities: Vec<String>,
     #[sqlx(skip)]
@@ -156,6 +159,7 @@ pub struct PracticeSection {
 #[derive(Debug, Deserialize)]
 pub struct PartInput {
     pub title: String,
+    pub help_text: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +167,7 @@ pub struct SectionInput {
     pub title: String,
     #[serde(default)]
     pub part_id: Option<String>,
+    pub help_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]

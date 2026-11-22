@@ -144,90 +144,12 @@ pub fn api_router(state: SharedState) -> Router {
             post(remove_group_member_path),
         )
         .route("/practices", get(list_practices).post(create_practice))
-        .route(
-            "/practices/{id}",
-            post(update_practice).delete(delete_practice),
-        )
-        .route("/practices/{id}/duplicate", post(duplicate_practice))
-        .route("/practices/{id}/versions", post(publish_practice_version))
-        .route("/practices/{id}/draft-changes", get(practice_draft_changes))
-        .route("/practices/{id}/parts", post(create_part))
-        .route(
-            "/practices/{id}/parts/{pid}",
-            post(update_part).delete(delete_part),
-        )
-        .route("/practices/{id}/parts/{pid}/move", post(move_part))
-        .route(
-            "/practices/{id}/parts/{pid}/analysis-kind",
-            post(set_part_kind),
-        )
-        .route("/practices/{id}/sections", post(create_section))
-        .route(
-            "/practices/{id}/sections/{sid}",
-            post(update_section).delete(delete_section),
-        )
-        .route("/practices/{id}/sections/{sid}/move", post(move_section))
-        .route(
-            "/practices/{id}/quantities/{qid}/section",
-            post(set_quantity_section),
-        )
-        .route(
-            "/practices/{id}/results/{rid}/section",
-            post(set_result_section),
-        )
-        .route("/practices/{id}/status", post(set_practice_status))
         .route("/practices/{id}/definition", get(practice_definition))
+        .route("/practices/{id}/problems", get(practice_problems))
+        .route("/practices/{id}/draft-changes", get(practice_draft_changes))
         .route("/practices/{id}/analyze-preview", post(analyze_preview))
         .route("/practices/{id}/live-values", post(live_values))
-        .route(
-            "/practices/{id}/analysis-kind",
-            post(set_practice_analysis_kind),
-        )
-        .route(
-            "/practices/{id}/regression-formulas",
-            post(set_practice_regression_formulas),
-        )
-        .route(
-            "/practices/{id}/operator-count",
-            post(set_practice_operator_count),
-        )
-        .route("/practices/{id}/quantities", post(create_quantity))
-        .route(
-            "/practices/{id}/quantities/{qid}",
-            post(update_quantity).delete(delete_quantity),
-        )
-        .route("/practices/{id}/results", post(create_result))
-        .route(
-            "/practices/{id}/results/{rid}",
-            post(update_result).delete(delete_result),
-        )
-        .route("/practices/{id}/curves", post(create_curve))
-        .route(
-            "/practices/{id}/curves/{cid}",
-            post(update_curve).delete(delete_curve),
-        )
-        .route("/practices/{id}/curves/{cid}/move", post(move_curve))
-        .route("/practices/{id}/quantities/{qid}/move", post(move_quantity))
-        .route("/practices/{id}/results/{rid}/move", post(move_result))
-        .route("/practices/{id}/intermediates", post(create_intermediate))
-        .route(
-            "/practices/{id}/intermediates/{iid}",
-            post(update_intermediate).delete(delete_intermediate),
-        )
-        .route("/practices/{id}/point-results", post(create_point_result))
-        .route(
-            "/practices/{id}/point-results/{pid}",
-            post(update_point_result).delete(delete_point_result),
-        )
-        .route("/practices/{id}/aggregates", post(create_aggregate))
-        .route(
-            "/practices/{id}/aggregates/{aid}",
-            post(update_aggregate).delete(delete_aggregate),
-        )
-        .route(
-            "/practices/{id}/results/{rid}/tolerance",
-            post(set_result_tolerance),
-        )
+        .merge(practice_edit_routes(state.clone()))
         .route(
             "/instruments",
             get(list_instruments).post(create_instrument),
@@ -274,6 +196,106 @@ pub fn api_router(state: SharedState) -> Router {
             csrf_middleware,
         ))
         .with_state(state)
+}
+
+fn practice_edit_routes(state: SharedState) -> Router<SharedState> {
+    Router::new()
+        .route(
+            "/practices/{id}",
+            post(update_practice).delete(delete_practice),
+        )
+        .route("/practices/{id}/duplicate", post(duplicate_practice))
+        .route("/practices/{id}/versions", post(publish_practice_version))
+        .route("/practices/{id}/parts", post(create_part))
+        .route(
+            "/practices/{id}/parts/{pid}",
+            post(update_part).delete(delete_part),
+        )
+        .route("/practices/{id}/parts/{pid}/move", post(move_part))
+        .route(
+            "/practices/{id}/parts/{pid}/analysis-kind",
+            post(set_part_kind),
+        )
+        .route("/practices/{id}/sections", post(create_section))
+        .route(
+            "/practices/{id}/sections/{sid}",
+            post(update_section).delete(delete_section),
+        )
+        .route("/practices/{id}/sections/{sid}/move", post(move_section))
+        .route(
+            "/practices/{id}/quantities/{qid}/section",
+            post(set_quantity_section),
+        )
+        .route(
+            "/practices/{id}/results/{rid}/section",
+            post(set_result_section),
+        )
+        .route("/practices/{id}/status", post(set_practice_status))
+        .route(
+            "/practices/{id}/analysis-kind",
+            post(set_practice_analysis_kind),
+        )
+        .route(
+            "/practices/{id}/regression-formulas",
+            post(set_practice_regression_formulas),
+        )
+        .route(
+            "/practices/{id}/operator-count",
+            post(set_practice_operator_count),
+        )
+        .route("/practices/{id}/quantities", post(create_quantity))
+        .route(
+            "/practices/{id}/quantities/{qid}",
+            post(update_quantity).delete(delete_quantity),
+        )
+        .route("/practices/{id}/results", post(create_result))
+        .route(
+            "/practices/{id}/results/{rid}",
+            post(update_result).delete(delete_result),
+        )
+        .route("/practices/{id}/curves", post(create_curve))
+        .route(
+            "/practices/{id}/curves/{cid}",
+            post(update_curve).delete(delete_curve),
+        )
+        .route("/practices/{id}/curves/{cid}/move", post(move_curve))
+        .route("/practices/{id}/quantities/{qid}/move", post(move_quantity))
+        .route("/practices/{id}/results/{rid}/move", post(move_result))
+        .route("/practices/{id}/intermediates", post(create_intermediate))
+        .route(
+            "/practices/{id}/intermediates/{iid}",
+            post(update_intermediate).delete(delete_intermediate),
+        )
+        .route(
+            "/practices/{id}/intermediates/{iid}/move",
+            post(move_intermediate),
+        )
+        .route("/practices/{id}/point-results", post(create_point_result))
+        .route(
+            "/practices/{id}/point-results/{pid}",
+            post(update_point_result).delete(delete_point_result),
+        )
+        .route(
+            "/practices/{id}/point-results/{pid}/move",
+            post(move_point_result),
+        )
+        .route("/practices/{id}/aggregates", post(create_aggregate))
+        .route(
+            "/practices/{id}/aggregates/{aid}",
+            post(update_aggregate).delete(delete_aggregate),
+        )
+        .route(
+            "/practices/{id}/aggregates/{aid}/move",
+            post(move_aggregate),
+        )
+        .route(
+            "/practices/{id}/results/{rid}/tolerance",
+            post(set_result_tolerance),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state,
+            serialize_practice_edits,
+        ))
 }
 
 #[derive(Serialize)]
