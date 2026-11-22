@@ -144,7 +144,14 @@ pub fn api_router(state: SharedState) -> Router {
             post(remove_group_member_path),
         )
         .route("/practices", get(list_practices).post(create_practice))
+        .route("/practice-templates/import", post(import_practice))
+        .route("/practice-templates", get(list_library))
+        .route(
+            "/practice-templates/{key}/create",
+            post(create_from_library),
+        )
         .route("/practices/{id}/definition", get(practice_definition))
+        .route("/practices/{id}/export", get(export_practice))
         .route("/practices/{id}/problems", get(practice_problems))
         .route("/practices/{id}/draft-changes", get(practice_draft_changes))
         .route("/practices/{id}/analyze-preview", post(analyze_preview))

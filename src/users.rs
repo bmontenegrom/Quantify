@@ -286,7 +286,7 @@ pub async fn set_user_default_table(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{migrate, seed_academic, seed_practices, seed_users};
+    use crate::db::{migrate, seed_academic, seed_users};
     use crate::sessions::{login, user_by_session, LoginRequest};
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use std::str::FromStr;
@@ -313,7 +313,7 @@ mod tests {
 
     async fn seeded() -> (SqlitePool, TempDir) {
         let (pool, dir) = pool().await;
-        seed_practices(&pool).await.unwrap();
+        crate::practices::seed_library(&pool).await.unwrap();
         seed_users(&pool).await.unwrap();
         seed_academic(&pool).await.unwrap();
         (pool, dir)

@@ -46,7 +46,10 @@ pub fn slugify(name: &str) -> String {
     }
 }
 
-async fn free_practice_id(conn: &mut SqliteConnection, base: &str) -> anyhow::Result<String> {
+pub(super) async fn free_practice_id(
+    conn: &mut SqliteConnection,
+    base: &str,
+) -> anyhow::Result<String> {
     let mut n = 1;
     loop {
         let candidate = if n == 1 {
@@ -66,11 +69,18 @@ async fn free_practice_id(conn: &mut SqliteConnection, base: &str) -> anyhow::Re
 }
 
 pub async fn practice(pool: &SqlitePool, practice_id: &str) -> anyhow::Result<Option<Practice>> {
+    practice_in(&mut *pool.acquire().await?, practice_id).await
+}
+
+pub async fn practice_in(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+) -> anyhow::Result<Option<Practice>> {
     Ok(sqlx::query_as::<_, Practice>(&format!(
         "SELECT {PRACTICE_COLS} FROM practices WHERE id = ?1"
     ))
     .bind(practice_id)
-    .fetch_optional(pool)
+    .fetch_optional(conn)
     .await?)
 }
 
