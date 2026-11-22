@@ -116,8 +116,9 @@ document.querySelectorAll(".tab").forEach((tab) => {
       return;
     }
     if (tab.dataset.view === "practices" && state.activePracticeId) {
+      const onPractices = document.querySelector("#practices-view").classList.contains("active");
       import("./practices-admin.js").then(({ resetPracticeWorkspace, confirmDiscardForms }) => {
-        if (confirmDiscardForms()) resetPracticeWorkspace();
+        if (onPractices && confirmDiscardForms()) resetPracticeWorkspace();
         selectView("practices");
       });
       return;

@@ -46,26 +46,12 @@ export async function fillAndSubmit(page, formSelector, fields, checks = {}) {
 
 export async function assignSection(page, list, symbol, label) {
   const select = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="${list}"]`);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const old = await select.elementHandle();
-    await select.selectOption({ label });
-    await page.waitForFunction((el) => !el.isConnected, old, { timeout: 10_000 }).catch(() => {});
-    const ok = await page
-      .waitForFunction(
-        ([list, symbol, label]) => {
-          const row = [...document.querySelectorAll("#practice-workspace tr")].find(
-            (tr) => tr.querySelector("code")?.textContent === symbol,
-          );
-          const sel = row?.querySelector(`[data-section-select="${list}"]`);
-          return sel?.selectedOptions[0]?.textContent === label;
-        },
-        [list, symbol, label],
-        { timeout: 3_000 },
-      )
-      .then(() => true, () => false);
-    if (ok) return;
-  }
-  throw new Error(`no se pudo asignar ${symbol} a ${label}`);
+  const old = await select.elementHandle();
+  await select.selectOption({ label });
+  await page.waitForFunction((el) => !el.isConnected, old, { timeout: 10_000 }).catch(() => {});
+  await old.dispose();
+  const shown = await select.evaluate((sel) => sel.selectedOptions[0]?.textContent);
+  if (shown !== label) throw new Error(`no se pudo asignar ${symbol} a ${label} (muestra ${shown})`);
 }
 
 export async function waitForStatus(page, text) {

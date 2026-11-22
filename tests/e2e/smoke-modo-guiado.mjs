@@ -106,7 +106,7 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   for (const symbol of ["R", "L", "g"]) await addQuantity(page, { symbol, name: symbol, unit: "", role: "catedra" });
   await addQuantity(page, { symbol: "rho", name: "Densidad del agua", unit: "kg/m3", role: "unica" });
 
-  step("Fluidos I: cambiar de paso con datos sin guardar pide confirmación");
+  step("Fluidos I: cambiar de paso conserva lo escrito; cerrar una edición con cambios pide confirmación");
   await page.locator(`${row("h")} [data-edit-quantity]`).click();
   await page.locator('#edit-quantity-form [name="unit"]').fill("cm");
   let before = dialogs;
@@ -115,9 +115,13 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   await page.locator('#practice-regression-form [name="x_formula"]').fill("h");
   before = dialogs;
   await page.click("#practice-workspace [data-guide-exit]");
-  assert(dialogs === before + 1, "Ver todo con los ejes escritos sin guardar debía pedir confirmación");
   await page.click("#practice-workspace [data-guide-start]");
   await expectStep(page, "Serie y ejes");
+  assert(dialogs === before, "Ver todo y volver al paso no debían pedir confirmación");
+  assert(
+    (await page.locator('#practice-regression-form [name="x_formula"]').inputValue()) === "h",
+    "Ver todo y volver al paso debían conservar los ejes escritos",
+  );
 
   step("Fluidos I: ejes del ajuste e intermedia Q; el alta cerrada no se vuelve a abrir sola");
   const intermediatePanel = page.locator('#practice-workspace details[data-add-panel="intermediate"]');
@@ -247,14 +251,18 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   await openAddForm(page, "#new-section-form");
   await page.locator('#new-section-form [name="title"]').fill("Sin guardar");
   await page.click('.tab.teacher-only[data-view="submissions"]');
-  acceptDialogs = false;
   await page.click('.tab.teacher-only[data-view="practices"]');
   await page.waitForSelector('#new-section-form [name="title"]');
+  assert(dialogs === before, "volver a Prácticas desde otra pestaña debía mostrar la ficha sin preguntar");
+  acceptDialogs = false;
+  const asked = page.waitForEvent("dialog");
+  await page.click('.tab.teacher-only[data-view="practices"]');
+  await asked;
   acceptDialogs = true;
-  assert(dialogs === before + 1, "volver por la pestaña con datos sin guardar debía pedir confirmación");
+  assert(dialogs === before + 1, "la pestaña Prácticas desde la ficha con datos sin guardar debía pedir confirmación");
   assert(
     (await page.locator('#new-section-form [name="title"]').inputValue()) === "Sin guardar",
-    "cancelar debía volver a la ficha con lo escrito",
+    "cancelar debía dejar la ficha con lo escrito",
   );
   await page.click("#practice-workspace-back");
   assert(dialogs === before + 2, "volver al listado con datos sin guardar debía pedir confirmación");

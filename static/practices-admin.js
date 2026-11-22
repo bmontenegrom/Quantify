@@ -23,7 +23,8 @@ import {
 import { selectView } from "./navigation.js";
 
 let dropped = new Set();
-practiceWorkspace.addEventListener("submit", (e) => dropped.add(formKey(e.target)), true);
+let submitted = null;
+practiceWorkspace.addEventListener("submit", (e) => { submitted = e.target; }, true);
 
 const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
 
@@ -246,13 +247,15 @@ function symbolFormulaPayloadFromForm(form, kind) {
 }
 
 async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) {
+  const form = submitted;
+  submitted = null;
   try {
     const message = await fn();
     if (resetEditing) state.editing = { kind: null, id: null };
     state.practiceActionStatus = typeof message === "string" ? message : successMsg;
+    if (form) dropped.add(formKey(form));
   } catch (error) {
     state.practiceActionStatus = error.message;
-    dropped.clear();
   }
   renderPracticesPage();
 }
@@ -426,7 +429,6 @@ export function renderPracticesPage() {
     btn.addEventListener("click", () => goToGuideStep(practice.id, btn.dataset.guideGo));
   });
   practiceWorkspace.querySelector("[data-guide-exit]")?.addEventListener("click", () => {
-    if (!confirmDiscardForms()) return;
     state.practiceGuideLastStep = state.practiceGuide?.step ?? null;
     state.practiceGuide = null;
     renderPracticesPage();
@@ -436,7 +438,6 @@ export function renderPracticesPage() {
     btn.addEventListener("click", () => setPracticeStatus(btn.dataset.practiceId, btn.dataset.practiceStatus));
   });
   practiceWorkspace.querySelector("[data-practice-try-draft]")?.addEventListener("click", async (e) => {
-    if (!confirmDiscardForms()) return;
     const practiceId = e.currentTarget.dataset.practiceId;
     const { openDraftPreview } = await import("./forms.js");
     await openDraftPreview(practiceId);
@@ -611,16 +612,21 @@ function toggleEditing(kind, id) {
 }
 
 function setGuideStep(step) {
-  state.practiceGuide.step = guideStepOrNext(state.practiceDefinition, step);
-  if (state.editing.kind && GUIDE_STEP_OF_PROBLEM[state.editing.kind] !== state.practiceGuide.step) {
-    state.editing = { kind: null, id: null };
-  }
+  const next = guideStepOrNext(state.practiceDefinition, step);
+  const closesEdit = state.editing.kind && GUIDE_STEP_OF_PROBLEM[state.editing.kind] !== next;
+  if (closesEdit && !confirmDiscardForms(".scale-edit-cell form")) return false;
+  state.practiceGuide.step = next;
+  if (closesEdit) state.editing = { kind: null, id: null };
+  return true;
 }
 
 function goToGuideStep(practiceId, step) {
-  if (!confirmDiscardForms()) return;
-  state.practiceGuide = { practiceId, step };
-  setGuideStep(step);
+  const previous = state.practiceGuide;
+  state.practiceGuide = { practiceId, step: previous?.step ?? step };
+  if (!setGuideStep(step)) {
+    state.practiceGuide = previous;
+    return;
+  }
   renderPracticesPage();
   openStepPanels(state.practiceGuide.step);
   practiceWorkspace.scrollIntoView({ block: "start" });
@@ -820,9 +826,9 @@ function goToProblem({ kind, id }) {
   const step = steps.includes(GUIDE_STEP_OF_PROBLEM[kind]) ? GUIDE_STEP_OF_PROBLEM[kind] : null;
   const moves = step && guided.step !== step;
   const editable = id && EDITABLE_KINDS.has(kind);
-  if ((moves || editable) && !confirmDiscardForms()) return;
-  if (moves) setGuideStep(step);
+  if (editable && state.editing.kind && !isEditing(kind, id) && !confirmDiscardForms(".scale-edit-cell form")) return;
   if (editable) state.editing = { kind, id };
+  if (moves && !setGuideStep(step)) return;
   if (moves || editable) renderPracticesPage();
   const parts = '[data-add-panel="part"]';
   let target = { axes: "#practice-regression-form", layout: '[data-add-panel="quantity"]' }[kind] ?? `[data-add-panel="${kind}"]`;
