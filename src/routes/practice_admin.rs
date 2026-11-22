@@ -239,6 +239,50 @@ pub(super) async fn import_practice(
     ))
 }
 
+#[derive(Debug, Serialize)]
+pub(super) struct LibraryEntry {
+    key: &'static str,
+    name: String,
+    description: String,
+    analysis_kind: Option<String>,
+}
+
+pub(super) async fn list_library(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<LibraryEntry>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let entries: Vec<LibraryEntry> = practices::LIBRARY
+        .iter()
+        .filter_map(|(key, _)| {
+            let t = practices::library_template(key)?;
+            Some(LibraryEntry {
+                key,
+                name: t.name,
+                description: t.description,
+                analysis_kind: t.analysis_kind,
+            })
+        })
+        .collect();
+    Ok(Json(entries))
+}
+
+pub(super) async fn create_from_library(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<Json<db::Practice>, AppError> {
+    let user = require_teacher(&state, &headers).await?;
+    let mut template = practices::library_template(&key)
+        .ok_or_else(|| AppError::not_found("plantilla no encontrada"))?;
+    practices::check_template(&template).map_err(AppError::bad_request)?;
+    validate_template_items(&template)?;
+    template.name = format!("{} (desde plantilla)", template.name);
+    Ok(Json(
+        practices::import_template(&state.pool, &template, &user.id).await?,
+    ))
+}
+
 fn validate_template_items(t: &practices::PracticeTemplate) -> Result<(), AppError> {
     for row in t.symbol_rows() {
         validate_symbol_format(row.symbol)?;
@@ -4921,6 +4965,35 @@ mod tests {
         .await
         .unwrap_err();
         assert!(typo.message().contains("formato inválido"));
+        let library = list_library(State(state.clone()), teacher.clone())
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(library.len(), practices::LIBRARY.len());
+        for (key, _) in practices::LIBRARY {
+            let created =
+                create_from_library(State(state.clone()), teacher.clone(), Path(key.to_string()))
+                    .await
+                    .unwrap_or_else(|e| panic!("{key}: {}", e.message()));
+            assert!(created.name.ends_with("(desde plantilla)"), "{key}");
+        }
+        let from_library = create_from_library(
+            State(state.clone()),
+            teacher.clone(),
+            Path("fluidos-1".into()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(from_library.status, "borrador");
+        assert_eq!(from_library.name, "Fluidos I (desde plantilla)");
+        assert!(create_from_library(
+            State(state.clone()),
+            teacher.clone(),
+            Path("no-existe".into())
+        )
+        .await
+        .is_err());
         let created = import(teacher.clone(), "x").await.unwrap().0;
         assert_eq!(created.status, "borrador");
         let exported = export_practice(

@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "name": "Relajacion Exponencial",
+  "description": "Tiempo de relajación de un circuito RC medido de dos formas: directamente, con el tiempo de semidescarga, y a partir del desfasaje según la frecuencia.",
+  "analysis_kind": "regresion_lineal",
+  "x_formula": "2*pi*f",
+  "y_formula": "b / math::sqrt(a*a - b*b)",
+  "operator_count": null,
+  "parts": [
+    {
+      "title": "Parte 1: Relajación directa",
+      "analysis_kind": null,
+      "help_text": ""
+    },
+    {
+      "title": "Parte 2: Desfasaje",
+      "analysis_kind": null,
+      "help_text": ""
+    }
+  ],
+  "sections": [
+    {
+      "title": "Circuito RC y semidescarga",
+      "part": 0,
+      "help_text": "",
+      "quantities": [
+        "R",
+        "Rint",
+        "C",
+        "T_oc",
+        "tmedio"
+      ],
+      "results": [
+        "tau_teorico",
+        "tau_exp"
+      ]
+    },
+    {
+      "title": "Elipse por frecuencia",
+      "part": 1,
+      "help_text": "",
+      "quantities": [
+        "f",
+        "a",
+        "b"
+      ],
+      "results": [
+        "tau"
+      ]
+    }
+  ],
+  "quantities": [
+    {
+      "display_symbol": null,
+      "symbol": "R",
+      "name": "Resistencia",
+      "unit": "ohm",
+      "repeated": false,
+      "quantity": "resistencia",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": false,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "teclado"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "Rint",
+      "name": "Resistencia interna de la fuente",
+      "unit": "ohm",
+      "repeated": false,
+      "quantity": "resistencia",
+      "is_given": true,
+      "replicas_per_point": null,
+      "per_point": false,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "teclado"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "C",
+      "name": "Capacitancia",
+      "unit": "F",
+      "repeated": false,
+      "quantity": "capacitancia",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": false,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "teclado"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "T_oc",
+      "name": "Periodo de la onda cuadrada",
+      "unit": "s",
+      "repeated": false,
+      "quantity": "tiempo",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": false,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre_simbolo",
+      "input_widget": "teclado"
+    },
+    {
+      "display_symbol": "t_1/2",
+      "symbol": "tmedio",
+      "name": "Tiempo de semidescarga (t1/2)",
+      "unit": "s",
+      "repeated": false,
+      "quantity": "tiempo",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": false,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "teclado"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "f",
+      "name": "Frecuencia",
+      "unit": "Hz",
+      "repeated": true,
+      "quantity": "frecuencia",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": true,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "teclado"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "a",
+      "name": "Amplitud de la senal en el eje y de la elipse",
+      "unit": "div",
+      "repeated": true,
+      "quantity": "longitud",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": true,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "teclado"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "b",
+      "name": "Interseccion de la elipse con el eje y",
+      "unit": "div",
+      "repeated": true,
+      "quantity": "longitud",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": true,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "teclado"
+    }
+  ],
+  "results": [
+    {
+      "display_symbol": null,
+      "symbol": "tau_teorico",
+      "name": "Tiempo de relajacion teorico",
+      "unit": "s",
+      "formula": "(R + Rint) * C",
+      "tolerance": null,
+      "is_final": false,
+      "has_uncertainty": true,
+      "compare_with": null
+    },
+    {
+      "display_symbol": null,
+      "symbol": "tau_exp",
+      "name": "Tiempo de relajacion experimental",
+      "unit": "s",
+      "formula": "tmedio / math::ln(2)",
+      "tolerance": null,
+      "is_final": true,
+      "has_uncertainty": true,
+      "compare_with": null
+    },
+    {
+      "display_symbol": null,
+      "symbol": "tau",
+      "name": "Constante de tiempo RC (desfasaje)",
+      "unit": "s",
+      "formula": "slope",
+      "tolerance": null,
+      "is_final": true,
+      "has_uncertainty": true,
+      "compare_with": null
+    }
+  ],
+  "intermediates": [],
+  "point_results": [],
+  "aggregates": [],
+  "curves": []
+}
