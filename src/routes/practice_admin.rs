@@ -218,11 +218,17 @@ pub(super) async fn import_practice(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<db::Practice>, AppError> {
     let user = require_teacher(&state, &headers).await?;
-    let template: practices::PracticeTemplate = serde_json::from_value(body).map_err(|e| {
-        AppError::bad_request(format!(
-            "El archivo no es una práctica exportada de Quantify ({e})."
-        ))
-    })?;
+    let not_a_template =
+        || AppError::bad_request("El archivo no es una práctica exportada de Quantify.");
+    let version = body
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(not_a_template)?;
+    if version != u64::from(practices::TEMPLATE_VERSION) {
+        return Err(AppError::bad_request(practices::version_error(version)));
+    }
+    let template: practices::PracticeTemplate =
+        serde_json::from_value(body).map_err(|_| not_a_template())?;
     practices::check_template(&template).map_err(AppError::bad_request)?;
     validate_template_items(&template)?;
     Ok(Json(
@@ -4778,11 +4784,10 @@ mod tests {
             }
         };
         let template = |symbol: &str| -> serde_json::Value {
-            serde_json::to_value(serde_json::json!({
+            serde_json::json!({
                 "schema_version": 1, "name": "Importada", "analysis_kind": "estadistico",
                 "quantities": [{"symbol": symbol, "name": "x", "unit": "", "repeated": false}]
-            }))
-            .unwrap()
+            })
         };
         let import = |headers: HeaderMap, symbol: &str| {
             import_practice(State(state.clone()), headers, Json(template(symbol)))
@@ -4821,11 +4826,10 @@ mod tests {
             for (key, value) in extra.as_object().unwrap() {
                 body[key] = value.clone();
             }
-            let template = body;
             let state = state.clone();
             let headers = teacher.clone();
             async move {
-                let practice = import_practice(State(state.clone()), headers, Json(template))
+                let practice = import_practice(State(state.clone()), headers, Json(body))
                     .await
                     .unwrap_or_else(|e| panic!("{}", e.message()))
                     .0;
@@ -4898,6 +4902,14 @@ mod tests {
         assert!(not_a_template
             .message()
             .contains("no es una práctica exportada"));
+        let future = import_practice(
+            State(state.clone()),
+            teacher.clone(),
+            Json(serde_json::json!({"schema_version": 2, "quantities": {"otra": "forma"}})),
+        )
+        .await
+        .unwrap_err();
+        assert!(future.message().contains("versión 2"));
         let created = import(teacher.clone(), "x").await.unwrap().0;
         assert_eq!(created.status, "borrador");
         let exported = export_practice(

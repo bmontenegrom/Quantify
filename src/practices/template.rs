@@ -262,6 +262,10 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
     }
 }
 
+pub fn version_error(found: u64) -> String {
+    format!("El archivo usa la versión {found} del formato y esta versión de Quantify lee la {TEMPLATE_VERSION}.")
+}
+
 /// Lo que impide escribir una plantilla; el resto lo muestra el panel de problemas del borrador.
 ///
 /// ```
@@ -276,10 +280,7 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
 /// ```
 pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     if t.schema_version != TEMPLATE_VERSION {
-        return Err(format!(
-            "El archivo usa la versión {} del formato y esta versión de Quantify lee la {}.",
-            t.schema_version, TEMPLATE_VERSION
-        ));
+        return Err(version_error(t.schema_version.into()));
     }
     if t.name.trim().is_empty() {
         return Err("La práctica necesita un nombre.".into());

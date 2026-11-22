@@ -254,6 +254,11 @@ function symbolFormulaPayloadFromForm(form, kind) {
   return payload;
 }
 
+async function reloadDefinition(practiceId) {
+  const definition = await fetchJson(`/api/practices/${practiceId}/definition`);
+  if (state.activePracticeId === practiceId) state.practiceDefinition = definition;
+}
+
 async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) {
   const form = submitted;
   submitted = null;
@@ -268,7 +273,7 @@ async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) 
     state.practiceActionStatus = typeof message === "string" ? message : successMsg;
     if (form) dropped.add(formKey(form));
   } catch (error) {
-    if (state.activePracticeId !== practiceId) return;
+    if (state.activePracticeId !== practiceId) return withPracticeStatus(error.message);
     state.practiceActionStatus = error.message;
   }
   renderPracticesPage();
@@ -281,7 +286,7 @@ async function saveNewSymbolFormulaRow(kind, event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/${kind.urlSegment}`, symbolFormulaPayloadFromForm(form, kind));
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     kind.statusCreate,
     { resetEditing: true },
@@ -296,7 +301,7 @@ async function saveEditSymbolFormulaRow(kind, event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`, symbolFormulaPayloadFromForm(form, kind));
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     kind.statusUpdate,
     { resetEditing: true },
@@ -308,7 +313,7 @@ async function deleteSymbolFormulaRow(kind, id, practiceId) {
   await runPracticeAction(
     async () => {
       await deleteJson(`/api/practices/${practiceId}/${kind.urlSegment}/${id}`);
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     kind.statusDelete,
     { resetEditing: true },
@@ -451,7 +456,7 @@ export function renderPracticesPage() {
   renderProblems(practice.id);
   if (def?.current_version) renderDraftChanges(practice.id);
   practiceWorkspace.querySelectorAll("[data-practice-export]").forEach((btn) => {
-    btn.addEventListener("click", () => exportPractice(practice.id, btn.dataset.practiceExport, def.current_version));
+    btn.addEventListener("click", () => exportPractice(practice.id, btn.dataset.practiceExport));
   });
   practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
     deletePractice(e.currentTarget.dataset.practiceId);
@@ -800,18 +805,25 @@ async function createPractice(event) {
   }
 }
 
-async function exportPractice(practiceId, version, number) {
+async function exportPractice(practiceId, version) {
   const published = version === "publicada";
   await runPracticeAction(async () => {
     const template = await fetchJson(`/api/practices/${encodeURIComponent(practiceId)}/export?version=${version}`);
-    downloadJson(template, published ? `${practiceId}-v${number}.json` : `${practiceId}.json`);
+    downloadJson(template, published ? `${practiceId}-publicada.json` : `${practiceId}.json`);
   }, published ? "Versión publicada exportada" : "Borrador exportado");
 }
+
+let importing = false;
 
 async function importPractice(event) {
   const input = event.target;
   const file = input.files?.[0];
-  if (!file) return;
+  if (!file || importing) {
+    input.value = "";
+    return;
+  }
+  importing = true;
+  withPracticeStatus("Importando…");
   try {
     let template;
     try {
@@ -827,6 +839,7 @@ async function importPractice(event) {
   } catch (error) {
     withPracticeStatus(error.message);
   } finally {
+    importing = false;
     input.value = "";
   }
 }
@@ -1002,7 +1015,7 @@ async function setPracticeStatus(practiceId, status) {
     await postJson(`/api/practices/${practiceId}/status`, { status });
     await refreshPractices();
     if (state.practiceDefinition?.practice_id === practiceId) {
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     }
   }, STATUS_DONE[status] ?? "Estado actualizado");
 }
@@ -1011,7 +1024,7 @@ async function publishPracticeVersion(practiceId, fingerprint) {
   lastDraftChanges = null;
   await runPracticeAction(async () => {
     const { number, new_version } = await postJson(`/api/practices/${practiceId}/versions`, { expected_fingerprint: fingerprint });
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    await reloadDefinition(practiceId);
     return new_version
       ? `Versión ${number} publicada: las entregas nuevas la usan; las anteriores siguen con la suya.`
       : `Versión ${number} actualizada, sin crear otra.`;
@@ -1429,7 +1442,7 @@ export async function openPracticeWorkspace(practiceId, { guided = false } = {})
   renderPracticesPage();
   selectView("practices");
   try {
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    await reloadDefinition(practiceId);
     renderPracticesPage();
     if (state.practiceGuide) openStepPanels(state.practiceGuide.step);
   } catch (error) {
@@ -1457,7 +1470,7 @@ async function savePracticeKind(event) {
     await postJson(`/api/practices/${payload.practice_id}/analysis-kind`, {
       analysis_kind: payload.analysis_kind,
     });
-    state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
+    await reloadDefinition(payload.practice_id);
     state.practices = await fetchJson("/api/practices");
   }, "Tipo de análisis guardado");
 }
@@ -1468,7 +1481,7 @@ async function savePracticeOperatorCount(event) {
   const count = Number(payload.operator_count) || 0;
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${payload.practice_id}/operator-count`, { count });
-    state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
+    await reloadDefinition(payload.practice_id);
   }, "Operadores actualizados");
 }
 
@@ -1480,7 +1493,7 @@ async function savePracticeRegressionFormulas(event) {
       x_formula: payload.x_formula ?? "",
       y_formula: payload.y_formula ?? "",
     });
-    state.practiceDefinition = await fetchJson(`/api/practices/${payload.practice_id}/definition`);
+    await reloadDefinition(payload.practice_id);
   }, "Fórmulas de ajuste guardadas");
 }
 
@@ -1540,7 +1553,7 @@ async function saveNewQuantity(event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/quantities`, quantityPayloadFromForm(form));
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     "Magnitud agregada",
     { resetEditing: true },
@@ -1555,7 +1568,7 @@ async function saveEditQuantity(event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/quantities/${qid}`, quantityPayloadFromForm(form));
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     "Magnitud actualizada",
     { resetEditing: true },
@@ -1567,7 +1580,7 @@ async function deletePracticeQuantity(qid, practiceId) {
   await runPracticeAction(
     async () => {
       const { retired } = await deleteJson(`/api/practices/${practiceId}/quantities/${qid}`);
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
       return retired
         ? "Magnitud quitada del borrador: sigue en la versión vigente hasta que publiques la siguiente."
         : "Magnitud eliminada";
@@ -1593,7 +1606,7 @@ async function saveNewCurve(event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/curves`, curvePayloadFromForm(form));
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     "Curva agregada",
     { resetEditing: true },
@@ -1608,7 +1621,7 @@ async function saveEditCurve(event) {
   await runPracticeAction(
     async () => {
       await postJson(`/api/practices/${practiceId}/curves/${cid}`, curvePayloadFromForm(form));
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     "Curva actualizada",
     { resetEditing: true },
@@ -1722,7 +1735,7 @@ async function saveLayoutItem(event, practiceId) {
   if (list === "sections") body.part_id = payload.part_id || null;
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/${list}${id ? `/${id}` : ""}`, body);
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    await reloadDefinition(practiceId);
   }, list === "parts" ? "Parte guardada" : "Sección guardada");
 }
 
@@ -1733,8 +1746,8 @@ async function deleteLayoutItem(list, id, practiceId) {
   if (!window.confirm(what)) return;
   await runPracticeAction(async () => {
     await deleteJson(`/api/practices/${practiceId}/${list}/${id}`);
-    [state.practiceDefinition, state.practices] = await Promise.all([
-      fetchJson(`/api/practices/${practiceId}/definition`),
+    [, state.practices] = await Promise.all([
+      reloadDefinition(practiceId),
       list === "parts" ? fetchJson("/api/practices") : state.practices,
     ]);
   }, list === "parts" ? "Parte eliminada" : "Sección eliminada");
@@ -1743,17 +1756,14 @@ async function deleteLayoutItem(list, id, practiceId) {
 async function setPartKind(partId, kind, practiceId) {
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/parts/${partId}/analysis-kind`, { analysis_kind: kind });
-    [state.practiceDefinition, state.practices] = await Promise.all([
-      fetchJson(`/api/practices/${practiceId}/definition`),
-      fetchJson("/api/practices"),
-    ]);
+    [, state.practices] = await Promise.all([reloadDefinition(practiceId), fetchJson("/api/practices")]);
   }, "Análisis de la parte guardado");
 }
 
 async function setItemSection(list, id, sectionId, practiceId) {
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/${list}/${id}/section`, { section_id: sectionId || null });
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    await reloadDefinition(practiceId);
   }, "Sección asignada");
 }
 
@@ -1767,7 +1777,7 @@ function moveButtonsHtml(list, id, index, total) {
 async function movePracticeItem(list, id, practiceId, dir) {
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/${list}/${id}/move`, { up: dir === "up" });
-    state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+    await reloadDefinition(practiceId);
   }, state.practiceActionStatus);
 }
 
@@ -1776,7 +1786,7 @@ async function deletePracticeCurve(cid, practiceId) {
   await runPracticeAction(
     async () => {
       await deleteJson(`/api/practices/${practiceId}/curves/${cid}`);
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     "Curva eliminada",
     { resetEditing: true },
@@ -1807,7 +1817,7 @@ async function saveNewResult(event) {
         compare_with: raw.compare_with ?? "",
         section_id: raw.section_id || null,
       });
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     "Mensurando agregado",
     { resetEditing: true },
@@ -1833,7 +1843,7 @@ async function saveEditResult(event) {
         display_symbol: raw.display_symbol,
         compare_with: raw.compare_with ?? "",
       });
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     "Mensurando actualizado",
     { resetEditing: true },
@@ -1845,7 +1855,7 @@ async function deletePracticeResult(rid, practiceId) {
   await runPracticeAction(
     async () => {
       await deleteJson(`/api/practices/${practiceId}/results/${rid}`);
-      state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
+      await reloadDefinition(practiceId);
     },
     "Mensurando eliminado",
     { resetEditing: true },
