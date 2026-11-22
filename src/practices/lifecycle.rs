@@ -46,7 +46,10 @@ pub fn slugify(name: &str) -> String {
     }
 }
 
-async fn free_practice_id(conn: &mut SqliteConnection, base: &str) -> anyhow::Result<String> {
+pub(super) async fn free_practice_id(
+    conn: &mut SqliteConnection,
+    base: &str,
+) -> anyhow::Result<String> {
     let mut n = 1;
     loop {
         let candidate = if n == 1 {

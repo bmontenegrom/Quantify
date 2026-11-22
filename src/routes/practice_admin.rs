@@ -186,6 +186,59 @@ pub(super) async fn duplicate_practice(
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
+pub(super) async fn export_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<practices::PracticeTemplate>, AppError> {
+    require_teacher(&state, &headers).await?;
+    practices::export_template(&state.pool, &id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))
+}
+
+pub(super) async fn import_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(template): Json<practices::PracticeTemplate>,
+) -> Result<Json<db::Practice>, AppError> {
+    let user = require_teacher(&state, &headers).await?;
+    practices::check_template(&template).map_err(AppError::bad_request)?;
+    validate_template_items(&template)?;
+    Ok(Json(
+        practices::import_template(&state.pool, &template, &user.id).await?,
+    ))
+}
+
+fn validate_template_items(t: &practices::PracticeTemplate) -> Result<(), AppError> {
+    for q in &t.quantities {
+        validate_quantity(q)?;
+    }
+    let rows = t
+        .quantities
+        .iter()
+        .map(|q| (&q.symbol, &q.display_symbol))
+        .chain(t.results.iter().map(|r| (&r.symbol, &r.display_symbol)))
+        .chain(
+            t.intermediates
+                .iter()
+                .map(|i| (&i.symbol, &i.display_symbol)),
+        )
+        .chain(
+            t.point_results
+                .iter()
+                .map(|p| (&p.symbol, &p.display_symbol)),
+        )
+        .chain(t.aggregates.iter().map(|a| (&a.symbol, &a.display_symbol)));
+    for (symbol, display) in rows {
+        validate_symbol_format(symbol)?;
+        validate_symbol_not_reserved(symbol)?;
+        validate_display_symbol(display)?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct StatusBody {
     status: String,
@@ -4703,5 +4756,93 @@ mod tests {
         assert!(validate_symbol_not_reserved("V_g").is_ok());
         assert!(validate_symbol_not_reserved("first_h").is_ok());
         assert!(validate_symbol_not_reserved("h_max").is_ok());
+    }
+
+    #[tokio::test]
+    async fn import_needs_a_teacher_and_valid_symbols() {
+        let (pool, dir) = crate::computation::tests::setup().await;
+        let state: SharedState = std::sync::Arc::new(db::AppState {
+            pool: pool.clone(),
+            upload_dir: dir.path().to_path_buf(),
+            secret_key: "secreto".into(),
+            secure_cookies: false,
+            login_attempts: Default::default(),
+        });
+        let session = |role: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let (user_id,): (String,) =
+                    sqlx::query_as("SELECT id FROM users WHERE role = ?1 LIMIT 1")
+                        .bind(role)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                let token = uuid::Uuid::new_v4().to_string();
+                let now = chrono::Utc::now();
+                sqlx::query(
+                    "INSERT INTO sessions (token, user_id, created_at, expires_at)                      VALUES (?1, ?2, ?3, ?4)",
+                )
+                .bind(&token)
+                .bind(user_id)
+                .bind(now)
+                .bind(now + chrono::Duration::hours(1))
+                .execute(&pool)
+                .await
+                .unwrap();
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    axum::http::header::COOKIE,
+                    format!("quantify_session={token}").parse().unwrap(),
+                );
+                headers
+            }
+        };
+        let template = |symbol: &str| -> practices::PracticeTemplate {
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 1, "name": "Importada",
+                "quantities": [{"symbol": symbol, "name": "x", "unit": "", "repeated": false}]
+            }))
+            .unwrap()
+        };
+        let import = |headers: HeaderMap, symbol: &str| {
+            import_practice(State(state.clone()), headers, Json(template(symbol)))
+        };
+        let status = |r: Result<Json<db::Practice>, AppError>| {
+            r.err()
+                .map(|e| axum::response::IntoResponse::into_response(e).status())
+        };
+        assert_eq!(
+            status(import(session("estudiante").await, "x").await),
+            Some(axum::http::StatusCode::FORBIDDEN)
+        );
+        let teacher = session("docente").await;
+        assert_eq!(
+            status(import(teacher.clone(), "slope").await),
+            Some(axum::http::StatusCode::BAD_REQUEST)
+        );
+        let created = import(teacher.clone(), "x").await.unwrap().0;
+        assert_eq!(created.status, "borrador");
+        let exported = export_practice(State(state.clone()), teacher.clone(), Path(created.id))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(exported.quantities[0].symbol, "x");
+        for practice in db::practices(&pool).await.unwrap() {
+            let exported = export_practice(
+                State(state.clone()),
+                teacher.clone(),
+                Path(practice.id.clone()),
+            )
+            .await
+            .unwrap()
+            .0;
+            let imported = import_practice(State(state.clone()), teacher.clone(), Json(exported))
+                .await
+                .unwrap_or_else(|e| {
+                    let response = axum::response::IntoResponse::into_response(e);
+                    panic!("{}: {}", practice.id, response.status())
+                });
+            assert_eq!(imported.0.status, "borrador");
+        }
     }
 }

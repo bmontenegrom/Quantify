@@ -150,6 +150,27 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
 ) -> anyhow::Result<T> {
     let mut tx = crate::db::begin_write(pool).await?;
     let position = next_position(&mut tx, T::TABLE, "practice_id", practice_id).await?;
+    let id = insert_symbol_formula_row::<T>(
+        &mut tx,
+        practice_id,
+        position,
+        [symbol, name, unit, formula],
+        display,
+        flags,
+    )
+    .await?;
+    tx.commit().await?;
+    fetch_symbol_formula_row::<T>(pool, &id).await
+}
+
+async fn insert_symbol_formula_row<T: SymbolFormulaRow>(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+    position: i64,
+    [symbol, name, unit, formula]: [&str; 4],
+    display: Option<&str>,
+    flags: &[bool],
+) -> anyhow::Result<String> {
     let id = Uuid::new_v4().to_string();
     let query = format!(
         "INSERT INTO {} (id, practice_id, position, symbol, name, unit, formula, display_symbol{}) \
@@ -172,9 +193,42 @@ async fn create_symbol_formula_row<T: SymbolFormulaRow>(
     for flag in flags {
         insert = insert.bind(*flag);
     }
-    insert.execute(&mut *tx).await?;
-    tx.commit().await?;
-    fetch_symbol_formula_row::<T>(pool, &id).await
+    insert.execute(&mut *conn).await?;
+    Ok(id)
+}
+
+pub(super) async fn insert_intermediate(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+    position: i64,
+    input: &IntermediateInput,
+) -> anyhow::Result<String> {
+    insert_symbol_formula_row::<PracticeIntermediate>(
+        conn,
+        practice_id,
+        position,
+        [&input.symbol, &input.name, &input.unit, &input.formula].map(|s| s.trim()),
+        display_symbol(&input.display_symbol),
+        &[input.show_live, input.on_means],
+    )
+    .await
+}
+
+pub(super) async fn insert_point_result(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+    position: i64,
+    input: &PointResultInput,
+) -> anyhow::Result<String> {
+    insert_symbol_formula_row::<PracticePointResult>(
+        conn,
+        practice_id,
+        position,
+        [&input.symbol, &input.name, &input.unit, &input.formula].map(|s| s.trim()),
+        display_symbol(&input.display_symbol),
+        &[],
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -334,6 +388,17 @@ pub async fn create_aggregate(
     let mut tx = crate::db::begin_write(pool).await?;
     let position =
         next_position(&mut tx, "practice_aggregates", "practice_id", practice_id).await?;
+    let id = insert_aggregate(&mut tx, practice_id, position, &input).await?;
+    tx.commit().await?;
+    fetch_aggregate(pool, &id).await
+}
+
+pub(super) async fn insert_aggregate(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+    position: i64,
+    input: &AggregateInput,
+) -> anyhow::Result<String> {
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_aggregates \
@@ -343,16 +408,15 @@ pub async fn create_aggregate(
     .bind(&id)
     .bind(practice_id)
     .bind(position)
-    .bind(symbol)
+    .bind(input.symbol.trim())
     .bind(input.name.trim())
     .bind(input.unit.trim())
-    .bind(formula)
+    .bind(input.formula.trim())
     .bind(input.is_final)
     .bind(display_symbol(&input.display_symbol).unwrap_or(""))
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
-    tx.commit().await?;
-    fetch_aggregate(pool, &id).await
+    Ok(id)
 }
 
 pub async fn update_aggregate(
@@ -489,6 +553,17 @@ pub async fn create_curve(
     }
     let mut tx = crate::db::begin_write(pool).await?;
     let position = next_position(&mut tx, "practice_curves", "practice_id", practice_id).await?;
+    let id = insert_curve(&mut tx, practice_id, position, &input).await?;
+    tx.commit().await?;
+    fetch_curve(pool, &id).await
+}
+
+pub(super) async fn insert_curve(
+    conn: &mut SqliteConnection,
+    practice_id: &str,
+    position: i64,
+    input: &CurveInput,
+) -> anyhow::Result<String> {
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_curves (id, practice_id, position, x_formula, y_formula, x_log) \
@@ -497,13 +572,12 @@ pub async fn create_curve(
     .bind(&id)
     .bind(practice_id)
     .bind(position)
-    .bind(x)
-    .bind(y)
+    .bind(input.x_formula.trim())
+    .bind(input.y_formula.trim())
     .bind(input.x_log)
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
-    tx.commit().await?;
-    fetch_curve(pool, &id).await
+    Ok(id)
 }
 
 pub async fn update_curve(

@@ -4810,3 +4810,104 @@ async fn the_live_columns_migration_updates_drafts_and_versions_once() {
     display::migrate_legacy_live_columns(&pool).await.unwrap();
     assert_seeded_live_columns(&pool).await;
 }
+
+fn json_keys(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                out.push(k.clone());
+                json_keys(v, out);
+            }
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|v| json_keys(v, out)),
+        _ => {}
+    }
+}
+
+#[tokio::test]
+async fn export_and_import_keep_every_seeded_practice() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    for practice in db::practices(&pool).await.unwrap() {
+        let exported = export_template(&pool, &practice.id).await.unwrap().unwrap();
+        check_template(&exported).unwrap_or_else(|e| panic!("{}: {e}", practice.id));
+        let original = serde_json::to_value(&exported).unwrap();
+        let mut keys = Vec::new();
+        json_keys(&original, &mut keys);
+        for internal in ["id", "practice_id", "position", "part_id"] {
+            assert!(
+                !keys.iter().any(|k| k == internal),
+                "{}: exporta {internal}",
+                practice.id
+            );
+        }
+        let copy = import_template(&pool, &exported, "u1").await.unwrap();
+        assert_ne!(copy.id, practice.id);
+        assert_eq!(copy.status, "borrador");
+        let again = export_template(&pool, &copy.id).await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_value(&again).unwrap(),
+            original,
+            "{}",
+            practice.id
+        );
+        let def = definition(&pool, &copy.id).await.unwrap().unwrap();
+        assert_eq!(def.current_version, None);
+    }
+}
+
+#[tokio::test]
+async fn importing_twice_picks_a_free_id() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let exported = export_template(&pool, "p2-cc").await.unwrap().unwrap();
+    let first = import_template(&pool, &exported, "u1").await.unwrap();
+    let second = import_template(&pool, &exported, "u1").await.unwrap();
+    assert_eq!(second.id, format!("{}-2", first.id));
+    assert!(export_template(&pool, "no-existe").await.unwrap().is_none());
+}
+
+#[test]
+fn check_template_rejects_what_cannot_be_written() {
+    let template = |extra: serde_json::Value| -> PracticeTemplate {
+        let mut base = serde_json::json!({
+            "schema_version": 1, "name": "P",
+            "parts": [{"title": "A"}],
+            "quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": false}],
+            "results": [{"symbol": "y", "name": "y", "unit": "", "formula": "2*x"}]
+        });
+        base.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(base).unwrap()
+    };
+    assert!(check_template(&template(serde_json::json!({}))).is_ok());
+    for (extra, expected) in [
+        (serde_json::json!({"schema_version": 2}), "versión 2"),
+        (serde_json::json!({"name": " "}), "nombre"),
+        (serde_json::json!({"analysis_kind": "otro"}), "\"otro\""),
+        (
+            serde_json::json!({"sections": [{"title": "S", "part": 3}]}),
+            "parte que no existe",
+        ),
+        (
+            serde_json::json!({"sections": [{"title": "S", "quantities": ["z"]}]}),
+            "\"z\"",
+        ),
+        (
+            serde_json::json!({"sections": [
+                {"title": "S", "quantities": ["x"]}, {"title": "T", "quantities": ["x"]}
+            ]}),
+            "más de una sección",
+        ),
+        (
+            serde_json::json!({"aggregates": [{"symbol": "x", "name": "a", "unit": "", "formula": "1"}]}),
+            "\"x\" aparece",
+        ),
+        (
+            serde_json::json!({"curves": [{"x_formula": "x", "y_formula": " "}]}),
+            "ambos ejes",
+        ),
+    ] {
+        let error = check_template(&template(extra.clone())).unwrap_err();
+        assert!(error.contains(expected), "{extra}: {error}");
+    }
+}
