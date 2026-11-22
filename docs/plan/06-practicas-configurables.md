@@ -965,14 +965,102 @@ Decisiones:
 1. Formato de intercambio JSON con `schema_version` (definición completa, sin ids internos).
 2. `GET /practices/{id}/export`, `POST /practices/import` (crea un borrador; resuelve choques de id
    y símbolos), como el exportar/importar de instrumentos.
-3. Las 10 prácticas pasan a ser plantillas JSON en el repo (`templates/practices/*.json`) que se
+3. Las 9 prácticas pasan a ser plantillas JSON en el repo (`templates/practices/*.json`) que se
    importan una sola vez en bases nuevas. Se retiran las funciones `seed_*` de `seed.rs` y todas
    sus autorreparaciones (R4, R5); las bases existentes ya tienen los datos.
 4. `seed_academic` (R2) habilita en el curso de ejemplo lo que se importó.
 5. UI: "Importar práctica" y "Exportar", y "Nueva desde plantilla".
 
-**Aceptación**: exportar e importar cada una de las 10 prácticas produce golden idénticos; una base
-nueva arranca con las 10 desde plantillas; `seed.rs` ya no contiene definiciones.
+**Aceptación**: exportar e importar cada una de las 9 prácticas produce golden idénticos; una base
+nueva arranca con las 9 desde plantillas; `seed.rs` ya no contiene definiciones. (Eran 10 cuando se
+escribió el plan; P3 se unificó en una sola práctica, `unify_p3`.)
+
+**Plan de PRs**
+
+Lo que se relevó en el código (2026-11-22):
+- **Instrumentos** ya exportan e importan:
+  - backend en `src/instruments/import_export.rs` (`export_course`, `import_course`), frontend en
+    `static/instruments.js` (`exportInstruments`, `importInstruments`);
+  - el JSON no lleva ids ni `schema_version`;
+  - el import corre en una transacción, pero no valida ni resuelve choques: importar dos veces
+    duplica todo;
+  - no hay E2E.
+- **Definición:**
+  - `PracticeDefinition` (`src/practices/mod.rs:111`) es Serialize/Deserialize, pero lleva ids,
+    `practice_id`, `position`, `effective_kind`, `status` y `current_version`, y no tiene `name`.
+  - `display_symbol` solo viaja en el mapa `display_symbols`.
+  - Las referencias ya son por símbolo (miembros de secciones, `compare_with`, fórmulas), salvo
+    `section.part_id`.
+  - El `definition_json` de las versiones no sirve como formato: sus ids los usan las entregas.
+- **No hay un escritor de definición completa:**
+  - `duplicate_practice` (`lifecycle.rs:116`) copia SQL→SQL.
+  - Las siembras usan `seed_practice_in`, `insert_quantity`/`insert_result` (`crud.rs`) y
+    `apply_layout` (`layout.rs:441`), que asigna miembros a secciones por símbolo.
+  - El id de una práctica nueva sale de `slugify` + `free_practice_id` (`lifecycle.rs:21,49`).
+- **Siembras:**
+  - `seed.rs` tiene 1687 líneas; las definiciones ocupan ~260–1338.
+  - `run_seeds` corre una sola vez (clave `2026-11-definiciones-sembradas`).
+  - En cada arranque corren `seed_practices` (filas, R1), `seed_course` (curso y las 9
+    habilitadas, R2) y el borrado de `p2-*` (R5).
+  - Hay migraciones legacy atadas a ids y símbolos sembrados en `seed.rs`, `layout.rs`
+    (`legacy_layouts`), `display.rs` (4 claves, revisadas en cada arranque) y `schema.rs`
+    (backfill, R3).
+- **Golden:** `golden_practices_match` (`src/computation/golden_tests.rs:98`) arma las definiciones
+  con las funciones de siembra y compara contra `tests/golden/<id>.{input,expected}.json`. ~82 tests
+  llaman a `seed_definitions`, y varios prueban migraciones legacy borrando su clave.
+- **UI:**
+  - El catálogo (`renderPracticeDirectory`, `practices-admin.js`) solo tiene "Nueva práctica" y,
+    por fila, Editar y Duplicar.
+  - `api.js` no tiene helper de archivos: instrumentos lee con `file.text()`, manda con `postJson`
+    y descarga con un Blob.
+
+Decisiones:
+- **Formato propio, `PracticeTemplate`, con `schema_version: 1`:**
+  - nombre, descripción, análisis, ejes y operadores;
+  - partes, con `help_text`;
+  - secciones, con la parte por **índice** y los miembros por símbolo;
+  - cada lista sin ids ni `position` (el orden es el del array), con `display_symbol` en cada
+    elemento.
+
+  Se arma desde `PracticeDefinition`; no se reutiliza `definition_json`.
+- **Un solo escritor**, `write_template(tx, template) -> practice_id`, para importar, para las
+  plantillas del repo y para los tests. Reutiliza `insert_quantity`/`insert_result`/`create_*` y la
+  asignación por símbolo de `apply_layout`.
+- **Importar crea un borrador** con id nuevo (`free_practice_id`). Se rechaza solo lo que no se
+  puede escribir: `schema_version` desconocida, símbolos repetidos o una sección que apunta a una
+  parte inexistente. El resto de los problemas se ve en el panel de problemas, como en cualquier
+  borrador.
+- **Plantillas en `templates/practices/<id>.json`**, generadas exportando y embebidas con
+  `include_str!`. Un test las compara con lo exportado; `QUANTIFY_UPDATE_TEMPLATES=1` las regenera,
+  como los golden.
+- **Las bases existentes no cambian** (no hay producción). Al retirar las siembras se borran también
+  las migraciones legacy que dependen de ellas, sin migración de reemplazo.
+
+1. **`feat(practicas)`: exportar e importar una práctica (F8, 1/4).**
+   - `PracticeTemplate` con `schema_version`, `export_template` y `write_template`.
+   - `GET /practices/{id}/export` y `POST /practices/import`, para docente y admin.
+   - Test de ida y vuelta: exportar e importar cada una de las 9 prácticas sembradas y correr el
+     análisis da golden idénticos.
+2. **`feat(practicas)`: exportar e importar desde la UI (F8, 2/4).**
+   - "Exportar" en la ficha descarga `<id>.json`.
+   - "Importar práctica" en el catálogo abre el borrador importado.
+   - Sigue el patrón de instrumentos.
+   - E2E: exportar una práctica, importarla y ver el borrador con sus partes y problemas.
+3. **`feat(practicas)`: plantillas en el repo (F8, 3/4).**
+   - `templates/practices/*.json` con las 9, más el test que las compara con lo exportado.
+   - `GET /practices/templates` lista las plantillas.
+   - "Nueva desde plantilla" en el catálogo importa la plantilla como borrador.
+4. **`refactor(practicas)`: las bases nuevas arrancan desde las plantillas (F8, 4/4).**
+   - En una base sin prácticas se importan las 9 plantillas, se publican (`ensure_versions`) y
+     `seed_course` habilita lo importado (R2).
+   - Se borra lo que dependía de las siembras, con sus tests:
+     - las definiciones y autorreparaciones de `seed.rs` (R4) y `seed_practices` (R1);
+     - el borrado de `p2-*` (R5);
+     - `legacy_layouts`, `unify_p3`, `fix_ca_rlc_labels`, `reset_legacy_hidrostatica` y
+       `chain_seeded_formulas`;
+     - las migraciones legacy de `display.rs` y el backfill de `schema.rs` (R3).
+   - Los `setup()` de los tests y el golden cargan las plantillas.
+   - Doc: F8 queda marcada como hecha.
 
 ### F9 — Determinaciones repetidas con promedio
 
@@ -1038,7 +1126,7 @@ F0 → F1 → F2 → F3 → F4
   versiones, esos cambios recalculan distinto las entregas viejas. Hasta F5, editar en producción
   una práctica con entregas se hace con cuidado (como hoy).
 - **F6 después de F3**: muchas propiedades de presentación dependen de que las partes existan.
-- **F8 retira las siembras**: recién cuando las plantillas reproducen las 10 prácticas con golden
+- **F8 retira las siembras**: recién cuando las plantillas reproducen las 9 prácticas con golden
   idénticos.
 
 **Riesgos**
