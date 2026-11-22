@@ -864,6 +864,7 @@ async function importPractice(event) {
   } finally {
     importing = false;
     input.value = "";
+    if (practiceStatus?.textContent === "Importando…") withPracticeStatus("");
   }
 }
 

@@ -59,6 +59,10 @@ await withE2E({ port: PORT, dbName: "quantify-exportar-importar.db" }, async ({ 
   );
   await backToCatalog(page);
   assert((await catalogCount(page)) === before + 1, "importar debía sumar una práctica al catálogo");
+  assert(
+    !((await page.locator("#practice-status").textContent()) ?? "").includes("Importando"),
+    "terminada la importación, el catálogo no debía seguir diciendo «Importando…»",
+  );
 
   step("docente: un archivo inválido muestra su error y no crea nada");
   await page.setInputFiles("#practice-import-file", {
