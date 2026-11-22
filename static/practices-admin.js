@@ -19,8 +19,13 @@ import {
   practiceGuideSteps,
   guideStepOrNext,
   POINT_KINDS,
+  downloadJson,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
+
+const importFile = document.querySelector("#practice-import-file");
+document.querySelector("#practice-import-btn")?.addEventListener("click", () => importFile.click());
+importFile?.addEventListener("change", importPractice);
 
 let dropped = new Set();
 let submitted = null;
@@ -442,6 +447,9 @@ export function renderPracticesPage() {
   });
   renderProblems(practice.id);
   if (def?.current_version) renderDraftChanges(practice.id);
+  practiceWorkspace.querySelectorAll("[data-practice-export]").forEach((btn) => {
+    btn.addEventListener("click", () => exportPractice(practice.id, btn.dataset.practiceExport, def.current_version));
+  });
   practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
     deletePractice(e.currentTarget.dataset.practiceId);
   });
@@ -789,6 +797,40 @@ async function createPractice(event) {
   }
 }
 
+async function exportPractice(practiceId, version, number) {
+  try {
+    const template = await fetchJson(`/api/practices/${encodeURIComponent(practiceId)}/export?version=${version}`);
+    downloadJson(template, version === "publicada" ? `${practiceId}-v${number}.json` : `${practiceId}.json`);
+    state.practiceActionStatus = version === "publicada" ? "Versión publicada exportada" : "Borrador exportado";
+  } catch (error) {
+    state.practiceActionStatus = error.message;
+  }
+  renderPracticesPage();
+}
+
+async function importPractice(event) {
+  const input = event.target;
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    let template;
+    try {
+      template = JSON.parse(await file.text());
+    } catch {
+      throw new Error("El archivo no es un JSON válido.");
+    }
+    const created = await postJson("/api/practice-templates/import", template);
+    await refreshPractices();
+    await openPracticeWorkspace(created.id);
+    state.practiceActionStatus = "Práctica importada en borrador";
+    renderPracticesPage();
+  } catch (error) {
+    withPracticeStatus(error.message);
+  } finally {
+    input.value = "";
+  }
+}
+
 async function duplicatePractice(practiceId) {
   try {
     const copy = await postJson(`/api/practices/${practiceId}/duplicate`, {});
@@ -813,7 +855,9 @@ function practiceLifecycleActions(practice, def) {
   };
   const publishedActions = practice.status === "borrador" ? "" : versionInfo;
   const tryDraft = `<button type="button" data-practice-try-draft data-practice-id="${id}">Probar el borrador</button>`;
-  return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""} ${publishedActions} ${tryDraft}</div>
+  const exports = `<button type="button" data-practice-export="borrador">Exportar borrador</button>
+    ${version ? `<button type="button" data-practice-export="publicada">Exportar publicada</button>` : ""}`;
+  return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""} ${publishedActions} ${tryDraft} ${exports}</div>
     <div id="practice-problems"></div>
     <div id="practice-draft-changes"></div>`;
 }

@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { instrumentCatalog, instrumentWorkspace, instrumentCourseFilter, instrumentStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
-import { escapeHtml, format, scalePayload } from "./lib.js";
+import { escapeHtml, format, scalePayload, downloadJson } from "./lib.js";
 import { selectView } from "./navigation.js";
 
 export function renderInstrumentCourseOptions() {
@@ -427,13 +427,7 @@ async function exportInstruments() {
     withInstrumentStatus("");
     const courseId = state.instrumentCourseId;
     const data = await fetchJson(`/api/instruments/export?course_id=${encodeURIComponent(courseId)}`);
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "instrumentos.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadJson(data, "instrumentos.json");
     withInstrumentStatus("Catalogo exportado");
   } catch (error) {
     withInstrumentStatus(error.message);
