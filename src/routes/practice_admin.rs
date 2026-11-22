@@ -774,10 +774,13 @@ pub(super) async fn set_practice_operator_count(
     Json(body): Json<OperatorCountBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    if body.count > 1 && load_definition(&state, &id).await?.determinations.is_some() {
-        return Err(AppError::bad_request(
-            "La práctica ya tiene determinaciones: quitalas antes de usar operadores.",
-        ));
+    if body.count > 1 {
+        let def = load_definition(&state, &id).await?;
+        if def.determinations.is_some() || def.parts.iter().any(|p| p.determinations.is_some()) {
+            return Err(AppError::bad_request(
+                "La práctica ya tiene determinaciones: quitalas antes de usar operadores.",
+            ));
+        }
     }
     if body.count > practices::MAX_OPERATORS {
         return Err(AppError::bad_request(format!(
@@ -828,6 +831,11 @@ async fn save_determinations(
     });
     if let Some(d) = &determinations {
         validate_determinations(d)?;
+        if def.operator_count.is_some_and(|n| n > 1) {
+            return Err(AppError::bad_request(
+                "La práctica usa operadores: quitalos antes de configurar determinaciones.",
+            ));
+        }
     }
     let mut after = def.clone();
     match part_id {
@@ -841,11 +849,6 @@ async fn save_determinations(
                 if practices::is_point_based(def.analysis_kind.as_deref()) {
                     return Err(AppError::bad_request(
                         "Las determinaciones son para una práctica estadística.",
-                    ));
-                }
-                if def.operator_count.is_some_and(|n| n > 1) {
-                    return Err(AppError::bad_request(
-                        "La práctica usa operadores: quitalos antes de configurar determinaciones.",
                     ));
                 }
             }
@@ -2219,6 +2222,11 @@ fn validate_symbol_format(symbol: &str) -> Result<(), AppError> {
             s
         )));
     }
+    if s.contains("__") {
+        return Err(AppError::bad_request(format!(
+            "El simbolo \"{s}\" no es valido: el doble guion bajo (__) está reservado."
+        )));
+    }
     Ok(())
 }
 
@@ -3066,6 +3074,8 @@ mod tests {
         assert!(validate_symbol_format("a b").is_err());
         assert!(validate_symbol_format("a+b").is_err());
         assert!(validate_symbol_format("a.b").is_err());
+        assert!(validate_symbol_format("T__1").is_err());
+        assert!(validate_symbol_format("__x").is_err());
     }
 
     #[test]
@@ -5332,5 +5342,42 @@ mod tests {
         .err()
         .unwrap();
         assert!(with_parts.message().contains("tiene partes"));
+
+        let def = load_definition(&state, "p2-cc").await.unwrap();
+        let part = def
+            .parts
+            .iter()
+            .find(|p| def.part_kind(p) == "estadistico")
+            .unwrap()
+            .id
+            .clone();
+        let operators = |count: i64| {
+            set_practice_operator_count(
+                State(state.clone()),
+                headers.clone(),
+                Path("p2-cc".into()),
+                Json(OperatorCountBody { count }),
+            )
+        };
+        let part_determinations = || {
+            set_part_determinations(
+                State(state.clone()),
+                headers.clone(),
+                Path(("p2-cc".to_string(), part.clone())),
+                Json(
+                    serde_json::from_value(
+                        serde_json::json!({"determinations": {"count": 2, "label": "Medida"}}),
+                    )
+                    .unwrap(),
+                ),
+            )
+        };
+        let _ = operators(2).await.unwrap();
+        let blocked = part_determinations().await.err().unwrap();
+        assert!(blocked.message().contains("usa operadores"));
+        let _ = operators(1).await.unwrap();
+        let _ = part_determinations().await.unwrap();
+        let blocked = operators(2).await.err().unwrap();
+        assert!(blocked.message().contains("ya tiene determinaciones"));
     }
 }
