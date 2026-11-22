@@ -81,6 +81,27 @@ await withE2E({ port: PORT, dbName: "quantify-exportar-importar.db" }, async ({ 
   await catalogStatus(page, "no es una práctica exportada");
   assert((await catalogCount(page)) === before + 1, "un archivo inválido no debía crear prácticas");
 
+  step("docente: si abre otra práctica mientras se importa, se queda en ella y ve un aviso");
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  await page.route("**/api/practice-templates/import", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.setInputFiles("#practice-import-file", file);
+  await page.click('[data-practice-open][data-practice-id="fluidos-1"]');
+  await page.waitForSelector('#practice-workspace [data-practice-export="borrador"]');
+  const opened = await page.locator("#practice-workspace h3").first().textContent();
+  release();
+  await page.waitForSelector(".toast", { hasText: "Práctica importada en borrador" });
+  await page.unroute("**/api/practice-templates/import");
+  assert(
+    (await page.locator("#practice-workspace h3").first().textContent()) === opened,
+    "terminar la importación no debía reemplazar la ficha abierta",
+  );
+  await backToCatalog(page);
+  assert((await catalogCount(page)) === before + 2, "la importación retenida debía crear la práctica igual");
+
   step("docente: un borrador nuevo solo exporta el borrador");
   await page.click('details[data-add-panel="practice"] > summary');
   await fillAndSubmit(page, "#new-practice-form", { name: "Sin publicar", description: "E2E" });

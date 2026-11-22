@@ -1072,12 +1072,6 @@ Decisiones:
    - Los `setup()` de los tests y el golden cargan las plantillas.
    - Doc: F8 queda marcada como hecha.
 
-Pendiente (revisión de #139): "Nueva práctica", "Duplicar" e "Importar práctica" repiten la misma
-secuencia (crear, recargar el catálogo, abrir la ficha, mostrar el estado). Si el alta sale bien y
-después falla la recarga o la definición, el error tapa que la práctica se creó y el docente puede
-crearla dos veces. Va un helper compartido (`createAndOpen`) que distinga esos dos casos, en un PR
-aparte.
-
 ### F9 — Determinaciones repetidas con promedio
 
 Generaliza el motor D (operadores) y el patrón de Hidrostática (3 determinaciones independientes,

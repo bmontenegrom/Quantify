@@ -350,7 +350,7 @@ export function renderPracticesPage() {
         <div>
           <button type="button" class="back-link" id="practice-workspace-back">Volver al listado</button>
           <h3>${escapeHtml(practice.name)}</h3>
-          <p class="submission-meta">Cargando definición…</p>
+          <p class="submission-meta">${escapeHtml(state.practiceActionStatus || "Cargando definición…")}</p>
         </div>
       </div>`;
     practiceWorkspace.classList.remove("hidden");
@@ -799,18 +799,38 @@ async function refreshPractices() {
   await loadAcademic();
 }
 
+async function createAndOpen(request, done, { guided = false } = {}) {
+  const startedOn = state.activePracticeId;
+  const stayed = () =>
+    state.activePracticeId === startedOn && document.querySelector("#practices-view")?.classList.contains("active");
+  const notify = (message, kind) => (stayed() ? withPracticeStatus(message) : showToast(message, kind));
+  let created;
+  try {
+    created = await request();
+  } catch (error) {
+    notify(error.message, "error");
+    return;
+  }
+  try {
+    await refreshPractices();
+  } catch (error) {
+    notify(`${done} («${created.name}»), pero no se pudo actualizar el catálogo: ${error.message}`, "error");
+    return;
+  }
+  if (!stayed()) {
+    showToast(`${done}: «${created.name}».`, "success");
+    return;
+  }
+  const opened = await openPracticeWorkspace(created.id, { guided });
+  if (state.activePracticeId !== created.id) return;
+  state.practiceActionStatus = opened ? done : `${done}, pero no se pudo cargar su definición: ${state.practiceActionStatus}`;
+  renderPracticesPage();
+}
+
 async function createPractice(event) {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
-  try {
-    const created = await postJson("/api/practices", payload);
-    await refreshPractices();
-    await openPracticeWorkspace(created.id, { guided: true });
-    state.practiceActionStatus = "Práctica creada en borrador";
-    renderPracticesPage();
-  } catch (error) {
-    withPracticeStatus(error.message);
-  }
+  await createAndOpen(() => postJson("/api/practices", payload), "Práctica creada en borrador", { guided: true });
 }
 
 async function exportPractice(practiceId, version) {
@@ -834,13 +854,10 @@ async function importPractice(event) {
   importing = true;
   withPracticeStatus("Importando…");
   try {
-    const created = await postJson("/api/practice-templates/import", await readJsonFile(file));
-    await refreshPractices();
-    await openPracticeWorkspace(created.id);
-    state.practiceActionStatus = "Práctica importada en borrador";
-    renderPracticesPage();
-  } catch (error) {
-    withPracticeStatus(error.message);
+    await createAndOpen(
+      async () => postJson("/api/practice-templates/import", await readJsonFile(file)),
+      "Práctica importada en borrador",
+    );
   } finally {
     importing = false;
     input.value = "";
@@ -848,15 +865,7 @@ async function importPractice(event) {
 }
 
 async function duplicatePractice(practiceId) {
-  try {
-    const copy = await postJson(`/api/practices/${practiceId}/duplicate`, {});
-    await refreshPractices();
-    await openPracticeWorkspace(copy.id);
-    state.practiceActionStatus = "Copia creada en borrador";
-    renderPracticesPage();
-  } catch (error) {
-    withPracticeStatus(error.message);
-  }
+  await createAndOpen(() => postJson(`/api/practices/${practiceId}/duplicate`, {}), "Copia creada en borrador");
 }
 
 function practiceLifecycleActions(practice, def) {
@@ -1446,8 +1455,13 @@ export async function openPracticeWorkspace(practiceId, { guided = false } = {})
     await reloadDefinition(practiceId);
     renderPracticesPage();
     if (state.practiceGuide) openStepPanels(state.practiceGuide.step);
+    return true;
   } catch (error) {
-    withPracticeStatus(error.message);
+    if (state.activePracticeId === practiceId) {
+      state.practiceActionStatus = error.message;
+      renderPracticesPage();
+    }
+    return false;
   }
 }
 
