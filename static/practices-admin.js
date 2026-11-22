@@ -823,7 +823,7 @@ async function renderLibrary() {
   const box = practiceCatalog.querySelector("#practice-library");
   if (!box) return;
   if (failure) {
-    box.innerHTML = `<p class="submission-meta">${escapeHtml(failure)}</p>`;
+    box.innerHTML = `<p class="submission-meta">No se pudieron cargar las plantillas: ${escapeHtml(failure)}. Cerrá y abrí el panel para reintentar.</p>`;
     return;
   }
   const rows = library.map((t) => `

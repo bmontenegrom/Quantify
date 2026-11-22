@@ -252,7 +252,7 @@ pub(super) async fn list_library(
     headers: HeaderMap,
 ) -> Result<Json<Vec<LibraryEntry>>, AppError> {
     require_teacher(&state, &headers).await?;
-    let mut entries: Vec<LibraryEntry> = practices::LIBRARY
+    let entries: Vec<LibraryEntry> = practices::LIBRARY
         .iter()
         .filter_map(|(key, _)| {
             let t = practices::library_template(key)?;
@@ -264,7 +264,6 @@ pub(super) async fn list_library(
             })
         })
         .collect();
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(Json(entries))
 }
 
@@ -276,6 +275,7 @@ pub(super) async fn create_from_library(
     let user = require_teacher(&state, &headers).await?;
     let mut template = practices::library_template(&key)
         .ok_or_else(|| AppError::not_found("plantilla no encontrada"))?;
+    practices::check_template(&template).map_err(AppError::bad_request)?;
     validate_template_items(&template)?;
     template.name = format!("{} (desde plantilla)", template.name);
     Ok(Json(
@@ -4970,6 +4970,13 @@ mod tests {
             .unwrap()
             .0;
         assert_eq!(library.len(), practices::LIBRARY.len());
+        for (key, _) in practices::LIBRARY {
+            let created =
+                create_from_library(State(state.clone()), teacher.clone(), Path(key.to_string()))
+                    .await
+                    .unwrap_or_else(|e| panic!("{key}: {}", e.message()));
+            assert!(created.name.ends_with("(desde plantilla)"), "{key}");
+        }
         let from_library = create_from_library(
             State(state.clone()),
             teacher.clone(),
