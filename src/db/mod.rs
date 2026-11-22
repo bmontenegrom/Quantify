@@ -250,8 +250,8 @@ pub async fn run_startup_seeds(
     demo_data: bool,
     admin_password: Option<String>,
 ) -> anyhow::Result<()> {
-    crate::practices::seed_library(pool).await?;
-    seed_course(pool).await?;
+    let imported = crate::practices::seed_library(pool).await?;
+    seed_course(pool, imported).await?;
     crate::instruments::seed_instruments(pool, TEST_COURSE_ID).await?;
     seed_initial_accounts(pool, demo_data, admin_password).await
 }
@@ -409,7 +409,7 @@ async fn ensure_lab_group_columns(pool: &SqlitePool) -> anyhow::Result<()> {
 const TEST_COURSE_ID: &str = "fisica-experimental-i-2026";
 const TEST_GROUP_ID: &str = "fisica-exp-i-grupo-1";
 
-async fn seed_course(pool: &SqlitePool) -> anyhow::Result<()> {
+async fn seed_course(pool: &SqlitePool, enable_library: bool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
         INSERT INTO courses (id, name, term, active, created_at)
@@ -435,7 +435,12 @@ async fn seed_course(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    for (practice, _) in crate::practices::LIBRARY {
+    let library = if enable_library {
+        crate::practices::LIBRARY
+    } else {
+        &[]
+    };
+    for (practice, _) in library {
         sqlx::query(
             r#"
             INSERT INTO course_practices (course_id, practice_id, created_at)
@@ -455,7 +460,7 @@ async fn seed_course(pool: &SqlitePool) -> anyhow::Result<()> {
 
 #[cfg(test)]
 pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
-    seed_course(pool).await?;
+    seed_course(pool, true).await?;
     let mut conn = pool.acquire().await?;
     enroll_test_student(&mut conn).await
 }
@@ -899,6 +904,27 @@ mod tests {
             )
             .await,
             2
+        );
+    }
+
+    #[tokio::test]
+    async fn restarting_does_not_enable_library_practices_again() {
+        let (pool, _dir) = pool().await;
+        run_startup_seeds(&pool, true, None).await.unwrap();
+        let enabled = "SELECT COUNT(*) FROM course_practices";
+        assert_eq!(
+            count(&pool, enabled).await,
+            crate::practices::LIBRARY.len() as i64
+        );
+        sqlx::query("DELETE FROM course_practices WHERE practice_id = 'filtros'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_startup_seeds(&pool, true, None).await.unwrap();
+        assert_eq!(
+            count(&pool, enabled).await,
+            crate::practices::LIBRARY.len() as i64 - 1,
+            "reiniciar volvió a habilitar filtros"
         );
     }
 

@@ -724,8 +724,11 @@ aplica editando un `seed_*`: tiene que ser una migración de una sola vez. Esto 
 sección 2.5. En una base sin usuarios, `seed_initial_accounts` crea en una transacción el admin y, solo con
 `SEED_DEMO_DATA=true` (dev, E2E), el docente y el estudiante de prueba, la inscripción y las entregas de prueba. Producción
 arranca con el admin solo (`SEED_ADMIN_PASSWORD` es obligatoria salvo con `SEED_DEMO_DATA=true`) y reiniciar no
-recrea nada. Siguen corriendo en cada arranque
-`seed_practices`, `seed_course` y `seed_instruments`, que se retiran con las siembras en F8.
+recrea nada.
+
+Desde F8 (#141) ya no hay siembras de definiciones ni `applied_migrations`: una base sin prácticas
+importa la biblioteca (`seed_library`, `templates/practices/`) y en esa misma vuelta el curso de
+ejemplo la habilita; después el arranque no toca las prácticas ni sus habilitaciones.
 
 ### F6 — Sin casos especiales en el frontend ni en las siembras ✅ HECHA
 

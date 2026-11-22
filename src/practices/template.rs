@@ -15,6 +15,7 @@ use uuid::Uuid;
 pub const TEMPLATE_VERSION: u32 = 1;
 pub const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
 pub const MAX_OPERATORS: i64 = 20;
+const MAX_PART_KEY: usize = 40;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PracticeTemplate {
@@ -116,7 +117,10 @@ impl PracticeTemplate {
 
 fn is_part_key(key: &str) -> bool {
     let edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
-    key.starts_with(edge) && key.ends_with(edge) && key.chars().all(|c| edge(c) || c == '-')
+    key.len() <= MAX_PART_KEY
+        && key.starts_with(edge)
+        && key.ends_with(edge)
+        && key.chars().all(|c| edge(c) || c == '-')
 }
 
 fn part_key(part: &TemplatePart) -> Option<&str> {
@@ -326,7 +330,7 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     for key in t.parts.iter().filter_map(part_key) {
         if !is_part_key(key) || !keys.insert(key) {
             return Err(format!(
-                "La clave de parte \"{key}\" tiene que ser única y usar solo minúsculas, dígitos y guiones."
+                "La clave de parte \"{key}\" tiene que ser única, de hasta {MAX_PART_KEY} caracteres, y usar solo minúsculas, dígitos y guiones."
             ));
         }
     }
@@ -438,7 +442,8 @@ async fn part_exists(conn: &mut SqliteConnection, id: &str) -> anyhow::Result<bo
     )
 }
 
-pub async fn seed_library(pool: &SqlitePool) -> anyhow::Result<()> {
+pub async fn seed_library(pool: &SqlitePool) -> anyhow::Result<bool> {
+    let mut imported = false;
     if !has_practices(&mut *pool.acquire().await?).await? {
         let mut tx = crate::db::begin_write(pool).await?;
         if !has_practices(&mut tx).await? {
@@ -447,10 +452,12 @@ pub async fn seed_library(pool: &SqlitePool) -> anyhow::Result<()> {
                     .ok_or_else(|| anyhow::anyhow!("falta la plantilla {key}"))??;
                 write_template(&mut tx, &template, key, "publicada", None).await?;
             }
+            imported = true;
         }
         tx.commit().await?;
     }
-    super::ensure_versions(pool).await
+    super::ensure_versions(pool).await?;
+    Ok(imported)
 }
 
 async fn write_template(
