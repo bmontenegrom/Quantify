@@ -112,9 +112,8 @@ impl PracticeTemplate {
     }
 }
 
-pub fn axis(formula: &Option<String>) -> Option<String> {
+pub fn axis(formula: Option<&str>) -> Option<String> {
     formula
-        .as_deref()
         .map(str::trim)
         .filter(|f| !f.is_empty())
         .map(str::to_string)
@@ -133,7 +132,7 @@ pub async fn export_template(
     practice_id: &str,
     source: ExportSource,
 ) -> anyhow::Result<Option<PracticeTemplate>> {
-    let mut tx = crate::db::begin_write(pool).await?;
+    let mut tx = crate::db::begin_read(pool).await?;
     let Some(practice) = super::practice_in(&mut tx, practice_id).await? else {
         return Ok(None);
     };
@@ -432,8 +431,8 @@ pub async fn write_template(
     .bind(t.name.trim())
     .bind(t.description.trim())
     .bind(&kind)
-    .bind(axis(&t.x_formula))
-    .bind(axis(&t.y_formula))
+    .bind(axis(t.x_formula.as_deref()))
+    .bind(axis(t.y_formula.as_deref()))
     .bind(t.operator_count.filter(|n| *n > 1))
     .bind(created_by)
     .bind(chrono::Utc::now())

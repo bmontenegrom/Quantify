@@ -4875,13 +4875,6 @@ async fn importing_twice_picks_a_free_id() {
         .await
         .unwrap()
         .is_none());
-    let mut named_import = export_template(&pool, "p2-cc", ExportSource::Borrador)
-        .await
-        .unwrap()
-        .unwrap();
-    named_import.name = "Import".into();
-    let reserved = import_template(&pool, &named_import, "u1").await.unwrap();
-    assert_eq!(reserved.id, "import-2");
 }
 
 #[test]

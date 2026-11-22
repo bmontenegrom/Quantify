@@ -778,8 +778,8 @@ pub(super) async fn set_practice_regression_formulas(
     let def = load_definition(&state, &id).await?;
     check_axes(&def, &body.x_formula, &body.y_formula)?;
     let mut after = def.clone();
-    after.x_formula = practices::axis(&Some(body.x_formula.clone()));
-    after.y_formula = practices::axis(&Some(body.y_formula.clone()));
+    after.x_formula = practices::axis(Some(&body.x_formula));
+    after.y_formula = practices::axis(Some(&body.y_formula));
     if let (Some(x), Some(y)) = (&after.x_formula, &after.y_formula) {
         uses_series(&def, x, y)?;
     }
@@ -4869,6 +4869,10 @@ mod tests {
         };
         assert_eq!(rejected(serde_json::json!({})).await, None);
         let cases = [
+            (
+                serde_json::json!({"results": [{"symbol": "y", "name": "  ", "unit": "g", "formula": "2*m"}]}),
+                "nombre",
+            ),
             (
                 serde_json::json!({"results": [{"symbol": "y", "name": "y", "unit": "g", "formula": "2*zzz"}]}),
                 "zzz",

@@ -2,8 +2,6 @@ use super::{NewPracticeInput, PracticeInfoInput};
 use crate::db::{Practice, PRACTICE_COLS};
 use sqlx::{SqliteConnection, SqlitePool};
 
-const RESERVED_IDS: [&str; 1] = ["import"];
-
 const DEFINITION_TABLES: [&str; 6] = [
     "practice_quantities",
     "practice_results",
@@ -63,7 +61,7 @@ pub(super) async fn free_practice_id(
             .bind(&candidate)
             .fetch_optional(&mut *conn)
             .await?;
-        if taken.is_none() && !RESERVED_IDS.contains(&candidate.as_str()) {
+        if taken.is_none() {
             return Ok(candidate);
         }
         n += 1;
