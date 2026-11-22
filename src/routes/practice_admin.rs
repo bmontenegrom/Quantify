@@ -206,44 +206,59 @@ pub(super) async fn import_practice(
     let user = require_teacher(&state, &headers).await?;
     practices::check_template(&template).map_err(AppError::bad_request)?;
     validate_template_items(&template)?;
-    let def = practices::template_definition(&template);
-    for (quantity, input) in def.quantities.iter().zip(&template.quantities) {
-        validate_quantity_in(&def, input, Some(&quantity.id))?;
-    }
-    for (row, input) in def.intermediates.iter().zip(&template.intermediates) {
-        validate_intermediate(&def, input, Some(&row.id))?;
-    }
-    for input in &template.point_results {
-        validate_point_result(&def, input)?;
-    }
-    for (row, input) in def.aggregates.iter().zip(&template.aggregates) {
-        validate_aggregate(&def, input, Some(&row.id))?;
-    }
-    for input in &template.curves {
-        validate_curve(&def, input)?;
-    }
-    check_axes(
-        &def,
-        def.x_formula.as_deref().unwrap_or_default(),
-        def.y_formula.as_deref().unwrap_or_default(),
-    )?;
-    guard_change(
-        &practices::PracticeDefinition::default(),
-        &def,
-        "importar la práctica",
-    )?;
-    Ok(Json(
-        practices::import_template(&state.pool, &template, &user.id).await?,
-    ))
+    let mut tx = crate::db::begin_write(&state.pool).await?;
+    let id = practices::write_template(&mut tx, &template, &user.id).await?;
+    let def = practices::definition_in(&mut tx, &id)
+        .await?
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
+    validate_imported(&def, &template)?;
+    tx.commit().await?;
+    practices::practice(&state.pool, &id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
 fn validate_template_items(t: &practices::PracticeTemplate) -> Result<(), AppError> {
-    for row in t.symbol_rows() {
-        validate_symbol_format(row.symbol)?;
-        validate_symbol_not_reserved(row.symbol)?;
-        validate_display_symbol(row.display)?;
+    let quantities = t.quantities.iter().map(|q| (&q.symbol, &q.display_symbol));
+    let results = t.results.iter().map(|r| (&r.symbol, &r.display_symbol));
+    for (symbol, display) in quantities.chain(results) {
+        validate_symbol_format(symbol)?;
+        validate_symbol_not_reserved(symbol)?;
+        validate_display_symbol(display)?;
     }
     Ok(())
+}
+
+fn validate_imported(
+    def: &practices::PracticeDefinition,
+    t: &practices::PracticeTemplate,
+) -> Result<(), AppError> {
+    for (row, input) in def.quantities.iter().zip(&t.quantities) {
+        validate_quantity_in(def, input, Some(&row.id))?;
+    }
+    for (row, input) in def.intermediates.iter().zip(&t.intermediates) {
+        validate_intermediate(def, input, Some(&row.id))?;
+    }
+    for input in &t.point_results {
+        validate_point_result(def, input)?;
+    }
+    for (row, input) in def.aggregates.iter().zip(&t.aggregates) {
+        validate_aggregate(def, input, Some(&row.id))?;
+    }
+    for input in &t.curves {
+        validate_curve(def, input)?;
+    }
+    let (x, y) = (def.x_formula.as_deref(), def.y_formula.as_deref());
+    check_axes(def, x.unwrap_or_default(), y.unwrap_or_default())?;
+    if let (Some(x), Some(y)) = (x, y) {
+        uses_series(def, x, y)?;
+    }
+    guard_change(
+        &practices::PracticeDefinition::default(),
+        def,
+        "importar la práctica",
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -749,9 +764,8 @@ pub(super) async fn set_practice_regression_formulas(
     let def = load_definition(&state, &id).await?;
     check_axes(&def, &body.x_formula, &body.y_formula)?;
     let mut after = def.clone();
-    let axis = |f: &str| Some(f.trim().to_string()).filter(|f| !f.is_empty());
-    after.x_formula = axis(&body.x_formula);
-    after.y_formula = axis(&body.y_formula);
+    after.x_formula = practices::axis(&Some(body.x_formula.clone()));
+    after.y_formula = practices::axis(&Some(body.y_formula.clone()));
     if let (Some(x), Some(y)) = (&after.x_formula, &after.y_formula) {
         uses_series(&def, x, y)?;
     }
@@ -4868,11 +4882,8 @@ mod tests {
                 "Comparar con",
             ),
             (
-                serde_json::json!({"parts": [
-                    {"title": "Estática", "analysis_kind": "regresion_lineal"},
-                    {"title": "Serie", "analysis_kind": "regresion_lineal"}
-                ], "sections": [
-                    {"title": "A", "part": 0, "quantities": ["h"]},
+                serde_json::json!({"sections": [
+                    {"title": "A", "part": 0, "quantities": ["m", "h"], "results": ["y"]},
                     {"title": "B", "part": 1, "quantities": ["t"]}
                 ]}),
                 "una sola serie",

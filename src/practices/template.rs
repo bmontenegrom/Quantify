@@ -3,13 +3,11 @@ use super::crud::{
     insert_result,
 };
 use super::{
-    AggregateInput, CurveInput, IntermediateInput, PointResultInput, PracticeAggregate,
-    PracticeCurve, PracticeDefinition, PracticeIntermediate, PracticePart, PracticePointResult,
-    PracticeSection, QuantityInput, ResultInput,
+    AggregateInput, CurveInput, IntermediateInput, PointResultInput, QuantityInput, ResultInput,
 };
-use crate::db::{Practice, PracticeQuantity, PracticeResult};
+use crate::db::Practice;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -113,7 +111,7 @@ impl PracticeTemplate {
     }
 }
 
-fn axis(formula: &Option<String>) -> Option<String> {
+pub fn axis(formula: &Option<String>) -> Option<String> {
     formula
         .as_deref()
         .map(str::trim)
@@ -125,17 +123,14 @@ pub async fn export_template(
     pool: &SqlitePool,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeTemplate>> {
-    let conn = &mut *pool.acquire().await?;
-    let Some(def) = super::definition_in(conn, practice_id).await? else {
+    let mut tx = crate::db::begin_write(pool).await?;
+    let Some(def) = super::definition_in(&mut tx, practice_id).await? else {
         return Ok(None);
     };
-    let Some(name) = sqlx::query_scalar("SELECT name FROM practices WHERE id = ?1")
-        .bind(practice_id)
-        .fetch_optional(&mut *conn)
-        .await?
-    else {
+    let Some(practice) = super::practice_in(&mut tx, practice_id).await? else {
         return Ok(None);
     };
+    let name = practice.name;
     let display = |symbol: &str| def.display_symbols.get(symbol).cloned();
     Ok(Some(PracticeTemplate {
         schema_version: TEMPLATE_VERSION,
@@ -287,6 +282,14 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
              regresion_lineal o curva."
         ));
     }
+    let series_parts = t
+        .parts
+        .iter()
+        .filter(|p| super::is_point_based(p.analysis_kind.as_deref().map(str::trim)))
+        .count();
+    if series_parts > 1 {
+        return Err("Solo una parte puede tener una serie de puntos (regresión o curva).".into());
+    }
     if t.operator_count.is_some_and(|n| n > MAX_OPERATORS) {
         return Err(format!(
             "La cantidad de operadores no puede superar {MAX_OPERATORS}."
@@ -364,171 +367,46 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     Ok(())
 }
 
-pub fn template_definition(t: &PracticeTemplate) -> PracticeDefinition {
-    let kind = |k: &Option<String>| k.as_deref().map(|k| k.trim().to_string());
-    let display_symbols = t
-        .symbol_rows()
-        .filter_map(|row| {
-            let display = row.display.as_deref()?.trim();
-            (!display.is_empty()).then(|| (row.symbol.trim().to_string(), display.to_string()))
-        })
-        .collect();
-    PracticeDefinition {
-        practice_id: String::new(),
-        description: t.description.trim().to_string(),
-        status: "borrador".into(),
-        analysis_kind: kind(&t.analysis_kind),
-        x_formula: axis(&t.x_formula),
-        y_formula: axis(&t.y_formula),
-        operator_count: t.operator_count.filter(|n| *n > 1),
-        parts: t
-            .parts
-            .iter()
-            .enumerate()
-            .map(|(i, p)| PracticePart {
-                id: format!("parte-{i}"),
-                title: p.title.trim().to_string(),
-                position: i as i64,
-                analysis_kind: kind(&p.analysis_kind),
-                help_text: p.help_text.clone(),
-                ..Default::default()
-            })
-            .collect(),
-        sections: t
-            .sections
-            .iter()
-            .enumerate()
-            .map(|(i, s)| PracticeSection {
-                id: format!("seccion-{i}"),
-                part_id: s.part.map(|p| format!("parte-{p}")),
-                title: s.title.trim().to_string(),
-                position: i as i64,
-                help_text: s.help_text.clone(),
-                quantities: s.quantities.iter().map(|q| q.trim().to_string()).collect(),
-                results: s.results.iter().map(|r| r.trim().to_string()).collect(),
-                ..Default::default()
-            })
-            .collect(),
-        quantities: t
-            .quantities
-            .iter()
-            .enumerate()
-            .map(|(i, q)| PracticeQuantity {
-                id: format!("magnitud-{i}"),
-                symbol: q.symbol.trim().to_string(),
-                name: q.name.trim().to_string(),
-                unit: q.unit.trim().to_string(),
-                repeated: q.repeated,
-                quantity: q.quantity.clone(),
-                position: i as i64,
-                is_given: q.is_given,
-                replicas_per_point: q.replicas_per_point,
-                per_point: q.per_point,
-                has_uncertainty: q.has_uncertainty,
-                optional: q.optional,
-                default_value: q.default_value.flatten(),
-                slot_count: q.slot_count,
-                label_mode: q
-                    .label_mode
-                    .clone()
-                    .unwrap_or_else(|| super::DEFAULT_LABEL_MODE.into()),
-                input_widget: q
-                    .input_widget
-                    .clone()
-                    .unwrap_or_else(|| super::DEFAULT_INPUT_WIDGET.into()),
-                ..Default::default()
-            })
-            .collect(),
-        results: t
-            .results
-            .iter()
-            .enumerate()
-            .map(|(i, r)| PracticeResult {
-                id: format!("mensurando-{i}"),
-                symbol: r.symbol.trim().to_string(),
-                name: r.name.trim().to_string(),
-                unit: r.unit.trim().to_string(),
-                formula: r.formula.trim().to_string(),
-                position: i as i64,
-                tolerance: r.tolerance.flatten(),
-                is_final: r.is_final,
-                has_uncertainty: r.has_uncertainty,
-                compare_with: r.compare_with().unwrap_or_default().to_string(),
-                ..Default::default()
-            })
-            .collect(),
-        intermediates: t
-            .intermediates
-            .iter()
-            .enumerate()
-            .map(|(i, it)| PracticeIntermediate {
-                id: format!("intermedia-{i}"),
-                position: i as i64,
-                symbol: it.symbol.trim().to_string(),
-                name: it.name.trim().to_string(),
-                unit: it.unit.trim().to_string(),
-                formula: it.formula.trim().to_string(),
-                show_live: it.show_live,
-                on_means: it.on_means,
-                ..Default::default()
-            })
-            .collect(),
-        point_results: t
-            .point_results
-            .iter()
-            .enumerate()
-            .map(|(i, p)| PracticePointResult {
-                id: format!("derivada-{i}"),
-                position: i as i64,
-                symbol: p.symbol.trim().to_string(),
-                name: p.name.trim().to_string(),
-                unit: p.unit.trim().to_string(),
-                formula: p.formula.trim().to_string(),
-                ..Default::default()
-            })
-            .collect(),
-        aggregates: t
-            .aggregates
-            .iter()
-            .enumerate()
-            .map(|(i, a)| PracticeAggregate {
-                id: format!("agregado-{i}"),
-                position: i as i64,
-                symbol: a.symbol.trim().to_string(),
-                name: a.name.trim().to_string(),
-                unit: a.unit.trim().to_string(),
-                formula: a.formula.trim().to_string(),
-                is_final: a.is_final,
-                ..Default::default()
-            })
-            .collect(),
-        curves: t
-            .curves
-            .iter()
-            .enumerate()
-            .map(|(i, c)| PracticeCurve {
-                id: format!("curva-{i}"),
-                position: i as i64,
-                x_formula: c.x_formula.trim().to_string(),
-                y_formula: c.y_formula.trim().to_string(),
-                x_log: c.x_log,
-                ..Default::default()
-            })
-            .collect(),
-        display_symbols,
-        current_version: None,
-    }
-    .with_effective_kinds()
-}
-
 pub async fn import_template(
     pool: &SqlitePool,
     t: &PracticeTemplate,
     created_by: &str,
 ) -> anyhow::Result<Practice> {
-    check_template(t).map_err(anyhow::Error::msg)?;
     let mut tx = crate::db::begin_write(pool).await?;
-    let id = super::lifecycle::free_practice_id(&mut tx, &super::slugify(&t.name)).await?;
+    let id = write_template(&mut tx, t, created_by).await?;
+    tx.commit().await?;
+    super::practice(pool, &id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("la práctica recién importada no aparece"))
+}
+
+pub async fn write_template(
+    tx: &mut SqliteConnection,
+    t: &PracticeTemplate,
+    created_by: &str,
+) -> anyhow::Result<String> {
+    check_template(t).map_err(anyhow::Error::msg)?;
+    let trimmed = |k: &Option<String>| k.as_deref().map(|k| k.trim().to_string());
+    let has_part_kinds = t.parts.iter().any(|p| p.analysis_kind.is_some());
+    let part_kinds: Vec<Option<String>> = t
+        .parts
+        .iter()
+        .map(|p| match trimmed(&p.analysis_kind) {
+            None if has_part_kinds => Some("estadistico".into()),
+            kind => kind,
+        })
+        .collect();
+    let kind = if has_part_kinds {
+        part_kinds
+            .iter()
+            .flatten()
+            .find(|k| super::is_point_based(Some(k)))
+            .cloned()
+            .or_else(|| Some("estadistico".into()))
+    } else {
+        trimmed(&t.analysis_kind)
+    };
+    let id = super::lifecycle::free_practice_id(tx, &super::slugify(&t.name)).await?;
     sqlx::query(
         "INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula, \
          operator_count, status, created_by, created_at) \
@@ -537,7 +415,7 @@ pub async fn import_template(
     .bind(&id)
     .bind(t.name.trim())
     .bind(t.description.trim())
-    .bind(t.analysis_kind.as_deref().map(str::trim))
+    .bind(&kind)
     .bind(axis(&t.x_formula))
     .bind(axis(&t.y_formula))
     .bind(t.operator_count.filter(|n| *n > 1))
@@ -546,7 +424,7 @@ pub async fn import_template(
     .execute(&mut *tx)
     .await?;
     let mut parts = Vec::new();
-    for (position, part) in t.parts.iter().enumerate() {
+    for (position, (part, part_kind)) in t.parts.iter().zip(&part_kinds).enumerate() {
         let part_id = Uuid::new_v4().to_string();
         sqlx::query(
             "INSERT INTO practice_parts (id, practice_id, title, position, analysis_kind, help_text) \
@@ -556,29 +434,29 @@ pub async fn import_template(
         .bind(&id)
         .bind(part.title.trim())
         .bind(position as i64)
-        .bind(part.analysis_kind.as_deref().map(str::trim))
+        .bind(part_kind)
         .bind(part.help_text.trim())
         .execute(&mut *tx)
         .await?;
         parts.push(part_id);
     }
     for (position, q) in t.quantities.iter().enumerate() {
-        insert_quantity(&mut tx, &id, position as i64, q).await?;
+        insert_quantity(tx, &id, position as i64, q).await?;
     }
     for (position, r) in t.results.iter().enumerate() {
-        insert_result(&mut tx, &id, position as i64, r).await?;
+        insert_result(tx, &id, position as i64, r).await?;
     }
     for (position, i) in t.intermediates.iter().enumerate() {
-        insert_intermediate(&mut tx, &id, position as i64, i).await?;
+        insert_intermediate(tx, &id, position as i64, i).await?;
     }
     for (position, p) in t.point_results.iter().enumerate() {
-        insert_point_result(&mut tx, &id, position as i64, p).await?;
+        insert_point_result(tx, &id, position as i64, p).await?;
     }
     for (position, a) in t.aggregates.iter().enumerate() {
-        insert_aggregate(&mut tx, &id, position as i64, a).await?;
+        insert_aggregate(tx, &id, position as i64, a).await?;
     }
     for (position, c) in t.curves.iter().enumerate() {
-        insert_curve(&mut tx, &id, position as i64, c).await?;
+        insert_curve(tx, &id, position as i64, c).await?;
     }
     for (position, section) in t.sections.iter().enumerate() {
         let section_id = Uuid::new_v4().to_string();
@@ -610,8 +488,5 @@ pub async fn import_template(
             }
         }
     }
-    tx.commit().await?;
-    super::practice(pool, &id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("la práctica recién importada no aparece"))
+    Ok(id)
 }

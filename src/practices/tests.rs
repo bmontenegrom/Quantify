@@ -4896,6 +4896,13 @@ fn check_template_rejects_what_cannot_be_written() {
         (serde_json::json!({"parts": [{"title": " "}]}), "sin título"),
         (serde_json::json!({"operator_count": 21}), "superar 20"),
         (
+            serde_json::json!({"parts": [
+                {"title": "A", "analysis_kind": "curva"},
+                {"title": "B", "analysis_kind": "regresion_lineal"}
+            ]}),
+            "Solo una parte",
+        ),
+        (
             serde_json::json!({"results": [
                 {"symbol": "y", "name": "y", "unit": "", "formula": "x", "tolerance": -1}
             ]}),
@@ -4927,4 +4934,23 @@ fn check_template_rejects_what_cannot_be_written() {
         let error = check_template(&template(extra.clone())).unwrap_err();
         assert!(error.contains(expected), "{extra}: {error}");
     }
+}
+
+#[tokio::test]
+async fn import_mirrors_the_part_kinds_like_the_editor() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let template: PracticeTemplate = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "name": "Partes", "analysis_kind": "curva",
+        "parts": [{"title": "A", "analysis_kind": "regresion_lineal"}, {"title": "B"}]
+    }))
+    .unwrap();
+    let practice = import_template(&pool, &template, "u1").await.unwrap();
+    let def = definition(&pool, &practice.id).await.unwrap().unwrap();
+    assert_eq!(def.analysis_kind.as_deref(), Some("regresion_lineal"));
+    let kinds: Vec<_> = def
+        .parts
+        .iter()
+        .map(|p| p.analysis_kind.as_deref())
+        .collect();
+    assert_eq!(kinds, [Some("regresion_lineal"), Some("estadistico")]);
 }
