@@ -223,6 +223,13 @@ pub async fn begin_write(
     pool.begin_with("BEGIN IMMEDIATE").await
 }
 
+pub async fn begin_read(
+    pool: &SqlitePool,
+) -> sqlx::Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    #[allow(clippy::disallowed_methods)]
+    pool.begin().await
+}
+
 pub async fn next_position(
     conn: &mut sqlx::SqliteConnection,
     table: &str,

@@ -1030,6 +1030,16 @@ Decisiones:
   puede escribir: `schema_version` desconocida, símbolos repetidos o una sección que apunta a una
   parte inexistente. El resto de los problemas se ve en el panel de problemas, como en cualquier
   borrador.
+
+  Nota (revisión de #138): se probó que importar rechazara lo mismo que los altas, y se volvió a
+  este criterio. Con el criterio estricto, un borrador que ya tenía problemas (el editor solo
+  bloquea los que una edición agrega), o filas que el tipo de análisis ya no usa, se exportaba y
+  después no se podía importar. Lo estructural que se rechaza: versión del formato, nombre y tipo
+  de análisis, más de una parte con serie, más de 20 operadores, títulos vacíos, tolerancias
+  negativas, símbolos vacíos, repetidos, inválidos o reservados, fórmulas vacías y secciones que
+  apuntan a partes o símbolos que no existen.
+- **Exportar elige el borrador (por defecto) o la versión publicada** (`?version=publicada`). El
+  nombre de la práctica no se versiona: la exportación de la publicada lleva el nombre actual.
 - **Plantillas en `templates/practices/<id>.json`**, generadas exportando y embebidas con
   `include_str!`. Un test las compara con lo exportado; `QUANTIFY_UPDATE_TEMPLATES=1` las regenera,
   como los golden.

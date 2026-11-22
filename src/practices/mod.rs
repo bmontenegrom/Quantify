@@ -14,7 +14,7 @@ pub const INPUT_WIDGETS: [&str; 2] = [DEFAULT_INPUT_WIDGET, "cronometro"];
 const DEFAULT_LABEL_MODE: &str = "nombre";
 pub const DEFAULT_INPUT_WIDGET: &str = "teclado";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuantityInput {
     #[serde(default)]
     pub display_symbol: Option<String>,
@@ -75,7 +75,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ResultInput {
     #[serde(default)]
     pub display_symbol: Option<String>,
@@ -181,7 +181,7 @@ pub struct PracticeCurve {
     pub x_log: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CurveInput {
     pub x_formula: String,
     pub y_formula: String,
@@ -203,7 +203,7 @@ pub struct PracticeIntermediate {
     pub on_means: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct IntermediateInput {
     #[serde(default)]
     pub display_symbol: Option<String>,
@@ -229,7 +229,7 @@ pub struct PracticePointResult {
     pub formula: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PointResultInput {
     #[serde(default)]
     pub display_symbol: Option<String>,
@@ -253,7 +253,7 @@ pub struct PracticeAggregate {
     pub is_final: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AggregateInput {
     #[serde(default)]
     pub display_symbol: Option<String>,
@@ -287,6 +287,7 @@ mod layout;
 mod lifecycle;
 mod parts;
 mod seed;
+mod template;
 #[cfg(test)]
 mod tests;
 mod versions;
@@ -297,4 +298,5 @@ pub use layout::*;
 pub use lifecycle::*;
 pub use parts::{is_point_based, CompareOptions};
 pub use seed::seed_definitions;
+pub use template::*;
 pub use versions::*;

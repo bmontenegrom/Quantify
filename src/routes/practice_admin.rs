@@ -120,7 +120,7 @@ async fn load_definition(
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
-const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
+use practices::ANALYSIS_KINDS;
 
 fn validate_practice_name(name: &str) -> Result<(), AppError> {
     if name.trim().is_empty() {
@@ -184,6 +184,54 @@ pub(super) async fn duplicate_practice(
         .await?
         .map(Json)
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct ExportQuery {
+    #[serde(default)]
+    version: practices::ExportSource,
+}
+
+pub(super) async fn export_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(query): Query<ExportQuery>,
+) -> Result<Json<practices::PracticeTemplate>, AppError> {
+    require_teacher(&state, &headers).await?;
+    if let Some(template) = practices::export_template(&state.pool, &id, query.version).await? {
+        return Ok(Json(template));
+    }
+    Err(match query.version {
+        practices::ExportSource::Publicada
+            if practices::practice(&state.pool, &id).await?.is_some() =>
+        {
+            AppError::not_found("La práctica no tiene una versión publicada.")
+        }
+        _ => AppError::not_found("practica no encontrada"),
+    })
+}
+
+pub(super) async fn import_practice(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(template): Json<practices::PracticeTemplate>,
+) -> Result<Json<db::Practice>, AppError> {
+    let user = require_teacher(&state, &headers).await?;
+    practices::check_template(&template).map_err(AppError::bad_request)?;
+    validate_template_items(&template)?;
+    Ok(Json(
+        practices::import_template(&state.pool, &template, &user.id).await?,
+    ))
+}
+
+fn validate_template_items(t: &practices::PracticeTemplate) -> Result<(), AppError> {
+    for row in t.symbol_rows() {
+        validate_symbol_format(row.symbol)?;
+        validate_symbol_not_reserved(row.symbol)?;
+        validate_display_symbol(row.display)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -667,10 +715,11 @@ pub(super) async fn set_practice_operator_count(
     Json(body): Json<OperatorCountBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    if body.count > 20 {
-        return Err(AppError::bad_request(
-            "La cantidad de operadores no puede superar 20.",
-        ));
+    if body.count > practices::MAX_OPERATORS {
+        return Err(AppError::bad_request(format!(
+            "La cantidad de operadores no puede superar {}.",
+            practices::MAX_OPERATORS
+        )));
     }
     if !practices::set_operator_count(&state.pool, &id, body.count).await? {
         return Err(AppError::not_found("practica no encontrada"));
@@ -688,9 +737,8 @@ pub(super) async fn set_practice_regression_formulas(
     let def = load_definition(&state, &id).await?;
     check_axes(&def, &body.x_formula, &body.y_formula)?;
     let mut after = def.clone();
-    let axis = |f: &str| Some(f.trim().to_string()).filter(|f| !f.is_empty());
-    after.x_formula = axis(&body.x_formula);
-    after.y_formula = axis(&body.y_formula);
+    after.x_formula = practices::axis(Some(&body.x_formula));
+    after.y_formula = practices::axis(Some(&body.y_formula));
     if let (Some(x), Some(y)) = (&after.x_formula, &after.y_formula) {
         uses_series(&def, x, y)?;
     }
@@ -3200,6 +3248,28 @@ mod tests {
         );
     }
 
+    async fn session_token(pool: &sqlx::SqlitePool, role: &str) -> String {
+        let (user_id,): (String,) = sqlx::query_as("SELECT id FROM users WHERE role = ?1 LIMIT 1")
+            .bind(role)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        let token = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now();
+        sqlx::query(
+            "INSERT INTO sessions (token, user_id, created_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(&token)
+        .bind(user_id)
+        .bind(now)
+        .bind(now + chrono::Duration::hours(1))
+        .execute(pool)
+        .await
+        .unwrap();
+        token
+    }
+
     #[tokio::test]
     async fn the_edit_lock_waits_for_a_teacher_and_a_complete_body() {
         use tower::ServiceExt;
@@ -3211,33 +3281,8 @@ mod tests {
             secure_cookies: false,
             login_attempts: Default::default(),
         });
-        let session = |role: &'static str| {
-            let pool = pool.clone();
-            async move {
-                let (user_id,): (String,) =
-                    sqlx::query_as("SELECT id FROM users WHERE role = ?1 LIMIT 1")
-                        .bind(role)
-                        .fetch_one(&pool)
-                        .await
-                        .unwrap();
-                let token = uuid::Uuid::new_v4().to_string();
-                let now = chrono::Utc::now();
-                sqlx::query(
-                    "INSERT INTO sessions (token, user_id, created_at, expires_at) \
-                     VALUES (?1, ?2, ?3, ?4)",
-                )
-                .bind(&token)
-                .bind(user_id)
-                .bind(now)
-                .bind(now + chrono::Duration::hours(1))
-                .execute(&pool)
-                .await
-                .unwrap();
-                token
-            }
-        };
-        let student = session("estudiante").await;
-        let teacher = session("docente").await;
+        let student = session_token(&pool, "estudiante").await;
+        let teacher = session_token(&pool, "docente").await;
         let request = |token: Option<&str>, body: axum::body::Body| {
             let mut builder = axum::http::Request::post("/practices/lock-body/quantities")
                 .header("content-type", "application/json");
@@ -4703,5 +4748,181 @@ mod tests {
         assert!(validate_symbol_not_reserved("V_g").is_ok());
         assert!(validate_symbol_not_reserved("first_h").is_ok());
         assert!(validate_symbol_not_reserved("h_max").is_ok());
+    }
+
+    #[tokio::test]
+    async fn import_needs_a_teacher_and_valid_symbols() {
+        let (pool, dir) = crate::computation::tests::setup().await;
+        let state: SharedState = std::sync::Arc::new(db::AppState {
+            pool: pool.clone(),
+            upload_dir: dir.path().to_path_buf(),
+            secret_key: "secreto".into(),
+            secure_cookies: false,
+            login_attempts: Default::default(),
+        });
+        let session = |role: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let token = session_token(&pool, role).await;
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    axum::http::header::COOKIE,
+                    format!("quantify_session={token}").parse().unwrap(),
+                );
+                headers
+            }
+        };
+        let template = |symbol: &str| -> practices::PracticeTemplate {
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 1, "name": "Importada", "analysis_kind": "estadistico",
+                "quantities": [{"symbol": symbol, "name": "x", "unit": "", "repeated": false}]
+            }))
+            .unwrap()
+        };
+        let import = |headers: HeaderMap, symbol: &str| {
+            import_practice(State(state.clone()), headers, Json(template(symbol)))
+        };
+        let status = |r: Result<Json<db::Practice>, AppError>| {
+            r.err()
+                .map(|e| axum::response::IntoResponse::into_response(e).status())
+        };
+        assert_eq!(
+            status(import(session("estudiante").await, "x").await),
+            Some(axum::http::StatusCode::FORBIDDEN)
+        );
+        let teacher = session("docente").await;
+        assert_eq!(
+            status(import(teacher.clone(), "slope").await),
+            Some(axum::http::StatusCode::BAD_REQUEST)
+        );
+        let problems_after_import = |extra: serde_json::Value| {
+            let mut body = serde_json::json!({
+                "schema_version": 1, "name": "Importada", "analysis_kind": "regresion_lineal",
+                "parts": [
+                    {"title": "Estática", "analysis_kind": "estadistico"},
+                    {"title": "Serie", "analysis_kind": "regresion_lineal"}
+                ],
+                "sections": [
+                    {"title": "A", "part": 0, "quantities": ["m"], "results": ["y"]},
+                    {"title": "B", "part": 1, "quantities": ["h", "t"]}
+                ],
+                "quantities": [
+                    {"symbol": "m", "name": "m", "unit": "g", "repeated": true, "per_point": false},
+                    {"symbol": "h", "name": "h", "unit": "cm", "repeated": false},
+                    {"symbol": "t", "name": "t", "unit": "s", "repeated": false}
+                ],
+                "results": [{"symbol": "y", "name": "y", "unit": "g", "formula": "2*m"}]
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                body[key] = value.clone();
+            }
+            let template: practices::PracticeTemplate = serde_json::from_value(body).unwrap();
+            let state = state.clone();
+            let headers = teacher.clone();
+            async move {
+                let practice = import_practice(State(state.clone()), headers, Json(template))
+                    .await
+                    .unwrap_or_else(|e| panic!("{}", e.message()))
+                    .0;
+                let def = practices::definition(&state.pool, &practice.id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let problems: Vec<String> = draft_problems(&def)
+                    .into_iter()
+                    .map(|p| p.message)
+                    .collect();
+                problems.join(" | ")
+            }
+        };
+        let cases = [
+            (
+                serde_json::json!({"results": [{"symbol": "y", "name": "  ", "unit": "g", "formula": "2*m"}]}),
+                "nombre",
+            ),
+            (
+                serde_json::json!({"results": [{"symbol": "y", "name": "y", "unit": "g", "formula": "2*zzz"}]}),
+                "zzz",
+            ),
+            (
+                serde_json::json!({"results": [
+                    {"symbol": "y", "name": "y", "unit": "g", "formula": "z"},
+                    {"symbol": "z", "name": "z", "unit": "g", "formula": "y"}
+                ]}),
+                "ciclo",
+            ),
+            (
+                serde_json::json!({"quantities": [
+                    {"symbol": "m", "name": "m", "unit": "g", "repeated": true, "per_point": false,
+                     "replicas_per_point": 2},
+                    {"symbol": "h", "name": "h", "unit": "cm", "repeated": false},
+                    {"symbol": "t", "name": "t", "unit": "s", "repeated": false}
+                ]}),
+                "réplicas",
+            ),
+            (
+                serde_json::json!({"results": [
+                    {"symbol": "y", "name": "y", "unit": "cm", "formula": "2*m", "compare_with": "h"}
+                ]}),
+                "Comparar con",
+            ),
+            (
+                serde_json::json!({"sections": [
+                    {"title": "A", "part": 0, "quantities": ["m", "h"], "results": ["y"]},
+                    {"title": "B", "part": 1, "quantities": ["t"]}
+                ]}),
+                "fuera de la parte",
+            ),
+            (
+                serde_json::json!({"analysis_kind": "estadistico", "parts": [], "sections": [],
+                    "intermediates": [{"symbol": "k", "name": "k", "unit": "", "formula": "zzz+1"}]}),
+                "",
+            ),
+        ];
+        for (extra, expected) in cases {
+            let problems = problems_after_import(extra.clone()).await;
+            assert!(problems.contains(expected), "{extra}: {problems}");
+        }
+        let created = import(teacher.clone(), "x").await.unwrap().0;
+        assert_eq!(created.status, "borrador");
+        let exported = export_practice(
+            State(state.clone()),
+            teacher.clone(),
+            Path(created.id.clone()),
+            Query(Default::default()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(exported.quantities[0].symbol, "x");
+        let unpublished = export_practice(
+            State(state.clone()),
+            teacher.clone(),
+            Path(created.id.clone()),
+            Query(ExportQuery {
+                version: practices::ExportSource::Publicada,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(unpublished.message().contains("versión publicada"));
+        for practice in db::practices(&pool).await.unwrap() {
+            let exported = export_practice(
+                State(state.clone()),
+                teacher.clone(),
+                Path(practice.id.clone()),
+                Query(Default::default()),
+            )
+            .await
+            .unwrap()
+            .0;
+            let imported = import_practice(State(state.clone()), teacher.clone(), Json(exported))
+                .await
+                .unwrap_or_else(|e| {
+                    let response = axum::response::IntoResponse::into_response(e);
+                    panic!("{}: {}", practice.id, response.status())
+                });
+            assert_eq!(imported.0.status, "borrador");
+        }
     }
 }
