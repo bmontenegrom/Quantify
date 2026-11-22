@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.0](https://github.com/bmontenegrom/Quantify/compare/v0.7.0...v0.8.0) (2026-11-22)
+
+
+### Funcionalidades
+
+* **practicas:** exportar e importar desde la UI (F8, 2/4) ([#139](https://github.com/bmontenegrom/Quantify/issues/139)) ([fd48c0a](https://github.com/bmontenegrom/Quantify/commit/fd48c0a4815602e66f92203a979d006b3dfb26cb))
+* **practicas:** exportar e importar una práctica (F8, 1/4) ([#138](https://github.com/bmontenegrom/Quantify/issues/138)) ([93bed1d](https://github.com/bmontenegrom/Quantify/commit/93bed1dd8922cc5cda2d2dc73ad8c0c62872a7b9))
+* **practicas:** plantillas en el repo (F8, 3/4) ([#140](https://github.com/bmontenegrom/Quantify/issues/140)) ([4928007](https://github.com/bmontenegrom/Quantify/commit/4928007d482cacaeb4fb105c4bad3887b453ebca))
+
 ## [0.7.0](https://github.com/bmontenegrom/Quantify/compare/v0.6.0...v0.7.0) (2026-11-22)
 
 
