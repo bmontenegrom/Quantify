@@ -395,7 +395,7 @@ pub async fn import_template(
         .ok_or_else(|| anyhow::anyhow!("la práctica recién importada no aparece"))
 }
 
-pub async fn write_template(
+async fn write_template(
     tx: &mut SqliteConnection,
     t: &PracticeTemplate,
     created_by: &str,

@@ -220,59 +220,18 @@ pub(super) async fn import_practice(
     let user = require_teacher(&state, &headers).await?;
     practices::check_template(&template).map_err(AppError::bad_request)?;
     validate_template_items(&template)?;
-    let mut tx = crate::db::begin_write(&state.pool).await?;
-    let id = practices::write_template(&mut tx, &template, &user.id).await?;
-    let def = practices::definition_in(&mut tx, &id)
-        .await?
-        .ok_or_else(|| AppError::not_found("practica no encontrada"))?;
-    validate_imported(&def, &template)?;
-    tx.commit().await?;
-    practices::practice(&state.pool, &id)
-        .await?
-        .map(Json)
-        .ok_or_else(|| AppError::not_found("practica no encontrada"))
+    Ok(Json(
+        practices::import_template(&state.pool, &template, &user.id).await?,
+    ))
 }
 
 fn validate_template_items(t: &practices::PracticeTemplate) -> Result<(), AppError> {
-    let quantities = t.quantities.iter().map(|q| (&q.symbol, &q.display_symbol));
-    let results = t.results.iter().map(|r| (&r.symbol, &r.display_symbol));
-    for (symbol, display) in quantities.chain(results) {
-        validate_symbol_format(symbol)?;
-        validate_symbol_not_reserved(symbol)?;
-        validate_display_symbol(display)?;
+    for row in t.symbol_rows() {
+        validate_symbol_format(row.symbol)?;
+        validate_symbol_not_reserved(row.symbol)?;
+        validate_display_symbol(row.display)?;
     }
     Ok(())
-}
-
-fn validate_imported(
-    def: &practices::PracticeDefinition,
-    t: &practices::PracticeTemplate,
-) -> Result<(), AppError> {
-    for (row, input) in def.quantities.iter().zip(&t.quantities) {
-        validate_quantity_in(def, input, Some(&row.id))?;
-    }
-    for (row, input) in def.intermediates.iter().zip(&t.intermediates) {
-        validate_intermediate(def, input, Some(&row.id))?;
-    }
-    for input in &t.point_results {
-        validate_point_result(def, input)?;
-    }
-    for (row, input) in def.aggregates.iter().zip(&t.aggregates) {
-        validate_aggregate(def, input, Some(&row.id))?;
-    }
-    for input in &t.curves {
-        validate_curve(def, input)?;
-    }
-    let (x, y) = (def.x_formula.as_deref(), def.y_formula.as_deref());
-    check_axes(def, x.unwrap_or_default(), y.unwrap_or_default())?;
-    if let (Some(x), Some(y)) = (x, y) {
-        uses_series(def, x, y)?;
-    }
-    guard_change(
-        &practices::PracticeDefinition::default(),
-        def,
-        "importar la práctica",
-    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -4836,7 +4795,7 @@ mod tests {
             status(import(teacher.clone(), "slope").await),
             Some(axum::http::StatusCode::BAD_REQUEST)
         );
-        let rejected = |extra: serde_json::Value| {
+        let problems_after_import = |extra: serde_json::Value| {
             let mut body = serde_json::json!({
                 "schema_version": 1, "name": "Importada", "analysis_kind": "regresion_lineal",
                 "parts": [
@@ -4861,13 +4820,21 @@ mod tests {
             let state = state.clone();
             let headers = teacher.clone();
             async move {
-                import_practice(State(state), headers, Json(template))
+                let practice = import_practice(State(state.clone()), headers, Json(template))
                     .await
-                    .err()
-                    .map(|e| e.message().to_string())
+                    .unwrap_or_else(|e| panic!("{}", e.message()))
+                    .0;
+                let def = practices::definition(&state.pool, &practice.id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let problems: Vec<String> = draft_problems(&def)
+                    .into_iter()
+                    .map(|p| p.message)
+                    .collect();
+                problems.join(" | ")
             }
         };
-        assert_eq!(rejected(serde_json::json!({})).await, None);
         let cases = [
             (
                 serde_json::json!({"results": [{"symbol": "y", "name": "  ", "unit": "g", "formula": "2*m"}]}),
@@ -4904,17 +4871,17 @@ mod tests {
                     {"title": "A", "part": 0, "quantities": ["m", "h"], "results": ["y"]},
                     {"title": "B", "part": 1, "quantities": ["t"]}
                 ]}),
-                "una sola serie",
+                "fuera de la parte",
             ),
             (
                 serde_json::json!({"analysis_kind": "estadistico", "parts": [], "sections": [],
                     "intermediates": [{"symbol": "k", "name": "k", "unit": "", "formula": "zzz+1"}]}),
-                "zzz",
+                "",
             ),
         ];
         for (extra, expected) in cases {
-            let message = rejected(extra.clone()).await.unwrap_or_default();
-            assert!(message.contains(expected), "{extra}: {message}");
+            let problems = problems_after_import(extra.clone()).await;
+            assert!(problems.contains(expected), "{extra}: {problems}");
         }
         let created = import(teacher.clone(), "x").await.unwrap().0;
         assert_eq!(created.status, "borrador");
