@@ -7,7 +7,6 @@ use super::{
     QuantityInput, ResultInput,
 };
 use crate::db::Practice;
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 use std::collections::HashSet;
@@ -116,10 +115,12 @@ impl PracticeTemplate {
 }
 
 fn is_part_key(key: &str) -> bool {
-    !key.is_empty()
-        && key
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    let edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+    key.starts_with(edge) && key.ends_with(edge) && key.chars().all(|c| edge(c) || c == '-')
+}
+
+fn part_key(part: &TemplatePart) -> Option<&str> {
+    part.key.as_deref().map(str::trim).filter(|k| !k.is_empty())
 }
 
 pub fn axis(formula: Option<&str>) -> Option<String> {
@@ -322,8 +323,8 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
         return Err("Solo una parte puede tener una serie de puntos (regresión o curva).".into());
     }
     let mut keys = HashSet::new();
-    for key in t.parts.iter().filter_map(|p| p.key.as_deref()) {
-        if !is_part_key(key.trim()) || !keys.insert(key.trim()) {
+    for key in t.parts.iter().filter_map(part_key) {
+        if !is_part_key(key) || !keys.insert(key) {
             return Err(format!(
                 "La clave de parte \"{key}\" tiene que ser única y usar solo minúsculas, dígitos y guiones."
             ));
@@ -441,9 +442,9 @@ pub async fn seed_library(pool: &SqlitePool) -> anyhow::Result<()> {
     if !has_practices(&mut *pool.acquire().await?).await? {
         let mut tx = crate::db::begin_write(pool).await?;
         if !has_practices(&mut tx).await? {
-            for (key, json) in super::LIBRARY {
-                let template: PracticeTemplate = serde_json::from_str(json)
-                    .with_context(|| format!("la plantilla {key} no se puede leer"))?;
+            for (key, _) in super::LIBRARY {
+                let template = super::library_template(key)
+                    .ok_or_else(|| anyhow::anyhow!("falta la plantilla {key}"))??;
                 write_template(&mut tx, &template, key, "publicada", None).await?;
             }
         }
@@ -499,10 +500,7 @@ async fn write_template(
     .await?;
     let mut parts = Vec::new();
     for (position, (part, part_kind)) in t.parts.iter().zip(&part_kinds).enumerate() {
-        let keyed = part
-            .key
-            .as_deref()
-            .map(|key| format!("{id}-{}", key.trim()));
+        let keyed = part_key(part).map(|key| format!("{id}-{key}"));
         let part_id = match keyed {
             Some(candidate) if !part_exists(tx, &candidate).await? => candidate,
             _ => Uuid::new_v4().to_string(),

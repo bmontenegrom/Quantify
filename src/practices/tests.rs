@@ -3883,6 +3883,10 @@ fn check_template_rejects_what_cannot_be_written() {
     };
     assert!(check_template(&template(serde_json::json!({}))).is_ok());
     assert!(check_template(&template(serde_json::json!({"analysis_kind": " curva "}))).is_ok());
+    for key in ["", "  ", "serie-1"] {
+        let parts = serde_json::json!({"parts": [{"title": "A", "key": key}]});
+        assert!(check_template(&template(parts)).is_ok(), "{key:?}");
+    }
     for (extra, expected) in [
         (serde_json::json!({"schema_version": 2}), "versión 2"),
         (serde_json::json!({"name": " "}), "nombre"),
@@ -3893,6 +3897,14 @@ fn check_template_rejects_what_cannot_be_written() {
         ),
         (serde_json::json!({"parts": [{"title": " "}]}), "sin título"),
         (serde_json::json!({"operator_count": 21}), "superar 20"),
+        (
+            serde_json::json!({"parts": [{"title": "A", "key": "-"}]}),
+            "clave de parte",
+        ),
+        (
+            serde_json::json!({"parts": [{"title": "A", "key": "a-"}]}),
+            "clave de parte",
+        ),
         (
             serde_json::json!({"parts": [
                 {"title": "A", "analysis_kind": "curva"},
@@ -4011,7 +4023,7 @@ async fn the_library_loads_and_exports_unchanged() {
         if file != serde_json::to_value(&exported).unwrap() {
             stale.push(key);
         }
-        let template = library_template(key).unwrap_or_else(|| panic!("{key}: no se puede leer"));
+        let template = library_template(key).unwrap().unwrap();
         import_template(&pool, &template, "u1")
             .await
             .unwrap_or_else(|e| panic!("{key}: no se puede importar: {e:#}"));

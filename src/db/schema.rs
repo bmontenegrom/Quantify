@@ -631,17 +631,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 
     sqlx::query(
         r#"
-        CREATE TABLE IF NOT EXISTS applied_migrations (
-            name       TEXT PRIMARY KEY,
-            applied_at TEXT NOT NULL
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
-
-    sqlx::query(
-        r#"
         CREATE TABLE IF NOT EXISTS user_default_tables (
             user_id      TEXT    NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
             group_id     TEXT    NOT NULL REFERENCES lab_groups(id) ON DELETE CASCADE,

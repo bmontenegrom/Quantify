@@ -18,13 +18,16 @@ pub const LIBRARY: &[(&str, &str)] = &library!(
     "hidrostatica",
 );
 
-/// La plantilla del repo con esa clave, o `None` si no existe.
+/// La plantilla del repo con esa clave (`None` si no existe; `Some(Err)` si no se puede leer).
 ///
 /// ```
-/// let t = quantify::practices::library_template("fluidos-1").unwrap();
+/// let t = quantify::practices::library_template("fluidos-1").unwrap().unwrap();
 /// assert_eq!(t.schema_version, quantify::practices::TEMPLATE_VERSION);
 /// ```
-pub fn library_template(key: &str) -> Option<PracticeTemplate> {
+pub fn library_template(key: &str) -> Option<anyhow::Result<PracticeTemplate>> {
     let (_, json) = LIBRARY.iter().find(|(k, _)| *k == key)?;
-    serde_json::from_str(json).ok()
+    Some(
+        serde_json::from_str(json)
+            .map_err(|e| anyhow::anyhow!("la plantilla {key} no se puede leer: {e}")),
+    )
 }

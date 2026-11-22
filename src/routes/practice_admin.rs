@@ -252,18 +252,19 @@ pub(super) async fn list_library(
     headers: HeaderMap,
 ) -> Result<Json<Vec<LibraryEntry>>, AppError> {
     require_teacher(&state, &headers).await?;
-    let entries: Vec<LibraryEntry> = practices::LIBRARY
-        .iter()
-        .filter_map(|(key, _)| {
-            let t = practices::library_template(key)?;
-            Some(LibraryEntry {
-                key,
-                name: t.name,
-                description: t.description,
-                analysis_kind: t.analysis_kind,
-            })
-        })
-        .collect();
+    let mut entries = Vec::new();
+    for (key, _) in practices::LIBRARY {
+        let Some(template) = practices::library_template(key) else {
+            continue;
+        };
+        let t = template?;
+        entries.push(LibraryEntry {
+            key,
+            name: t.name,
+            description: t.description,
+            analysis_kind: t.analysis_kind,
+        });
+    }
     Ok(Json(entries))
 }
 
@@ -274,7 +275,7 @@ pub(super) async fn create_from_library(
 ) -> Result<Json<db::Practice>, AppError> {
     let user = require_teacher(&state, &headers).await?;
     let mut template = practices::library_template(&key)
-        .ok_or_else(|| AppError::not_found("plantilla no encontrada"))?;
+        .ok_or_else(|| AppError::not_found("plantilla no encontrada"))??;
     practices::check_template(&template).map_err(AppError::bad_request)?;
     validate_template_items(&template)?;
     template.name = format!("{} (desde plantilla)", template.name);
