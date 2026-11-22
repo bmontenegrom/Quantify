@@ -257,6 +257,7 @@ function symbolFormulaPayloadFromForm(form, kind) {
 }
 
 async function reloadDefinition(practiceId) {
+  if (state.activePracticeId !== practiceId) return;
   const definition = await fetchJson(`/api/practices/${practiceId}/definition`);
   if (state.activePracticeId === practiceId) state.practiceDefinition = definition;
 }
@@ -271,14 +272,16 @@ async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) 
   };
   try {
     const message = await fn();
+    const done = typeof message === "string" ? message : successMsg;
     if (state.activePracticeId !== practiceId) {
-      return elsewhere(typeof message === "string" ? message : successMsg, "success");
+      if (done) elsewhere(done, "success");
+      return;
     }
     const edit = practiceWorkspace.querySelector(".scale-edit-cell form");
     if (resetEditing && (!edit || edit === form || !formFields(edit).some(fieldChanged))) {
       state.editing = { kind: null, id: null };
     }
-    state.practiceActionStatus = typeof message === "string" ? message : successMsg;
+    state.practiceActionStatus = done ?? state.practiceActionStatus;
     if (form) dropped.add(formKey(form));
   } catch (error) {
     if (state.activePracticeId !== practiceId) return elsewhere(error.message, "error");
@@ -852,7 +855,7 @@ async function importPractice(event) {
     return;
   }
   importing = true;
-  withPracticeStatus("Importando…");
+  withPracticeStatus("Importando…", { keep: true });
   try {
     await createAndOpen(
       async () => postJson("/api/practice-templates/import", await readJsonFile(file)),
@@ -1793,7 +1796,7 @@ async function movePracticeItem(list, id, practiceId, dir) {
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/${list}/${id}/move`, { up: dir === "up" });
     await reloadDefinition(practiceId);
-  }, state.practiceActionStatus);
+  }, null);
 }
 
 async function deletePracticeCurve(cid, practiceId) {
@@ -1879,8 +1882,8 @@ async function deletePracticeResult(rid, practiceId) {
 
 let practiceStatusTimer;
 
-function withPracticeStatus(message) {
+function withPracticeStatus(message, { keep = false } = {}) {
   if (practiceStatus) practiceStatus.textContent = message;
   window.clearTimeout(practiceStatusTimer);
-  if (message) practiceStatusTimer = window.setTimeout(() => { if (practiceStatus) practiceStatus.textContent = ""; }, 3000);
+  if (message && !keep) practiceStatusTimer = window.setTimeout(() => { if (practiceStatus) practiceStatus.textContent = ""; }, 3000);
 }
