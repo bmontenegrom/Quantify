@@ -217,10 +217,14 @@ async fn golden_practices_match_after_export_import() {
     for input_path in golden_inputs() {
         let input = read_input(&input_path);
         let source = &input.practice_id;
-        let template = crate::practices::export_template(&pool, source)
-            .await
-            .unwrap()
-            .unwrap();
+        let template = crate::practices::export_template(
+            &pool,
+            source,
+            crate::practices::ExportSource::Borrador,
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let copy = crate::practices::import_template(&pool, &template, "u1")
             .await
             .unwrap();

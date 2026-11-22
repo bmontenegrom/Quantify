@@ -4828,7 +4828,10 @@ fn json_keys(value: &serde_json::Value, out: &mut Vec<String>) {
 async fn export_and_import_keep_every_seeded_practice() {
     let (pool, _dir) = crate::computation::tests::setup().await;
     for practice in db::practices(&pool).await.unwrap() {
-        let exported = export_template(&pool, &practice.id).await.unwrap().unwrap();
+        let exported = export_template(&pool, &practice.id, ExportSource::Borrador)
+            .await
+            .unwrap()
+            .unwrap();
         check_template(&exported).unwrap_or_else(|e| panic!("{}: {e}", practice.id));
         let original = serde_json::to_value(&exported).unwrap();
         let mut keys = Vec::new();
@@ -4843,7 +4846,10 @@ async fn export_and_import_keep_every_seeded_practice() {
         let copy = import_template(&pool, &exported, "u1").await.unwrap();
         assert_ne!(copy.id, practice.id);
         assert_eq!(copy.status, "borrador");
-        let again = export_template(&pool, &copy.id).await.unwrap().unwrap();
+        let again = export_template(&pool, &copy.id, ExportSource::Borrador)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             serde_json::to_value(&again).unwrap(),
             original,
@@ -4858,12 +4864,21 @@ async fn export_and_import_keep_every_seeded_practice() {
 #[tokio::test]
 async fn importing_twice_picks_a_free_id() {
     let (pool, _dir) = crate::computation::tests::setup().await;
-    let exported = export_template(&pool, "p2-cc").await.unwrap().unwrap();
+    let exported = export_template(&pool, "p2-cc", ExportSource::Borrador)
+        .await
+        .unwrap()
+        .unwrap();
     let first = import_template(&pool, &exported, "u1").await.unwrap();
     let second = import_template(&pool, &exported, "u1").await.unwrap();
     assert_eq!(second.id, format!("{}-2", first.id));
-    assert!(export_template(&pool, "no-existe").await.unwrap().is_none());
-    let mut named_import = export_template(&pool, "p2-cc").await.unwrap().unwrap();
+    assert!(export_template(&pool, "no-existe", ExportSource::Borrador)
+        .await
+        .unwrap()
+        .is_none());
+    let mut named_import = export_template(&pool, "p2-cc", ExportSource::Borrador)
+        .await
+        .unwrap()
+        .unwrap();
     named_import.name = "Import".into();
     let reserved = import_template(&pool, &named_import, "u1").await.unwrap();
     assert_eq!(reserved.id, "import-2");
@@ -4953,4 +4968,29 @@ async fn import_mirrors_the_part_kinds_like_the_editor() {
         .map(|p| p.analysis_kind.as_deref())
         .collect();
     assert_eq!(kinds, [Some("regresion_lineal"), Some("estadistico")]);
+}
+
+#[tokio::test]
+async fn export_picks_the_draft_or_the_published_version() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let info = PracticeInfoInput {
+        name: "Corriente continua".into(),
+        description: "Descripción sin publicar".into(),
+    };
+    update_practice(&pool, "p2-cc", &info).await.unwrap();
+    let draft = export_template(&pool, "p2-cc", ExportSource::Borrador)
+        .await
+        .unwrap()
+        .unwrap();
+    let published = export_template(&pool, "p2-cc", ExportSource::Publicada)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(draft.description, "Descripción sin publicar");
+    assert_ne!(published.description, draft.description);
+    let copy = import_template(&pool, &published, "u1").await.unwrap();
+    assert!(export_template(&pool, &copy.id, ExportSource::Publicada)
+        .await
+        .unwrap()
+        .is_none());
 }

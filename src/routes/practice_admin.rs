@@ -186,16 +186,30 @@ pub(super) async fn duplicate_practice(
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct ExportQuery {
+    #[serde(default)]
+    version: practices::ExportSource,
+}
+
 pub(super) async fn export_practice(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    Query(query): Query<ExportQuery>,
 ) -> Result<Json<practices::PracticeTemplate>, AppError> {
     require_teacher(&state, &headers).await?;
-    practices::export_template(&state.pool, &id)
-        .await?
-        .map(Json)
-        .ok_or_else(|| AppError::not_found("practica no encontrada"))
+    if let Some(template) = practices::export_template(&state.pool, &id, query.version).await? {
+        return Ok(Json(template));
+    }
+    Err(match query.version {
+        practices::ExportSource::Publicada
+            if practices::practice(&state.pool, &id).await?.is_some() =>
+        {
+            AppError::not_found("La práctica no tiene una versión publicada.")
+        }
+        _ => AppError::not_found("practica no encontrada"),
+    })
 }
 
 pub(super) async fn import_practice(
@@ -4900,16 +4914,33 @@ mod tests {
         }
         let created = import(teacher.clone(), "x").await.unwrap().0;
         assert_eq!(created.status, "borrador");
-        let exported = export_practice(State(state.clone()), teacher.clone(), Path(created.id))
-            .await
-            .unwrap()
-            .0;
+        let exported = export_practice(
+            State(state.clone()),
+            teacher.clone(),
+            Path(created.id.clone()),
+            Query(Default::default()),
+        )
+        .await
+        .unwrap()
+        .0;
         assert_eq!(exported.quantities[0].symbol, "x");
+        let unpublished = export_practice(
+            State(state.clone()),
+            teacher.clone(),
+            Path(created.id.clone()),
+            Query(ExportQuery {
+                version: practices::ExportSource::Publicada,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(unpublished.message().contains("versión publicada"));
         for practice in db::practices(&pool).await.unwrap() {
             let exported = export_practice(
                 State(state.clone()),
                 teacher.clone(),
                 Path(practice.id.clone()),
+                Query(Default::default()),
             )
             .await
             .unwrap()

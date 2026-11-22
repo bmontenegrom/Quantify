@@ -3,7 +3,8 @@ use super::crud::{
     insert_result,
 };
 use super::{
-    AggregateInput, CurveInput, IntermediateInput, PointResultInput, QuantityInput, ResultInput,
+    AggregateInput, CurveInput, IntermediateInput, PointResultInput, PracticeDefinition,
+    QuantityInput, ResultInput,
 };
 use crate::db::Practice;
 use serde::{Deserialize, Serialize};
@@ -119,20 +120,35 @@ pub fn axis(formula: &Option<String>) -> Option<String> {
         .map(str::to_string)
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportSource {
+    #[default]
+    Borrador,
+    Publicada,
+}
+
 pub async fn export_template(
     pool: &SqlitePool,
     practice_id: &str,
+    source: ExportSource,
 ) -> anyhow::Result<Option<PracticeTemplate>> {
     let mut tx = crate::db::begin_write(pool).await?;
-    let Some(def) = super::definition_in(&mut tx, practice_id).await? else {
-        return Ok(None);
-    };
     let Some(practice) = super::practice_in(&mut tx, practice_id).await? else {
         return Ok(None);
     };
-    let name = practice.name;
+    let def = match source {
+        ExportSource::Borrador => super::definition_in(&mut tx, practice_id).await?,
+        ExportSource::Publicada => super::versions::current_version_in(&mut tx, practice_id)
+            .await?
+            .map(|v| v.definition),
+    };
+    Ok(def.map(|def| template_from(&def, practice.name)))
+}
+
+fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
     let display = |symbol: &str| def.display_symbols.get(symbol).cloned();
-    Ok(Some(PracticeTemplate {
+    PracticeTemplate {
         schema_version: TEMPLATE_VERSION,
         name,
         description: def.description.clone(),
@@ -244,7 +260,7 @@ pub async fn export_template(
                 x_log: c.x_log,
             })
             .collect(),
-    }))
+    }
 }
 
 /// Lo que impide escribir una plantilla; el resto lo muestra el panel de problemas del borrador.
