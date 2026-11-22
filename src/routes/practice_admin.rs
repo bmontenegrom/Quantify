@@ -210,38 +210,38 @@ pub(super) async fn import_practice(
     for (quantity, input) in def.quantities.iter().zip(&template.quantities) {
         validate_quantity_in(&def, input, Some(&quantity.id))?;
     }
-    if let Some(problem) = element_problems(&def).into_iter().next() {
-        return Err(AppError::bad_request(format!(
-            "{}: {}",
-            problem.element, problem.message
-        )));
+    for (row, input) in def.intermediates.iter().zip(&template.intermediates) {
+        validate_intermediate(&def, input, Some(&row.id))?;
     }
+    for input in &template.point_results {
+        validate_point_result(&def, input)?;
+    }
+    for (row, input) in def.aggregates.iter().zip(&template.aggregates) {
+        validate_aggregate(&def, input, Some(&row.id))?;
+    }
+    for input in &template.curves {
+        validate_curve(&def, input)?;
+    }
+    check_axes(
+        &def,
+        def.x_formula.as_deref().unwrap_or_default(),
+        def.y_formula.as_deref().unwrap_or_default(),
+    )?;
+    guard_change(
+        &practices::PracticeDefinition::default(),
+        &def,
+        "importar la práctica",
+    )?;
     Ok(Json(
         practices::import_template(&state.pool, &template, &user.id).await?,
     ))
 }
 
 fn validate_template_items(t: &practices::PracticeTemplate) -> Result<(), AppError> {
-    let rows = t
-        .quantities
-        .iter()
-        .map(|q| (&q.symbol, &q.display_symbol))
-        .chain(t.results.iter().map(|r| (&r.symbol, &r.display_symbol)))
-        .chain(
-            t.intermediates
-                .iter()
-                .map(|i| (&i.symbol, &i.display_symbol)),
-        )
-        .chain(
-            t.point_results
-                .iter()
-                .map(|p| (&p.symbol, &p.display_symbol)),
-        )
-        .chain(t.aggregates.iter().map(|a| (&a.symbol, &a.display_symbol)));
-    for (symbol, display) in rows {
-        validate_symbol_format(symbol)?;
-        validate_symbol_not_reserved(symbol)?;
-        validate_display_symbol(display)?;
+    for row in t.symbol_rows() {
+        validate_symbol_format(row.symbol)?;
+        validate_symbol_not_reserved(row.symbol)?;
+        validate_display_symbol(row.display)?;
     }
     Ok(())
 }
@@ -4866,6 +4866,21 @@ mod tests {
                     {"symbol": "y", "name": "y", "unit": "cm", "formula": "2*m", "compare_with": "h"}
                 ]}),
                 "Comparar con",
+            ),
+            (
+                serde_json::json!({"parts": [
+                    {"title": "Estática", "analysis_kind": "regresion_lineal"},
+                    {"title": "Serie", "analysis_kind": "regresion_lineal"}
+                ], "sections": [
+                    {"title": "A", "part": 0, "quantities": ["h"]},
+                    {"title": "B", "part": 1, "quantities": ["t"]}
+                ]}),
+                "una sola serie",
+            ),
+            (
+                serde_json::json!({"analysis_kind": "estadistico", "parts": [], "sections": [],
+                    "intermediates": [{"symbol": "k", "name": "k", "unit": "", "formula": "zzz+1"}]}),
+                "zzz",
             ),
         ];
         for (extra, expected) in cases {

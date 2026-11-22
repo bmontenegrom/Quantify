@@ -137,32 +137,6 @@ fn input_widget(input: &QuantityInput) -> &str {
         .unwrap_or(DEFAULT_INPUT_WIDGET)
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn create_symbol_formula_row<T: SymbolFormulaRow>(
-    pool: &SqlitePool,
-    practice_id: &str,
-    symbol: &str,
-    name: &str,
-    unit: &str,
-    formula: &str,
-    display: Option<&str>,
-    flags: &[bool],
-) -> anyhow::Result<T> {
-    let mut tx = crate::db::begin_write(pool).await?;
-    let position = next_position(&mut tx, T::TABLE, "practice_id", practice_id).await?;
-    let id = insert_symbol_formula_row::<T>(
-        &mut tx,
-        practice_id,
-        position,
-        [symbol, name, unit, formula],
-        display,
-        flags,
-    )
-    .await?;
-    tx.commit().await?;
-    fetch_symbol_formula_row::<T>(pool, &id).await
-}
-
 async fn insert_symbol_formula_row<T: SymbolFormulaRow>(
     conn: &mut SqliteConnection,
     practice_id: &str,
@@ -301,22 +275,20 @@ pub async fn create_point_result(
     practice_id: &str,
     input: PointResultInput,
 ) -> anyhow::Result<PracticePointResult> {
-    let symbol = input.symbol.trim();
-    let formula = input.formula.trim();
-    if symbol.is_empty() || formula.is_empty() {
+    if input.symbol.trim().is_empty() || input.formula.trim().is_empty() {
         anyhow::bail!("la magnitud derivada por punto necesita símbolo y fórmula");
     }
-    create_symbol_formula_row(
-        pool,
+    let mut tx = crate::db::begin_write(pool).await?;
+    let position = next_position(
+        &mut tx,
+        PracticePointResult::TABLE,
+        "practice_id",
         practice_id,
-        symbol,
-        input.name.trim(),
-        input.unit.trim(),
-        formula,
-        display_symbol(&input.display_symbol),
-        &[],
     )
-    .await
+    .await?;
+    let id = insert_point_result(&mut tx, practice_id, position, &input).await?;
+    tx.commit().await?;
+    fetch_symbol_formula_row(pool, &id).await
 }
 
 pub async fn update_point_result(
@@ -380,9 +352,7 @@ pub async fn create_aggregate(
     practice_id: &str,
     input: AggregateInput,
 ) -> anyhow::Result<PracticeAggregate> {
-    let symbol = input.symbol.trim();
-    let formula = input.formula.trim();
-    if symbol.is_empty() || formula.is_empty() {
+    if input.symbol.trim().is_empty() || input.formula.trim().is_empty() {
         anyhow::bail!("el mensurando agregado necesita símbolo y fórmula");
     }
     let mut tx = crate::db::begin_write(pool).await?;
@@ -477,22 +447,20 @@ pub async fn create_intermediate(
     practice_id: &str,
     input: IntermediateInput,
 ) -> anyhow::Result<PracticeIntermediate> {
-    let symbol = input.symbol.trim();
-    let formula = input.formula.trim();
-    if symbol.is_empty() || formula.is_empty() {
+    if input.symbol.trim().is_empty() || input.formula.trim().is_empty() {
         anyhow::bail!("la magnitud intermedia necesita símbolo y fórmula");
     }
-    create_symbol_formula_row(
-        pool,
+    let mut tx = crate::db::begin_write(pool).await?;
+    let position = next_position(
+        &mut tx,
+        PracticeIntermediate::TABLE,
+        "practice_id",
         practice_id,
-        symbol,
-        input.name.trim(),
-        input.unit.trim(),
-        formula,
-        display_symbol(&input.display_symbol),
-        &[input.show_live, input.on_means],
     )
-    .await
+    .await?;
+    let id = insert_intermediate(&mut tx, practice_id, position, &input).await?;
+    tx.commit().await?;
+    fetch_symbol_formula_row(pool, &id).await
 }
 
 pub async fn update_intermediate(
@@ -546,9 +514,7 @@ pub async fn create_curve(
     practice_id: &str,
     input: CurveInput,
 ) -> anyhow::Result<PracticeCurve> {
-    let x = input.x_formula.trim();
-    let y = input.y_formula.trim();
-    if x.is_empty() || y.is_empty() {
+    if input.x_formula.trim().is_empty() || input.y_formula.trim().is_empty() {
         anyhow::bail!("la curva necesita las fórmulas de ambos ejes");
     }
     let mut tx = crate::db::begin_write(pool).await?;

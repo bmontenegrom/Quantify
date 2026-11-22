@@ -4863,6 +4863,10 @@ async fn importing_twice_picks_a_free_id() {
     let second = import_template(&pool, &exported, "u1").await.unwrap();
     assert_eq!(second.id, format!("{}-2", first.id));
     assert!(export_template(&pool, "no-existe").await.unwrap().is_none());
+    let mut named_import = export_template(&pool, "p2-cc").await.unwrap().unwrap();
+    named_import.name = "Import".into();
+    let reserved = import_template(&pool, &named_import, "u1").await.unwrap();
+    assert_eq!(reserved.id, "import-2");
 }
 
 #[test]

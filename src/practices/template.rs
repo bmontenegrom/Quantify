@@ -68,6 +68,59 @@ pub struct TemplateSection {
     pub results: Vec<String>,
 }
 
+pub struct SymbolRow<'a> {
+    pub symbol: &'a str,
+    pub display: &'a Option<String>,
+    pub formula: Option<&'a str>,
+}
+
+impl PracticeTemplate {
+    pub fn symbol_rows(&self) -> impl Iterator<Item = SymbolRow<'_>> {
+        fn row<'a>(
+            symbol: &'a str,
+            display: &'a Option<String>,
+            formula: Option<&'a str>,
+        ) -> SymbolRow<'a> {
+            SymbolRow {
+                symbol,
+                display,
+                formula,
+            }
+        }
+        self.quantities
+            .iter()
+            .map(|q| row(&q.symbol, &q.display_symbol, None))
+            .chain(
+                self.results
+                    .iter()
+                    .map(|r| row(&r.symbol, &r.display_symbol, Some(&r.formula))),
+            )
+            .chain(
+                self.intermediates
+                    .iter()
+                    .map(|i| row(&i.symbol, &i.display_symbol, Some(&i.formula))),
+            )
+            .chain(
+                self.point_results
+                    .iter()
+                    .map(|p| row(&p.symbol, &p.display_symbol, Some(&p.formula))),
+            )
+            .chain(
+                self.aggregates
+                    .iter()
+                    .map(|a| row(&a.symbol, &a.display_symbol, Some(&a.formula))),
+            )
+    }
+}
+
+fn axis(formula: &Option<String>) -> Option<String> {
+    formula
+        .as_deref()
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+}
+
 pub async fn export_template(
     pool: &SqlitePool,
     practice_id: &str,
@@ -76,10 +129,13 @@ pub async fn export_template(
     let Some(def) = super::definition_in(conn, practice_id).await? else {
         return Ok(None);
     };
-    let name: String = sqlx::query_scalar("SELECT name FROM practices WHERE id = ?1")
+    let Some(name) = sqlx::query_scalar("SELECT name FROM practices WHERE id = ?1")
         .bind(practice_id)
-        .fetch_one(&mut *conn)
-        .await?;
+        .fetch_optional(&mut *conn)
+        .await?
+    else {
+        return Ok(None);
+    };
     let display = |symbol: &str| def.display_symbols.get(symbol).cloned();
     Ok(Some(PracticeTemplate {
         schema_version: TEMPLATE_VERSION,
@@ -254,30 +310,18 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
             r.symbol.trim()
         ));
     }
-    let formulas = t
-        .results
-        .iter()
-        .map(|r| (&r.symbol, &r.formula))
-        .chain(t.intermediates.iter().map(|i| (&i.symbol, &i.formula)))
-        .chain(t.point_results.iter().map(|p| (&p.symbol, &p.formula)))
-        .chain(t.aggregates.iter().map(|a| (&a.symbol, &a.formula)));
-    let symbols = t
-        .quantities
-        .iter()
-        .map(|q| &q.symbol)
-        .chain(formulas.clone().map(|(s, _)| s));
     let mut seen = HashSet::new();
-    for symbol in symbols {
-        let symbol = symbol.trim();
+    for row in t.symbol_rows() {
+        let symbol = row.symbol.trim();
         if symbol.is_empty() {
             return Err("Hay una magnitud o un mensurando sin símbolo.".into());
         }
         if !seen.insert(symbol) {
             return Err(format!("El símbolo \"{symbol}\" aparece más de una vez."));
         }
-    }
-    if let Some((symbol, _)) = formulas.clone().find(|(_, f)| f.trim().is_empty()) {
-        return Err(format!("\"{}\" no tiene fórmula.", symbol.trim()));
+        if row.formula.is_some_and(|f| f.trim().is_empty()) {
+            return Err(format!("\"{symbol}\" no tiene fórmula."));
+        }
     }
     if t.curves
         .iter()
@@ -323,24 +367,10 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
 pub fn template_definition(t: &PracticeTemplate) -> PracticeDefinition {
     let kind = |k: &Option<String>| k.as_deref().map(|k| k.trim().to_string());
     let display_symbols = t
-        .quantities
-        .iter()
-        .map(|q| (&q.symbol, &q.display_symbol))
-        .chain(t.results.iter().map(|r| (&r.symbol, &r.display_symbol)))
-        .chain(
-            t.intermediates
-                .iter()
-                .map(|i| (&i.symbol, &i.display_symbol)),
-        )
-        .chain(
-            t.point_results
-                .iter()
-                .map(|p| (&p.symbol, &p.display_symbol)),
-        )
-        .chain(t.aggregates.iter().map(|a| (&a.symbol, &a.display_symbol)))
-        .filter_map(|(symbol, display)| {
-            let display = display.as_deref()?.trim();
-            (!display.is_empty()).then(|| (symbol.trim().to_string(), display.to_string()))
+        .symbol_rows()
+        .filter_map(|row| {
+            let display = row.display.as_deref()?.trim();
+            (!display.is_empty()).then(|| (row.symbol.trim().to_string(), display.to_string()))
         })
         .collect();
     PracticeDefinition {
@@ -348,8 +378,8 @@ pub fn template_definition(t: &PracticeTemplate) -> PracticeDefinition {
         description: t.description.trim().to_string(),
         status: "borrador".into(),
         analysis_kind: kind(&t.analysis_kind),
-        x_formula: t.x_formula.clone(),
-        y_formula: t.y_formula.clone(),
+        x_formula: axis(&t.x_formula),
+        y_formula: axis(&t.y_formula),
         operator_count: t.operator_count.filter(|n| *n > 1),
         parts: t
             .parts
@@ -499,12 +529,6 @@ pub async fn import_template(
     check_template(t).map_err(anyhow::Error::msg)?;
     let mut tx = crate::db::begin_write(pool).await?;
     let id = super::lifecycle::free_practice_id(&mut tx, &super::slugify(&t.name)).await?;
-    let formula = |f: &Option<String>| {
-        f.as_deref()
-            .map(str::trim)
-            .filter(|f| !f.is_empty())
-            .map(str::to_string)
-    };
     sqlx::query(
         "INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula, \
          operator_count, status, created_by, created_at) \
@@ -514,8 +538,8 @@ pub async fn import_template(
     .bind(t.name.trim())
     .bind(t.description.trim())
     .bind(t.analysis_kind.as_deref().map(str::trim))
-    .bind(formula(&t.x_formula))
-    .bind(formula(&t.y_formula))
+    .bind(axis(&t.x_formula))
+    .bind(axis(&t.y_formula))
     .bind(t.operator_count.filter(|n| *n > 1))
     .bind(created_by)
     .bind(chrono::Utc::now())
