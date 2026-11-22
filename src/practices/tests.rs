@@ -4021,3 +4021,26 @@ async fn the_library_loads_and_exports_unchanged() {
         "estas plantillas cambian al importarlas y exportarlas (normalizalas con QUANTIFY_UPDATE_TEMPLATES=1 cargo test library): {stale:?}"
     );
 }
+
+#[tokio::test]
+async fn part_keys_that_collide_across_practices_fall_back_to_a_fresh_id() {
+    let (pool, _dir) = setup().await;
+    let template = |name: &str, key: &str| -> PracticeTemplate {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "name": name, "analysis_kind": "estadistico",
+            "parts": [{"key": key, "title": "Parte"}]
+        }))
+        .unwrap()
+    };
+    let first = import_template(&pool, &template("A B", "c"), "u1")
+        .await
+        .unwrap();
+    let second = import_template(&pool, &template("A", "b-c"), "u1")
+        .await
+        .unwrap();
+    assert_eq!((first.id.as_str(), second.id.as_str()), ("a-b", "a"));
+    let first_parts = definition(&pool, "a-b").await.unwrap().unwrap().parts;
+    let second_parts = definition(&pool, "a").await.unwrap().unwrap().parts;
+    assert_eq!(first_parts[0].id, "a-b-c");
+    assert_ne!(second_parts[0].id, "a-b-c");
+}

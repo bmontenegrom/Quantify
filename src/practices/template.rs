@@ -482,9 +482,24 @@ async fn write_template(
     .await?;
     let mut parts = Vec::new();
     for (position, (part, part_kind)) in t.parts.iter().zip(&part_kinds).enumerate() {
-        let part_id = match &part.key {
-            Some(key) => format!("{id}-{}", key.trim()),
-            None => Uuid::new_v4().to_string(),
+        let keyed = part
+            .key
+            .as_deref()
+            .map(|key| format!("{id}-{}", key.trim()));
+        let taken = match &keyed {
+            Some(candidate) => {
+                sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS (SELECT 1 FROM practice_parts WHERE id = ?1)",
+                )
+                .bind(candidate)
+                .fetch_one(&mut *tx)
+                .await?
+            }
+            None => true,
+        };
+        let part_id = match keyed {
+            Some(candidate) if !taken => candidate,
+            _ => Uuid::new_v4().to_string(),
         };
         sqlx::query(
             "INSERT INTO practice_parts (id, practice_id, title, position, analysis_kind, help_text) \
