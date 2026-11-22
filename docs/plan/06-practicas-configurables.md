@@ -119,7 +119,7 @@ No hay ningún concepto de parte ni de sección en la base ni en Rust. Todo vive
 | `fluidos-2` | regresión | 4 agregados encadenados con `_first`/`_last`. |
 | `filtros` | curva | 2 curvas con `x_log`; 3 intermedias. |
 | `ca-rlc` | estadístico | 15 medidas únicas; 17 resultados con **fórmulas expandidas** (no hay encadenamiento). |
-| `hidrostatica` | estadístico | 48 magnitudes; ranuras con `slot_count`; 3 determinaciones como símbolos separados + promedio; 2 pestañas vía JS. |
+| `hidrostatica` | estadístico | 48 magnitudes; ranuras con `slot_count`; 3 determinaciones como símbolos separados + promedio; 2 pestañas vía JS. (F9: 26 magnitudes, determinaciones en bloques.) |
 
 ### 2.5 Casos especiales que bloquean la creación genérica
 
@@ -1100,8 +1100,80 @@ derivado por determinación y promedio con propagación):
 3. Migrar P1 (3 operadores, sin promedio, **en pestañas**) e Hidrostática (3 determinaciones con
    promedio, en bloques) a este modelo.
 
-**Aceptación**: golden idénticos para P1 e Hidrostática con el modelo nuevo; Hidrostática pasa de
-48 magnitudes a ~16.
+**Aceptación**: golden con los mismos números para P1 e Hidrostática con el modelo nuevo;
+Hidrostática pasa de 48 magnitudes a 26. (El plan decía "golden idénticos" y "~16"; ver las
+decisiones de abajo.)
+
+**Plan de PRs**
+
+Lo que se relevó en el código (2026-11-22):
+- **P1 no usa el motor de operadores.** Son 3 partes `op1`/`op2`/`op3` con `T1`/`T2`/`T3` y
+  `g1`/`g2`/`g3` escritos a mano; `operator_count` es null y su golden tiene `operators: []`.
+- **Hidrostática** tiene 48 magnitudes: 27 masas `m{k}_{i}` (3 medidas × 9 ranuras), 6 de
+  Wilhelmy (`mw{k}`, `dw{k}`) y 15 comunes (`m_goma`, `rho_f`, `g_ac`, `b_E`, `b1`…`b9`, `l`,
+  `d`). Sus 12 resultados son `E{k}`, `rho{k}`, `gamma{k}` y los promedios escritos a mano
+  (`E_medio = (E1+E2+E3)/3`, `rho_medio`, `gamma_medio`), en secciones "Medida k".
+- **El motor de operadores** (`compute`, `src/computation/engines.rs:162`) ya separa las
+  magnitudes comunes (`is_given || !repeated`) de las de cada operador y vuelve a calcular todos
+  los resultados por operador con los mismos símbolos (`OperatorComputation`, etiqueta fija
+  "Operador i"). No promedia y vale para toda la práctica (`statistical_operators`,
+  `src/practices/parts.rs:224`). Hoy solo lo usa `smoke-operadores.mjs`. Se guarda en
+  `submission_measurements.operator_index`, y la UI lo muestra como bloques dentro de una pestaña
+  (`static/forms.js`, `static/analysis.js`).
+- **`config_json` no existe**: 3.4 lo menciona para las partes, pero nunca se agregó.
+- **Propagación**: `derive_results` propaga cada resultado hasta las entradas. Por eso `E_medio`
+  cuenta una sola vez los datos que comparten las tres medidas (brazos, `g_ac`): u(E_medio) ≈
+  1.38·10⁻⁴ N contra u(E1) ≈ 1.39·10⁻⁴ N. Tratar las medidas como independientes daría ≈
+  0.80·10⁻⁴ N, una subestimación.
+
+Decisiones:
+- **Golden = mismos números.** Se regeneran con la forma nueva (una lista de determinaciones en
+  vez de `g1`/`g2`/`g3`) y un test fija los valores e incertidumbres de hoy, símbolo por símbolo.
+- **Promedio correlacionado, como hoy.** El promedio de un resultado se propaga sobre todas las
+  entradas de las N determinaciones, con los datos comunes una sola vez.
+- **Hidrostática colapsa solo las determinaciones**: 48 → 26 magnitudes (`m_1`…`m_9`, `mw`, `dw`
+  repetidas por medida). Las ranuras como magnitud indexada (≈10 magnitudes, con sumatorias en
+  las fórmulas) quedan fuera de F9.
+- **Dónde vive la configuración.** `determinations = { count, label, average, display }` va en la
+  práctica si no tiene partes (reemplaza `operator_count`) y en cada parte estadística si tiene,
+  igual que `analysis_kind`. Se guarda en `config_json` (práctica y partes), con un tipo en Rust.
+- **Qué se repite.** Las magnitudes ganan `per_determination` (no se reusa `repeated`). Un
+  resultado es por determinación si su fórmula usa, directo o encadenado, algo por determinación.
+  Con `average`, cada resultado por determinación suma `<símbolo>_medio`.
+- **`display`**: `pestanas` (una pestaña por determinación, como P1) o `bloques` (todas en la
+  misma pestaña, como Hidrostática y el bloque de operadores de hoy).
+- **El formato de plantilla sigue en `schema_version: 1`**: los campos nuevos son opcionales.
+- En P1, `Q = pi*t_med/(T*ln2)` pasa a calcularse por operador (hoy usa solo `T1`): los valores
+  de hoy se mantienen y aparecen dos nuevos.
+
+1. **`feat(practicas)`: determinaciones en el motor (F9, 1/5).**
+   - `config_json` en `practices` y `practice_parts`, y `per_determination` en las magnitudes:
+     tipos, CRUD, rutas y validación (panel de problemas).
+   - `compute` generaliza la rama de operadores a determinaciones de la práctica o de la parte,
+     con etiqueta configurable y promedios correlacionados (`<símbolo>_medio`); la parte devuelve
+     `determinations`.
+   - Las plantillas exportan e importan los campos nuevos.
+   - Tests del motor con una práctica de prueba: el promedio coincide con propagar la fórmula
+     expandida.
+2. **`feat(practicas)`: el alumno carga determinaciones (F9, 2/5).**
+   - Formulario: `bloques` (reusa el bloque de operadores) y `pestanas` (una pestaña por
+     determinación dentro de la parte).
+   - Payload con el índice de determinación, borradores, cronómetro, datos de ejemplo y
+     validación; resultados finales y comparación por determinación.
+   - E2E con una práctica de prueba.
+3. **`feat(practicas)`: el docente configura determinaciones (F9, 3/5).**
+   - Editor: cantidad, etiqueta, promedio y forma de mostrar (práctica o parte), y "¿Se repite
+     por determinación?" en las magnitudes.
+   - Panel de problemas, y revisión con los resultados por determinación y los promedios.
+4. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
+   - P1 sin partes, con 3 operadores en pestañas; Hidrostática con 26 magnitudes y 3 medidas en
+     bloques con promedio.
+   - Golden regenerados, más el test con los números de hoy.
+   - Los E2E que usan `p1-estadistica-op1` o los símbolos `m1_3`… se actualizan.
+5. **`refactor(practicas)`: se retira `operator_count` (F9, 5/5).**
+   - Las determinaciones reemplazan al motor de operadores, su ruta y su editor;
+     `smoke-operadores` pasa a determinaciones.
+   - Doc: F9 queda marcada como hecha.
 
 ### F10 — Futuro
 
