@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.0](https://github.com/bmontenegrom/Quantify/compare/v0.6.0...v0.7.0) (2026-11-22)
+
+
+### Funcionalidades
+
+* **practicas:** ayuda para escribir fórmulas (F7, 3/6) ([#127](https://github.com/bmontenegrom/Quantify/issues/127)) ([45708cb](https://github.com/bmontenegrom/Quantify/commit/45708cb7c9b5ec3ec8b7134178347972877c4492))
+* **practicas:** modo guiado para crear prácticas (F7, 6/6) ([#133](https://github.com/bmontenegrom/Quantify/issues/133)) ([22e4954](https://github.com/bmontenegrom/Quantify/commit/22e4954ca184dc63f1c4741d9c3514c9a7ceb32b))
+* **practicas:** orden completo y textos de ayuda (F7, 4/6) ([#128](https://github.com/bmontenegrom/Quantify/issues/128)) ([1bbbf94](https://github.com/bmontenegrom/Quantify/commit/1bbbf941687fda7087e3b753d5e4eeaaf3d7c415))
+* **practicas:** problemas del borrador siempre a la vista (F7, 1/6) ([#125](https://github.com/bmontenegrom/Quantify/issues/125)) ([8626c10](https://github.com/bmontenegrom/Quantify/commit/8626c10bac8302482ff7eedb059b4456a86711f3))
+* **practicas:** rellenar con datos de ejemplo (F7, 5/6) ([#132](https://github.com/bmontenegrom/Quantify/issues/132)) ([dcb72e8](https://github.com/bmontenegrom/Quantify/commit/dcb72e87b163189a68e98a0a551968c941d5d81a))
+* **practicas:** rol de cada magnitud (F7, 2/6) ([#126](https://github.com/bmontenegrom/Quantify/issues/126)) ([ada983f](https://github.com/bmontenegrom/Quantify/commit/ada983f69ab7a4e022a0d2e462171b6987eba49d))
+
+
+### Correcciones
+
+* **formularios:** aviso de instrumento retirado, selector unificado y roles validados en backend ([#131](https://github.com/bmontenegrom/Quantify/issues/131)) ([d1b63e0](https://github.com/bmontenegrom/Quantify/commit/d1b63e0e62cc19443822b8ecc064f13837b8de66))
+* **practicas:** las ediciones de una misma práctica se serializan con un lock por práctica ([#130](https://github.com/bmontenegrom/Quantify/issues/130)) ([5dc6b6c](https://github.com/bmontenegrom/Quantify/commit/5dc6b6c1d361a4012164dbbac7bdecb231aa8ae1))
+
 ## [0.6.0](https://github.com/bmontenegrom/Quantify/compare/v0.5.0...v0.6.0) (2026-11-12)
 
 
