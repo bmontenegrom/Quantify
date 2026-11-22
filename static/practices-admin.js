@@ -257,8 +257,10 @@ function symbolFormulaPayloadFromForm(form, kind) {
 async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) {
   const form = submitted;
   submitted = null;
+  const practiceId = state.activePracticeId;
   try {
     const message = await fn();
+    if (state.activePracticeId !== practiceId) return;
     const edit = practiceWorkspace.querySelector(".scale-edit-cell form");
     if (resetEditing && (!edit || edit === form || !formFields(edit).some(fieldChanged))) {
       state.editing = { kind: null, id: null };
@@ -266,6 +268,7 @@ async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) 
     state.practiceActionStatus = typeof message === "string" ? message : successMsg;
     if (form) dropped.add(formKey(form));
   } catch (error) {
+    if (state.activePracticeId !== practiceId) return;
     state.practiceActionStatus = error.message;
   }
   renderPracticesPage();
@@ -798,14 +801,11 @@ async function createPractice(event) {
 }
 
 async function exportPractice(practiceId, version, number) {
-  try {
+  const published = version === "publicada";
+  await runPracticeAction(async () => {
     const template = await fetchJson(`/api/practices/${encodeURIComponent(practiceId)}/export?version=${version}`);
-    downloadJson(template, version === "publicada" ? `${practiceId}-v${number}.json` : `${practiceId}.json`);
-    state.practiceActionStatus = version === "publicada" ? "Versión publicada exportada" : "Borrador exportado";
-  } catch (error) {
-    state.practiceActionStatus = error.message;
-  }
-  renderPracticesPage();
+    downloadJson(template, published ? `${practiceId}-v${number}.json` : `${practiceId}.json`);
+  }, published ? "Versión publicada exportada" : "Borrador exportado");
 }
 
 async function importPractice(event) {
@@ -1852,7 +1852,10 @@ async function deletePracticeResult(rid, practiceId) {
   );
 }
 
+let practiceStatusTimer;
+
 function withPracticeStatus(message) {
   if (practiceStatus) practiceStatus.textContent = message;
-  if (message) window.setTimeout(() => { if (practiceStatus) practiceStatus.textContent = ""; }, 3000);
+  window.clearTimeout(practiceStatusTimer);
+  if (message) practiceStatusTimer = window.setTimeout(() => { if (practiceStatus) practiceStatus.textContent = ""; }, 3000);
 }

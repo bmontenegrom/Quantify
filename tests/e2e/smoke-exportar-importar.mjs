@@ -73,6 +73,12 @@ await withE2E({ port: PORT, dbName: "quantify-exportar-importar.db" }, async ({ 
     buffer: Buffer.from(JSON.stringify({ ...template, schema_version: 2 })),
   });
   await catalogStatus(page, "versión 2 del formato");
+  await page.setInputFiles("#practice-import-file", {
+    name: "instrumentos.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ instruments: [] })),
+  });
+  await catalogStatus(page, "no es una práctica exportada");
   assert((await catalogCount(page)) === before + 1, "un archivo inválido no debía crear prácticas");
 
   step("docente: un borrador nuevo solo exporta el borrador");
