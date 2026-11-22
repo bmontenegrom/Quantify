@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { instrumentCatalog, instrumentWorkspace, instrumentCourseFilter, instrumentStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
-import { escapeHtml, format, scalePayload, downloadJson } from "./lib.js";
+import { escapeHtml, format, scalePayload, downloadJson, readJsonFile } from "./lib.js";
 import { selectView } from "./navigation.js";
 
 export function renderInstrumentCourseOptions() {
@@ -440,8 +440,7 @@ async function importInstruments(event) {
   const importStatus = instrumentCatalog.querySelector("#instrument-import-status");
   try {
     if (importStatus) importStatus.textContent = "Importando...";
-    const text = await file.text();
-    const catalog = JSON.parse(text);
+    const catalog = await readJsonFile(file);
     await postJson("/api/instruments/import", {
       course_id: state.instrumentCourseId,
       instruments: catalog.instruments,

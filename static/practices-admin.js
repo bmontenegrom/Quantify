@@ -20,8 +20,10 @@ import {
   guideStepOrNext,
   POINT_KINDS,
   downloadJson,
+  readJsonFile,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
+import { showToast } from "./toast.js";
 
 const importFile = document.querySelector("#practice-import-file");
 document.querySelector("#practice-import-btn")?.addEventListener("click", () => importFile.click());
@@ -263,9 +265,15 @@ async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) 
   const form = submitted;
   submitted = null;
   const practiceId = state.activePracticeId;
+  const elsewhere = (text, kind) => {
+    const name = state.practices.find((p) => p.id === practiceId)?.name ?? practiceId;
+    showToast(`${name}: ${text}`, kind);
+  };
   try {
     const message = await fn();
-    if (state.activePracticeId !== practiceId) return;
+    if (state.activePracticeId !== practiceId) {
+      return elsewhere(typeof message === "string" ? message : successMsg, "success");
+    }
     const edit = practiceWorkspace.querySelector(".scale-edit-cell form");
     if (resetEditing && (!edit || edit === form || !formFields(edit).some(fieldChanged))) {
       state.editing = { kind: null, id: null };
@@ -273,7 +281,7 @@ async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) 
     state.practiceActionStatus = typeof message === "string" ? message : successMsg;
     if (form) dropped.add(formKey(form));
   } catch (error) {
-    if (state.activePracticeId !== practiceId) return withPracticeStatus(error.message);
+    if (state.activePracticeId !== practiceId) return elsewhere(error.message, "error");
     state.practiceActionStatus = error.message;
   }
   renderPracticesPage();
@@ -819,19 +827,14 @@ async function importPractice(event) {
   const input = event.target;
   const file = input.files?.[0];
   if (!file || importing) {
+    if (file) showToast("Ya hay una importación en curso.");
     input.value = "";
     return;
   }
   importing = true;
   withPracticeStatus("Importando…");
   try {
-    let template;
-    try {
-      template = JSON.parse(await file.text());
-    } catch {
-      throw new Error("El archivo no es un JSON válido.");
-    }
-    const created = await postJson("/api/practice-templates/import", template);
+    const created = await postJson("/api/practice-templates/import", await readJsonFile(file));
     await refreshPractices();
     await openPracticeWorkspace(created.id);
     state.practiceActionStatus = "Práctica importada en borrador";
@@ -1014,9 +1017,7 @@ async function setPracticeStatus(practiceId, status) {
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/status`, { status });
     await refreshPractices();
-    if (state.practiceDefinition?.practice_id === practiceId) {
-      await reloadDefinition(practiceId);
-    }
+    await reloadDefinition(practiceId);
   }, STATUS_DONE[status] ?? "Estado actualizado");
 }
 

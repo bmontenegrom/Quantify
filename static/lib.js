@@ -601,3 +601,11 @@ export function downloadJson(data, filename) {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+
+export async function readJsonFile(file) {
+  try {
+    return JSON.parse(await file.text());
+  } catch {
+    throw new Error("El archivo no es un JSON válido.");
+  }
+}

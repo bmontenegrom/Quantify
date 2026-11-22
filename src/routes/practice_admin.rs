@@ -227,8 +227,11 @@ pub(super) async fn import_practice(
     if version != u64::from(practices::TEMPLATE_VERSION) {
         return Err(AppError::bad_request(practices::version_error(version)));
     }
-    let template: practices::PracticeTemplate =
-        serde_json::from_value(body).map_err(|_| not_a_template())?;
+    let template: practices::PracticeTemplate = serde_json::from_value(body).map_err(|_| {
+        AppError::bad_request(
+            "El archivo es una práctica exportada, pero tiene un dato con un formato inválido.",
+        )
+    })?;
     practices::check_template(&template).map_err(AppError::bad_request)?;
     validate_template_items(&template)?;
     Ok(Json(
@@ -4910,6 +4913,14 @@ mod tests {
         .await
         .unwrap_err();
         assert!(future.message().contains("versión 2"));
+        let typo = import_practice(
+            State(state.clone()),
+            teacher.clone(),
+            Json(serde_json::json!({"schema_version": 1, "name": "X", "quantities": {"otra": "forma"}})),
+        )
+        .await
+        .unwrap_err();
+        assert!(typo.message().contains("formato inválido"));
         let created = import(teacher.clone(), "x").await.unwrap().0;
         assert_eq!(created.status, "borrador");
         let exported = export_practice(
