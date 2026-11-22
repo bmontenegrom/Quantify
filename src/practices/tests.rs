@@ -5022,6 +5022,10 @@ async fn the_library_matches_the_seeded_practices() {
         if file != serde_json::to_value(&exported).unwrap() {
             stale.push(key);
         }
+        let template = library_template(key).unwrap_or_else(|| panic!("{key}: no se puede leer"));
+        import_template(&pool, &template, "u1")
+            .await
+            .unwrap_or_else(|e| panic!("{key}: no se puede importar: {e:#}"));
     }
     assert!(
         stale.is_empty(),

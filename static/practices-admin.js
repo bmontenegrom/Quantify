@@ -761,7 +761,7 @@ function renderPracticeDirectory() {
     </tr>
   `);
 
-  const openPanels = [...practiceCatalog.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel);
+  const libraryOpen = practiceCatalog.querySelector('details[open][data-add-panel="template"]') !== null;
   practiceCatalog.innerHTML = `
     <details class="add-panel" data-add-panel="practice">
       <summary>Nueva práctica</summary>
@@ -804,20 +804,20 @@ function renderPracticeDirectory() {
   practiceCatalog.querySelector('[data-add-panel="template"]')?.addEventListener("toggle", (e) => {
     if (e.target.open) renderLibrary();
   });
-  for (const panel of openPanels) {
-    const details = practiceCatalog.querySelector(`details[data-add-panel="${panel}"]`);
-    if (details) details.open = true;
-  }
+  if (libraryOpen) practiceCatalog.querySelector('details[data-add-panel="template"]').open = true;
 }
 
-let library = null;
+let libraryRequest = null;
 let creatingFromLibrary = false;
 
 async function renderLibrary() {
   let failure = null;
+  let library = [];
   try {
-    library ??= await fetchJson("/api/practice-templates");
+    libraryRequest ??= fetchJson("/api/practice-templates");
+    library = await libraryRequest;
   } catch (error) {
+    libraryRequest = null;
     failure = error.message;
   }
   const box = practiceCatalog.querySelector("#practice-library");
@@ -832,7 +832,7 @@ async function renderLibrary() {
       <td><span class="status-chip">${escapeHtml(analysisKindLabel(t.analysis_kind))}</span></td>
       <td>${escapeHtml(t.description)}</td>
       <td class="directory-actions">
-        <button type="button" data-template-key="${escapeHtml(t.key)}">Usar</button>
+        <button type="button" data-template-key="${escapeHtml(t.key)}"${creatingFromLibrary ? " disabled" : ""}>Usar</button>
       </td>
     </tr>`);
   box.innerHTML = `
@@ -842,19 +842,21 @@ async function renderLibrary() {
         <tbody>${rows.join("")}</tbody>
       </table>
     </div>`;
+  const setBusy = (busy) => {
+    creatingFromLibrary = busy;
+    practiceCatalog.querySelectorAll("[data-template-key]").forEach((b) => (b.disabled = busy));
+  };
   box.querySelectorAll("[data-template-key]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (creatingFromLibrary) return;
-      creatingFromLibrary = true;
-      box.querySelectorAll("[data-template-key]").forEach((b) => (b.disabled = true));
+      setBusy(true);
       try {
         await createAndOpen(
           () => postJson(`/api/practice-templates/${encodeURIComponent(btn.dataset.templateKey)}/create`, {}),
           "Práctica creada desde plantilla",
         );
       } finally {
-        creatingFromLibrary = false;
-        box.querySelectorAll("[data-template-key]").forEach((b) => (b.disabled = false));
+        setBusy(false);
       }
     });
   });
