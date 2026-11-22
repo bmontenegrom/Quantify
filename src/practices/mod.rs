@@ -41,6 +41,8 @@ pub struct QuantityInput {
     pub label_mode: Option<String>,
     #[serde(default)]
     pub input_widget: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub per_determination: bool,
 }
 
 impl Default for QuantityInput {
@@ -67,6 +69,7 @@ impl Default for QuantityInput {
             slot_count: None,
             label_mode: None,
             input_widget: None,
+            per_determination: false,
         }
     }
 }
@@ -126,6 +129,45 @@ pub struct PracticeDefinition {
     pub sections: Vec<PracticeSection>,
     pub display_symbols: std::collections::BTreeMap<String, String>,
     pub current_version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeterminationDisplay {
+    #[default]
+    Bloques,
+    Pestanas,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Determinations {
+    pub count: i64,
+    pub label: String,
+    #[serde(default)]
+    pub average: bool,
+    #[serde(default)]
+    pub display: DeterminationDisplay,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PracticeConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
+}
+
+impl PracticeConfig {
+    /// Lee el `config_json` guardado; uno vacío o ilegible queda sin configuración.
+    ///
+    /// ```
+    /// let c = quantify::practices::PracticeConfig::parse(r#"{"determinations":{"count":3,"label":"Medida"}}"#);
+    /// assert_eq!(c.determinations.unwrap().count, 3);
+    /// ```
+    pub fn parse(json: &str) -> Self {
+        serde_json::from_str(json).unwrap_or_default()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
@@ -139,6 +181,9 @@ pub struct PracticePart {
     pub help_text: String,
     #[sqlx(skip)]
     pub effective_kind: String,
+    #[sqlx(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
@@ -294,6 +339,7 @@ mod versions;
 
 pub use changes::*;
 pub use crud::*;
+pub use display::version_symbols;
 pub use layout::*;
 pub use library::*;
 pub use lifecycle::*;

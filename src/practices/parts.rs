@@ -236,6 +236,7 @@ impl PracticeDefinition {
             x_formula: None,
             y_formula: None,
             operator_count: self.statistical_operators(),
+            determinations: None,
             quantities: self
                 .quantities
                 .iter()
@@ -267,6 +268,10 @@ impl PracticeDefinition {
             x_formula: self.x_formula.clone().filter(|_| is_series),
             y_formula: self.y_formula.clone().filter(|_| is_series),
             operator_count: self.statistical_operators(),
+            determinations: part
+                .determinations
+                .clone()
+                .filter(|_| self.part_kind(part) == "estadistico"),
             quantities: self
                 .quantities
                 .iter()

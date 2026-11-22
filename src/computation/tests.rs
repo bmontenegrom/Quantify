@@ -183,6 +183,7 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
         sections: vec![],
         display_symbols: Default::default(),
         current_version: None,
+        determinations: None,
     };
     let sr = |symbol: &str| db::StudentResultInput {
         symbol: symbol.into(),
@@ -355,7 +356,15 @@ fn compute_propagates_q_l_a_b() {
         measurement("a", &[3.0]),
         measurement("b", &[4.0]),
     ];
-    let analysis = compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
+    let analysis = compute(
+        &quantities,
+        &results,
+        &HashMap::new(),
+        &measurements,
+        None,
+        None,
+    )
+    .unwrap();
     assert_eq!(analysis.quantities.len(), 3);
     let q_l = &analysis.quantities[0];
     assert_eq!(q_l.symbol, "l");
@@ -387,7 +396,15 @@ fn compute_propagates_uncertainty_to_measurand() {
         measurement("a", &[2.0]),
         measurement("b", &[3.0]),
     ];
-    let analysis = compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
+    let analysis = compute(
+        &quantities,
+        &results,
+        &HashMap::new(),
+        &measurements,
+        None,
+        None,
+    )
+    .unwrap();
     let q_l = &analysis.quantities[0];
     assert!(close(q_l.result.u_a, 1.0, 1e-12));
     let q = &analysis.derived[0];
@@ -399,7 +416,7 @@ fn compute_propagates_uncertainty_to_measurand() {
 #[test]
 fn compute_warns_on_missing_readings() {
     let quantities = vec![quantity("l")];
-    let analysis = compute(&quantities, &[], &HashMap::new(), &[], None).unwrap();
+    let analysis = compute(&quantities, &[], &HashMap::new(), &[], None, None).unwrap();
     assert_eq!(analysis.warnings.len(), 1);
     assert!(analysis.warnings[0].contains("no tiene lecturas"));
 }
@@ -441,6 +458,7 @@ fn compute_with_operators_derives_per_operator() {
         &HashMap::new(),
         &measurements,
         Some(2),
+        None,
     )
     .unwrap();
 
@@ -2664,7 +2682,15 @@ fn compute_skips_a_result_it_cannot_evaluate_and_keeps_the_rest() {
     let quantities = vec![quantity("l"), quantity("a")];
     let results = vec![result("ok", "l*a"), result("roto", "l*zzz")];
     let measurements = vec![measurement("l", &[2.0]), measurement("a", &[3.0])];
-    let analysis = compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
+    let analysis = compute(
+        &quantities,
+        &results,
+        &HashMap::new(),
+        &measurements,
+        None,
+        None,
+    )
+    .unwrap();
     let symbols: Vec<&str> = analysis.derived.iter().map(|d| d.symbol.as_str()).collect();
     assert_eq!(symbols, ["ok"]);
     assert!(analysis
@@ -2729,6 +2755,7 @@ fn chained_results_propagate_against_the_inputs() {
         &HashMap::new(),
         &[measurement("x", &[1.0, 2.0, 3.0])],
         None,
+        None,
     )
     .unwrap();
     let by = |s: &str| a.derived.iter().find(|d| d.symbol == s).unwrap();
@@ -2756,6 +2783,7 @@ fn a_cycle_skips_its_results_with_a_warning() {
         &results,
         &HashMap::new(),
         &[measurement("x", &[1.0, 2.0])],
+        None,
         None,
     )
     .unwrap();
@@ -3333,5 +3361,162 @@ fn chained_intermediates_use_the_mean_of_the_earlier_one_in_the_fit() {
     assert_eq!(
         a.regression.unwrap().points,
         vec![(56.25, 100.0), (225.0, 200.0)]
+    );
+}
+
+fn det_result(symbol: &str, formula: &str) -> PracticeResult {
+    PracticeResult {
+        id: format!("r-{symbol}"),
+        practice_id: "p".into(),
+        symbol: symbol.into(),
+        name: symbol.into(),
+        unit: "u".into(),
+        formula: formula.into(),
+        has_uncertainty: true,
+        ..Default::default()
+    }
+}
+
+fn determinations(average: bool) -> crate::practices::Determinations {
+    crate::practices::Determinations {
+        count: 3,
+        label: "Medida".into(),
+        average,
+        display: Default::default(),
+    }
+}
+
+#[test]
+fn determinations_match_separate_symbols_and_a_hand_written_average() {
+    let mut l = quantity("L");
+    l.repeated = false;
+    let mut t = quantity("T");
+    t.per_determination = true;
+    let replicas = vec![
+        vec![2.0, 2.02, 1.98],
+        vec![2.01, 1.99],
+        vec![2.05, 1.95, 2.0],
+    ];
+    let measurements = vec![
+        MeasurementInput {
+            operator_replicas: Some(replicas.clone()),
+            ..measurement("T", &[])
+        },
+        measurement("L", &[1.0, 1.02, 0.98]),
+    ];
+    let results = vec![det_result("g", "4*pi^2*L/T^2"), det_result("doble", "2*L")];
+    let d = determinations(true);
+    let a = compute(
+        &[l.clone(), t],
+        &results,
+        &HashMap::new(),
+        &measurements,
+        None,
+        Some(&d),
+    )
+    .unwrap();
+
+    let separate_quantities = vec![l, quantity("T1"), quantity("T2"), quantity("T3")];
+    let mut separate_measurements = vec![measurement("L", &[1.0, 1.02, 0.98])];
+    for (k, values) in replicas.iter().enumerate() {
+        separate_measurements.push(measurement(&format!("T{}", k + 1), values));
+    }
+    let separate_results = vec![
+        det_result("g1", "4*pi^2*L/T1^2"),
+        det_result("g2", "4*pi^2*L/T2^2"),
+        det_result("g3", "4*pi^2*L/T3^2"),
+        det_result("g_medio", "(g1 + g2 + g3)/3"),
+    ];
+    let s = compute(
+        &separate_quantities,
+        &separate_results,
+        &HashMap::new(),
+        &separate_measurements,
+        None,
+        None,
+    )
+    .unwrap();
+    let by_symbol = |list: &[DerivedComputation], symbol: &str| {
+        let d = list.iter().find(|d| d.symbol == symbol).unwrap();
+        (d.value, d.u)
+    };
+
+    assert_eq!(a.determinations.len(), 3);
+    assert_eq!(a.determinations[1].label, "Medida 2");
+    for (k, det) in a.determinations.iter().enumerate() {
+        assert_eq!(det.quantities.len(), 1);
+        assert_eq!(det.derived.len(), 1);
+        let (value, u) = by_symbol(&det.derived, "g");
+        let (expected, expected_u) = by_symbol(&s.derived, &format!("g{}", k + 1));
+        assert!(
+            close(value, expected, 1e-9 * expected),
+            "g de la medida {}",
+            k + 1
+        );
+        assert!(
+            close(u, expected_u, 1e-9 * expected_u),
+            "u(g) de la medida {}",
+            k + 1
+        );
+        assert_eq!(det.derived[0].formula, "4*pi^2*L/T^2");
+    }
+    let (value, u) = by_symbol(&a.derived, "g_medio");
+    let (expected, expected_u) = by_symbol(&s.derived, "g_medio");
+    assert!(close(value, expected, 1e-9 * expected));
+    assert!(close(u, expected_u, 1e-9 * expected_u));
+    assert_eq!(
+        a.derived.iter().filter(|d| d.symbol == "doble").count(),
+        1,
+        "un resultado común sale una sola vez"
+    );
+    assert_eq!(a.quantities.len(), 1);
+
+    let without_average = compute(
+        &[quantity("L"), {
+            let mut t = quantity("T");
+            t.per_determination = true;
+            t
+        }],
+        &results,
+        &HashMap::new(),
+        &measurements,
+        None,
+        Some(&determinations(false)),
+    )
+    .unwrap();
+    assert!(!without_average
+        .derived
+        .iter()
+        .any(|d| d.symbol == "g_medio"));
+}
+
+#[test]
+fn an_empty_determination_warns_with_its_label() {
+    let mut t = quantity("T");
+    t.per_determination = true;
+    let measurements = vec![MeasurementInput {
+        operator_replicas: Some(vec![vec![2.0], vec![2.1], vec![]]),
+        ..measurement("T", &[])
+    }];
+    let a = compute(
+        &[t],
+        &[det_result("f", "1/T")],
+        &HashMap::new(),
+        &measurements,
+        None,
+        Some(&determinations(false)),
+    )
+    .unwrap();
+    assert!(
+        a.warnings
+            .iter()
+            .any(|w| w.starts_with("Medida 3:") && w.contains("no tiene lecturas")),
+        "{:?}",
+        a.warnings
+    );
+    assert!(
+        a.warnings.iter().all(|w| !w.contains("__")),
+        "{:?}",
+        a.warnings
     );
 }

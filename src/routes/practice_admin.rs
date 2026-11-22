@@ -774,6 +774,11 @@ pub(super) async fn set_practice_operator_count(
     Json(body): Json<OperatorCountBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
+    if body.count > 1 && load_definition(&state, &id).await?.determinations.is_some() {
+        return Err(AppError::bad_request(
+            "La práctica ya tiene determinaciones: quitalas antes de usar operadores.",
+        ));
+    }
     if body.count > practices::MAX_OPERATORS {
         return Err(AppError::bad_request(format!(
             "La cantidad de operadores no puede superar {}.",
@@ -784,6 +789,107 @@ pub(super) async fn set_practice_operator_count(
         return Err(AppError::not_found("practica no encontrada"));
     }
     Ok(Json(Health { status: "ok" }))
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct DeterminationsBody {
+    #[serde(default)]
+    determinations: Option<practices::Determinations>,
+}
+
+fn validate_determinations(d: &practices::Determinations) -> Result<(), AppError> {
+    if !(2..=practices::MAX_OPERATORS).contains(&d.count) {
+        return Err(AppError::bad_request(format!(
+            "La cantidad de determinaciones tiene que ser de 2 a {}.",
+            practices::MAX_OPERATORS
+        )));
+    }
+    let label = d.label.trim();
+    if label.is_empty() || label.chars().count() > 40 {
+        return Err(AppError::bad_request(
+            "Las determinaciones necesitan un nombre de hasta 40 caracteres (p. ej. «Medida»).",
+        ));
+    }
+    Ok(())
+}
+
+async fn save_determinations(
+    state: &SharedState,
+    headers: &HeaderMap,
+    id: &str,
+    part_id: Option<&str>,
+    body: DeterminationsBody,
+) -> Result<Json<Health>, AppError> {
+    require_teacher(state, headers).await?;
+    let def = load_definition(state, id).await?;
+    let determinations = body.determinations.map(|d| practices::Determinations {
+        label: d.label.trim().to_string(),
+        ..d
+    });
+    if let Some(d) = &determinations {
+        validate_determinations(d)?;
+    }
+    let mut after = def.clone();
+    match part_id {
+        None => {
+            if determinations.is_some() {
+                if !def.parts.is_empty() {
+                    return Err(AppError::bad_request(
+                        "La práctica tiene partes: las determinaciones se configuran en cada parte.",
+                    ));
+                }
+                if practices::is_point_based(def.analysis_kind.as_deref()) {
+                    return Err(AppError::bad_request(
+                        "Las determinaciones son para una práctica estadística.",
+                    ));
+                }
+                if def.operator_count.is_some_and(|n| n > 1) {
+                    return Err(AppError::bad_request(
+                        "La práctica usa operadores: quitalos antes de configurar determinaciones.",
+                    ));
+                }
+            }
+            after.determinations = determinations.clone();
+        }
+        Some(pid) => {
+            let part = def
+                .parts
+                .iter()
+                .find(|p| p.id == pid)
+                .ok_or_else(|| AppError::not_found("parte no encontrada"))?;
+            if determinations.is_some() && def.part_kind(part) != "estadistico" {
+                return Err(AppError::bad_request(
+                    "Las determinaciones son para una parte estadística.",
+                ));
+            }
+            if let Some(p) = after.parts.iter_mut().find(|p| p.id == pid) {
+                p.determinations = determinations.clone();
+            }
+        }
+    }
+    guard_change(&def, &after, "guardar las determinaciones")?;
+    if !practices::set_determinations(&state.pool, id, part_id, determinations.as_ref()).await? {
+        return Err(AppError::not_found("practica no encontrada"));
+    }
+    Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn set_practice_determinations(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<DeterminationsBody>,
+) -> Result<Json<Health>, AppError> {
+    save_determinations(&state, &headers, &id, None, body).await
+}
+
+pub(super) async fn set_part_determinations(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(body): Json<DeterminationsBody>,
+) -> Result<Json<Health>, AppError> {
+    save_determinations(&state, &headers, &id, Some(&pid), body).await
 }
 
 pub(super) async fn set_practice_regression_formulas(
@@ -852,6 +958,7 @@ fn with_updated_quantity(
     q.optional = input.optional;
     q.slot_count = input.slot_count;
     q.replicas_per_point = input.replicas_per_point;
+    q.per_determination = input.per_determination;
     if let Some(mode) = &input.label_mode {
         q.label_mode.clone_from(mode);
     }
@@ -1474,6 +1581,7 @@ fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem>
                 slot_count: q.slot_count,
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
+                per_determination: q.per_determination,
             };
             let error = validate_quantity(&input).err()?;
             Some(ElementProblem {
@@ -1495,9 +1603,73 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
         .collect()
 }
 
+fn determinations_of<'a>(
+    def: &'a practices::PracticeDefinition,
+    part: Option<&practices::PracticePart>,
+) -> Option<&'a practices::Determinations> {
+    match part {
+        Some(part) => def
+            .parts
+            .iter()
+            .find(|p| p.id == part.id)
+            .and_then(|p| p.determinations.as_ref()),
+        None if def.parts.is_empty() => def.determinations.as_ref(),
+        None => None,
+    }
+}
+
+fn determination_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
+    let mut problems = Vec::new();
+    for q in def.quantities.iter().filter(|q| q.per_determination) {
+        let part = def
+            .quantity_part(&q.symbol)
+            .and_then(|id| def.parts.iter().find(|p| p.id == id));
+        if determinations_of(def, part).is_none() {
+            let place = match part {
+                Some(part) => format!("la parte \"{}\"", part.title),
+                None if def.parts.is_empty() => "la práctica".to_string(),
+                None => "los datos compartidos".to_string(),
+            };
+            problems.push(ElementProblem {
+                check: "la determinación de",
+                element: format!("la magnitud {}", q.symbol),
+                message: format!(
+                    "se repite por determinación, pero {place} no tiene determinaciones"
+                ),
+                kind: "quantity",
+                id: Some(q.id.clone()),
+            });
+        }
+    }
+    let averaging = def.determinations.as_ref().is_some_and(|d| d.average)
+        || def
+            .parts
+            .iter()
+            .any(|p| p.determinations.as_ref().is_some_and(|d| d.average));
+    if averaging {
+        let symbols: Vec<&str> = practices::version_symbols(def).collect();
+        for r in &def.results {
+            let average = format!("{}_medio", r.symbol);
+            if symbols.contains(&average.as_str()) {
+                problems.push(ElementProblem {
+                    check: "el promedio de",
+                    element: format!("el mensurando {}", r.symbol),
+                    message: format!(
+                        "su promedio se llamaría {average}, que ya es otro símbolo de la práctica"
+                    ),
+                    kind: "result",
+                    id: Some(r.id.clone()),
+                });
+            }
+        }
+    }
+    problems
+}
+
 fn element_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     let mut problems = cycle_problems(def);
     problems.extend(quantity_problems(def));
+    problems.extend(determination_problems(def));
     if def.parts.is_empty() {
         problems.extend(formula_problems_in(def));
         return problems;
@@ -2204,6 +2376,14 @@ fn validate_quantity_in(
              (regresión lineal o curva); dejá las réplicas vacías.",
         ));
     }
+    let any_determinations = determinations_of(def, part).is_some()
+        || (part.is_none() && def.parts.iter().any(|p| p.determinations.is_some()));
+    if input.per_determination && !any_determinations {
+        return Err(AppError::bad_request(
+            "Para repetir una magnitud por determinación, primero configurá las determinaciones \
+             de la práctica o de su parte.",
+        ));
+    }
     Ok(())
 }
 
@@ -2755,6 +2935,7 @@ mod tests {
             sections: vec![],
             display_symbols: Default::default(),
             current_version: None,
+            determinations: None,
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
             display_symbol: None,
@@ -2846,6 +3027,7 @@ mod tests {
             sections: vec![],
             display_symbols: Default::default(),
             current_version: None,
+            determinations: None,
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
             display_symbol: None,
@@ -3169,6 +3351,7 @@ mod tests {
             sections: vec![],
             display_symbols: Default::default(),
             current_version: None,
+            determinations: None,
         };
         let r = |unit: &str| ResultInput {
             display_symbol: None,
@@ -5040,5 +5223,114 @@ mod tests {
             });
             assert_eq!(imported.0.status, "borrador");
         }
+    }
+
+    #[tokio::test]
+    async fn determinations_are_validated_and_guard_their_quantities() {
+        let (pool, dir) = crate::computation::tests::setup().await;
+        let state: SharedState = std::sync::Arc::new(db::AppState {
+            pool: pool.clone(),
+            upload_dir: dir.path().to_path_buf(),
+            secret_key: "secreto".into(),
+            secure_cookies: false,
+            login_attempts: Default::default(),
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::COOKIE,
+            format!("quantify_session={}", session_token(&pool, "docente").await)
+                .parse()
+                .unwrap(),
+        );
+        let template: practices::PracticeTemplate = serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "name": "Sin partes", "analysis_kind": "estadistico"
+        }))
+        .unwrap();
+        let id = practices::import_template(&pool, &template, "u1")
+            .await
+            .unwrap()
+            .id;
+        let save = |body: serde_json::Value| {
+            let state = state.clone();
+            let headers = headers.clone();
+            let id = id.clone();
+            async move {
+                set_practice_determinations(
+                    State(state),
+                    headers,
+                    Path(id),
+                    Json(serde_json::from_value(body).unwrap()),
+                )
+                .await
+                .err()
+                .map(|e| e.message().to_string())
+            }
+        };
+        let quantity = |per_determination: bool| QuantityInput {
+            symbol: "T".into(),
+            name: "T".into(),
+            unit: "s".into(),
+            repeated: true,
+            per_determination,
+            ..Default::default()
+        };
+
+        let early = create_quantity(
+            State(state.clone()),
+            headers.clone(),
+            Path(id.clone()),
+            Json(quantity(true)),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            early.message().contains("primero configurá"),
+            "{}",
+            early.message()
+        );
+
+        let bad =
+            save(serde_json::json!({"determinations": {"count": 1, "label": "Medida"}})).await;
+        assert!(bad.unwrap_or_default().contains("de 2 a"));
+        let unnamed = save(serde_json::json!({"determinations": {"count": 3, "label": " "}})).await;
+        assert!(unnamed.unwrap_or_default().contains("nombre"));
+        assert_eq!(
+            save(serde_json::json!({"determinations": {"count": 3, "label": "Medida", "average": true}})).await,
+            None
+        );
+        let def = load_definition(&state, &id).await.unwrap();
+        assert_eq!(def.determinations.as_ref().unwrap().count, 3);
+
+        let _ = create_quantity(
+            State(state.clone()),
+            headers.clone(),
+            Path(id.clone()),
+            Json(quantity(true)),
+        )
+        .await
+        .unwrap();
+        let removal = save(serde_json::json!({"determinations": null})).await;
+        assert!(
+            removal
+                .unwrap_or_default()
+                .contains("no tiene determinaciones"),
+            "quitar las determinaciones no debía dejar magnitudes repetidas sueltas"
+        );
+
+        let with_parts = set_practice_determinations(
+            State(state.clone()),
+            headers.clone(),
+            Path("p2-cc".into()),
+            Json(
+                serde_json::from_value(
+                    serde_json::json!({"determinations": {"count": 2, "label": "Medida"}}),
+                )
+                .unwrap(),
+            ),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(with_parts.message().contains("tiene partes"));
     }
 }

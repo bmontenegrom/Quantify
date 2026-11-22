@@ -3,8 +3,8 @@ use super::crud::{
     insert_result,
 };
 use super::{
-    AggregateInput, CurveInput, IntermediateInput, PointResultInput, PracticeDefinition,
-    QuantityInput, ResultInput,
+    AggregateInput, CurveInput, Determinations, IntermediateInput, PointResultInput,
+    PracticeDefinition, QuantityInput, ResultInput,
 };
 use crate::db::Practice;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,8 @@ pub struct PracticeTemplate {
     pub y_formula: Option<String>,
     #[serde(default)]
     pub operator_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
     #[serde(default)]
     pub parts: Vec<TemplatePart>,
     #[serde(default)]
@@ -53,6 +55,8 @@ pub struct PracticeTemplate {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TemplatePart {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     pub title: String,
@@ -127,6 +131,12 @@ fn part_key(part: &TemplatePart) -> Option<&str> {
     part.key.as_deref().map(str::trim).filter(|k| !k.is_empty())
 }
 
+fn config_json(determinations: &Option<Determinations>) -> anyhow::Result<String> {
+    Ok(serde_json::to_string(&super::PracticeConfig {
+        determinations: determinations.clone(),
+    })?)
+}
+
 pub fn axis(formula: Option<&str>) -> Option<String> {
     formula
         .map(str::trim)
@@ -170,6 +180,7 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
         x_formula: def.x_formula.clone(),
         y_formula: def.y_formula.clone(),
         operator_count: def.operator_count,
+        determinations: def.determinations.clone(),
         parts: def
             .parts
             .iter()
@@ -182,6 +193,7 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
                 title: p.title.clone(),
                 analysis_kind: p.analysis_kind.clone(),
                 help_text: p.help_text.clone(),
+                determinations: p.determinations.clone(),
             })
             .collect(),
         sections: def
@@ -217,6 +229,7 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
                 slot_count: q.slot_count,
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
+                per_determination: q.per_determination,
             })
             .collect(),
         results: def
@@ -333,6 +346,19 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
                 "La clave de parte \"{key}\" tiene que ser única, de hasta {MAX_PART_KEY} caracteres, y usar solo minúsculas, dígitos y guiones."
             ));
         }
+    }
+    let all_determinations = std::iter::once(&t.determinations)
+        .chain(t.parts.iter().map(|p| &p.determinations))
+        .flatten();
+    for d in all_determinations {
+        if !(2..=MAX_OPERATORS).contains(&d.count) || d.label.trim().is_empty() {
+            return Err(format!(
+                "Las determinaciones tienen que ser de 2 a {MAX_OPERATORS} y tener un nombre."
+            ));
+        }
+    }
+    if t.determinations.is_some() && !t.parts.is_empty() {
+        return Err("Una práctica con partes configura las determinaciones en cada parte.".into());
     }
     if t.operator_count.is_some_and(|n| n > MAX_OPERATORS) {
         return Err(format!(
@@ -490,8 +516,8 @@ async fn write_template(
     };
     sqlx::query(
         "INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula, \
-         operator_count, status, created_by, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+         operator_count, status, created_by, created_at, config_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )
     .bind(id)
     .bind(t.name.trim())
@@ -503,6 +529,7 @@ async fn write_template(
     .bind(status)
     .bind(created_by)
     .bind(chrono::Utc::now())
+    .bind(config_json(&t.determinations)?)
     .execute(&mut *tx)
     .await?;
     let mut parts = Vec::new();
@@ -513,8 +540,9 @@ async fn write_template(
             _ => Uuid::new_v4().to_string(),
         };
         sqlx::query(
-            "INSERT INTO practice_parts (id, practice_id, title, position, analysis_kind, help_text) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO practice_parts \
+             (id, practice_id, title, position, analysis_kind, help_text, config_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .bind(&part_id)
         .bind(id)
@@ -522,6 +550,7 @@ async fn write_template(
         .bind(position as i64)
         .bind(part_kind)
         .bind(part.help_text.trim())
+        .bind(config_json(&part.determinations)?)
         .execute(&mut *tx)
         .await?;
         parts.push(part_id);

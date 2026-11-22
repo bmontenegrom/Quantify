@@ -203,6 +203,9 @@ fn list_changes(
     if published.operator_count != draft.operator_count {
         changes.push("Cambia la cantidad de operadores".to_string());
     }
+    if published.determinations != draft.determinations {
+        changes.push("Cambian las determinaciones".to_string());
+    }
     diff_items(
         "la parte",
         None,

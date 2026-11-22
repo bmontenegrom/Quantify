@@ -6,13 +6,24 @@ pub async fn parts_for(
     conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticePart>> {
-    Ok(sqlx::query_as::<_, PracticePart>(
+    let mut parts = sqlx::query_as::<_, PracticePart>(
         "SELECT id, practice_id, title, position, analysis_kind, help_text FROM practice_parts \
          WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
-    .fetch_all(conn)
-    .await?)
+    .fetch_all(&mut *conn)
+    .await?;
+    let configs: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, config_json FROM practice_parts WHERE practice_id = ?1")
+            .bind(practice_id)
+            .fetch_all(&mut *conn)
+            .await?;
+    for part in &mut parts {
+        if let Some((_, json)) = configs.iter().find(|(id, _)| *id == part.id) {
+            part.determinations = super::PracticeConfig::parse(json).determinations;
+        }
+    }
+    Ok(parts)
 }
 
 pub async fn sections_for(
@@ -86,6 +97,7 @@ pub async fn create_part(
         analysis_kind,
         help_text: help_text.to_string(),
         effective_kind: "estadistico".into(),
+        determinations: None,
     })
 }
 

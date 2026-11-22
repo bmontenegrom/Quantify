@@ -16,6 +16,7 @@ struct PracticeConfigRow {
     y_formula: Option<String>,
     operator_count: Option<i64>,
     current_version: Option<i64>,
+    config_json: String,
 }
 
 pub async fn definition(
@@ -32,7 +33,7 @@ pub async fn definition_in(
     let row: Option<PracticeConfigRow> = sqlx::query_as(
         "SELECT description, status, analysis_kind, x_formula, y_formula, operator_count, \
          (SELECT number FROM practice_versions WHERE id = practices.current_version_id) \
-         AS current_version FROM practices WHERE id = ?1",
+         AS current_version, config_json FROM practices WHERE id = ?1",
     )
     .bind(practice_id)
     .fetch_optional(&mut *conn)
@@ -68,6 +69,7 @@ pub async fn definition_in(
             sections,
             display_symbols,
             current_version: row.current_version,
+            determinations: super::PracticeConfig::parse(&row.config_json).determinations,
         }
         .with_effective_kinds(),
     ))
@@ -719,7 +721,8 @@ pub async fn update_quantity(
              display_symbol = COALESCE(?15, display_symbol), \
              label_mode = COALESCE(?16, label_mode), \
              input_widget = CASE WHEN ?6 = 'tiempo' AND NOT ?7 \
-                 THEN COALESCE(?17, input_widget) ELSE 'teclado' END \
+                 THEN COALESCE(?17, input_widget) ELSE 'teclado' END, \
+             per_determination = ?18 \
          WHERE id = ?1 AND removed = 0",
     )
     .bind(quantity_id)
@@ -739,6 +742,7 @@ pub async fn update_quantity(
     .bind(display_symbol(&input.display_symbol))
     .bind(input.label_mode.as_deref())
     .bind(input.input_widget.as_deref())
+    .bind(input.per_determination)
     .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
@@ -897,6 +901,37 @@ pub async fn set_analysis_kind(
     Ok(result.rows_affected() > 0)
 }
 
+pub async fn set_determinations(
+    pool: &SqlitePool,
+    practice_id: &str,
+    part_id: Option<&str>,
+    determinations: Option<&super::Determinations>,
+) -> anyhow::Result<bool> {
+    let json = serde_json::to_string(&super::PracticeConfig {
+        determinations: determinations.cloned(),
+    })?;
+    let result = match part_id {
+        Some(part_id) => {
+            sqlx::query(
+                "UPDATE practice_parts SET config_json = ?3 WHERE id = ?2 AND practice_id = ?1",
+            )
+            .bind(practice_id)
+            .bind(part_id)
+            .bind(&json)
+            .execute(pool)
+            .await?
+        }
+        None => {
+            sqlx::query("UPDATE practices SET config_json = ?2 WHERE id = ?1")
+                .bind(practice_id)
+                .bind(&json)
+                .execute(pool)
+                .await?
+        }
+    };
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn set_operator_count(
     pool: &SqlitePool,
     practice_id: &str,
@@ -958,7 +993,7 @@ async fn quantities_for(
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-         label_mode, input_widget \
+         label_mode, input_widget, per_determination \
          FROM practice_quantities WHERE practice_id = ?1 AND removed = 0 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -983,7 +1018,7 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-         label_mode, input_widget \
+         label_mode, input_widget, per_determination \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -1012,8 +1047,8 @@ pub(super) async fn insert_quantity(
         "INSERT INTO practice_quantities \
          (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
           replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-          display_symbol, label_mode, input_widget) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+          display_symbol, label_mode, input_widget, per_determination) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -1033,6 +1068,7 @@ pub(super) async fn insert_quantity(
     .bind(display_symbol(&input.display_symbol).unwrap_or(""))
     .bind(label_mode(input))
     .bind(input_widget(input))
+    .bind(input.per_determination)
     .execute(&mut *conn)
     .await?;
     Ok(id)

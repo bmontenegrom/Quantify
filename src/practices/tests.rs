@@ -1011,6 +1011,7 @@ async fn seeded_p3_formulas_compute() {
         &Default::default(),
         &m3,
         None,
+        None,
     )
     .unwrap();
     let tau_t = a3
@@ -4055,4 +4056,43 @@ async fn part_keys_that_collide_across_practices_fall_back_to_a_fresh_id() {
     let second_parts = definition(&pool, "a").await.unwrap().unwrap().parts;
     assert_eq!(first_parts[0].id, "a-b-c");
     assert_ne!(second_parts[0].id, "a-b-c");
+}
+
+#[tokio::test]
+async fn a_part_with_determinations_is_analyzed_and_round_trips() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let template: PracticeTemplate = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "name": "Con medidas", "analysis_kind": "estadistico",
+        "parts": [{"title": "A", "determinations": {"count": 2, "label": "Medida", "average": true}}],
+        "sections": [{"title": "S", "part": 0, "quantities": ["T"], "results": ["f"]}],
+        "quantities": [{"symbol": "T", "name": "T", "unit": "s", "repeated": true,
+                        "per_determination": true}],
+        "results": [{"symbol": "f", "name": "f", "unit": "1/s", "formula": "1/T"}]
+    }))
+    .unwrap();
+    let practice = import_template(&pool, &template, "u1").await.unwrap();
+    let exported = export_template(&pool, &practice.id, ExportSource::Borrador)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(exported.parts[0].determinations.as_ref().unwrap().count, 2);
+    assert!(exported.quantities[0].per_determination);
+    let def = definition(&pool, &practice.id).await.unwrap().unwrap();
+    let measurements = vec![crate::computation::MeasurementInput {
+        quantity_id: def.quantities[0].id.clone(),
+        instrument_id: None,
+        scale_id: None,
+        values: vec![],
+        given_u: None,
+        point_replicas: None,
+        operator_replicas: Some(vec![vec![2.0, 2.0], vec![4.0, 4.0]]),
+    }];
+    let analysis = crate::computation::analyze(&pool, &practice.id, &measurements)
+        .await
+        .unwrap();
+    let part = &analysis.parts[0].analysis;
+    assert_eq!(part.determinations.len(), 2);
+    assert!((part.determinations[1].derived[0].value - 0.25).abs() < 1e-12);
+    let average = part.derived.iter().find(|d| d.symbol == "f_medio").unwrap();
+    assert!((average.value - 0.375).abs() < 1e-12);
 }

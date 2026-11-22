@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 pub use engines::analyze;
 pub use engines::{
-    analyze_definition, compute, compute_curva, compute_regresion, live_values, scale_spec,
-    PointContext,
+    analyze_definition, compute, compute_curva, compute_regresion, live_values, rename_symbols,
+    scale_spec, PointContext,
 };
 pub(crate) use formula::{chain_order, formula_symbols};
 pub use formula::{check_formula, FUNCTIONS};
@@ -107,6 +107,13 @@ pub struct OperatorComputation {
 }
 
 #[derive(Debug, Serialize)]
+pub struct DeterminationComputation {
+    pub label: String,
+    pub quantities: Vec<QuantityComputation>,
+    pub derived: Vec<DerivedComputation>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct PointResultComputation {
     pub symbol: String,
     pub name: String,
@@ -137,6 +144,8 @@ pub struct FormAnalysis {
     pub derived: Vec<DerivedComputation>,
     #[serde(default)]
     pub operators: Vec<OperatorComputation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub determinations: Vec<DeterminationComputation>,
     #[serde(default)]
     pub point_results: Vec<PointResultComputation>,
     #[serde(default)]
