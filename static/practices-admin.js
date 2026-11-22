@@ -24,7 +24,10 @@ import { selectView } from "./navigation.js";
 
 let dropped = new Set();
 let submitted = null;
-practiceWorkspace.addEventListener("submit", (e) => { submitted = e.target; }, true);
+practiceWorkspace.addEventListener("submit", (e) => {
+  submitted = e.target;
+  setTimeout(() => { submitted = null; });
+}, true);
 
 const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
 
@@ -251,7 +254,10 @@ async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) 
   submitted = null;
   try {
     const message = await fn();
-    if (resetEditing) state.editing = { kind: null, id: null };
+    const edit = practiceWorkspace.querySelector(".scale-edit-cell form");
+    if (resetEditing && (!edit || edit === form || !formFields(edit).some(fieldChanged))) {
+      state.editing = { kind: null, id: null };
+    }
     state.practiceActionStatus = typeof message === "string" ? message : successMsg;
     if (form) dropped.add(formKey(form));
   } catch (error) {
@@ -305,7 +311,6 @@ export function renderPracticesPage() {
   const discarded = dropped;
   dropped = new Set();
   renderPracticeDirectory();
-  if (!practiceWorkspace) return;
 
   const practice = state.practices.find((p) => p.id === state.activePracticeId);
   if (!practice) {
@@ -425,14 +430,7 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("[data-guide-start]")?.addEventListener("click", () => {
     goToGuideStep(practice.id, state.practiceGuideLastStep ?? "datos");
   });
-  practiceWorkspace.querySelectorAll("[data-guide-go]").forEach((btn) => {
-    btn.addEventListener("click", () => goToGuideStep(practice.id, btn.dataset.guideGo));
-  });
-  practiceWorkspace.querySelector("[data-guide-exit]")?.addEventListener("click", () => {
-    state.practiceGuideLastStep = state.practiceGuide?.step ?? null;
-    state.practiceGuide = null;
-    renderPracticesPage();
-  });
+  bindGuideBar(practice.id);
   practiceWorkspace.querySelector("#practice-info-form")?.addEventListener("submit", savePracticeInfo);
   practiceWorkspace.querySelectorAll("[data-practice-status]").forEach((btn) => {
     btn.addEventListener("click", () => setPracticeStatus(btn.dataset.practiceId, btn.dataset.practiceStatus));
@@ -455,7 +453,10 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector('#new-result-form [name="section_id"]')?.addEventListener("change", (e) => {
     const section = def?.sections?.find((s) => s.id === e.target.value) ?? null;
     const select = e.target.form.elements.compare_with;
-    select.innerHTML = compareOptionsHtml(compareOptionGroups(def, { section }, select.value), select.value);
+    const { value } = select;
+    const initial = [...select.options].find((o) => o.defaultSelected)?.value ?? "";
+    select.innerHTML = compareOptionsHtml(compareOptionGroups(def, { section }, value), initial);
+    select.value = value;
     const help = e.target.form.querySelector(".formula-help");
     const open = help.open;
     help.outerHTML = formulaHelpFor(formulaScope(def, "result", { section }));
@@ -545,7 +546,8 @@ function formFields(form) {
 }
 
 function formKey(form) {
-  return [form.id, ...Object.entries(form.dataset).map(([k, v]) => `${k}=${v}`)].join("&");
+  const ids = Object.entries(form.dataset).filter(([k]) => /id$/i.test(k)).map(([k, v]) => `${k}=${v}`);
+  return [form.id, ...ids].join("&");
 }
 
 function typedFields(skip) {
@@ -620,14 +622,36 @@ function setGuideStep(step) {
   return true;
 }
 
+function bindGuideBar(practiceId) {
+  practiceWorkspace.querySelectorAll("[data-guide-go]").forEach((btn) => {
+    btn.addEventListener("click", () => goToGuideStep(practiceId, btn.dataset.guideGo));
+  });
+  practiceWorkspace.querySelector("[data-guide-exit]")?.addEventListener("click", () => {
+    state.practiceGuideLastStep = state.practiceGuide?.step ?? null;
+    state.practiceGuide = null;
+    renderPracticesPage();
+  });
+}
+
+function showGuideStep(practiceId) {
+  const bar = practiceWorkspace.querySelector(".practice-guide");
+  if (!bar) return renderPracticesPage();
+  const guide = guideFor(practiceId, state.practiceDefinition);
+  bar.outerHTML = guideBarHtml(guide);
+  bindGuideBar(practiceId);
+  applyGuide(guide);
+}
+
 function goToGuideStep(practiceId, step) {
   const previous = state.practiceGuide;
+  const editing = state.editing;
   state.practiceGuide = { practiceId, step: previous?.step ?? step };
   if (!setGuideStep(step)) {
     state.practiceGuide = previous;
     return;
   }
-  renderPracticesPage();
+  if (previous && state.editing === editing) showGuideStep(practiceId);
+  else renderPracticesPage();
   openStepPanels(state.practiceGuide.step);
   practiceWorkspace.scrollIntoView({ block: "start" });
 }
@@ -827,9 +851,11 @@ function goToProblem({ kind, id }) {
   const moves = step && guided.step !== step;
   const editable = id && EDITABLE_KINDS.has(kind);
   if (editable && state.editing.kind && !isEditing(kind, id) && !confirmDiscardForms(".scale-edit-cell form")) return;
+  const editing = state.editing;
   if (editable) state.editing = { kind, id };
   if (moves && !setGuideStep(step)) return;
-  if (moves || editable) renderPracticesPage();
+  if (state.editing !== editing) renderPracticesPage();
+  else if (moves) showGuideStep(guided.practiceId);
   const parts = '[data-add-panel="part"]';
   let target = { axes: "#practice-regression-form", layout: '[data-add-panel="quantity"]' }[kind] ?? `[data-add-panel="${kind}"]`;
   if (editable) {
@@ -839,7 +865,7 @@ function goToProblem({ kind, id }) {
     target = parts;
     if (guided) {
       setGuideStep("partes");
-      renderPracticesPage();
+      showGuideStep(guided.practiceId);
     }
   }
   const el = practiceWorkspace.querySelector(target) ?? practiceWorkspace.querySelector(parts);
