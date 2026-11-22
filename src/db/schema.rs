@@ -631,17 +631,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 
     sqlx::query(
         r#"
-        CREATE TABLE IF NOT EXISTS applied_migrations (
-            name       TEXT PRIMARY KEY,
-            applied_at TEXT NOT NULL
-        )
-        "#,
-    )
-    .execute(pool)
-    .await?;
-
-    sqlx::query(
-        r#"
         CREATE TABLE IF NOT EXISTS user_default_tables (
             user_id      TEXT    NOT NULL REFERENCES users(id)      ON DELETE CASCADE,
             group_id     TEXT    NOT NULL REFERENCES lab_groups(id) ON DELETE CASCADE,
@@ -738,63 +727,6 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;
-
-    backfill_result_flags(pool).await
-}
-
-const RESULT_FLAGS_BACKFILL: &str = "2026-11-backfill-is-final-y-has-uncertainty";
-
-async fn backfill_result_flags(pool: &SqlitePool) -> anyhow::Result<()> {
-    if migration_applied(pool, RESULT_FLAGS_BACKFILL).await? {
-        return Ok(());
-    }
-    for (practice_id, symbol) in [
-        ("p1-estadistica", "g"),
-        ("p3-relajacion", "tau_exp"),
-        ("fluidos-1", "mu"),
-        ("viscosidad", "mu"),
-        ("fluidos-2", "M_medio"),
-    ] {
-        sqlx::query(
-            "UPDATE practice_results SET is_final = 1 WHERE practice_id = ?1 AND symbol = ?2",
-        )
-        .bind(practice_id)
-        .bind(symbol)
-        .execute(pool)
-        .await?;
-    }
-    for (practice_id, symbol) in [
-        ("p2-cc", "P_max_e"),
-        ("p2-cc", "P_max_t"),
-        ("p2-cc", "RP_max_e"),
-        ("p2-cc", "RP_max_t"),
-    ] {
-        sqlx::query(
-            "UPDATE practice_results SET has_uncertainty = 0 WHERE practice_id = ?1 AND symbol = ?2",
-        )
-        .bind(practice_id)
-        .bind(symbol)
-        .execute(pool)
-        .await?;
-    }
-    mark_migration_applied(pool, RESULT_FLAGS_BACKFILL).await
-}
-
-pub(crate) async fn migration_applied(pool: &SqlitePool, name: &str) -> anyhow::Result<bool> {
-    let (count,): (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM applied_migrations WHERE name = ?1")
-            .bind(name)
-            .fetch_one(pool)
-            .await?;
-    Ok(count > 0)
-}
-
-pub(crate) async fn mark_migration_applied(pool: &SqlitePool, name: &str) -> anyhow::Result<()> {
-    sqlx::query("INSERT INTO applied_migrations (name, applied_at) VALUES (?1, ?2)")
-        .bind(name)
-        .bind(chrono::Utc::now())
-        .execute(pool)
-        .await?;
     Ok(())
 }
 

@@ -34,7 +34,7 @@ pub async fn current_version(
     current_version_in(&mut *pool.acquire().await?, practice_id).await
 }
 
-async fn current_version_in(
+pub(super) async fn current_version_in(
     conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeVersion>> {

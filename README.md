@@ -67,7 +67,7 @@ $env:SEED_STUDENT_PASSWORD="cambiar-esto"
 cargo run
 ```
 
-Para **empezar de cero** (regenerar los datos sembrados), detené el server y corré:
+Para **empezar de cero** (volver a importar las prácticas de la biblioteca), detené el server y corré:
 
 ```powershell
 .\scripts\dev-reset.ps1    # en Linux/macOS: ./scripts/dev-reset.sh
@@ -112,22 +112,28 @@ para **compararlos** con el cálculo automático (tabla de diferencias absolutas
 > calcula estadística básica por columna y una regresión entre las dos primeras columnas numéricas.
 > La UI actual usa el formulario; el CSV se mantiene por compatibilidad.
 
-## Prácticas sembradas (Física 103)
+## Prácticas de la biblioteca (Física 103)
+
+Las prácticas de Física 103 son plantillas JSON en `templates/practices/<id>.json`. Una base nueva
+(sin prácticas) las importa al arrancar, publicadas y habilitadas en el curso de ejemplo; después
+cada práctica se edita desde el admin como cualquier otra. El docente también puede crear un
+borrador desde una plantilla ("Nueva desde plantilla") o exportar e importar una práctica como
+archivo.
 
 | id | Nombre | Tipo de análisis |
 |----|--------|------------------|
-| `p1-estadistica` | Tratamiento Estadístico — Péndulo Simple | estadístico |
-| `p2-cc` | Corriente continua (serie + paralelo + curva de potencia, una sola entrega) | curva |
-| `p3-relajacion` | Relajación Exponencial (parte 1 — medida directa de τ) | estadístico |
-| `p3-relajacion-desfasaje` | Relajación Exponencial (parte 2 — desfasaje) | regresión lineal |
+| `p1-estadistica` | Tratamiento estadístico de Datos (tres operadores) | estadístico |
+| `p2-cc` | Corriente continua (serie, paralelo y curva de potencia) | curva |
+| `p3-relajacion` | Relajación Exponencial (medida directa y desfasaje, en dos partes) | regresión lineal |
+| `fluidos-1` | Fluidos I | regresión lineal |
+| `fluidos-2` | Fluidos II | regresión lineal |
+| `viscosidad` | Viscosidad | regresión lineal |
+| `filtros` | Filtros | curva |
+| `ca-rlc` | Corriente Alterna (RLC) | estadístico |
 | `hidrostatica` | Hidrostática y Tensión Superficial | estadístico |
 
-> Las prácticas `fluidos-1`, `fluidos-2`, `viscosidad`, `filtros` y `ca-rlc` también están
-> sembradas; su documentación en detalle queda pendiente (Fase 6).
-
-> **Migración**: las prácticas viejas `p2-serie`, `p2-corriente-continua` y `p2-potencia` ya no se
-> siembran (las reemplaza `p2-cc`). En una base de desarrollo existente, borrá `data/quantify.db`
-> antes de arrancar para re-seedear limpio.
+> Una base existente no vuelve a importar la biblioteca. Para empezar de cero en desarrollo, borrá
+> `data/quantify.db` antes de arrancar.
 
 ### P1 — Tratamiento estadístico
 
