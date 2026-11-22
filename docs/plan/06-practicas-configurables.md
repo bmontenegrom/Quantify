@@ -1072,6 +1072,13 @@ Decisiones:
    - Los `setup()` de los tests y el golden cargan las plantillas.
    - Doc: F8 queda marcada como hecha.
 
+Pendiente (revisión de #139): las acciones asíncronas de la ficha comprueban por su cuenta si la
+práctica sigue abierta (`reloadDefinition`, `runPracticeAction`, `createAndOpen`,
+`openPracticeWorkspace`). Va un mecanismo central (un contador de "generación" de la ficha que
+cada respuesta compara antes de tocar el estado), en un PR aparte, para que los caminos nuevos no
+tengan que acordarse; hoy `savePracticeKind` y `deleteLayoutItem` todavía escriben
+`state.practices` sin esa comprobación.
+
 ### F9 — Determinaciones repetidas con promedio
 
 Generaliza el motor D (operadores) y el patrón de Hidrostática (3 determinaciones independientes,

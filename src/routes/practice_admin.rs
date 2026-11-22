@@ -215,9 +215,23 @@ pub(super) async fn export_practice(
 pub(super) async fn import_practice(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Json(template): Json<practices::PracticeTemplate>,
+    Json(body): Json<serde_json::Value>,
 ) -> Result<Json<db::Practice>, AppError> {
     let user = require_teacher(&state, &headers).await?;
+    let not_a_template =
+        || AppError::bad_request("El archivo no es una práctica exportada de Quantify.");
+    let version = body
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(not_a_template)?;
+    if version != u64::from(practices::TEMPLATE_VERSION) {
+        return Err(AppError::bad_request(practices::version_error(version)));
+    }
+    let template: practices::PracticeTemplate = serde_json::from_value(body).map_err(|_| {
+        AppError::bad_request(
+            "El archivo es una práctica exportada, pero tiene un dato con un formato inválido.",
+        )
+    })?;
     practices::check_template(&template).map_err(AppError::bad_request)?;
     validate_template_items(&template)?;
     Ok(Json(
@@ -4772,12 +4786,11 @@ mod tests {
                 headers
             }
         };
-        let template = |symbol: &str| -> practices::PracticeTemplate {
-            serde_json::from_value(serde_json::json!({
+        let template = |symbol: &str| -> serde_json::Value {
+            serde_json::json!({
                 "schema_version": 1, "name": "Importada", "analysis_kind": "estadistico",
                 "quantities": [{"symbol": symbol, "name": "x", "unit": "", "repeated": false}]
-            }))
-            .unwrap()
+            })
         };
         let import = |headers: HeaderMap, symbol: &str| {
             import_practice(State(state.clone()), headers, Json(template(symbol)))
@@ -4816,11 +4829,10 @@ mod tests {
             for (key, value) in extra.as_object().unwrap() {
                 body[key] = value.clone();
             }
-            let template: practices::PracticeTemplate = serde_json::from_value(body).unwrap();
             let state = state.clone();
             let headers = teacher.clone();
             async move {
-                let practice = import_practice(State(state.clone()), headers, Json(template))
+                let practice = import_practice(State(state.clone()), headers, Json(body))
                     .await
                     .unwrap_or_else(|e| panic!("{}", e.message()))
                     .0;
@@ -4883,6 +4895,32 @@ mod tests {
             let problems = problems_after_import(extra.clone()).await;
             assert!(problems.contains(expected), "{extra}: {problems}");
         }
+        let not_a_template = import_practice(
+            State(state.clone()),
+            teacher.clone(),
+            Json(serde_json::json!({"instruments": []})),
+        )
+        .await
+        .unwrap_err();
+        assert!(not_a_template
+            .message()
+            .contains("no es una práctica exportada"));
+        let future = import_practice(
+            State(state.clone()),
+            teacher.clone(),
+            Json(serde_json::json!({"schema_version": 2, "quantities": {"otra": "forma"}})),
+        )
+        .await
+        .unwrap_err();
+        assert!(future.message().contains("versión 2"));
+        let typo = import_practice(
+            State(state.clone()),
+            teacher.clone(),
+            Json(serde_json::json!({"schema_version": 1, "name": "X", "quantities": {"otra": "forma"}})),
+        )
+        .await
+        .unwrap_err();
+        assert!(typo.message().contains("formato inválido"));
         let created = import(teacher.clone(), "x").await.unwrap().0;
         assert_eq!(created.status, "borrador");
         let exported = export_practice(
@@ -4916,12 +4954,16 @@ mod tests {
             .await
             .unwrap()
             .0;
-            let imported = import_practice(State(state.clone()), teacher.clone(), Json(exported))
-                .await
-                .unwrap_or_else(|e| {
-                    let response = axum::response::IntoResponse::into_response(e);
-                    panic!("{}: {}", practice.id, response.status())
-                });
+            let imported = import_practice(
+                State(state.clone()),
+                teacher.clone(),
+                Json(serde_json::to_value(exported).unwrap()),
+            )
+            .await
+            .unwrap_or_else(|e| {
+                let response = axum::response::IntoResponse::into_response(e);
+                panic!("{}: {}", practice.id, response.status())
+            });
             assert_eq!(imported.0.status, "borrador");
         }
     }
