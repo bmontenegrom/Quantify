@@ -767,6 +767,11 @@ function renderPracticeDirectory() {
       <p class="submission-meta">Se crea como borrador: cargale magnitudes y mensurandos, y publicala para poder habilitarla en un curso.</p>
       ${renderNewPracticeForm()}
     </details>
+    <details class="add-panel" data-add-panel="template">
+      <summary>Nueva desde plantilla</summary>
+      <p class="submission-meta">Crea un borrador con la definición de una práctica de la biblioteca, para adaptarla.</p>
+      <div id="practice-library"><p class="submission-meta">Cargando plantillas…</p></div>
+    </details>
     ${
       rows.length
         ? `
@@ -794,6 +799,46 @@ function renderPracticeDirectory() {
   });
   practiceCatalog.querySelectorAll("[data-practice-duplicate]").forEach((btn) => {
     btn.addEventListener("click", () => duplicatePractice(btn.dataset.practiceId));
+  });
+  practiceCatalog.querySelector('[data-add-panel="template"]')?.addEventListener("toggle", (e) => {
+    if (e.target.open) renderLibrary();
+  });
+}
+
+let library = null;
+
+async function renderLibrary() {
+  const box = practiceCatalog.querySelector("#practice-library");
+  try {
+    library ??= await fetchJson("/api/practice-templates");
+  } catch (error) {
+    if (box) box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+    return;
+  }
+  if (!box) return;
+  const rows = library.map((t) => `
+    <tr>
+      <td class="directory-primary"><strong>${escapeHtml(t.name)}</strong></td>
+      <td><span class="status-chip">${escapeHtml(analysisKindLabel(t.analysis_kind))}</span></td>
+      <td>${escapeHtml(t.description)}</td>
+      <td class="directory-actions">
+        <button type="button" data-template-key="${escapeHtml(t.key)}">Usar</button>
+      </td>
+    </tr>`);
+  box.innerHTML = `
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Plantilla</th><th>Tipo de análisis</th><th>Descripción</th><th></th></tr></thead>
+        <tbody>${rows.join("")}</tbody>
+      </table>
+    </div>`;
+  box.querySelectorAll("[data-template-key]").forEach((btn) => {
+    btn.addEventListener("click", () =>
+      createAndOpen(
+        () => postJson(`/api/practice-templates/${encodeURIComponent(btn.dataset.templateKey)}/create`, {}),
+        "Práctica creada desde plantilla",
+      ),
+    );
   });
 }
 

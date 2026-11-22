@@ -239,6 +239,48 @@ pub(super) async fn import_practice(
     ))
 }
 
+#[derive(Debug, Serialize)]
+pub(super) struct LibraryEntry {
+    key: &'static str,
+    name: String,
+    description: String,
+    analysis_kind: Option<String>,
+}
+
+pub(super) async fn list_library(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<LibraryEntry>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    let mut entries: Vec<LibraryEntry> = practices::LIBRARY
+        .iter()
+        .filter_map(|(key, _)| {
+            let t = practices::library_template(key)?;
+            Some(LibraryEntry {
+                key,
+                name: t.name,
+                description: t.description,
+                analysis_kind: t.analysis_kind,
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(entries))
+}
+
+pub(super) async fn create_from_library(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<Json<db::Practice>, AppError> {
+    let user = require_teacher(&state, &headers).await?;
+    let template = practices::library_template(&key)
+        .ok_or_else(|| AppError::not_found("plantilla no encontrada"))?;
+    Ok(Json(
+        practices::import_template(&state.pool, &template, &user.id).await?,
+    ))
+}
+
 fn validate_template_items(t: &practices::PracticeTemplate) -> Result<(), AppError> {
     for row in t.symbol_rows() {
         validate_symbol_format(row.symbol)?;
@@ -4921,6 +4963,27 @@ mod tests {
         .await
         .unwrap_err();
         assert!(typo.message().contains("formato inválido"));
+        let library = list_library(State(state.clone()), teacher.clone())
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(library.len(), practices::LIBRARY.len());
+        let from_library = create_from_library(
+            State(state.clone()),
+            teacher.clone(),
+            Path("fluidos-1".into()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(from_library.status, "borrador");
+        assert!(create_from_library(
+            State(state.clone()),
+            teacher.clone(),
+            Path("no-existe".into())
+        )
+        .await
+        .is_err());
         let created = import(teacher.clone(), "x").await.unwrap().0;
         assert_eq!(created.status, "borrador");
         let exported = export_practice(

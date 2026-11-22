@@ -106,6 +106,26 @@ await withE2E({ port: PORT, dbName: "quantify-exportar-importar.db" }, async ({ 
   await backToCatalog(page);
   assert((await catalogCount(page)) === before + 2, "la importación retenida debía crear la práctica igual");
 
+  step("docente: crea una práctica desde la plantilla de Fluidos I");
+  const magnitudes = '#practice-workspace .metric:has(.metric-label:text-is("Magnitudes")) .metric-value';
+  await page.click('[data-practice-open][data-practice-id="fluidos-1"]');
+  await page.waitForSelector(magnitudes);
+  const sourceQuantities = await page.locator(magnitudes).textContent();
+  await backToCatalog(page);
+  await page.click('details[data-add-panel="template"] > summary');
+  await page.waitForSelector("#practice-library [data-template-key]");
+  const templates = await page.locator("#practice-library [data-template-key]").count();
+  assert(templates === 9, `la biblioteca debía tener las 9 plantillas (tiene ${templates})`);
+  await page.click('#practice-library [data-template-key="fluidos-1"]');
+  await waitForStatus(page, "Práctica creada desde plantilla");
+  await page.waitForSelector("#practice-workspace .practice-state--borrador");
+  assert(
+    (await page.locator(magnitudes).textContent()) === sourceQuantities,
+    "el borrador desde la plantilla debía tener las mismas magnitudes que Fluidos I",
+  );
+  await backToCatalog(page);
+  assert((await catalogCount(page)) === before + 3, "la plantilla debía sumar una práctica al catálogo");
+
   step("docente: un borrador nuevo solo exporta el borrador");
   await page.click('details[data-add-panel="practice"] > summary');
   await fillAndSubmit(page, "#new-practice-form", { name: "Sin publicar", description: "E2E" });

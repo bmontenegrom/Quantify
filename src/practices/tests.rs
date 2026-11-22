@@ -4987,3 +4987,45 @@ async fn export_picks_the_draft_or_the_published_version() {
         .unwrap()
         .is_none());
 }
+
+#[tokio::test]
+async fn the_library_matches_the_seeded_practices() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/practices");
+    let update = std::env::var("QUANTIFY_UPDATE_TEMPLATES").is_ok_and(|v| v == "1");
+    let mut seeded: Vec<String> = db::practices(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    seeded.sort();
+    let mut keys: Vec<String> = LIBRARY.iter().map(|(k, _)| k.to_string()).collect();
+    keys.sort();
+    assert_eq!(
+        keys, seeded,
+        "cada práctica sembrada necesita su plantilla en el repo"
+    );
+    let mut stale = Vec::new();
+    for (key, json) in LIBRARY {
+        let exported = export_template(&pool, key, ExportSource::Borrador)
+            .await
+            .unwrap()
+            .unwrap();
+        if update {
+            let pretty = serde_json::to_string_pretty(&exported).unwrap()
+                + "
+";
+            std::fs::write(dir.join(format!("{key}.json")), pretty).unwrap();
+            continue;
+        }
+        let file: serde_json::Value = serde_json::from_str(json).unwrap();
+        if file != serde_json::to_value(&exported).unwrap() {
+            stale.push(key);
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "estas plantillas no coinciden con lo sembrado (regeneralas con QUANTIFY_UPDATE_TEMPLATES=1 cargo test library): {stale:?}"
+    );
+}
