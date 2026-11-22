@@ -120,7 +120,7 @@ async fn load_definition(
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
-const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
+use practices::ANALYSIS_KINDS;
 
 fn validate_practice_name(name: &str) -> Result<(), AppError> {
     if name.trim().is_empty() {
@@ -3253,6 +3253,28 @@ mod tests {
         );
     }
 
+    async fn session_token(pool: &sqlx::SqlitePool, role: &str) -> String {
+        let (user_id,): (String,) = sqlx::query_as("SELECT id FROM users WHERE role = ?1 LIMIT 1")
+            .bind(role)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        let token = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now();
+        sqlx::query(
+            "INSERT INTO sessions (token, user_id, created_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(&token)
+        .bind(user_id)
+        .bind(now)
+        .bind(now + chrono::Duration::hours(1))
+        .execute(pool)
+        .await
+        .unwrap();
+        token
+    }
+
     #[tokio::test]
     async fn the_edit_lock_waits_for_a_teacher_and_a_complete_body() {
         use tower::ServiceExt;
@@ -3264,33 +3286,8 @@ mod tests {
             secure_cookies: false,
             login_attempts: Default::default(),
         });
-        let session = |role: &'static str| {
-            let pool = pool.clone();
-            async move {
-                let (user_id,): (String,) =
-                    sqlx::query_as("SELECT id FROM users WHERE role = ?1 LIMIT 1")
-                        .bind(role)
-                        .fetch_one(&pool)
-                        .await
-                        .unwrap();
-                let token = uuid::Uuid::new_v4().to_string();
-                let now = chrono::Utc::now();
-                sqlx::query(
-                    "INSERT INTO sessions (token, user_id, created_at, expires_at) \
-                     VALUES (?1, ?2, ?3, ?4)",
-                )
-                .bind(&token)
-                .bind(user_id)
-                .bind(now)
-                .bind(now + chrono::Duration::hours(1))
-                .execute(&pool)
-                .await
-                .unwrap();
-                token
-            }
-        };
-        let student = session("estudiante").await;
-        let teacher = session("docente").await;
+        let student = session_token(&pool, "estudiante").await;
+        let teacher = session_token(&pool, "docente").await;
         let request = |token: Option<&str>, body: axum::body::Body| {
             let mut builder = axum::http::Request::post("/practices/lock-body/quantities")
                 .header("content-type", "application/json");
@@ -4771,24 +4768,7 @@ mod tests {
         let session = |role: &'static str| {
             let pool = pool.clone();
             async move {
-                let (user_id,): (String,) =
-                    sqlx::query_as("SELECT id FROM users WHERE role = ?1 LIMIT 1")
-                        .bind(role)
-                        .fetch_one(&pool)
-                        .await
-                        .unwrap();
-                let token = uuid::Uuid::new_v4().to_string();
-                let now = chrono::Utc::now();
-                sqlx::query(
-                    "INSERT INTO sessions (token, user_id, created_at, expires_at)                      VALUES (?1, ?2, ?3, ?4)",
-                )
-                .bind(&token)
-                .bind(user_id)
-                .bind(now)
-                .bind(now + chrono::Duration::hours(1))
-                .execute(&pool)
-                .await
-                .unwrap();
+                let token = session_token(&pool, role).await;
                 let mut headers = HeaderMap::new();
                 headers.insert(
                     axum::http::header::COOKIE,
@@ -4799,7 +4779,7 @@ mod tests {
         };
         let template = |symbol: &str| -> practices::PracticeTemplate {
             serde_json::from_value(serde_json::json!({
-                "schema_version": 1, "name": "Importada",
+                "schema_version": 1, "name": "Importada", "analysis_kind": "estadistico",
                 "quantities": [{"symbol": symbol, "name": "x", "unit": "", "repeated": false}]
             }))
             .unwrap()

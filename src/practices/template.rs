@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 pub const TEMPLATE_VERSION: u32 = 1;
-const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
+pub const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PracticeTemplate {
@@ -198,7 +198,7 @@ pub async fn export_template(
 /// ```
 /// use quantify::practices::{check_template, PracticeTemplate};
 /// let t: PracticeTemplate = serde_json::from_value(serde_json::json!({
-///     "schema_version": 1, "name": "P", "quantities": [
+///     "schema_version": 1, "name": "P", "analysis_kind": "estadistico", "quantities": [
 ///         {"symbol": "x", "name": "x", "unit": "", "repeated": false},
 ///         {"symbol": "x", "name": "otra", "unit": "", "repeated": false}
 ///     ]
@@ -215,8 +215,12 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     if t.name.trim().is_empty() {
         return Err("La práctica necesita un nombre.".into());
     }
+    if t.analysis_kind.is_none() {
+        return Err("La práctica necesita un tipo de análisis.".into());
+    }
     let kinds = std::iter::once(&t.analysis_kind).chain(t.parts.iter().map(|p| &p.analysis_kind));
     if let Some(kind) = kinds
+        .clone()
         .flatten()
         .find(|k| !ANALYSIS_KINDS.contains(&k.as_str()))
     {
@@ -224,6 +228,63 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
             "El tipo de análisis \"{kind}\" no existe: tiene que ser estadistico, \
              regresion_lineal o curva."
         ));
+    }
+    let titles = t
+        .parts
+        .iter()
+        .map(|p| &p.title)
+        .chain(t.sections.iter().map(|s| &s.title));
+    if titles.into_iter().any(|title| title.trim().is_empty()) {
+        return Err("Hay una parte o una sección sin título.".into());
+    }
+    let series = kinds.flatten().any(|k| super::is_point_based(Some(k)));
+    if let Some(q) = t
+        .quantities
+        .iter()
+        .find(|q| q.replicas_per_point.is_some() && !series)
+    {
+        return Err(format!(
+            "\"{}\" tiene réplicas por punto, pero la práctica no tiene una serie de puntos.",
+            q.symbol.trim()
+        ));
+    }
+    let named = t
+        .quantities
+        .iter()
+        .map(|q| (&q.symbol, &q.name))
+        .chain(t.results.iter().map(|r| (&r.symbol, &r.name)));
+    if let Some((symbol, _)) = named.into_iter().find(|(_, name)| name.trim().is_empty()) {
+        return Err(format!("\"{}\" no tiene nombre.", symbol.trim()));
+    }
+    if let Some(r) = t
+        .results
+        .iter()
+        .find(|r| r.tolerance.flatten().is_some_and(|v| v < 0.0))
+    {
+        return Err(format!(
+            "\"{}\" tiene una tolerancia negativa.",
+            r.symbol.trim()
+        ));
+    }
+    for r in &t.results {
+        let Some(target) = r.compare_with().filter(|c| !c.is_empty()) else {
+            continue;
+        };
+        match t.quantities.iter().find(|q| q.symbol.trim() == target) {
+            Some(q) if q.unit.trim() == r.unit.trim() => {}
+            Some(_) => {
+                return Err(format!(
+                    "\"{}\" se compara con {target}, que tiene otra unidad.",
+                    r.symbol.trim()
+                ))
+            }
+            None => {
+                return Err(format!(
+                    "\"{}\" se compara con {target}, que no es una magnitud de la práctica.",
+                    r.symbol.trim()
+                ))
+            }
+        }
     }
     let formulas = t
         .results
@@ -296,6 +357,7 @@ pub async fn import_template(
     t: &PracticeTemplate,
     created_by: &str,
 ) -> anyhow::Result<Practice> {
+    check_template(t).map_err(anyhow::Error::msg)?;
     let mut tx = crate::db::begin_write(pool).await?;
     let id = super::lifecycle::free_practice_id(&mut tx, &super::slugify(&t.name)).await?;
     let formula = |f: &Option<String>| {

@@ -4869,7 +4869,7 @@ async fn importing_twice_picks_a_free_id() {
 fn check_template_rejects_what_cannot_be_written() {
     let template = |extra: serde_json::Value| -> PracticeTemplate {
         let mut base = serde_json::json!({
-            "schema_version": 1, "name": "P",
+            "schema_version": 1, "name": "P", "analysis_kind": "estadistico",
             "parts": [{"title": "A"}],
             "quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": false}],
             "results": [{"symbol": "y", "name": "y", "unit": "", "formula": "2*x"}]
@@ -4884,6 +4884,39 @@ fn check_template_rejects_what_cannot_be_written() {
         (serde_json::json!({"schema_version": 2}), "versión 2"),
         (serde_json::json!({"name": " "}), "nombre"),
         (serde_json::json!({"analysis_kind": "otro"}), "\"otro\""),
+        (
+            serde_json::json!({"analysis_kind": null}),
+            "tipo de análisis",
+        ),
+        (serde_json::json!({"parts": [{"title": " "}]}), "sin título"),
+        (
+            serde_json::json!({"quantities": [
+                {"symbol": "x", "name": "x", "unit": "", "repeated": true, "replicas_per_point": 2}
+            ]}),
+            "réplicas por punto",
+        ),
+        (
+            serde_json::json!({"results": [{"symbol": "y", "name": "", "unit": "", "formula": "x"}]}),
+            "no tiene nombre",
+        ),
+        (
+            serde_json::json!({"results": [
+                {"symbol": "y", "name": "y", "unit": "", "formula": "x", "tolerance": -1}
+            ]}),
+            "negativa",
+        ),
+        (
+            serde_json::json!({"results": [
+                {"symbol": "y", "name": "y", "unit": "m", "formula": "x", "compare_with": "x"}
+            ]}),
+            "otra unidad",
+        ),
+        (
+            serde_json::json!({"results": [
+                {"symbol": "y", "name": "y", "unit": "", "formula": "x", "compare_with": "w"}
+            ]}),
+            "no es una magnitud",
+        ),
         (
             serde_json::json!({"sections": [{"title": "S", "part": 3}]}),
             "parte que no existe",
