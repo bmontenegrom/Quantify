@@ -357,9 +357,32 @@ export function hasUncertainty(entity) {
   return entity?.has_uncertainty !== false;
 }
 
+const GUIDE_STEPS = [
+  { id: "datos", title: "Datos", help: "Nombre, descripción y tipo de análisis. Si la práctica va a tener partes, el análisis se elige en cada una en el paso siguiente." },
+  { id: "partes", title: "Partes", help: "Cada parte es una pestaña del formulario del alumno, con su propio análisis. Sin partes, el formulario va en una sola pestaña." },
+  { id: "secciones", title: "Secciones", help: "Agrupan magnitudes y resultados bajo un título. Una sección sin parte se ve en todas las pestañas (datos compartidos). Cada magnitud y mensurando elige su sección en su tabla, en los pasos siguientes." },
+  { id: "magnitudes", title: "Magnitudes", help: "Lo que carga el alumno o da la cátedra. El rol dice cómo se ingresa cada una." },
+  { id: "serie", title: "Serie y ejes", help: "Intermedias que se calculan en cada punto, curvas y los ejes del ajuste." },
+  { id: "mensurandos", title: "Mensurandos", help: "Lo que se calcula a partir de las magnitudes, con sus fórmulas." },
+  { id: "revisar", title: "Revisar y publicar", help: "Resolvé los problemas que queden, probá el borrador con datos de ejemplo y publicá." },
+];
+
+export const POINT_KINDS = ["regresion_lineal", "curva"];
+
+export function practiceGuideSteps(definition) {
+  const series = POINT_KINDS.includes(definition?.analysis_kind);
+  return GUIDE_STEPS.filter((s) => s.id !== "serie" || series);
+}
+
+export function guideStepOrNext(definition, step) {
+  const steps = practiceGuideSteps(definition);
+  const order = GUIDE_STEPS.map((s) => s.id);
+  const from = order.indexOf(step);
+  return (steps.find((s) => s.id === step) ?? steps.find((s) => order.indexOf(s.id) > from) ?? steps[0]).id;
+}
+
 export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
-  const kind = definition?.analysis_kind;
-  const pointBased = kind === "regresion_lineal" || kind === "curva";
+  const pointBased = POINT_KINDS.includes(definition?.analysis_kind);
   const operators = !pointBased && (definition?.operator_count ?? 0) >= 2 ? definition.operator_count : 0;
   const round = (x) => Number(x.toPrecision(6));
   const series = (n, v) => Array.from({ length: n }, (_, k) => round(v * (1 + 0.01 * (k - (n - 1) / 2))));
@@ -515,7 +538,7 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
 }
 
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
-  if (analysisKind === "regresion_lineal" || analysisKind === "curva") {
+  if (POINT_KINDS.includes(analysisKind)) {
     const pointCount = (m) => m.point_replicas?.length ?? m.values.length;
     const isSeries = (m) => metaMap[m.quantity_id]?.perPoint !== false && !metaMap[m.quantity_id]?.isGiven;
     const points = Math.max(0, ...measurements.filter(isSeries).map(pointCount));

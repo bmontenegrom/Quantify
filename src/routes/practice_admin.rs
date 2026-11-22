@@ -637,7 +637,7 @@ pub(super) async fn set_practice_analysis_kind(
     let before = load_definition(&state, &id).await?;
     if !before.parts.is_empty() {
         return Err(AppError::bad_request(
-            "La práctica tiene partes: el tipo de análisis se elige en cada parte, en \"Partes y secciones\".",
+            "La práctica tiene partes: el tipo de análisis se elige en cada parte, en \"Partes\".",
         ));
     }
     let mut after = before.clone();

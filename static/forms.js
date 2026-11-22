@@ -9,7 +9,7 @@ import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   prefixFactor, validateMeasurements,
-  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements,
+  draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements, POINT_KINDS,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -303,7 +303,7 @@ export function renderMeasurementFields(draft) {
     return;
   }
 
-  if (definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva") {
+  if (POINT_KINDS.includes(definition.analysis_kind)) {
     renderSeriesTable(definition);
     measurementFields.insertAdjacentHTML("beforeend", seriesFinalResultsHtml(definition));
     return;

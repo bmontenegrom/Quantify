@@ -1312,6 +1312,10 @@ button.back-link {
   margin-top: 8px;
 }
 
+.practice-lifecycle.hidden {
+  display: none;
+}
+
 .course-catalog {
   display: grid;
   gap: 12px;
@@ -2101,4 +2105,18 @@ button.back-link {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+.practice-guide-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+.practice-guide-current {
+  font-weight: 700;
+  text-decoration: none;
 }

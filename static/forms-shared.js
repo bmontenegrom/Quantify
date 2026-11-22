@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor, compatibleInstruments } from "./lib.js";
+import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor, compatibleInstruments, POINT_KINDS } from "./lib.js";
 
 export function formPracticeVersion(practiceId) {
   const definition = state.practiceForm?.definition;
@@ -15,7 +15,7 @@ export function definitionSections(definition) {
     symbols: s.quantities,
     results: s.results,
   }));
-  const pointBased = definition.analysis_kind === "regresion_lineal" || definition.analysis_kind === "curva";
+  const pointBased = POINT_KINDS.includes(definition.analysis_kind);
   const seriesSymbols = new Set(
     pointBased ? definition.quantities.filter((q) => q.per_point && !q.is_given).map((q) => q.symbol) : [],
   );
