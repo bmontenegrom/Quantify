@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   analysisSections,
+  exampleMeasurements,
+  practiceGuideSteps,
+  guideStepOrNext,
   escapeHtml,
   symbolHtml,
   setDisplaySymbols,
@@ -40,6 +43,12 @@ import {
   histogram,
   normalCurve,
   validateMeasurements,
+  QUANTITY_ROLES,
+  quantityRole,
+  roleFlags,
+  formatSymbolHtml,
+  formulaScope,
+  formulaHelpHtml,
 } from "../static/lib.js";
 
 function academicFixture() {
@@ -691,6 +700,19 @@ test("validateMeasurements: cuenta puntos desde point_replicas (réplicas por pu
   assert.ok(typeof few === "string");
 });
 
+test("validateMeasurements: las réplicas de una compartida no cuentan como puntos", () => {
+  const meta = { x: { perPoint: true }, g: { perPoint: false } };
+  const err = validateMeasurements(
+    [
+      { quantity_id: "x", values: [], given_u: null },
+      { quantity_id: "g", values: [9.8, 9.81], given_u: null },
+    ],
+    "regresion_lineal",
+    meta,
+  );
+  assert.ok(typeof err === "string");
+});
+
 test("validateMeasurements: regresión exige escalares compartidos completos (Motor E)", () => {
   const meta = {
     x: { name: "x", perPoint: true },
@@ -811,4 +833,204 @@ test("compareOptionGroups usa las opciones del servidor y no pierde la comparaci
     [[null, ["R1", "VR1_p"]]],
     "en un mensurando nuevo una elección fuera de alcance no se presenta como guardada",
   );
+});
+
+test("quantityRole y roleFlags: cada rol vuelve a sí mismo", () => {
+  for (const pointBased of [true, false]) {
+    for (const { id, series } of QUANTITY_ROLES) {
+      if (series && !pointBased) continue;
+      const quantity = { ...roleFlags(id, pointBased), replicas_per_point: id === "serie_replicas" ? 2 : null };
+      assert.equal(quantityRole(quantity, pointBased), id, `${id} (serie: ${pointBased})`);
+    }
+  }
+});
+
+test("quantityRole: en una práctica estadística per_point no cuenta", () => {
+  const q = { is_given: false, per_point: true, repeated: true, has_uncertainty: true, replicas_per_point: 3 };
+  assert.equal(quantityRole(q, false), "replicas");
+  assert.equal(quantityRole(q, true), "serie_replicas");
+  assert.equal(quantityRole({ is_given: true, has_uncertainty: false }, true), "constante");
+  assert.equal(quantityRole({ ...q, replicas_per_point: null }, true), "serie", "réplicas sin cantidad: un valor por punto");
+});
+
+test("roleFlags: conserva lo que el rol no decide", () => {
+  assert.equal(roleFlags("unica", false, { per_point: true }).per_point, true);
+  assert.equal(roleFlags("unica", false, { per_point: false }).per_point, false);
+  assert.equal(roleFlags("unica", true, { per_point: true }).per_point, false);
+  assert.equal(roleFlags("catedra", true, { repeated: true }).repeated, true);
+  assert.equal(roleFlags("serie", true, { per_point: true, repeated: true }).repeated, true, "una serie de P3 conserva su repeated");
+  assert.equal(roleFlags("serie", true, { per_point: false, repeated: true }).repeated, false, "de réplicas a serie");
+  const conReplicas = { per_point: true, repeated: true, replicas_per_point: 3 };
+  assert.equal(roleFlags("serie", true, conReplicas).repeated, false, "de serie con réplicas a serie");
+  assert.deepEqual(roleFlags("serie_replicas", true), {
+    is_given: false,
+    has_uncertainty: true,
+    repeated: true,
+    per_point: true,
+  });
+});
+
+test("formulaScope: alcance por tipo, por parte y por posición", () => {
+  const definition = {
+    quantities: [{ symbol: "L" }],
+    formula_scopes: {
+      results: ["L"],
+      part_results: { p2: ["L", "slope"] },
+      existing_results: { g: ["L"] },
+      intermediates: { "": ["L", "A", "B"], A: ["L"], B: ["L", "A"] },
+      aggregates: { "": ["L"] },
+      point_results: ["L", "A", "slope"],
+      axes: ["L", "A", "B"],
+    },
+  };
+  assert.deepEqual(formulaScope(definition, "result", { section: { part_id: "p2" } }), ["L", "slope"]);
+  assert.deepEqual(formulaScope(definition, "result", { section: { part_id: null } }), ["L"]);
+  assert.deepEqual(formulaScope(definition, "result"), ["L", "slope"], "sin sección: cualquier parte");
+  assert.deepEqual(formulaScope(definition, "result", { symbol: "g" }), ["L"], "uno existente: su alcance del servidor");
+  assert.deepEqual(formulaScope(definition, "intermediate", { id: "B" }), ["L", "A"]);
+  assert.deepEqual(formulaScope(definition, "intermediate"), ["L", "A", "B"]);
+  assert.deepEqual(formulaScope(definition, "aggregate"), ["L"]);
+  assert.deepEqual(formulaScope(definition, "intermediate", { id: "falta" }), [], "sin alcance propio no ofrece el de uno nuevo");
+  assert.deepEqual(formulaScope(definition, "axis"), ["L", "A", "B"]);
+  assert.deepEqual(formulaScope({ quantities: [{ symbol: "T" }] }, "axis"), ["T"], "sin formula_scopes: las magnitudes");
+});
+
+test("formulaHelpHtml: botones que insertan símbolos, constantes y funciones", () => {
+  const html = formulaHelpHtml(["V_R", "V_R"], [["math::sqrt", "raíz cuadrada"]]);
+  assert.equal(html.match(/data-insert="V_R"/g).length, 1, "sin repetidos");
+  assert.ok(html.includes('data-insert="pi"') && html.includes('data-insert="e"'));
+  assert.ok(html.includes('data-insert="math::sqrt()"'));
+  assert.ok(html.includes("V<sub>R</sub>"));
+  assert.ok(html.startsWith("<details"), "plegada por defecto");
+  assert.ok(!html.includes("<details open"));
+});
+
+test("formulaHelpHtml: los nombres derivados van aparte y se muestran como se escriben", () => {
+  const html = formulaHelpHtml(["V", "V_first", "I_at_f_max"], [], new Set(["V"]));
+  const rows = html.match(/<div class="formula-chips">.*?<\/div>/g);
+  assert.equal(rows.length, 2, "una fila de símbolos y otra de derivados (sin funciones)");
+  assert.ok(rows[0].includes('data-insert="V"') && rows[0].includes('data-insert="pi"'));
+  assert.ok(rows[1].includes("<code>I_at_f_max</code>"), "sin subíndices engañosos");
+  assert.ok(!html.includes("<sub>AT"));
+});
+
+test("formatSymbolHtml no busca en los símbolos a mostrar", () => {
+  setDisplaySymbols({ VR: "V_R_PP" });
+  assert.equal(formatSymbolHtml("VR"), "VR");
+  assert.equal(formatSymbolHtml("V_R_PP"), "V<sub>R,PP</sub>");
+  assert.equal(formatSymbolHtml("rho_1"), "ρ<sub>1</sub>");
+  setDisplaySymbols({});
+});
+
+test("exampleMeasurements: estadística con datos dados, repetidas, únicas y operadores", () => {
+  const definition = {
+    analysis_kind: "estadistico",
+    operator_count: 2,
+    quantities: [
+      { id: "g", is_given: true, default_value: 9.8 },
+      { id: "c", is_given: true, has_uncertainty: false },
+      { id: "s", is_given: true, slot_count: 4 },
+      { id: "t", repeated: true },
+      { id: "L", repeated: false },
+    ],
+  };
+  const [g, c, s, t, L] = exampleMeasurements(definition);
+  assert.deepEqual(g.values, [9.8]);
+  assert.equal(g.given_u, 0.098);
+  assert.equal(c.given_u, null);
+  assert.deepEqual(s.values, [1]);
+  assert.equal(t.operator_replicas.length, 2);
+  assert.equal(t.operator_replicas[0].length, 3);
+  assert.ok(new Set(t.operator_replicas[0]).size === 3, "las réplicas difieren");
+  assert.deepEqual(L.values, [1]);
+});
+
+test("exampleMeasurements: sin operadores una repetida da réplicas parecidas", () => {
+  const [t] = exampleMeasurements({ quantities: [{ id: "t", repeated: true }] }, { replicas: 4 });
+  assert.equal(t.values.length, 4);
+  assert.ok(Math.max(...t.values) / Math.min(...t.values) < 1.05);
+});
+
+test("exampleMeasurements: regresión con serie simple y con réplicas por punto", () => {
+  const definition = {
+    analysis_kind: "regresion_lineal",
+    operator_count: 3,
+    quantities: [
+      { id: "x", per_point: true },
+      { id: "y", per_point: true, repeated: true, replicas_per_point: 2 },
+      { id: "D", per_point: false },
+    ],
+  };
+  const [x, y, D] = exampleMeasurements(definition, { points: 4 });
+  assert.equal(x.values.length, 4);
+  assert.ok(x.values.every((v, k) => k === 0 || v > x.values[k - 1]), "la serie crece");
+  assert.equal(y.point_replicas.length, 4);
+  assert.ok(y.point_replicas.every((reps) => reps.length === 2 && reps[0] !== reps[1]));
+  assert.deepEqual(D.values, [1]);
+  assert.equal(x.operator_replicas, undefined);
+});
+
+test("exampleMeasurements: una magnitud posterior queda por debajo de la anterior (asin(b/a))", () => {
+  const def = { analysis_kind: "curva", quantities: [{ id: "a", per_point: true }, { id: "b", per_point: true }] };
+  const [a, b] = exampleMeasurements(def);
+  assert.ok(a.values.every((v, k) => b.values[k] / v < 1));
+  const [sa, sb] = exampleMeasurements({ quantities: [{ id: "a" }, { id: "b" }] });
+  assert.ok(sb.values[0] / sa.values[0] < 1);
+});
+
+test("exampleMeasurements: un 0 por defecto en una medida no se usa (divisor de hidrostática)", () => {
+  const [m, b] = exampleMeasurements({ quantities: [{ id: "m", default_value: 0 }, { id: "b", is_given: true, default_value: 0 }] });
+  assert.ok(m.values[0] > 0);
+  assert.deepEqual(b.values, [0]);
+});
+
+test("exampleMeasurements: una ranura usa su valor por defecto", () => {
+  const [a, b] = exampleMeasurements({ quantities: [{ id: "a", is_given: true, slot_count: 9, default_value: 3 }, { id: "b", is_given: true, slot_count: 9 }] });
+  assert.deepEqual(a.values, [3]);
+  assert.deepEqual(b.values, [1]);
+});
+
+test("exampleMeasurements: elige el primer instrumento compatible con escala", () => {
+  const instruments = [
+    { id: "vacio", quantity: "longitud", scales: [] },
+    { id: "regla", quantity: "longitud", scales: [{ id: "mm" }, { id: "cm" }] },
+    { id: "balanza", quantity: "masa", scales: [{ id: "g" }] },
+  ];
+  const [L, g, x] = exampleMeasurements(
+    { quantities: [{ id: "L", quantity: "longitud" }, { id: "g", quantity: "longitud", is_given: true }, { id: "x" }] },
+    { instruments },
+  );
+  assert.equal(L.instrument_id, "regla");
+  assert.equal(L.scale_id, "mm");
+  assert.equal(g.instrument_id, null);
+  assert.equal(x.instrument_id, null);
+});
+
+test("exampleMeasurements: el cociente entre dos series varía entre puntos (eje V/t)", () => {
+  const def = {
+    analysis_kind: "regresion_lineal",
+    quantities: [
+      { id: "V", per_point: true, repeated: true, replicas_per_point: 2 },
+      { id: "t", per_point: true, repeated: true, replicas_per_point: 2 },
+    ],
+  };
+  const [V, t] = exampleMeasurements(def);
+  const q = V.point_replicas.map((reps, p) => 1 / (reps[0] / t.point_replicas[p][0]));
+  assert.ok((Math.max(...q) - Math.min(...q)) / Math.max(...q) > 0.1, `1/Q casi constante: ${q}`);
+});
+
+test("practiceGuideSteps: el paso de serie aparece solo con regresión o curva", () => {
+  const ids = (def) => practiceGuideSteps(def).map((s) => s.id);
+  assert.deepEqual(ids({ analysis_kind: "estadistico", parts: [] }), ["datos", "partes", "secciones", "magnitudes", "mensurandos", "revisar"]);
+  assert.deepEqual(ids({ analysis_kind: "regresion_lineal" }), ["datos", "partes", "secciones", "magnitudes", "serie", "mensurandos", "revisar"]);
+  assert.ok(ids({ analysis_kind: "curva", parts: [{ effective_kind: "estadistico" }, { effective_kind: "curva" }] }).includes("serie"));
+  assert.deepEqual(ids(null), ["datos", "partes", "secciones", "magnitudes", "mensurandos", "revisar"]);
+});
+
+test("guideStepOrNext: un paso que ya no aplica cae al siguiente que sí", () => {
+  const estadistica = { analysis_kind: "estadistico", parts: [] };
+  assert.equal(guideStepOrNext(estadistica, "serie"), "mensurandos");
+  assert.equal(guideStepOrNext(estadistica, "magnitudes"), "magnitudes");
+  assert.equal(guideStepOrNext({ analysis_kind: "curva" }, "serie"), "serie");
+  assert.equal(guideStepOrNext(estadistica, "desconocido"), "datos");
 });

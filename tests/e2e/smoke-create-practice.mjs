@@ -1,50 +1,39 @@
 
-import { STUDENT, TEACHER, assert, openAddForm, step, withE2E } from "./lib.mjs";
+import { STUDENT, TEACHER, assert, assignSection, fillAndSubmit, openAddForm, step, waitForStatus, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8163";
 const NAME = "Péndulo de prueba";
 const ID = "pendulo-de-prueba";
 
-async function fillAndSubmit(page, formSelector, fields, checks = {}) {
-  const form = page.locator(formSelector);
-  for (const [name, value] of Object.entries(fields)) {
-    await form.locator(`[name="${name}"]`).fill(value);
-  }
-  for (const [name, checked] of Object.entries(checks)) {
-    await form.locator(`[name="${name}"]`).setChecked(checked);
-  }
-  await form.locator('button[type="submit"]').click();
-}
-
-async function assignSection(page, list, symbol, label) {
-  const select = page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="${list}"]`);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await select.selectOption({ label });
-    await page.waitForLoadState("networkidle");
-    const ok = await page
-      .waitForFunction(
-        ([list, symbol, label]) => {
-          const row = [...document.querySelectorAll("#practice-workspace tr")].find(
-            (tr) => tr.querySelector("code")?.textContent === symbol,
-          );
-          const sel = row?.querySelector(`[data-section-select="${list}"]`);
-          return sel?.selectedOptions[0]?.textContent === label;
-        },
-        [list, symbol, label],
-        { timeout: 3_000 },
-      )
-      .then(() => true, () => false);
-    if (ok) return;
-  }
-  throw new Error(`no se pudo asignar ${symbol} a ${label}`);
-}
-
-async function waitForStatus(page, text) {
-  await page.waitForFunction(
-    (t) => (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes(t),
-    text,
-    { timeout: 10_000 },
-  );
+async function buildFormulaWithHelp(page, expected) {
+  const form = page.locator("#new-result-form");
+  const input = form.locator('[name="formula"]');
+  const chip = (text) => form.locator(`.formula-help [data-insert="${text}"]`);
+  await form.locator(".formula-help summary").click();
+  await input.fill("");
+  await chip("math::sqrt()").click();
+  await page.keyboard.type("L");
+  assert((await input.inputValue()) === "math::sqrt(L)", "la función debía dejar el cursor entre paréntesis");
+  await input.evaluate((el) => {
+    el.setSelectionRange(0, 0);
+    el.blur();
+  });
+  await chip("T").click();
+  assert((await input.inputValue()) === "math::sqrt(L)T", "sin foco en la fórmula, el botón debía agregar al final");
+  await input.fill("math::sqrt()");
+  await input.evaluate((el) => el.setSelectionRange(11, 11));
+  await chip("L").focus();
+  await page.keyboard.press("Enter");
+  assert((await input.inputValue()) === "math::sqrt(L)", "con teclado, el botón debía insertar donde estaba el cursor");
+  await input.fill("4*");
+  await chip("pi").click();
+  await page.keyboard.type("^2*");
+  await chip("L").click();
+  await page.keyboard.type("/");
+  await chip("T").click();
+  await page.keyboard.type("^2");
+  const value = await input.inputValue();
+  assert(value === expected, `la fórmula armada con la ayuda debía ser ${expected} (quedó ${value})`);
 }
 
 await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ login }) => {
@@ -54,15 +43,42 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await page.click('.tab.teacher-only[data-view="practices"]');
   await page.click('details[data-add-panel="practice"] > summary');
   await fillAndSubmit(page, "#new-practice-form", { name: NAME, description: "Prueba E2E" });
+  await page.click("#practice-workspace [data-guide-exit]");
   await page.waitForSelector("#practice-workspace .practice-state--borrador");
+
+  step("docente: el panel lista lo que falta y lleva a donde se arregla");
+  const problem = page.locator("#practice-problems [data-problem]", { hasText: "magnitudes de entrada" });
+  await problem.waitFor();
+  assert(
+    !(await page.locator('details[data-add-panel="quantity"]').evaluate((d) => d.open)),
+    "el alta de magnitudes debía empezar cerrada",
+  );
+  await problem.click();
+  assert(
+    await page.locator('details[data-add-panel="quantity"]').evaluate((d) => d.open),
+    "el problema debía abrir el alta de magnitudes",
+  );
+
+  step("docente: el rol muestra solo sus campos; en una práctica estadística no hay roles de serie");
+  const quantityForm = page.locator("#new-quantity-form");
+  const role = quantityForm.locator('[name="role"]');
+  const shown = (name) => quantityForm.locator(`[name="${name}"]`).isVisible();
+  const roles = await role.locator("option").evaluateAll((os) => os.map((o) => o.value));
+  assert(!roles.includes("serie") && roles.includes("replicas"), `roles de una práctica estadística: ${roles}`);
+  assert(!(await shown("replicas_per_point")) && !(await shown("slot_count")), "con réplicas: sin ranuras ni réplicas por punto");
+  await role.selectOption("catedra");
+  assert(await shown("slot_count"), "un dato de cátedra admite ranuras");
+  await role.selectOption("replicas");
 
   step("docente: agrega L (dato) y T (réplicas)");
   await openAddForm(page, "#new-quantity-form");
-  await fillAndSubmit(page, "#new-quantity-form", { symbol: "L", name: "Largo", unit: "m" }, { is_given: true, repeated: false });
+  await fillAndSubmit(page, "#new-quantity-form", { symbol: "L", name: "Largo", unit: "m", role: "catedra" });
   await waitForStatus(page, "Magnitud agregada");
   await openAddForm(page, "#new-quantity-form");
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "T", name: "Periodo", unit: "s" });
   await waitForStatus(page, "Magnitud agregada");
+  await problem.waitFor({ state: "detached" });
+  await page.locator("#practice-problems [data-problem]", { hasText: "mensurandos" }).waitFor();
 
   step("docente: renombrar una magnitud y vaciar su símbolo a mostrar lo borra");
   const row = (symbol) => `#practice-workspace tr:has(code:text-is("${symbol}"))`;
@@ -85,12 +101,13 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   step("docente: dos partes con sus secciones; L sin sección (compartida) y T en la segunda");
   for (const title of ["Parte A", "Parte B"]) {
     await openAddForm(page, "#new-part-form");
-    await fillAndSubmit(page, "#new-part-form", { title });
+    await fillAndSubmit(page, "#new-part-form", { title, help_text: `Ayuda de ${title}` });
     await page.waitForSelector(`#practice-workspace input[aria-label="Título de la parte"][value="${title}"]`);
   }
   for (const [title, part] of [["Seccion A", "Parte A"], ["Seccion B", "Parte B"], ["Seccion R", "Parte B"]]) {
     await openAddForm(page, "#new-section-form");
     await page.locator('#new-section-form [name="title"]').fill(title);
+    await page.locator('#new-section-form [name="help_text"]').fill(`Ayuda de ${title}`);
     await page.locator('#new-section-form [name="part_id"]').selectOption({ label: part });
     await page.locator('#new-section-form button[type="submit"]').click();
     await page.waitForSelector(`#practice-workspace input[aria-label="Título de la sección"][value="${title}"]`);
@@ -108,10 +125,11 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   ]) {
     await openAddForm(page, "#new-result-form");
     await page.locator('#new-result-form [name="section_id"]').selectOption({ label: section });
+    if (symbol === "g") await buildFormulaWithHelp(page, formula);
     await fillAndSubmit(
       page,
       "#new-result-form",
-      { symbol, name, unit: symbol === "g" ? "m/s2" : "m", formula },
+      symbol === "g" ? { symbol, name, unit: "m/s2" } : { symbol, name, unit: "m", formula },
       { is_final: true },
     );
     await waitForStatus(page, "Mensurando agregado");
@@ -150,14 +168,21 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   const tabs = sPage.locator("#practice-part-tabs .part-tab");
   await tabs.nth(1).waitFor();
   assert((await tabs.count()) === 2, "la práctica debía mostrar las dos pestañas");
+  assert((await sPage.locator("#practica-subtitle").textContent()) === "Prueba E2E", "debajo del título va la descripción");
+  const help = (text) => sPage.locator(`#measurement-fields .form-help:text-is("${text}")`);
   const given = sPage.locator(".measurement-row--given").first();
   const measured = sPage.locator('#measurement-fields .measurement-row:not(.measurement-row--given):not([data-final-result])').first();
   await tabs.nth(0).click();
   assert((await given.isVisible()) && !(await measured.isVisible()), "la parte A debía mostrar L y ocultar T");
+  assert(
+    (await help("Ayuda de Parte A").isVisible()) && !(await help("Ayuda de Parte B").isVisible()),
+    "la parte A debía mostrar solo su ayuda",
+  );
   await given.locator(".measure-given-value").fill("1");
   await given.locator(".measure-given-u").fill("0.002");
   await tabs.nth(1).click();
   assert((await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y también L, que es compartida");
+  assert(await help("Ayuda de Seccion B").isVisible(), "la sección B debía mostrar su ayuda");
   await measured.locator(".measure-value").first().fill("2.006");
   const finalG = sPage.locator('[data-final-result="1"][data-symbol="g"]');
   assert(await finalG.isVisible(), "el resultado final g debía verse en la parte B");

@@ -10,8 +10,24 @@ import {
   analysisKindLabel,
   formatDate,
   compareOptionGroups,
+  formulaScope,
+  formulaHelpHtml,
+  formatSymbolHtml,
+  QUANTITY_ROLES,
+  quantityRole,
+  roleFlags,
+  practiceGuideSteps,
+  guideStepOrNext,
+  POINT_KINDS,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
+
+let dropped = new Set();
+let submitted = null;
+practiceWorkspace.addEventListener("submit", (e) => {
+  submitted = e.target;
+  setTimeout(() => { submitted = null; });
+}, true);
 
 const ANALYSIS_KINDS = ["estadistico", "regresion_lineal", "curva"];
 
@@ -22,8 +38,71 @@ function adminSymbolHtml(symbol) {
 function displaySymbolFieldHtml(item) {
   const symbols = state.practiceDefinition?.display_symbols ?? {};
   const shown = item && Object.hasOwn(symbols, item.symbol) ? symbols[item.symbol] : "";
-  return `<label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label>`;
+  const preview = formatSymbolHtml(shown || item?.symbol || "");
+  return `<div class="display-symbol-field"><label>Símbolo a mostrar <input name="display_symbol" value="${escapeHtml(shown)}" maxlength="40" placeholder="vacío = el símbolo" title="Con _ para subíndice: V_R_PP se ve como V con subíndice R,PP" /></label><span class="symbol-preview" aria-hidden="true">${preview}</span></div>`;
 }
+
+function formulaHelpFor(symbols) {
+  const def = state.practiceDefinition;
+  const known = new Set(
+    ["quantities", "intermediates", "results", "point_results", "aggregates"]
+      .flatMap((list) => (def?.[list] ?? []).map((item) => item.symbol))
+      .concat(["slope", "intercept"]),
+  );
+  return formulaHelpHtml(symbols, def?.formula_scopes?.functions ?? [], known);
+}
+
+function formulaFieldHtml(label, input, symbols) {
+  return `<div class="formula-field wide-field"><label>${label} ${input}</label>${formulaHelpFor(symbols)}</div>`;
+}
+
+let formulaCaret = null;
+
+function insertIntoFormula(button) {
+  const input = button.closest(".formula-field")?.querySelector("input");
+  if (!input) return;
+  const text = button.dataset.insert;
+  const end = input.value.length;
+  const caret =
+    document.activeElement === input
+      ? { start: input.selectionStart, end: input.selectionEnd }
+      : formulaCaret?.input === input
+        ? formulaCaret
+        : { start: end, end };
+  formulaCaret = null;
+  input.setRangeText(text, caret.start, caret.end, "end");
+  if (text.endsWith("()")) input.setSelectionRange(input.selectionEnd - 1, input.selectionEnd - 1);
+  input.focus();
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function refreshSymbolPreview(input) {
+  const preview = input.closest(".display-symbol-field")?.querySelector(".symbol-preview");
+  if (!preview) return;
+  preview.innerHTML = formatSymbolHtml(input.value.trim() || input.form?.elements.symbol?.value.trim() || "");
+}
+
+practiceWorkspace.addEventListener("focusin", (e) => {
+  const field = e.target.closest?.(".formula-field");
+  const input = field?.querySelector("input");
+  if (!field || e.target === input) formulaCaret = null;
+  else if (e.relatedTarget === input) formulaCaret = { input, start: input.selectionStart, end: input.selectionEnd };
+  else if (!field.contains(e.relatedTarget)) formulaCaret = null;
+});
+practiceWorkspace.addEventListener("mousedown", (e) => {
+  if (e.target.closest("[data-insert]")) e.preventDefault();
+});
+practiceWorkspace.addEventListener("click", (e) => {
+  const button = e.target.closest("[data-insert]");
+  if (button) insertIntoFormula(button);
+});
+practiceWorkspace.addEventListener("input", (e) => {
+  if (e.target.name === "display_symbol") refreshSymbolPreview(e.target);
+  if (e.target.name === "symbol") {
+    const field = e.target.form?.elements.display_symbol;
+    if (field) refreshSymbolPreview(field);
+  }
+});
 
 function selectFieldHtml(label, name, options, current) {
   const items = options
@@ -53,6 +132,7 @@ const SYMBOL_FORMULA_KINDS = {
     urlSegment: "point-results",
     idParam: "pid",
     dataAttr: "point-result",
+    scopeKind: "point_result",
     listOf: (def) => def?.point_results ?? [],
     emptyText: "Sin magnitudes derivadas por punto.",
     symbolPlaceholder: "Re",
@@ -66,6 +146,7 @@ const SYMBOL_FORMULA_KINDS = {
     urlSegment: "aggregates",
     idParam: "aid",
     dataAttr: "aggregate",
+    scopeKind: "aggregate",
     listOf: (def) => def?.aggregates ?? [],
     emptyText: "Sin mensurandos agregados.",
     symbolPlaceholder: "Re_medio",
@@ -80,6 +161,7 @@ const SYMBOL_FORMULA_KINDS = {
     urlSegment: "intermediates",
     idParam: "iid",
     dataAttr: "intermediate",
+    scopeKind: "intermediate",
     listOf: (def) => def?.intermediates ?? [],
     emptyText: "Sin magnitudes intermedias.",
     symbolPlaceholder: "Q",
@@ -106,7 +188,7 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       ${displaySymbolFieldHtml(item)}
       <label>Nombre <input name="name" value="${v("name")}" placeholder="${kind.namePlaceholder}" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="(vacío = adimensional)" /></label>
-      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" /></label>
+      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" />`, formulaScope(state.practiceDefinition, kind.scopeKind, { id: item?.id ?? "" }))}
       ${
         (kind.flags ?? [])
           .map((f) => `<label class="checkbox-field"><input name="${f.field}" type="checkbox" ${item?.[f.field] ? "checked" : ""} /> ${f.label}</label>`)
@@ -125,7 +207,7 @@ function renderSymbolFormulaList(kind, def, practiceId) {
   if (items.length === 0) return `<p class="submission-meta">${kind.emptyText}</p>`;
   const flags = kind.flags ?? [];
   const colspan = 3 + flags.length;
-  const rows = items.flatMap((item) => {
+  const rows = items.flatMap((item, i) => {
     const editing = isEditing(kind.kind, item.id);
     const finalCell = flags.map((f) => `<td>${item[f.field] ? "Sí" : "—"}</td>`).join("");
     const baseRow = `
@@ -134,6 +216,7 @@ function renderSymbolFormulaList(kind, def, practiceId) {
         <td><code>${escapeHtml(item.formula)}</code></td>
         ${finalCell}
         <td class="directory-actions">
+          ${moveButtonsHtml(kind.urlSegment, item.id, i, items.length)}
           <button type="button" data-edit-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">${editing ? "Cerrar" : "Editar"}</button>
           <button type="button" class="btn-danger" data-delete-${kind.dataAttr} data-${kind.idParam}="${escapeHtml(item.id)}">Eliminar</button>
         </td>
@@ -167,10 +250,16 @@ function symbolFormulaPayloadFromForm(form, kind) {
 }
 
 async function runPracticeAction(fn, successMsg, { resetEditing = false } = {}) {
+  const form = submitted;
+  submitted = null;
   try {
     const message = await fn();
-    if (resetEditing) state.editing = { kind: null, id: null };
+    const edit = practiceWorkspace.querySelector(".scale-edit-cell form");
+    if (resetEditing && (!edit || edit === form || !formFields(edit).some(fieldChanged))) {
+      state.editing = { kind: null, id: null };
+    }
     state.practiceActionStatus = typeof message === "string" ? message : successMsg;
+    if (form) dropped.add(formKey(form));
   } catch (error) {
     state.practiceActionStatus = error.message;
   }
@@ -219,11 +308,13 @@ async function deleteSymbolFormulaRow(kind, id, practiceId) {
 }
 
 export function renderPracticesPage() {
+  const discarded = dropped;
+  dropped = new Set();
   renderPracticeDirectory();
-  if (!practiceWorkspace) return;
 
   const practice = state.practices.find((p) => p.id === state.activePracticeId);
   if (!practice) {
+    delete practiceWorkspace.dataset.practiceId;
     practiceWorkspace.innerHTML = "";
     practiceWorkspace.classList.add("hidden");
     practiceCatalog?.closest(".panel")?.classList.remove("hidden");
@@ -248,14 +339,18 @@ export function renderPracticesPage() {
   }
 
   const kind = def?.analysis_kind;
-  const pointBased = kind === "regresion_lineal" || kind === "curva";
+  const pointBased = POINT_KINDS.includes(kind);
   const openPanels = new Set(
     [...practiceWorkspace.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel),
   );
+  const typed = practiceWorkspace.dataset.practiceId === practice.id ? typedFields(discarded) : [];
+  const guide = guideFor(practice.id, def);
+  practiceWorkspace.dataset.practiceId = practice.id;
   practiceWorkspace.innerHTML = `
     <div class="workspace-head">
       <div>
         <button type="button" class="back-link" id="practice-workspace-back">Volver al listado</button>
+        ${guide ? "" : `<button type="button" class="link-button" data-guide-start>Modo guiado</button>`}
         <h3>${escapeHtml(practice.name)}</h3>
         <p class="submission-meta">${escapeHtml(practice.description)}</p>
         ${practiceLifecycleActions(practice, def)}
@@ -277,23 +372,24 @@ export function renderPracticesPage() {
     </div>
 
     ${state.practiceActionStatus ? `<p class="inline-status practice-status" role="status">${escapeHtml(state.practiceActionStatus)}</p>` : ""}
+    ${guide ? guideBarHtml(guide) : ""}
 
-    <details class="panel workspace-panel add-panel" data-add-panel="practice-info">
+    <details class="panel workspace-panel add-panel" data-add-panel="practice-info" data-guide-step="datos">
       <summary>Datos de la práctica</summary>
       ${renderPracticeInfoForm(practice)}
     </details>
 
-    <section class="panel workspace-panel">
+    <section class="panel workspace-panel" data-guide-step="datos">
       <h3 class="admin-section-title">Configuración del análisis</h3>
       ${def?.parts?.length
-        ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes y secciones».</p>`
+        ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes».</p>`
         : renderAnalysisKindForm(practice, def)}
-      ${kind === "regresion_lineal" ? renderRegressionFormulasForm(practice, def) : ""}
       ${kind == null || kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
     </section>
 
     ${renderLayoutSection(practice, def)}
     ${adminSection({
+      step: "magnitudes",
       id: "quantity",
       title: "Magnitudes de entrada",
       count: def?.quantities?.length ?? 0,
@@ -302,8 +398,14 @@ export function renderPracticesPage() {
       form: renderQuantityForm(null, practice.id),
     })}
     ${pointBased ? renderIntermediatesSection(practice, def) : ""}
+    ${kind === "regresion_lineal" ? `
+      <section class="panel workspace-panel" data-guide-step="serie">
+        <h3 class="admin-section-title">Ejes del ajuste</h3>
+        ${renderRegressionFormulasForm(practice, def)}
+      </section>` : ""}
     ${kind === "curva" ? renderCurvesSection(practice, def) : ""}
     ${adminSection({
+      step: "mensurandos",
       id: "result",
       title: "Mensurandos derivados",
       count: def?.results?.length ?? 0,
@@ -317,11 +419,18 @@ export function renderPracticesPage() {
   for (const details of practiceWorkspace.querySelectorAll("details[data-add-panel]")) {
     if (openPanels.has(details.dataset.addPanel)) details.open = true;
   }
+  if (guide) applyGuide(guide);
 
   practiceWorkspace.classList.remove("hidden");
   practiceCatalog?.closest(".panel")?.classList.add("hidden");
 
-  practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", closePracticeWorkspace);
+  practiceWorkspace.querySelector("#practice-workspace-back")?.addEventListener("click", () => {
+    if (confirmDiscardForms()) closePracticeWorkspace();
+  });
+  practiceWorkspace.querySelector("[data-guide-start]")?.addEventListener("click", () => {
+    goToGuideStep(practice.id, state.practiceGuideLastStep ?? "datos");
+  });
+  bindGuideBar(practice.id);
   practiceWorkspace.querySelector("#practice-info-form")?.addEventListener("submit", savePracticeInfo);
   practiceWorkspace.querySelectorAll("[data-practice-status]").forEach((btn) => {
     btn.addEventListener("click", () => setPracticeStatus(btn.dataset.practiceId, btn.dataset.practiceStatus));
@@ -331,6 +440,7 @@ export function renderPracticesPage() {
     const { openDraftPreview } = await import("./forms.js");
     await openDraftPreview(practiceId);
   });
+  renderProblems(practice.id);
   if (def?.current_version) renderDraftChanges(practice.id);
   practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
     deletePractice(e.currentTarget.dataset.practiceId);
@@ -343,7 +453,14 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector('#new-result-form [name="section_id"]')?.addEventListener("change", (e) => {
     const section = def?.sections?.find((s) => s.id === e.target.value) ?? null;
     const select = e.target.form.elements.compare_with;
-    select.innerHTML = compareOptionsHtml(compareOptionGroups(def, { section }, select.value), select.value);
+    const { value } = select;
+    const initial = [...select.options].find((o) => o.defaultSelected)?.value ?? "";
+    select.innerHTML = compareOptionsHtml(compareOptionGroups(def, { section }, value), initial);
+    select.value = value;
+    const help = e.target.form.querySelector(".formula-help");
+    const open = help.open;
+    help.outerHTML = formulaHelpFor(formulaScope(def, "result", { section }));
+    e.target.form.querySelector(".formula-help").open = open;
   });
   practiceWorkspace.querySelector("#new-curve-form")?.addEventListener("submit", saveNewCurve);
 
@@ -352,11 +469,7 @@ export function renderPracticesPage() {
       .querySelector(`#new-${kind.dataAttr}-form`)
       ?.addEventListener("submit", (event) => saveNewSymbolFormulaRow(kind, event));
     practiceWorkspace.querySelectorAll(`[data-edit-${kind.dataAttr}]`).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset[kind.idParam];
-        state.editing = isEditing(kind.kind, id) ? { kind: null, id: null } : { kind: kind.kind, id };
-        renderPracticesPage();
-      });
+      btn.addEventListener("click", () => toggleEditing(kind.kind, btn.dataset[kind.idParam]));
     });
     practiceWorkspace.querySelectorAll(`[data-delete-${kind.dataAttr}]`).forEach((btn) => {
       btn.addEventListener("click", () => deleteSymbolFormulaRow(kind, btn.dataset[kind.idParam], practice.id));
@@ -370,11 +483,7 @@ export function renderPracticesPage() {
   }
 
   practiceWorkspace.querySelectorAll("[data-edit-curve]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.cid;
-      state.editing = isEditing("curve", id) ? { kind: null, id: null } : { kind: "curve", id };
-      renderPracticesPage();
-    });
+    btn.addEventListener("click", () => toggleEditing("curve", btn.dataset.cid));
   });
   practiceWorkspace.querySelectorAll("[data-delete-curve]").forEach((btn) => {
     btn.addEventListener("click", () => deletePracticeCurve(btn.dataset.cid, practice.id));
@@ -402,11 +511,7 @@ export function renderPracticesPage() {
   });
 
   practiceWorkspace.querySelectorAll("[data-edit-quantity]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.qid;
-      state.editing = isEditing("quantity", id) ? { kind: null, id: null } : { kind: "quantity", id };
-      renderPracticesPage();
-    });
+    btn.addEventListener("click", () => toggleEditing("quantity", btn.dataset.qid));
   });
   practiceWorkspace.querySelectorAll("[data-delete-quantity]").forEach((btn) => {
     btn.addEventListener("click", () => deletePracticeQuantity(btn.dataset.qid, practice.id));
@@ -418,15 +523,11 @@ export function renderPracticesPage() {
     form.addEventListener("submit", saveEditQuantity);
   });
   practiceWorkspace.querySelectorAll("#new-quantity-form, [data-edit-quantity-form]").forEach((form) => {
-    syncStopwatchOption(form);
-    form.addEventListener("input", () => syncStopwatchOption(form));
+    syncQuantityForm(form, { initial: true });
+    form.addEventListener("input", () => syncQuantityForm(form));
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.rid;
-      state.editing = isEditing("result", id) ? { kind: null, id: null } : { kind: "result", id };
-      renderPracticesPage();
-    });
+    btn.addEventListener("click", () => toggleEditing("result", btn.dataset.rid));
   });
   practiceWorkspace.querySelectorAll("[data-delete-result]").forEach((btn) => {
     btn.addEventListener("click", () => deletePracticeResult(btn.dataset.rid, practice.id));
@@ -437,6 +538,164 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("[data-edit-result-form]").forEach((form) => {
     form.addEventListener("submit", saveEditResult);
   });
+  restoreTypedFields(typed);
+}
+
+function formFields(form) {
+  return [...form.querySelectorAll("input, select, textarea")];
+}
+
+function formKey(form) {
+  const ids = Object.entries(form.dataset).filter(([k]) => /id$/i.test(k)).map(([k, v]) => `${k}=${v}`);
+  return [form.id, ...ids].join("&");
+}
+
+function typedFields(skip) {
+  return [...practiceWorkspace.querySelectorAll("form")]
+    .filter((form) => !skip.has(formKey(form)))
+    .flatMap((form) => formFields(form)
+      .filter((el) => el.name && fieldChanged(el))
+      .map((el) => ({ form: formKey(form), name: el.name, value: el.value, checked: el.checked })));
+}
+
+function restoreTypedFields(typed) {
+  const forms = new Map([...practiceWorkspace.querySelectorAll("form")].map((form) => [formKey(form), form]));
+  for (const { form, name, value, checked } of typed) {
+    const el = (forms.has(form) ? formFields(forms.get(form)) : []).find((e) => e.name === name && (e.type !== "radio" || e.value === value));
+    if (!el || (el.tagName === "SELECT" && ![...el.options].some((o) => o.value === value))) continue;
+    if (el.type === "checkbox" || el.type === "radio") el.checked = checked;
+    else el.value = value;
+    for (const type of ["input", "change"]) el.dispatchEvent(new Event(type, { bubbles: true }));
+  }
+}
+
+const GUIDE_STEP_OF_PROBLEM = {
+  layout: "magnitudes",
+  quantity: "magnitudes",
+  intermediate: "serie",
+  curve: "serie",
+  axes: "serie",
+  result: "mensurandos",
+  pointResult: "mensurandos",
+  aggregate: "mensurandos",
+};
+
+function guideFor(practiceId, def) {
+  if (state.practiceGuide?.practiceId !== practiceId) return null;
+  const steps = practiceGuideSteps(def);
+  state.practiceGuide.step = guideStepOrNext(def, state.practiceGuide.step);
+  return { steps, index: steps.findIndex((s) => s.id === state.practiceGuide.step) };
+}
+
+function fieldChanged(el) {
+  if (el.type === "hidden" || el.disabled) return false;
+  if (el.tagName === "SELECT") {
+    const options = [...el.options];
+    const marked = options.findLastIndex((o) => o.defaultSelected);
+    return el.selectedIndex !== (marked >= 0 ? marked : options.findIndex((o) => !o.disabled));
+  }
+  if (el.type === "checkbox" || el.type === "radio") return el.checked !== el.defaultChecked;
+  const initial = el.tagName === "INPUT" ? el.defaultValue.replace(/[\r\n]/g, "") : el.defaultValue;
+  return el.value !== initial;
+}
+
+export function confirmDiscardForms(scope = "form") {
+  const dirty = [...practiceWorkspace.querySelectorAll(scope)].filter((form) => formFields(form).some(fieldChanged));
+  if (!dirty.length) return true;
+  if (!window.confirm("Hay datos sin guardar en un formulario. ¿Descartarlos?")) return false;
+  dirty.forEach((form) => dropped.add(formKey(form)));
+  return true;
+}
+
+function toggleEditing(kind, id) {
+  if (!confirmDiscardForms(".scale-edit-cell form")) return;
+  state.editing = isEditing(kind, id) ? { kind: null, id: null } : { kind, id };
+  renderPracticesPage();
+}
+
+function setGuideStep(step) {
+  const next = guideStepOrNext(state.practiceDefinition, step);
+  const closesEdit = state.editing.kind && GUIDE_STEP_OF_PROBLEM[state.editing.kind] !== next;
+  if (closesEdit && !confirmDiscardForms(".scale-edit-cell form")) return false;
+  state.practiceGuide.step = next;
+  if (closesEdit) state.editing = { kind: null, id: null };
+  return true;
+}
+
+function bindGuideBar(practiceId) {
+  practiceWorkspace.querySelectorAll("[data-guide-go]").forEach((btn) => {
+    btn.addEventListener("click", () => goToGuideStep(practiceId, btn.dataset.guideGo));
+  });
+  practiceWorkspace.querySelector("[data-guide-exit]")?.addEventListener("click", () => {
+    state.practiceGuideLastStep = state.practiceGuide?.step ?? null;
+    state.practiceGuide = null;
+    renderPracticesPage();
+  });
+}
+
+function showGuideStep(practiceId) {
+  const bar = practiceWorkspace.querySelector(".practice-guide");
+  if (!bar) return renderPracticesPage();
+  const guide = guideFor(practiceId, state.practiceDefinition);
+  bar.outerHTML = guideBarHtml(guide);
+  bindGuideBar(practiceId);
+  applyGuide(guide);
+}
+
+function goToGuideStep(practiceId, step) {
+  const previous = state.practiceGuide;
+  const editing = state.editing;
+  state.practiceGuide = { practiceId, step: previous?.step ?? step };
+  if (!setGuideStep(step)) {
+    state.practiceGuide = previous;
+    return;
+  }
+  if (previous && state.editing === editing) showGuideStep(practiceId);
+  else renderPracticesPage();
+  openStepPanels(state.practiceGuide.step);
+  practiceWorkspace.scrollIntoView({ block: "start" });
+}
+
+function openStepPanels(step) {
+  for (const block of practiceWorkspace.querySelectorAll(`[data-guide-step="${step}"]`)) {
+    if (block.matches("details")) {
+      block.open = true;
+      continue;
+    }
+    const empty = block.querySelector(".count-badge")?.textContent.trim() === "0";
+    const add = block.querySelector("details.add-panel");
+    if (add && empty) add.open = true;
+  }
+}
+
+function guideBarHtml({ steps, index }) {
+  const current = steps[index];
+  const prev = steps[index - 1];
+  const next = steps[index + 1];
+  const item = (s, i) => {
+    const here = i === index;
+    return `<li><button type="button" class="link-button${here ? " practice-guide-current" : ""}" data-guide-go="${s.id}"${here ? ' aria-current="step"' : ""}>${i + 1}. ${escapeHtml(s.title)}</button></li>`;
+  };
+  return `
+    <nav class="panel workspace-panel practice-guide" aria-label="Pasos para crear la práctica">
+      <ol class="practice-guide-steps">${steps.map(item).join("")}</ol>
+      <p class="submission-meta">${escapeHtml(current.help)}</p>
+      <div class="detail-actions">
+        ${prev ? `<button type="button" data-guide-go="${prev.id}">Anterior</button>` : ""}
+        ${next ? `<button type="button" data-guide-go="${next.id}">Siguiente: ${escapeHtml(next.title)}</button>` : ""}
+        <button type="button" class="link-button" data-guide-exit>Ver todo</button>
+      </div>
+    </nav>`;
+}
+
+function applyGuide({ steps, index }) {
+  const step = steps[index].id;
+  for (const block of practiceWorkspace.querySelectorAll("[data-guide-step]")) {
+    block.classList.toggle("hidden", block.dataset.guideStep !== step);
+  }
+  for (const el of practiceWorkspace.querySelectorAll(".practice-lifecycle, #practice-draft-changes")) {
+    el.classList.toggle("hidden", step !== "revisar");
+  }
 }
 
 const STATUS_LABELS = { borrador: "Borrador", publicada: "Publicada", archivada: "Archivada" };
@@ -522,7 +781,7 @@ async function createPractice(event) {
   try {
     const created = await postJson("/api/practices", payload);
     await refreshPractices();
-    await openPracticeWorkspace(created.id);
+    await openPracticeWorkspace(created.id, { guided: true });
     state.practiceActionStatus = "Práctica creada en borrador";
     renderPracticesPage();
   } catch (error) {
@@ -555,6 +814,7 @@ function practiceLifecycleActions(practice, def) {
   const publishedActions = practice.status === "borrador" ? "" : versionInfo;
   const tryDraft = `<button type="button" data-practice-try-draft data-practice-id="${id}">Probar el borrador</button>`;
   return `<div class="practice-lifecycle">${practiceStatusChip(practice.status)} ${buttons[practice.status] ?? ""} ${publishedActions} ${tryDraft}</div>
+    <div id="practice-problems"></div>
     <div id="practice-draft-changes"></div>`;
 }
 
@@ -574,6 +834,75 @@ function draftChangesMarkup(practiceId, { version, kind, changes, submissions, v
       </div>
       <button type="button" data-practice-publish-version data-practice-id="${id}">${structural ? `Publicar versión ${version + 1}` : `Actualizar versión ${version}`}</button>
     </div>`;
+}
+
+const EDITABLE_KINDS = new Set(["quantity", "result", "curve", "intermediate", "pointResult", "aggregate"]);
+let problemsRequest = 0;
+let lastProblems = null;
+
+function problemItemHtml({ message }, k) {
+  return `<li><button type="button" class="link-button" data-problem="${k}">${escapeHtml(message)}</button></li>`;
+}
+
+function goToProblem({ kind, id }) {
+  const guided = state.practiceGuide;
+  const steps = guided ? practiceGuideSteps(state.practiceDefinition).map((s) => s.id) : [];
+  const step = steps.includes(GUIDE_STEP_OF_PROBLEM[kind]) ? GUIDE_STEP_OF_PROBLEM[kind] : null;
+  const moves = step && guided.step !== step;
+  const editable = id && EDITABLE_KINDS.has(kind);
+  if (editable && state.editing.kind && !isEditing(kind, id) && !confirmDiscardForms(".scale-edit-cell form")) return;
+  const editing = state.editing;
+  if (editable) state.editing = { kind, id };
+  if (moves && !setGuideStep(step)) return;
+  if (state.editing !== editing) renderPracticesPage();
+  else if (moves) showGuideStep(guided.practiceId);
+  const parts = '[data-add-panel="part"]';
+  let target = { axes: "#practice-regression-form", layout: '[data-add-panel="quantity"]' }[kind] ?? `[data-add-panel="${kind}"]`;
+  if (editable) {
+    const cell = practiceWorkspace.querySelector(".scale-edit-cell");
+    if (cell) return cell.scrollIntoView({ block: "center" });
+    state.editing = { kind: null, id: null };
+    target = parts;
+    if (guided) {
+      setGuideStep("partes");
+      showGuideStep(guided.practiceId);
+    }
+  }
+  const el = practiceWorkspace.querySelector(target) ?? practiceWorkspace.querySelector(parts);
+  if (el?.tagName === "DETAILS" && el.matches(`[data-add-panel="${kind}"]`)) el.open = true;
+  (el?.closest("section") ?? el)?.scrollIntoView({ block: "start" });
+}
+
+async function renderProblems(practiceId) {
+  const box = practiceWorkspace.querySelector("#practice-problems");
+  if (!box) return;
+  if (lastProblems?.practiceId === practiceId) paintProblems(box, lastProblems.problems);
+  const request = ++problemsRequest;
+  try {
+    const problems = await fetchJson(`/api/practices/${practiceId}/problems`);
+    if (request !== problemsRequest) return;
+    lastProblems = { practiceId, problems };
+    paintProblems(box, problems);
+  } catch (error) {
+    if (request === problemsRequest) box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function paintProblems(box, problems) {
+  if (!problems.length) {
+    box.innerHTML = `<p class="submission-meta practice-problems-ok">Sin problemas: la definición está completa.</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="edit-banner practice-problems" role="status">
+      <div>
+        <strong>Para publicar falta resolver (${problems.length})</strong>
+        <ul>${problems.map(problemItemHtml).join("")}</ul>
+      </div>
+    </div>`;
+  box.querySelectorAll("[data-problem]").forEach((btn) => {
+    btn.addEventListener("click", () => goToProblem(problems[Number(btn.dataset.problem)]));
+  });
 }
 
 let lastDraftChanges = null;
@@ -617,7 +946,7 @@ function renderPracticeInfoForm(practice) {
     <form id="practice-info-form" class="detail-form detail-form-grid">
       <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
       <label>Nombre <input name="name" value="${escapeHtml(practice.name)}" required /></label>
-      <label>Descripción <input name="description" value="${escapeHtml(practice.description)}" /></label>
+      <label>Descripción (el alumno la ve debajo del título) <input name="description" value="${escapeHtml(practice.description)}" /></label>
       <div class="detail-actions"><button type="submit">Guardar</button></div>
     </form>`;
 }
@@ -694,9 +1023,9 @@ function renderRegressionFormulasForm(practice, def) {
   return `
     <form id="practice-regression-form" class="detail-form detail-form-grid">
       <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
-      <label>Fórmula eje X <input name="x_formula" value="${x}" placeholder="2*pi*f" /></label>
-      <label>Fórmula eje Y <input name="y_formula" value="${y}" placeholder="b / math::sqrt(a*a - b*b)" /></label>
-      <p class="submission-meta">Usá los símbolos de las magnitudes. Disponibles: <code>pi</code>, <code>e</code> y funciones <code>math::*</code> (p. ej. <code>math::sqrt</code>). La pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code> en los mensurandos.</p>
+      ${formulaFieldHtml("Fórmula eje X", `<input name="x_formula" value="${x}" placeholder="2*pi*f" />`, formulaScope(def, "axis"))}
+      ${formulaFieldHtml("Fórmula eje Y", `<input name="y_formula" value="${y}" placeholder="b / math::sqrt(a*a - b*b)" />`, formulaScope(def, "axis"))}
+      <p class="submission-meta">En los mensurandos, la pendiente del ajuste se referencia como <code>slope</code> y el intercepto como <code>intercept</code>.</p>
       <div class="detail-actions">
         <button type="submit">Guardar fórmulas</button>
       </div>
@@ -720,9 +1049,9 @@ function renderOperatorCountForm(practice, def) {
   `;
 }
 
-function adminSection({ id, title, count, help = "", list, addLabel, form }) {
+function adminSection({ step, id, title, count, help = "", list, addLabel, form }) {
   return `
-    <section class="panel workspace-panel admin-section">
+    <section class="panel workspace-panel admin-section" data-guide-step="${step}">
       <h3 class="admin-section-title">${title} <span class="count-badge">${count}</span></h3>
       ${help ? `<p class="submission-meta">${help}</p>` : ""}
       ${list}
@@ -736,6 +1065,7 @@ function adminSection({ id, title, count, help = "", list, addLabel, form }) {
 function symbolFormulaSection(kindKey, practice, def, { title, help, addLabel }) {
   const kind = SYMBOL_FORMULA_KINDS[kindKey];
   return adminSection({
+    step: kindKey === "intermediate" ? "serie" : "mensurandos",
     id: kindKey,
     title,
     count: kind.listOf(def).length,
@@ -772,6 +1102,7 @@ function renderIntermediatesSection(practice, def) {
 
 function renderCurvesSection(practice, def) {
   return adminSection({
+    step: "serie",
     id: "curve",
     title: "Curvas",
     count: def?.curves?.length ?? 0,
@@ -791,8 +1122,8 @@ function renderCurveForm(curve, practiceId) {
     <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${curve ? `<input name="cid" type="hidden" value="${escapeHtml(curve.id)}" />` : ""}
-      <label>Fórmula eje X <input name="x_formula" value="${x}" required placeholder="math::log10(2*pi*f)" /></label>
-      <label>Fórmula eje Y <input name="y_formula" value="${y}" required placeholder="VR / Vg" /></label>
+      ${formulaFieldHtml("Fórmula eje X", `<input name="x_formula" value="${x}" required placeholder="math::log10(2*pi*f)" />`, formulaScope(state.practiceDefinition, "axis"))}
+      ${formulaFieldHtml("Fórmula eje Y", `<input name="y_formula" value="${y}" required placeholder="VR / Vg" />`, formulaScope(state.practiceDefinition, "axis"))}
       <label class="detail-form-checkbox">
         <input type="checkbox" name="x_log" ${curve?.x_log ? "checked" : ""} />
         Eje X logarítmico (barridos en frecuencia)
@@ -840,12 +1171,34 @@ function renderCurvesList(def, practiceId) {
   `;
 }
 
+function seriesPractice() {
+  return POINT_KINDS.includes(state.practiceDefinition?.analysis_kind);
+}
+
+function pointBasedFor(qty) {
+  const def = state.practiceDefinition;
+  if (!seriesPractice()) return false;
+  if (!def.parts?.length) return true;
+  const hasSeries = def.parts.some((p) => POINT_KINDS.includes(p.effective_kind));
+  const section = qty && def.sections?.find((sec) => sec.quantities?.includes(qty.symbol));
+  const part = section?.part_id && def.parts.find((p) => p.id === section.part_id);
+  return part ? POINT_KINDS.includes(part.effective_kind) : hasSeries;
+}
+
+function roleSelectHtml(qty) {
+  const pointBased = pointBasedFor(qty);
+  const current = qty ? quantityRole(qty, pointBased) : pointBased ? "serie" : "replicas";
+  const options = QUANTITY_ROLES.filter((r) => pointBased || !r.series).map((r) => [r.id, r.label]);
+  return selectFieldHtml("¿Cómo se ingresa?", "role", options, current).replace("<label>", '<label class="wide-field">');
+}
+
 function renderQuantityForm(qty, practiceId) {
   const v = (f) => qty ? escapeHtml(String(qty[f] ?? "")) : "";
   const formId = qty ? "edit-quantity-form" : "new-quantity-form";
   const formAttr = qty ? `data-edit-quantity-form data-qid="${escapeHtml(qty.id)}"` : "";
+  const kept = `data-per-point="${qty?.per_point === false ? 0 : 1}" data-repeated="${qty?.repeated ? 1 : 0}" data-given="${qty?.is_given ? 1 : 0}" data-replicas="${qty?.replicas_per_point ?? ""}"`;
   return `
-    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr}>
+    <form id="${formId}" class="detail-form detail-form-grid" ${formAttr} ${kept}>
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
       ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : ""}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="l" /></label>
@@ -853,34 +1206,19 @@ function renderQuantityForm(qty, practiceId) {
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Longitud del cordón" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm (vacío = adimensional)" /></label>
       <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" /></label>
-      <label class="detail-form-checkbox">
-        <input type="checkbox" name="repeated" ${qty ? (qty.repeated ? "checked" : "") : "checked"} />
-        Admite réplicas (tipo A)
-      </label>
-      <label>Réplicas por punto (regresión/curva)
-        <input name="replicas_per_point" type="number" min="1" step="1" value="${v("replicas_per_point")}" placeholder="sin grilla" />
-      </label>
-      <label class="detail-form-checkbox">
-        <input type="checkbox" name="per_point" ${qty ? (qty.per_point ? "checked" : "") : "checked"} />
-        Se mide por punto (regresión/curva; desmarcá para escalar compartido)
-      </label>
-      <label class="detail-form-checkbox">
-        <input type="checkbox" name="is_given" ${qty?.is_given ? "checked" : ""} />
-        Dato dado (valor ± U cargado a mano, sin instrumento ni réplicas)
-      </label>
-      <label class="detail-form-checkbox">
-        <input type="checkbox" name="has_uncertainty" ${qty ? (qty.has_uncertainty ? "checked" : "") : "checked"} />
-        Tiene incertidumbre (solo aplica si es dato dado; desmarcá para pedir solo "Valor")
+      ${roleSelectHtml(qty)}
+      <label data-for-roles="serie_replicas">Réplicas por punto
+        <input name="replicas_per_point" type="number" min="1" step="1" required value="${v("replicas_per_point")}" placeholder="cantidad" />
       </label>
       <label class="detail-form-checkbox">
         <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />
         Opcional (puede quedar sin lecturas sin bloquear la entrega)
       </label>
-      <label>Valor inicial (precargado en el formulario del alumno)
-        <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" />
+      <label>Valor inicial
+        <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" title="Se precarga en el formulario del alumno" />
       </label>
-      <label>Ranuras del instrumento (el valor es un entero de 1 a N, en la unidad de arriba)
-        <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" />
+      <label data-for-roles="catedra constante">Ranuras
+        <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" title="El valor es un entero de 1 a N, en la unidad de la magnitud" />
       </label>
       ${selectFieldHtml("Rótulo en el formulario", "label_mode", [
         ["nombre", "Nombre"],
@@ -911,7 +1249,7 @@ function renderQuantitiesList(def, practiceId) {
         <td>${inlineMathHtml(q.name)}</td>
         <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
-        <td>${q.repeated ? "Sí" : "No"}</td>
+        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedFor(q))).short}</td>
         <td>${sectionSelectHtml(def, "quantities", q)}</td>
         <td class="directory-actions">
           ${moveButtonsHtml("quantities", q.id, i, quantities.length)}
@@ -929,7 +1267,7 @@ function renderQuantitiesList(def, practiceId) {
     <div class="data-table-wrap">
       <table class="data-table">
         <thead>
-          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Magnitud</th><th>Réplicas</th><th>Sección</th><th>Acciones</th></tr>
+          <tr><th>Símbolo</th><th>Nombre</th><th>Unidad</th><th>Magnitud</th><th>Cómo se ingresa</th><th>Sección</th><th>Acciones</th></tr>
         </thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -969,8 +1307,8 @@ function renderResultForm(res, practiceId, def = null) {
       ${displaySymbolFieldHtml(res)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Área transversal" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm2 (vacío = adimensional)" /></label>
-      <label>Fórmula <input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" /></label>
-      <p class="submission-meta">Podés usar magnitudes y otros mensurandos (p. ej. <code>I_teo*R</code>); la incertidumbre se propaga desde las magnitudes.</p>
+      ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="l*a + l*b" />`, formulaScope(def, "result", { symbol: res?.symbol ?? "" }))}
+      <p class="submission-meta">La incertidumbre se propaga desde las magnitudes.</p>
       ${res ? "" : newResultSectionHtml(def)}
       <label>Tolerancia (%)
         <input name="tolerance" type="number" min="0" step="any"
@@ -1037,8 +1375,10 @@ function renderResultsList(def, practiceId) {
   `;
 }
 
-export async function openPracticeWorkspace(practiceId) {
+export async function openPracticeWorkspace(practiceId, { guided = false } = {}) {
   state.activePracticeId = practiceId;
+  state.practiceGuide = guided ? { practiceId, step: "datos" } : null;
+  state.practiceGuideLastStep = null;
   state.practiceActionStatus = "";
   state.editing = { kind: null, id: null };
   state.practiceDefinition = null;
@@ -1047,16 +1387,22 @@ export async function openPracticeWorkspace(practiceId) {
   try {
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);
     renderPracticesPage();
+    if (state.practiceGuide) openStepPanels(state.practiceGuide.step);
   } catch (error) {
     withPracticeStatus(error.message);
   }
 }
 
-export function closePracticeWorkspace() {
+export function resetPracticeWorkspace() {
   state.activePracticeId = null;
+  state.practiceGuide = null;
   state.practiceDefinition = null;
   state.practiceActionStatus = "";
   state.editing = { kind: null, id: null };
+}
+
+export function closePracticeWorkspace() {
+  resetPracticeWorkspace();
   renderPracticesPage();
 }
 
@@ -1094,15 +1440,34 @@ async function savePracticeRegressionFormulas(event) {
   }, "Fórmulas de ajuste guardadas");
 }
 
-function syncStopwatchOption(form) {
-  const option = form.elements.input_widget.querySelector('option[value="cronometro"]');
-  option.disabled = form.elements.quantity.value !== "tiempo" || form.elements.is_given.checked;
-  if (option.disabled && option.selected) form.elements.input_widget.value = "teclado";
+function syncQuantityForm(form, { initial = false } = {}) {
+  const { elements } = form;
+  const role = elements.role.value;
+  const given = roleFlags(role, seriesPractice()).is_given;
+  const option = elements.input_widget.querySelector('option[value="cronometro"]');
+  option.disabled = elements.quantity.value !== "tiempo" || given;
+  if (option.disabled && option.selected) {
+    elements.input_widget.value = "teclado";
+    if (initial) {
+      option.defaultSelected = false;
+      elements.input_widget.selectedOptions[0].defaultSelected = true;
+    }
+  }
+  form.querySelectorAll("[data-for-roles]").forEach((label) => {
+    const applies = label.dataset.forRoles.split(" ").includes(role);
+    label.hidden = !applies;
+    label.querySelector("input").disabled = !applies;
+  });
 }
 
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
-  const repeated = "repeated" in raw;
+  const flags = roleFlags(raw.role, seriesPractice(), {
+    per_point: form.dataset.perPoint === "1",
+    repeated: form.dataset.repeated === "1",
+    is_given: form.dataset.given === "1",
+    replicas_per_point: Number(form.dataset.replicas) || null,
+  });
   const replicas = Number(raw.replicas_per_point);
   const slots = raw.slot_count ? Number(raw.slot_count) : null;
   if (slots != null && !Number.isInteger(slots)) {
@@ -1113,11 +1478,8 @@ function quantityPayloadFromForm(form) {
     name: raw.name,
     unit: raw.unit,
     quantity: raw.quantity || null,
-    repeated,
-    replicas_per_point: repeated && raw.replicas_per_point && replicas > 0 ? replicas : null,
-    per_point: "per_point" in raw,
-    is_given: "is_given" in raw,
-    has_uncertainty: "has_uncertainty" in raw,
+    ...flags,
+    replicas_per_point: raw.replicas_per_point && replicas > 0 ? replicas : null,
     optional: "optional" in raw,
     slot_count: slots,
     display_symbol: raw.display_symbol,
@@ -1244,6 +1606,7 @@ function renderLayoutSection(practice, def) {
       <td class="directory-primary">
         <form class="layout-inline-form" data-layout-form="parts" data-id="${escapeHtml(p.id)}">
           <input name="title" value="${escapeHtml(p.title)}" required aria-label="Título de la parte" />
+          <input name="help_text" value="${escapeHtml(p.help_text ?? "")}" placeholder="Texto de ayuda para el alumno (opcional)" aria-label="Ayuda de la parte" />
           <button type="submit">Guardar</button>
         </form>
       </td>
@@ -1265,6 +1628,7 @@ function renderLayoutSection(practice, def) {
         <form class="layout-inline-form" data-layout-form="sections" data-id="${escapeHtml(s.id)}">
           <input name="title" value="${escapeHtml(s.title)}" required aria-label="Título de la sección" />
           <select name="part_id" aria-label="Parte">${partOptionsHtml(def, s.part_id)}</select>
+          <input name="help_text" value="${escapeHtml(s.help_text ?? "")}" placeholder="Texto de ayuda para el alumno (opcional)" aria-label="Ayuda de la sección" />
           <button type="submit">Guardar</button>
         </form>
       </td>
@@ -1275,26 +1639,29 @@ function renderLayoutSection(practice, def) {
       </td>
     </tr>`);
   return `
-    <section class="panel workspace-panel admin-section">
-      <h3 class="admin-section-title">Partes y secciones <span class="count-badge">${parts.length}</span></h3>
-      <p class="submission-meta">Cada parte es una pestaña del formulario del alumno. Una sección agrupa magnitudes y resultados bajo un título; sin parte, se ve en todas las pestañas (datos compartidos). La sección de cada magnitud y mensurando se elige en sus tablas.</p>
-      <h4>Partes</h4>
-      <p class="submission-meta">Cada parte elige su análisis. Solo una puede ser de regresión o curva: es la que lleva la serie de datos (sus magnitudes por punto, intermedias, curvas y ajuste).</p>
+    <section class="panel workspace-panel admin-section" data-guide-step="partes">
+      <h3 class="admin-section-title">Partes <span class="count-badge">${parts.length}</span></h3>
+      <p class="submission-meta">Cada parte es una pestaña del formulario del alumno y elige su análisis. Solo una puede ser de regresión o curva: es la que lleva la serie de datos (sus magnitudes por punto, intermedias, curvas y ajuste).</p>
       ${layoutTable("<th>Título</th><th>Análisis</th><th>Acciones</th>", partRows, "Sin partes: el formulario va en una sola pestaña.")}
       <details class="add-panel" data-add-panel="part">
         <summary>Nueva parte</summary>
         <form id="new-part-form" class="detail-form detail-form-grid" data-layout-form="parts">
           <label>Título <input name="title" required placeholder="Parte 1: Arquímedes" /></label>
+          <label>Ayuda <input name="help_text" placeholder="Texto de ayuda para el alumno (opcional)" /></label>
           <div class="detail-actions"><button type="submit">Agregar</button></div>
         </form>
       </details>
-      <h4>Secciones</h4>
+    </section>
+    <section class="panel workspace-panel admin-section" data-guide-step="secciones">
+      <h3 class="admin-section-title">Secciones <span class="count-badge">${sections.length}</span></h3>
+      <p class="submission-meta">Una sección agrupa magnitudes y resultados bajo un título; sin parte, se ve en todas las pestañas (datos compartidos). La sección de cada magnitud y mensurando se elige en sus tablas.</p>
       ${layoutTable("<th>Título y parte</th><th>Elementos</th><th>Acciones</th>", sectionRows, "Sin secciones.")}
       <details class="add-panel" data-add-panel="section">
         <summary>Nueva sección</summary>
         <form id="new-section-form" class="detail-form detail-form-grid" data-layout-form="sections">
           <label>Título <input name="title" required placeholder="Datos comunes" /></label>
           <label>Parte <select name="part_id">${partOptionsHtml(def, null)}</select></label>
+          <label>Ayuda <input name="help_text" placeholder="Texto de ayuda para el alumno (opcional)" /></label>
           <div class="detail-actions"><button type="submit">Agregar</button></div>
         </form>
       </details>
@@ -1307,7 +1674,8 @@ async function saveLayoutItem(event, practiceId) {
   const list = form.dataset.layoutForm;
   const id = form.dataset.id;
   const payload = Object.fromEntries(new FormData(form).entries());
-  const body = list === "parts" ? { title: payload.title } : { title: payload.title, part_id: payload.part_id || null };
+  const body = { title: payload.title, help_text: payload.help_text ?? "" };
+  if (list === "sections") body.part_id = payload.part_id || null;
   await runPracticeAction(async () => {
     await postJson(`/api/practices/${practiceId}/${list}${id ? `/${id}` : ""}`, body);
     state.practiceDefinition = await fetchJson(`/api/practices/${practiceId}/definition`);

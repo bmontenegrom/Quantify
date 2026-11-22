@@ -145,8 +145,9 @@ await withE2E({ port: PORT, dbName: "quantify-smoke.db" }, async ({ login }) => 
     { timeout: 10_000 },
   );
   const adminText = (await tPage.locator("#practice-workspace").textContent()) ?? "";
-  assert(adminText.includes(symbolText("factor_test")), "la magnitud adimensional debía aparecer en la lista");
-  assert(adminText.includes("adimensional"), 'la unidad vacía debía mostrarse como "adimensional"');
+  const factorRow = tPage.locator('#practice-workspace tr:has(td:first-child code:text-is("factor_test"))');
+  assert((await factorRow.count()) === 1, "la magnitud adimensional debía aparecer en una fila de la lista");
+  assert(((await factorRow.textContent()) ?? "").includes("adimensional"), 'la unidad vacía debía mostrarse como "adimensional"');
   assert(
     !adminText.includes("datos de magnitud invalidos"),
     "no debía rechazar la magnitud por unidad vacía",

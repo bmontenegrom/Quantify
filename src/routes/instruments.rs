@@ -25,7 +25,10 @@ pub(super) async fn list_instruments(
     headers: HeaderMap,
     Query(query): Query<CourseQuery>,
 ) -> Result<Json<Vec<instruments::InstrumentWithScales>>, AppError> {
-    current_user(&state, &headers).await?;
+    let user = current_user(&state, &headers).await?;
+    if !crate::courses::user_sees_course(&state.pool, &user, &query.course_id).await? {
+        return Err(AppError::forbidden("No estás inscripto en ese curso."));
+    }
     Ok(Json(
         instruments::list_instruments(&state.pool, &query.course_id).await?,
     ))

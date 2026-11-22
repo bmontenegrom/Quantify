@@ -23,6 +23,8 @@ await withE2E({ port: PORT, dbName: "quantify-simbolo-mostrar.db" }, async ({ lo
     await openAddForm(page, "#new-quantity-form");
     await page.fill('#new-quantity-form [name="symbol"]', "Zz");
     await page.fill('#new-quantity-form [name="display_symbol"]', "Z_z");
+    const preview = await page.locator("#new-quantity-form .symbol-preview").innerHTML();
+    assert(preview === "Z<sub>Z</sub>", `la vista previa debía mostrar Z con subíndice (mostró ${preview})`);
     await page.fill('#new-quantity-form [name="name"]', "Zeta");
   };
   await fillNew();
@@ -101,7 +103,7 @@ await withE2E({ port: PORT, dbName: "quantify-simbolo-mostrar.db" }, async ({ lo
     symbol: "T_teo",
     name: "Periodo teórico",
     unit: "s",
-    formula: "2*pi*sqrt(L/9.8)",
+    formula: "2*pi*math::sqrt(L/9.8)",
     section_id: (await definition()).sections.find((s) => s.part_id === "p1-estadistica-op1").id,
   });
   await page.reload();

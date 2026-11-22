@@ -236,11 +236,11 @@ pub async fn create_scale(
     instrument_id: &str,
     input: ScaleInput,
 ) -> anyhow::Result<InstrumentScale> {
-    let position = next_position(pool, "instrument_scales", "instrument_id", instrument_id).await?;
-    let id = {
-        let mut conn = pool.acquire().await?;
-        insert_scale(&mut conn, instrument_id, position, &input).await?
-    };
+    let mut tx = crate::db::begin_write(pool).await?;
+    let position =
+        next_position(&mut tx, "instrument_scales", "instrument_id", instrument_id).await?;
+    let id = insert_scale(&mut tx, instrument_id, position, &input).await?;
+    tx.commit().await?;
     fetch_scale(pool, &id).await
 }
 
