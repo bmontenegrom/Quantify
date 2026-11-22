@@ -4880,6 +4880,7 @@ fn check_template_rejects_what_cannot_be_written() {
         serde_json::from_value(base).unwrap()
     };
     assert!(check_template(&template(serde_json::json!({}))).is_ok());
+    assert!(check_template(&template(serde_json::json!({"analysis_kind": " curva "}))).is_ok());
     for (extra, expected) in [
         (serde_json::json!({"schema_version": 2}), "versión 2"),
         (serde_json::json!({"name": " "}), "nombre"),
@@ -4889,33 +4890,12 @@ fn check_template_rejects_what_cannot_be_written() {
             "tipo de análisis",
         ),
         (serde_json::json!({"parts": [{"title": " "}]}), "sin título"),
-        (
-            serde_json::json!({"quantities": [
-                {"symbol": "x", "name": "x", "unit": "", "repeated": true, "replicas_per_point": 2}
-            ]}),
-            "réplicas por punto",
-        ),
-        (
-            serde_json::json!({"results": [{"symbol": "y", "name": "", "unit": "", "formula": "x"}]}),
-            "no tiene nombre",
-        ),
+        (serde_json::json!({"operator_count": 21}), "superar 20"),
         (
             serde_json::json!({"results": [
                 {"symbol": "y", "name": "y", "unit": "", "formula": "x", "tolerance": -1}
             ]}),
             "negativa",
-        ),
-        (
-            serde_json::json!({"results": [
-                {"symbol": "y", "name": "y", "unit": "m", "formula": "x", "compare_with": "x"}
-            ]}),
-            "otra unidad",
-        ),
-        (
-            serde_json::json!({"results": [
-                {"symbol": "y", "name": "y", "unit": "", "formula": "x", "compare_with": "w"}
-            ]}),
-            "no es una magnitud",
         ),
         (
             serde_json::json!({"sections": [{"title": "S", "part": 3}]}),

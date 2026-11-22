@@ -206,15 +206,22 @@ pub(super) async fn import_practice(
     let user = require_teacher(&state, &headers).await?;
     practices::check_template(&template).map_err(AppError::bad_request)?;
     validate_template_items(&template)?;
+    let def = practices::template_definition(&template);
+    for (quantity, input) in def.quantities.iter().zip(&template.quantities) {
+        validate_quantity_in(&def, input, Some(&quantity.id))?;
+    }
+    if let Some(problem) = element_problems(&def).into_iter().next() {
+        return Err(AppError::bad_request(format!(
+            "{}: {}",
+            problem.element, problem.message
+        )));
+    }
     Ok(Json(
         practices::import_template(&state.pool, &template, &user.id).await?,
     ))
 }
 
 fn validate_template_items(t: &practices::PracticeTemplate) -> Result<(), AppError> {
-    for q in &t.quantities {
-        validate_quantity(q)?;
-    }
     let rows = t
         .quantities
         .iter()
@@ -720,10 +727,11 @@ pub(super) async fn set_practice_operator_count(
     Json(body): Json<OperatorCountBody>,
 ) -> Result<Json<Health>, AppError> {
     require_teacher(&state, &headers).await?;
-    if body.count > 20 {
-        return Err(AppError::bad_request(
-            "La cantidad de operadores no puede superar 20.",
-        ));
+    if body.count > practices::MAX_OPERATORS {
+        return Err(AppError::bad_request(format!(
+            "La cantidad de operadores no puede superar {}.",
+            practices::MAX_OPERATORS
+        )));
     }
     if !practices::set_operator_count(&state.pool, &id, body.count).await? {
         return Err(AppError::not_found("practica no encontrada"));
@@ -4800,6 +4808,70 @@ mod tests {
             status(import(teacher.clone(), "slope").await),
             Some(axum::http::StatusCode::BAD_REQUEST)
         );
+        let rejected = |extra: serde_json::Value| {
+            let mut body = serde_json::json!({
+                "schema_version": 1, "name": "Importada", "analysis_kind": "regresion_lineal",
+                "parts": [
+                    {"title": "Estática", "analysis_kind": "estadistico"},
+                    {"title": "Serie", "analysis_kind": "regresion_lineal"}
+                ],
+                "sections": [
+                    {"title": "A", "part": 0, "quantities": ["m"], "results": ["y"]},
+                    {"title": "B", "part": 1, "quantities": ["h", "t"]}
+                ],
+                "quantities": [
+                    {"symbol": "m", "name": "m", "unit": "g", "repeated": true, "per_point": false},
+                    {"symbol": "h", "name": "h", "unit": "cm", "repeated": false},
+                    {"symbol": "t", "name": "t", "unit": "s", "repeated": false}
+                ],
+                "results": [{"symbol": "y", "name": "y", "unit": "g", "formula": "2*m"}]
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                body[key] = value.clone();
+            }
+            let template: practices::PracticeTemplate = serde_json::from_value(body).unwrap();
+            let state = state.clone();
+            let headers = teacher.clone();
+            async move {
+                import_practice(State(state), headers, Json(template))
+                    .await
+                    .err()
+                    .map(|e| e.message().to_string())
+            }
+        };
+        assert_eq!(rejected(serde_json::json!({})).await, None);
+        let cases = [
+            (
+                serde_json::json!({"results": [{"symbol": "y", "name": "y", "unit": "g", "formula": "2*zzz"}]}),
+                "zzz",
+            ),
+            (
+                serde_json::json!({"results": [
+                    {"symbol": "y", "name": "y", "unit": "g", "formula": "z"},
+                    {"symbol": "z", "name": "z", "unit": "g", "formula": "y"}
+                ]}),
+                "ciclo",
+            ),
+            (
+                serde_json::json!({"quantities": [
+                    {"symbol": "m", "name": "m", "unit": "g", "repeated": true, "per_point": false,
+                     "replicas_per_point": 2},
+                    {"symbol": "h", "name": "h", "unit": "cm", "repeated": false},
+                    {"symbol": "t", "name": "t", "unit": "s", "repeated": false}
+                ]}),
+                "réplicas",
+            ),
+            (
+                serde_json::json!({"results": [
+                    {"symbol": "y", "name": "y", "unit": "cm", "formula": "2*m", "compare_with": "h"}
+                ]}),
+                "Comparar con",
+            ),
+        ];
+        for (extra, expected) in cases {
+            let message = rejected(extra.clone()).await.unwrap_or_default();
+            assert!(message.contains(expected), "{extra}: {message}");
+        }
         let created = import(teacher.clone(), "x").await.unwrap().0;
         assert_eq!(created.status, "borrador");
         let exported = export_practice(State(state.clone()), teacher.clone(), Path(created.id))
