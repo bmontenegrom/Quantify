@@ -7,6 +7,7 @@ use super::{
     QuantityInput, ResultInput,
 };
 use crate::db::Practice;
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 use std::collections::HashSet;
@@ -419,19 +420,35 @@ pub async fn import_template(
         .ok_or_else(|| anyhow::anyhow!("la práctica recién importada no aparece"))
 }
 
+async fn has_practices(conn: &mut SqliteConnection) -> anyhow::Result<bool> {
+    Ok(
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM practices)")
+            .fetch_one(conn)
+            .await?,
+    )
+}
+
+async fn part_exists(conn: &mut SqliteConnection, id: &str) -> anyhow::Result<bool> {
+    Ok(
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM practice_parts WHERE id = ?1)")
+            .bind(id)
+            .fetch_one(conn)
+            .await?,
+    )
+}
+
 pub async fn seed_library(pool: &SqlitePool) -> anyhow::Result<()> {
-    let mut tx = crate::db::begin_write(pool).await?;
-    let (empty,): (bool,) = sqlx::query_as("SELECT NOT EXISTS (SELECT 1 FROM practices)")
-        .fetch_one(&mut *tx)
-        .await?;
-    if empty {
-        for (key, _) in super::LIBRARY {
-            let template = super::library_template(key)
-                .ok_or_else(|| anyhow::anyhow!("la plantilla {key} no se puede leer"))?;
-            write_template(&mut tx, &template, key, "publicada", None).await?;
+    if !has_practices(&mut *pool.acquire().await?).await? {
+        let mut tx = crate::db::begin_write(pool).await?;
+        if !has_practices(&mut tx).await? {
+            for (key, json) in super::LIBRARY {
+                let template: PracticeTemplate = serde_json::from_str(json)
+                    .with_context(|| format!("la plantilla {key} no se puede leer"))?;
+                write_template(&mut tx, &template, key, "publicada", None).await?;
+            }
         }
+        tx.commit().await?;
     }
-    tx.commit().await?;
     super::ensure_versions(pool).await
 }
 
@@ -486,19 +503,8 @@ async fn write_template(
             .key
             .as_deref()
             .map(|key| format!("{id}-{}", key.trim()));
-        let taken = match &keyed {
-            Some(candidate) => {
-                sqlx::query_scalar::<_, bool>(
-                    "SELECT EXISTS (SELECT 1 FROM practice_parts WHERE id = ?1)",
-                )
-                .bind(candidate)
-                .fetch_one(&mut *tx)
-                .await?
-            }
-            None => true,
-        };
         let part_id = match keyed {
-            Some(candidate) if !taken => candidate,
+            Some(candidate) if !part_exists(tx, &candidate).await? => candidate,
             _ => Uuid::new_v4().to_string(),
         };
         sqlx::query(

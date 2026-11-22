@@ -731,7 +731,7 @@ async fn intermediate_crud_roundtrip() {
 }
 
 #[tokio::test]
-async fn seed_definitions_populates_p1_and_is_idempotent() {
+async fn the_library_loads_p1() {
     let (pool, _dir) = setup().await;
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     assert_eq!(def.quantities.len(), 5);
@@ -784,7 +784,7 @@ async fn seed_definitions_populates_p1_and_is_idempotent() {
 }
 
 #[tokio::test]
-async fn seed_definitions_populates_hidrostatica_and_is_idempotent() {
+async fn the_library_loads_hidrostatica() {
     let (pool, _dir) = setup().await;
     let def = definition(&pool, "hidrostatica").await.unwrap().unwrap();
     assert_eq!(def.analysis_kind.as_deref(), Some("estadistico"));
@@ -960,7 +960,7 @@ async fn deleting_practice_cascades_to_definition() {
 }
 
 #[tokio::test]
-async fn seed_definitions_populates_p3_relajacion() {
+async fn the_library_loads_p3_relajacion() {
     let (pool, _dir) = setup().await;
     let def = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
     assert_eq!(def.quantities.len(), 8);
@@ -1022,7 +1022,7 @@ async fn seeded_p3_formulas_compute() {
 }
 
 #[tokio::test]
-async fn seed_definitions_populates_p3_as_two_parts() {
+async fn the_library_loads_p3_as_two_parts() {
     let (pool, _dir) = setup().await;
     let def = definition(&pool, "p3-relajacion").await.unwrap().unwrap();
     assert_eq!(def.analysis_kind.as_deref(), Some("regresion_lineal"));
