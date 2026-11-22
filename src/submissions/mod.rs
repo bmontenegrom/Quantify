@@ -930,7 +930,7 @@ pub async fn update_review(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{migrate, seed_academic, seed_practices, seed_users};
+    use crate::db::{migrate, seed_academic, seed_users};
     use crate::users::AuthUser;
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use std::str::FromStr;
@@ -959,8 +959,7 @@ mod tests {
 
     async fn seeded() -> (SqlitePool, TempDir) {
         let (pool, dir) = pool().await;
-        seed_practices(&pool).await.unwrap();
-        crate::practices::seed_definitions(&pool).await.unwrap();
+        crate::practices::seed_library(&pool).await.unwrap();
         seed_users(&pool).await.unwrap();
         seed_academic(&pool).await.unwrap();
         (pool, dir)

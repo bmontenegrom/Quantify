@@ -8,16 +8,19 @@
   "operator_count": null,
   "parts": [
     {
+      "key": "op1",
       "title": "Operador 1",
       "analysis_kind": null,
       "help_text": ""
     },
     {
+      "key": "op2",
       "title": "Operador 2",
       "analysis_kind": null,
       "help_text": ""
     },
     {
+      "key": "op3",
       "title": "Operador 3",
       "analysis_kind": null,
       "help_text": ""

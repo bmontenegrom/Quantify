@@ -8,16 +8,19 @@
   "operator_count": null,
   "parts": [
     {
+      "key": "serie",
       "title": "Serie",
       "analysis_kind": null,
       "help_text": ""
     },
     {
+      "key": "paralelo",
       "title": "Paralelo",
       "analysis_kind": null,
       "help_text": ""
     },
     {
+      "key": "potencia",
       "title": "Curva de potencia",
       "analysis_kind": null,
       "help_text": ""

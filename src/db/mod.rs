@@ -17,7 +17,7 @@ pub(crate) use password::{
     digest_password, hash_password, verify_password, VerifyResult, MIN_PASSWORD_LEN,
 };
 pub use schema::migrate;
-pub(crate) use schema::{mark_migration_applied, migration_applied, DISPLAY_SYMBOL_TABLES};
+pub(crate) use schema::DISPLAY_SYMBOL_TABLES;
 
 pub const MAX_LOGIN_ATTEMPTS: u8 = 5;
 pub const LOGIN_BLOCK_MINUTES: i64 = 15;
@@ -250,10 +250,9 @@ pub async fn run_startup_seeds(
     demo_data: bool,
     admin_password: Option<String>,
 ) -> anyhow::Result<()> {
-    seed_practices(pool).await?;
-    seed_course(pool).await?;
+    let imported = crate::practices::seed_library(pool).await?;
+    seed_course(pool, imported).await?;
     crate::instruments::seed_instruments(pool, TEST_COURSE_ID).await?;
-    crate::practices::seed_definitions(pool).await?;
     seed_initial_accounts(pool, demo_data, admin_password).await
 }
 
@@ -383,161 +382,6 @@ pub async fn seed_users(pool: &SqlitePool) -> anyhow::Result<()> {
     insert_accounts(&mut conn, &accounts).await
 }
 
-pub(crate) const P3_DESCRIPTION: &str = "Tiempo de relajación de un circuito RC medido de dos formas: directamente, con el tiempo de semidescarga, y a partir del desfasaje según la frecuencia.";
-
-const STUDENT_DESCRIPTIONS: &str = "2026-11-descripciones-para-el-alumno";
-const VERSIONED_DESCRIPTIONS: &str = "2026-11-descripcion-en-versiones";
-
-const OLD_SEEDED_DESCRIPTIONS: [(&str, &str); 9] = [
-    ("p1-estadistica", "Pendulo simple con hasta 3 operadores independientes: cada uno mide su propia serie de periodos (T1/T2/T3) y determina su g; incertidumbres tipo A y B, calculo indirecto de g = 4*pi^2*L/T^2."),
-    ("p2-cc", "Circuitos de corriente continua en una sola entrega: serie, paralelo (R1, R2, R3 compartidas) y curva de potencia P = I^2*R sobre carga variable."),
-    ("fluidos-1", "Viscosidad del agua por la ley de Hagen-Poiseuille: ajuste lineal de h/Q^2 contra 1/Q (Q = caudal medio por altura)."),
-    ("viscosidad", "Viscosidad de la glicerina por la ley de Stokes: ajuste lineal de v_lim contra R^2 (v_lim = dx / tiempo medio por esfera)."),
-    ("fluidos-2", "Perdidas energeticas en la descarga de un recipiente por un capilar: ajuste lineal de t contra (sqrt(h_max) - sqrt(h)). M_medio sale de la pendiente; Reynolds max/min y M teorico son mensurandos agregados."),
-    ("filtros", "Barrido en frecuencia de un circuito RLC: respuesta en amplitud VR/Vg y desfasaje phi = asin(b/a) contra la frecuencia angular omega = 2*pi*f (eje log)."),
-    ("ca-rlc", "Circuito RLC serie en corriente alterna: impedancia, corriente y tensiones teoricas vs experimentales por canal (R, C, L), y desfasaje phi = asin(b/a) por canal contra el teorico."),
-    ("hidrostatica", "Densidad de una pieza de goma por el principio de Arquimedes con balanza de Mohr (empuje y densidad por medida, promediados) y tension superficial de una solucion jabonosa por el metodo de Wilhelmy."),
-    ("p3-relajacion", "Tiempo de relajacion tau de un circuito RC en una sola entrega: parte 1, medida directa del tiempo de semidescarga; parte 2, desfasaje con ajuste lineal de tg(phi) contra omega = 2*pi*f."),
-];
-
-pub async fn seed_practices(pool: &SqlitePool) -> anyhow::Result<()> {
-    let practices = [
-        (
-            "p1-estadistica",
-            "Tratamiento estadístico de Datos",
-            "Medí el período de un péndulo simple y, con su largo, calculá la aceleración de la gravedad. Cada operador mide su propia serie de períodos.",
-            "estadistico",
-            None,
-            None,
-        ),
-        (
-            "p2-cc",
-            "Corriente continua",
-            "Circuitos de corriente continua: resistencias en serie y en paralelo, y la potencia que disipa una carga variable.",
-            "curva",
-            None,
-            None,
-        ),
-        (
-            "p3-relajacion",
-            "Relajacion Exponencial",
-            P3_DESCRIPTION,
-            "regresion_lineal",
-            Some("2*pi*f"),
-            Some("b / math::sqrt(a*a - b*b)"),
-        ),
-        (
-            "fluidos-1",
-            "Fluidos I",
-            "Viscosidad del agua a partir del caudal que sale por un capilar con distintas alturas de agua (ley de Hagen-Poiseuille).",
-            "regresion_lineal",
-            Some("1/Q"),
-            Some("h/(Q*Q)"),
-        ),
-        (
-            "viscosidad",
-            "Viscosidad",
-            "Viscosidad de la glicerina a partir de la velocidad límite de esferas de distintos radios (ley de Stokes).",
-            "regresion_lineal",
-            Some("R^2"),
-            Some("dx/t"),
-        ),
-        (
-            "fluidos-2",
-            "Fluidos II",
-            "Pérdidas de energía en la descarga de un recipiente por un capilar: medí cómo baja el nivel del agua con el tiempo.",
-            "regresion_lineal",
-            Some("math::sqrt(h_max) - math::sqrt(h)"),
-            Some("t"),
-        ),
-        (
-            "filtros",
-            "Filtros",
-            "Respuesta de un circuito RLC según la frecuencia: amplitud y desfasaje de la tensión en la resistencia.",
-            "curva",
-            None,
-            None,
-        ),
-        (
-            "ca-rlc",
-            "Corriente Alterna (RLC)",
-            "Circuito RLC serie en corriente alterna: tensiones en R, C y L y sus desfasajes, comparados con los valores teóricos.",
-            "estadistico",
-            None,
-            None,
-        ),
-        (
-            "hidrostatica",
-            "Hidrostatica y Tension Superficial",
-            "Densidad de una pieza de goma con la balanza de Mohr (principio de Arquímedes) y tensión superficial de una solución jabonosa (método de Wilhelmy).",
-            "estadistico",
-            None,
-            None,
-        ),
-    ];
-
-    for (id, name, description, analysis_kind, x_formula, y_formula) in practices {
-        sqlx::query(
-            r#"
-            INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(id) DO NOTHING
-            "#,
-        )
-        .bind(id)
-        .bind(name)
-        .bind(description)
-        .bind(analysis_kind)
-        .bind(x_formula)
-        .bind(y_formula)
-        .execute(pool)
-        .await?;
-    }
-
-    if !migration_applied(pool, STUDENT_DESCRIPTIONS).await? {
-        for (id, _, description, ..) in practices {
-            let Some((_, old)) = OLD_SEEDED_DESCRIPTIONS.iter().find(|(o, _)| *o == id) else {
-                continue;
-            };
-            sqlx::query("UPDATE practices SET description = ?2 WHERE id = ?1 AND description = ?3")
-                .bind(id)
-                .bind(description)
-                .bind(old)
-                .execute(pool)
-                .await?;
-        }
-        mark_migration_applied(pool, STUDENT_DESCRIPTIONS).await?;
-    }
-
-    if !migration_applied(pool, VERSIONED_DESCRIPTIONS).await? {
-        sqlx::query(
-            "UPDATE practice_versions SET definition_json = json_set(definition_json, \
-             '$.description', \
-             (SELECT description FROM practices p WHERE p.id = practice_versions.practice_id)) \
-             WHERE json_type(definition_json, '$.description') IS NULL",
-        )
-        .execute(pool)
-        .await?;
-        mark_migration_applied(pool, VERSIONED_DESCRIPTIONS).await?;
-    }
-
-    for legacy_id in ["p2-serie", "p2-corriente-continua", "p2-potencia"] {
-        let has_submissions: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM submissions WHERE practice_id = ?1")
-                .bind(legacy_id)
-                .fetch_one(pool)
-                .await?;
-        if has_submissions.0 == 0 {
-            sqlx::query("DELETE FROM practices WHERE id = ?1")
-                .bind(legacy_id)
-                .execute(pool)
-                .await?;
-        }
-    }
-
-    Ok(())
-}
-
 async fn ensure_lab_group_columns(pool: &SqlitePool) -> anyhow::Result<()> {
     let rows = sqlx::query("PRAGMA table_info(lab_groups)")
         .fetch_all(pool)
@@ -565,7 +409,7 @@ async fn ensure_lab_group_columns(pool: &SqlitePool) -> anyhow::Result<()> {
 const TEST_COURSE_ID: &str = "fisica-experimental-i-2026";
 const TEST_GROUP_ID: &str = "fisica-exp-i-grupo-1";
 
-async fn seed_course(pool: &SqlitePool) -> anyhow::Result<()> {
+async fn seed_course(pool: &SqlitePool, enable_library: bool) -> anyhow::Result<()> {
     sqlx::query(
         r#"
         INSERT INTO courses (id, name, term, active, created_at)
@@ -591,21 +435,16 @@ async fn seed_course(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
 
-    for practice in [
-        "p1-estadistica",
-        "p2-cc",
-        "p3-relajacion",
-        "fluidos-1",
-        "viscosidad",
-        "fluidos-2",
-        "filtros",
-        "ca-rlc",
-        "hidrostatica",
-    ] {
+    let library = if enable_library {
+        crate::practices::LIBRARY
+    } else {
+        &[]
+    };
+    for (practice, _) in library {
         sqlx::query(
             r#"
             INSERT INTO course_practices (course_id, practice_id, created_at)
-            VALUES (?1, ?2, ?3)
+            SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM practices WHERE id = ?2)
             ON CONFLICT(course_id, practice_id) DO NOTHING
             "#,
         )
@@ -621,7 +460,7 @@ async fn seed_course(pool: &SqlitePool) -> anyhow::Result<()> {
 
 #[cfg(test)]
 pub async fn seed_academic(pool: &SqlitePool) -> anyhow::Result<()> {
-    seed_course(pool).await?;
+    seed_course(pool, true).await?;
     let mut conn = pool.acquire().await?;
     enroll_test_student(&mut conn).await
 }
@@ -920,7 +759,7 @@ mod tests {
 
     async fn seeded() -> (SqlitePool, TempDir) {
         let (pool, dir) = pool().await;
-        seed_practices(&pool).await.unwrap();
+        crate::practices::seed_library(&pool).await.unwrap();
         seed_users(&pool).await.unwrap();
         seed_academic(&pool).await.unwrap();
         (pool, dir)
@@ -1069,6 +908,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restarting_does_not_enable_library_practices_again() {
+        let (pool, _dir) = pool().await;
+        run_startup_seeds(&pool, true, None).await.unwrap();
+        let enabled = "SELECT COUNT(*) FROM course_practices";
+        assert_eq!(
+            count(&pool, enabled).await,
+            crate::practices::LIBRARY.len() as i64
+        );
+        sqlx::query("DELETE FROM course_practices WHERE practice_id = 'filtros'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        run_startup_seeds(&pool, true, None).await.unwrap();
+        assert_eq!(
+            count(&pool, enabled).await,
+            crate::practices::LIBRARY.len() as i64 - 1,
+            "reiniciar volvió a habilitar filtros"
+        );
+    }
+
+    #[tokio::test]
     async fn restarting_does_not_bring_back_test_accounts_or_submissions() {
         let (pool, _dir) = pool().await;
         run_startup_seeds(&pool, true, None).await.unwrap();
@@ -1110,9 +970,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seed_practices_loads_p1_p2_p3() {
+    async fn a_new_base_loads_the_library() {
         let (pool, _dir) = pool().await;
-        seed_practices(&pool).await.unwrap();
+        crate::practices::seed_library(&pool).await.unwrap();
         let ids: Vec<String> = practices(&pool)
             .await
             .unwrap()
@@ -1122,16 +982,13 @@ mod tests {
         assert!(ids.contains(&"p1-estadistica".to_string()));
         assert!(ids.contains(&"p2-cc".to_string()));
         assert!(ids.contains(&"p3-relajacion".to_string()));
-        assert!(!ids.contains(&"p3-relajacion-desfasaje".to_string()));
-        assert!(!ids.contains(&"p2-serie".to_string()));
-        assert!(!ids.contains(&"p2-corriente-continua".to_string()));
-        assert!(!ids.contains(&"p2-potencia".to_string()));
+        assert_eq!(ids.len(), crate::practices::LIBRARY.len());
     }
 
     #[tokio::test]
-    async fn seed_practices_does_not_clobber_edits() {
+    async fn the_library_does_not_clobber_edits() {
         let (pool, _dir) = pool().await;
-        seed_practices(&pool).await.unwrap();
+        crate::practices::seed_library(&pool).await.unwrap();
         sqlx::query(
             "UPDATE practices SET analysis_kind = 'regresion_lineal', name = 'Pendulo (editado)' \
              WHERE id = 'p1-estadistica'",
@@ -1139,7 +996,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        seed_practices(&pool).await.unwrap();
+        crate::practices::seed_library(&pool).await.unwrap();
         let p = practices(&pool)
             .await
             .unwrap()

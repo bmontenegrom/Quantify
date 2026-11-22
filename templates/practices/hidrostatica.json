@@ -8,11 +8,13 @@
   "operator_count": null,
   "parts": [
     {
+      "key": "arq",
       "title": "Parte 1: Arquimedes",
       "analysis_kind": null,
       "help_text": ""
     },
     {
+      "key": "ts",
       "title": "Parte 2: Tension superficial",
       "analysis_kind": null,
       "help_text": ""

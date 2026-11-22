@@ -287,7 +287,6 @@ mod layout;
 mod library;
 mod lifecycle;
 mod parts;
-mod seed;
 mod template;
 #[cfg(test)]
 mod tests;
@@ -299,6 +298,5 @@ pub use layout::*;
 pub use library::*;
 pub use lifecycle::*;
 pub use parts::{is_point_based, CompareOptions};
-pub use seed::seed_definitions;
 pub use template::*;
 pub use versions::*;
