@@ -3575,3 +3575,28 @@ fn determination_warnings_are_grouped_and_the_average_is_not_blamed_on_one() {
         a.warnings
     );
 }
+
+#[test]
+fn a_quantity_missing_in_every_determination_warns_once() {
+    let mut t = quantity("T");
+    t.per_determination = true;
+    let a = compute(
+        &[t],
+        &[det_result("f", "1/T")],
+        &HashMap::new(),
+        &[MeasurementInput {
+            operator_replicas: Some(vec![vec![], vec![], vec![]]),
+            ..measurement("T", &[])
+        }],
+        None,
+        Some(&determinations(false)),
+    )
+    .unwrap();
+    let missing: Vec<_> = a
+        .warnings
+        .iter()
+        .filter(|w| w.contains("no tiene lecturas"))
+        .collect();
+    assert_eq!(missing.len(), 1, "{:?}", a.warnings);
+    assert!(!missing[0].starts_with("Medida"), "{:?}", a.warnings);
+}

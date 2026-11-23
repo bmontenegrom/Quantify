@@ -5,7 +5,7 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 12] = [
+const COSMETIC_KEYS: [&str; 10] = [
     "description",
     "name",
     "title",
@@ -16,8 +16,6 @@ const COSMETIC_KEYS: [&str; 12] = [
     "input_widget",
     "compare_with",
     "show_live",
-    "label",
-    "display",
 ];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
 const FREELY_ORDERED: [&str; 5] = [
@@ -108,9 +106,27 @@ fn ignoring_order(mut definition: Value) -> Value {
     definition
 }
 
+fn without_determination_looks(definition: &PracticeDefinition) -> PracticeDefinition {
+    let plain = |d: &mut Option<super::Determinations>| {
+        if let Some(d) = d {
+            d.label.clear();
+            d.display = Default::default();
+        }
+    };
+    let mut definition = definition.clone();
+    plain(&mut definition.determinations);
+    for part in &mut definition.parts {
+        plain(&mut part.determinations);
+    }
+    definition
+}
+
 fn structure(definition: &PracticeDefinition) -> anyhow::Result<Value> {
     let keys = [VOLATILE_KEYS.as_slice(), COSMETIC_KEYS.as_slice()].concat();
-    Ok(ignoring_order(shape(definition, &keys)?))
+    Ok(ignoring_order(shape(
+        &without_determination_looks(definition),
+        &keys,
+    )?))
 }
 
 fn section_members(definition: &PracticeDefinition) -> BTreeMap<&str, (Option<&str>, Vec<&str>)> {
@@ -205,8 +221,11 @@ fn list_changes(
     if published.operator_count != draft.operator_count {
         changes.push("Cambia la cantidad de operadores".to_string());
     }
-    let structural = |d: &Option<super::Determinations>| d.as_ref().map(|d| (d.count, d.average));
-    if structural(&published.determinations) != structural(&draft.determinations) {
+    let (published, draft) = (
+        &without_determination_looks(published),
+        &without_determination_looks(draft),
+    );
+    if published.determinations != draft.determinations {
         changes.push("Cambian las determinaciones".to_string());
     }
     diff_items(
@@ -339,12 +358,14 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
         |d: Option<&super::Determinations>| d.map(|d| (d.label.trim().to_string(), d.display));
     let part_determinations = draft.parts.iter().filter_map(|new| {
         let old = published.parts.iter().find(|p| p.id == new.id)?;
-        (looks(old.determinations.as_ref()) != looks(new.determinations.as_ref()))
-            .then_some(&new.determinations)
+        (old.determinations.is_some()
+            && looks(old.determinations.as_ref()) != looks(new.determinations.as_ref()))
+        .then_some(&new.determinations)
     });
     let determinations = std::iter::once(&draft.determinations)
         .filter(|_| {
-            looks(published.determinations.as_ref()) != looks(draft.determinations.as_ref())
+            published.determinations.is_some()
+                && looks(published.determinations.as_ref()) != looks(draft.determinations.as_ref())
         })
         .chain(part_determinations)
         .filter_map(|d| d.as_ref())

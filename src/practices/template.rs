@@ -305,6 +305,67 @@ pub fn version_error(found: u64) -> String {
 /// })).unwrap();
 /// assert!(check_template(&t).unwrap_err().contains("\"x\""));
 /// ```
+fn stored_kinds(t: &PracticeTemplate) -> (Option<String>, Vec<Option<String>>) {
+    let trimmed = |k: &Option<String>| k.as_deref().map(|k| k.trim().to_string());
+    let has_part_kinds = t.parts.iter().any(|p| p.analysis_kind.is_some());
+    let part_kinds: Vec<Option<String>> = t
+        .parts
+        .iter()
+        .map(|p| match trimmed(&p.analysis_kind) {
+            None if has_part_kinds => Some("estadistico".into()),
+            kind => kind,
+        })
+        .collect();
+    let kind = if has_part_kinds {
+        part_kinds
+            .iter()
+            .flatten()
+            .find(|k| super::is_point_based(Some(k)))
+            .cloned()
+            .or_else(|| Some("estadistico".into()))
+    } else {
+        trimmed(&t.analysis_kind)
+    };
+    (kind, part_kinds)
+}
+
+fn effective_part_kinds(t: &PracticeTemplate) -> Vec<String> {
+    let (analysis_kind, part_kinds) = stored_kinds(t);
+    PracticeDefinition {
+        analysis_kind,
+        parts: part_kinds
+            .into_iter()
+            .enumerate()
+            .map(|(i, analysis_kind)| super::PracticePart {
+                id: i.to_string(),
+                analysis_kind,
+                ..Default::default()
+            })
+            .collect(),
+        quantities: t
+            .quantities
+            .iter()
+            .map(|q| crate::db::PracticeQuantity {
+                symbol: q.symbol.clone(),
+                per_point: q.per_point,
+                is_given: q.is_given,
+                ..Default::default()
+            })
+            .collect(),
+        sections: t
+            .sections
+            .iter()
+            .map(|s| super::PracticeSection {
+                part_id: s.part.map(|i| i.to_string()),
+                quantities: s.quantities.clone(),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    }
+    .part_kinds()
+}
+
 pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     if t.schema_version != TEMPLATE_VERSION {
         return Err(version_error(t.schema_version.into()));
@@ -353,17 +414,12 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
         return Err("Una práctica con partes configura las determinaciones en cada parte.".into());
     }
     let point_based = |kind: &Option<String>| super::is_point_based(kind.as_deref().map(str::trim));
-    let statistical_part = |p: &TemplatePart| {
-        !point_based(if p.analysis_kind.is_some() {
-            &p.analysis_kind
-        } else {
-            &t.analysis_kind
-        })
-    };
+    let kinds = effective_part_kinds(t);
     if (t.determinations.is_some() && point_based(&t.analysis_kind))
         || t.parts
             .iter()
-            .any(|p| p.determinations.is_some() && !statistical_part(p))
+            .zip(&kinds)
+            .any(|(p, kind)| p.determinations.is_some() && kind != "estadistico")
     {
         return Err("Las determinaciones son para una práctica o parte estadística.".into());
     }
@@ -522,26 +578,7 @@ async fn write_template(
     created_by: Option<&str>,
 ) -> anyhow::Result<()> {
     check_template(t).map_err(anyhow::Error::msg)?;
-    let trimmed = |k: &Option<String>| k.as_deref().map(|k| k.trim().to_string());
-    let has_part_kinds = t.parts.iter().any(|p| p.analysis_kind.is_some());
-    let part_kinds: Vec<Option<String>> = t
-        .parts
-        .iter()
-        .map(|p| match trimmed(&p.analysis_kind) {
-            None if has_part_kinds => Some("estadistico".into()),
-            kind => kind,
-        })
-        .collect();
-    let kind = if has_part_kinds {
-        part_kinds
-            .iter()
-            .flatten()
-            .find(|k| super::is_point_based(Some(k)))
-            .cloned()
-            .or_else(|| Some("estadistico".into()))
-    } else {
-        trimmed(&t.analysis_kind)
-    };
+    let (kind, part_kinds) = stored_kinds(t);
     sqlx::query(
         "INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula, \
          operator_count, status, created_by, created_at, config_json) \

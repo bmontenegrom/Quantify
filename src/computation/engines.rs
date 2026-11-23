@@ -335,6 +335,13 @@ pub(crate) fn per_determination_symbols(
     }
 }
 
+fn group_warning(grouped: &mut Vec<(String, Vec<usize>)>, text: String, k: Option<usize>) {
+    match grouped.iter_mut().find(|(t, _)| *t == text) {
+        Some((_, ks)) => ks.extend(k.filter(|k| !ks.contains(k))),
+        None => grouped.push((text, k.into_iter().collect())),
+    }
+}
+
 fn compute_determinations(
     quantities: &[PracticeQuantity],
     results: &[PracticeResult],
@@ -365,6 +372,7 @@ fn compute_determinations(
 
     let label = |k: usize| format!("{} {k}", determinations.label.trim());
     let mut renamed: HashMap<String, (String, usize)> = HashMap::new();
+    let mut grouped: Vec<(String, Vec<usize>)> = Vec::new();
     let mut per_quantities = Vec::with_capacity(count);
     let mut allowed: Vec<String> = common.iter().map(|q| q.symbol.clone()).collect();
     for k in 1..=count {
@@ -380,11 +388,9 @@ fn compute_determinations(
             &mut local_us,
             &mut local_warnings,
         )?;
-        warnings.extend(
-            local_warnings
-                .into_iter()
-                .map(|w| format!("{}: {w}", label(k))),
-        );
+        for w in local_warnings {
+            group_warning(&mut grouped, w, Some(k));
+        }
         for q in &repeated {
             let symbol = determination_symbol(&q.symbol, k);
             means.insert(symbol.clone(), local_means[&q.symbol]);
@@ -442,7 +448,6 @@ fn compute_determinations(
 
     let mut derive_warnings = Vec::new();
     let mut derived = derive_results(&expanded, &allowed, &means, &us, &mut derive_warnings)?;
-    let mut grouped: Vec<(String, Vec<usize>)> = Vec::new();
     for mut w in derive_warnings {
         for (formula, text) in &average_texts {
             w = w.replace(formula, text);
@@ -456,11 +461,7 @@ fn compute_determinations(
                 base.clone()
             })
         });
-        let k = k.get().filter(|_| !average.get());
-        match grouped.iter_mut().find(|(text, _)| *text == cleaned) {
-            Some((_, ks)) => ks.extend(k.filter(|k| !ks.contains(k))),
-            None => grouped.push((cleaned, k.into_iter().collect())),
-        }
+        group_warning(&mut grouped, cleaned, k.get().filter(|_| !average.get()));
     }
     for (text, ks) in grouped {
         warnings.push(if ks.is_empty() || ks.len() == count {

@@ -14,7 +14,8 @@ pub async fn parts_for(
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticePart>> {
     let rows = sqlx::query_as::<_, PartRow>(
-        "SELECT id, practice_id, title, position, analysis_kind, help_text, config_json          FROM practice_parts WHERE practice_id = ?1 ORDER BY position, id",
+        "SELECT id, practice_id, title, position, analysis_kind, help_text, config_json \
+         FROM practice_parts WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
     .fetch_all(&mut *conn)

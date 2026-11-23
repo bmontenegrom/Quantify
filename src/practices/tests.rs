@@ -3884,6 +3884,22 @@ fn check_template_rejects_what_cannot_be_written() {
     };
     assert!(check_template(&template(serde_json::json!({}))).is_ok());
     assert!(check_template(&template(serde_json::json!({"analysis_kind": " curva "}))).is_ok());
+    let curve_with_statistical_part = serde_json::json!({
+        "analysis_kind": "curva",
+        "parts": [{"title": "A"}, {"title": "B", "determinations": {"count": 2, "label": "M"}}],
+        "quantities": [
+            {"symbol": "x", "name": "x", "unit": "", "repeated": true, "per_point": true},
+            {"symbol": "t", "name": "t", "unit": "", "repeated": true, "per_determination": true}
+        ],
+        "sections": [
+            {"title": "S", "part": 0, "quantities": ["x"]},
+            {"title": "T", "part": 1, "quantities": ["t"]}
+        ]
+    });
+    assert_eq!(
+        check_template(&template(curve_with_statistical_part)),
+        Ok(())
+    );
     for key in ["", "  ", "serie-1"] {
         let parts = serde_json::json!({"parts": [{"title": "A", "key": key}]});
         assert!(check_template(&template(parts)).is_ok(), "{key:?}");
@@ -4157,6 +4173,9 @@ fn only_count_and_average_make_determinations_structural() {
         .kind,
         DraftChangeKind::Structural
     );
+    let added = compare_definitions(&PracticeDefinition::default(), &with(base.clone())).unwrap();
+    assert_eq!(added.kind, DraftChangeKind::Structural);
+    assert_eq!(added.changes, ["Cambian las determinaciones"]);
     assert_eq!(
         kind(Determinations {
             average: false,
