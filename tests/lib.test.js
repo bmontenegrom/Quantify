@@ -5,6 +5,7 @@ import {
   analysisSections,
   determinationsFor,
   symbolPart,
+  formulaVariables,
   perDeterminationSymbols,
   expandDeterminationResults,
   exampleMeasurements,
@@ -1152,4 +1153,15 @@ test("validateMeasurements: en una práctica de series las determinaciones se va
   const T = (groups) => ({ quantity_id: "T", values: [], operator_replicas: groups });
   assert.equal(validateMeasurements([x, T([[1], [2]])], "regresion_lineal", meta), null);
   assert.match(validateMeasurements([x, T([[1], []])], "regresion_lineal", meta), /falta cargar Medida 2/);
+});
+
+test("formulaVariables: deja afuera funciones, espacios de nombres y exponentes", () => {
+  assert.deepEqual(formulaVariables("math::sqrt(4) + sqrt*2"), ["sqrt"]);
+  assert.deepEqual(formulaVariables("4*pi^2*L/T^2 + 1e5*x_1 + f (y)"), ["pi", "L", "T", "x_1", "y"]);
+  assert.deepEqual(formulaVariables("math::ln(g_medio)/2.5e-3"), ["g_medio"]);
+  const def = {
+    quantities: [{ symbol: "sqrt", per_determination: true }],
+    results: [{ symbol: "r", formula: "math::sqrt(4)" }],
+  };
+  assert.ok(!perDeterminationSymbols(def).has("r"));
 });

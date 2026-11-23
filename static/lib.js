@@ -381,7 +381,10 @@ export function guideStepOrNext(definition, step) {
   return (steps.find((s) => s.id === step) ?? steps.find((s) => order.indexOf(s.id) > from) ?? steps[0]).id;
 }
 
-const identifiers = (formula) => formula.match(/[A-Za-z_]\w*/g) ?? [];
+export function formulaVariables(formula) {
+  return formula.match(/(?<![\w.:])[A-Za-z_]\w*\b(?!\s*\(|:)/g) ?? [];
+}
+const identifiers = formulaVariables;
 
 export function symbolPart(definition, symbol, seen = new Set()) {
   const results = definition?.results ?? [];
