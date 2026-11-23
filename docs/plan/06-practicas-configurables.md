@@ -1190,7 +1190,11 @@ Decisiones:
      de un solo lugar cuando el servidor lo mande resuelto.
    - `check_student_result_symbols` acepta `g#k` hasta la cantidad configurada, aunque la
      entrega traiga menos grupos; y sigue aceptando mensurandos comunes no finales (eso viene de
-     antes de F9). Revisar las dos cosas junto con la validación del resto de la entrega.
+     antes de F9). Además, `analyze_definition` solo rechaza más grupos que determinaciones: con
+     menos (por la API, o una magnitud opcional por determinación vacía) la que falta se calcula
+     sin lecturas, con advertencia, y `g_medio` sale mal o no sale. No se puede rechazar ahí
+     porque la vista previa del borrador usa la misma función: va al guardar la entrega. Revisar
+     todo junto con la validación del resto de la entrega.
    - `determination_results()` clona la definición (o una vista por parte) y se llama varias
      veces por validación; calcularlo una vez y pasarlo si llega a notarse.
      Lo mismo en el cliente: `finalPart` llama a `expandDeterminationResults` por cada resultado
