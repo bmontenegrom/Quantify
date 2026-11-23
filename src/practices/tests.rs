@@ -3899,6 +3899,22 @@ fn check_template_rejects_what_cannot_be_written() {
         (serde_json::json!({"parts": [{"title": " "}]}), "sin título"),
         (serde_json::json!({"operator_count": 21}), "superar 20"),
         (
+            serde_json::json!({"parts": [{"title": "A", "determinations": {"count": 2, "label": "M"}}], "operator_count": 2}),
+            "no puede usar operadores",
+        ),
+        (
+            serde_json::json!({"parts": [{"title": "A", "analysis_kind": "curva", "determinations": {"count": 2, "label": "M"}}]}),
+            "parte estadística",
+        ),
+        (
+            serde_json::json!({"parts": [], "analysis_kind": "regresion_lineal", "determinations": {"count": 2, "label": "M"}}),
+            "parte estadística",
+        ),
+        (
+            serde_json::json!({"parts": [{"title": "A", "determinations": {"count": 1, "label": "M"}}]}),
+            "de 2 a",
+        ),
+        (
             serde_json::json!({"parts": [{"title": "A", "key": "-"}]}),
             "clave de parte",
         ),

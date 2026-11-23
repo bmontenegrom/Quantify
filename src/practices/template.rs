@@ -350,15 +350,30 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     let all_determinations = std::iter::once(&t.determinations)
         .chain(t.parts.iter().map(|p| &p.determinations))
         .flatten();
+    let mut any_determinations = false;
     for d in all_determinations {
-        if !(2..=MAX_OPERATORS).contains(&d.count) || d.label.trim().is_empty() {
+        any_determinations = true;
+        let label = d.label.trim();
+        if !(2..=MAX_OPERATORS).contains(&d.count) || label.is_empty() || label.chars().count() > 40
+        {
             return Err(format!(
-                "Las determinaciones tienen que ser de 2 a {MAX_OPERATORS} y tener un nombre."
+                "Las determinaciones tienen que ser de 2 a {MAX_OPERATORS} y tener un nombre de hasta 40 caracteres."
             ));
         }
     }
     if t.determinations.is_some() && !t.parts.is_empty() {
         return Err("Una práctica con partes configura las determinaciones en cada parte.".into());
+    }
+    let point_based = |kind: &Option<String>| super::is_point_based(kind.as_deref().map(str::trim));
+    if (t.determinations.is_some() && point_based(&t.analysis_kind))
+        || t.parts
+            .iter()
+            .any(|p| p.determinations.is_some() && point_based(&p.analysis_kind))
+    {
+        return Err("Las determinaciones son para una práctica o parte estadística.".into());
+    }
+    if any_determinations && t.operator_count.is_some_and(|n| n > 1) {
+        return Err("Una práctica con determinaciones no puede usar operadores.".into());
     }
     if t.operator_count.is_some_and(|n| n > MAX_OPERATORS) {
         return Err(format!(

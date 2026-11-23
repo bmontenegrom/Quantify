@@ -46,13 +46,14 @@ async fn insert_measurements(
     for measurement in measurements {
         let rows: Vec<(i64, i64, i64, f64, Option<f64>)> =
             if let Some(operators) = &measurement.operator_replicas {
+                let u = measurement.given_u;
                 operators
                     .iter()
                     .enumerate()
                     .flat_map(|(o, reps)| {
                         reps.iter()
                             .enumerate()
-                            .map(move |(r, &v)| (o as i64, 0i64, r as i64, v, None))
+                            .map(move |(r, &v)| (o as i64, 0i64, r as i64, v, u))
                     })
                     .collect()
             } else if let Some(groups) = &measurement.point_replicas {
