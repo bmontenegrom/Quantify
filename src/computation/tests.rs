@@ -3695,7 +3695,7 @@ fn students_report_each_determination_and_the_average() {
     for r in not_final.results.iter_mut().filter(|r| r.symbol == "g") {
         r.is_final = false;
     }
-    assert!(!ok(&not_final, "g#1") && !ok(&not_final, "g_medio"));
+    assert!(!ok(&not_final, "g#1") && !ok(&not_final, "g_medio") && !ok(&not_final, "g"));
 }
 
 #[tokio::test]

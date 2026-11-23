@@ -341,11 +341,10 @@ pub fn check_student_result_symbols(
         .filter(|r| r.is_final)
         .map(|r| r.symbol.as_str())
         .collect();
-    let by_determination: Vec<_> = definition
+    let (by_determination, non_final): (Vec<_>, Vec<_>) = definition
         .determination_results()
         .into_iter()
-        .filter(|(s, _)| finals.contains(s.as_str()))
-        .collect();
+        .partition(|(s, _)| finals.contains(s.as_str()));
     for result in results {
         let symbol = result.symbol.trim();
         if let Some((base, idx)) = symbol.split_once('#') {
@@ -364,7 +363,11 @@ pub fn check_student_result_symbols(
             {
                 continue;
             }
-        } else if valid.contains(symbol) && !by_determination.iter().any(|(s, _)| s == symbol)
+        } else if valid.contains(symbol)
+            && !by_determination
+                .iter()
+                .chain(&non_final)
+                .any(|(s, _)| s == symbol)
             || by_determination
                 .iter()
                 .any(|(s, d)| d.average && symbol.strip_suffix("_medio") == Some(s.as_str()))

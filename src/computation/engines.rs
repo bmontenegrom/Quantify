@@ -1315,13 +1315,7 @@ pub async fn analyze_definition(
             let part = definition
                 .quantity_part(&quantity.symbol)
                 .and_then(|id| definition.parts.iter().find(|p| p.id == id));
-            let found = definition.determinations_in(part).map(|d| {
-                let place = part.map_or("la práctica".to_string(), |p| {
-                    format!("la parte \"{}\"", p.title)
-                });
-                (d, place)
-            });
-            if let Some((d, place)) = found {
+            if let Some(d) = definition.determinations_in(part) {
                 let groups = measurement.operator_replicas.as_ref().map_or(0, Vec::len);
                 if !measurement.values.is_empty() || measurement.point_replicas.is_some() {
                     anyhow::bail!(
@@ -1333,6 +1327,9 @@ pub async fn analyze_definition(
                     );
                 }
                 if groups > d.count as usize {
+                    let place = part.map_or("la práctica".to_string(), |p| {
+                        format!("la parte \"{}\"", p.title)
+                    });
                     anyhow::bail!(
                         "\"{}\" ({}) trae lecturas para {groups} determinaciones, pero {place} tiene {}",
                         quantity.name,
