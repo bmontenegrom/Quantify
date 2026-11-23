@@ -372,6 +372,12 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     {
         return Err("Las determinaciones son para una práctica o parte estadística.".into());
     }
+    if !any_determinations && t.quantities.iter().any(|q| q.per_determination) {
+        return Err(
+            "Una magnitud se repite por determinación, pero la plantilla no tiene determinaciones."
+                .into(),
+        );
+    }
     if any_determinations && t.operator_count.is_some_and(|n| n > 1) {
         return Err("Una práctica con determinaciones no puede usar operadores.".into());
     }

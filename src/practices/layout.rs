@@ -2,28 +2,30 @@ use super::{PartInput, PracticePart, PracticeSection, SectionInput};
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
+#[derive(sqlx::FromRow)]
+struct PartRow {
+    #[sqlx(flatten)]
+    part: PracticePart,
+    config_json: String,
+}
+
 pub async fn parts_for(
     conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticePart>> {
-    let mut parts = sqlx::query_as::<_, PracticePart>(
-        "SELECT id, practice_id, title, position, analysis_kind, help_text FROM practice_parts \
-         WHERE practice_id = ?1 ORDER BY position, id",
+    let rows = sqlx::query_as::<_, PartRow>(
+        "SELECT id, practice_id, title, position, analysis_kind, help_text, config_json          FROM practice_parts WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
     .fetch_all(&mut *conn)
     .await?;
-    let configs: Vec<(String, String)> =
-        sqlx::query_as("SELECT id, config_json FROM practice_parts WHERE practice_id = ?1")
-            .bind(practice_id)
-            .fetch_all(&mut *conn)
-            .await?;
-    for part in &mut parts {
-        if let Some((_, json)) = configs.iter().find(|(id, _)| *id == part.id) {
-            part.determinations = super::PracticeConfig::parse(json).determinations;
-        }
-    }
-    Ok(parts)
+    Ok(rows
+        .into_iter()
+        .map(|row| PracticePart {
+            determinations: super::PracticeConfig::parse(&row.config_json).determinations,
+            ..row.part
+        })
+        .collect())
 }
 
 pub async fn sections_for(

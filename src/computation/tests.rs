@@ -3495,7 +3495,11 @@ fn an_empty_determination_warns_with_its_label() {
     let mut t = quantity("T");
     t.per_determination = true;
     let measurements = vec![MeasurementInput {
-        operator_replicas: Some(vec![vec![2.0], vec![2.1], vec![]]),
+        operator_replicas: Some(
+            (1..=12)
+                .map(|k| if k == 12 { vec![] } else { vec![k as f64] })
+                .collect(),
+        ),
         ..measurement("T", &[])
     }];
     let a = compute(
@@ -3504,14 +3508,22 @@ fn an_empty_determination_warns_with_its_label() {
         &HashMap::new(),
         &measurements,
         None,
-        Some(&determinations(false)),
+        Some(&crate::practices::Determinations {
+            count: 12,
+            ..determinations(false)
+        }),
     )
     .unwrap();
     assert!(
         a.warnings
             .iter()
-            .any(|w| w.starts_with("Medida 3:") && w.contains("no tiene lecturas")),
+            .any(|w| w.starts_with("Medida 12:") && w.contains("no tiene lecturas")),
         "{:?}",
+        a.warnings
+    );
+    assert!(
+        a.warnings.iter().all(|w| w.starts_with("Medida 12:")),
+        "la determinación 12 no se confunde con la 1: {:?}",
         a.warnings
     );
     assert!(

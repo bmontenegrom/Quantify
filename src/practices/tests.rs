@@ -3903,6 +3903,10 @@ fn check_template_rejects_what_cannot_be_written() {
             "no puede usar operadores",
         ),
         (
+            serde_json::json!({"quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": true, "per_determination": true}]}),
+            "no tiene determinaciones",
+        ),
+        (
             serde_json::json!({"parts": [{"title": "A", "analysis_kind": "curva", "determinations": {"count": 2, "label": "M"}}]}),
             "parte estadística",
         ),

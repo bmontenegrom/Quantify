@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 pub use engines::analyze;
+pub(crate) use engines::per_determination_symbols;
 pub use engines::{
     analyze_definition, compute, compute_curva, compute_regresion, live_values, rename_symbols,
     scale_spec, PointContext,

@@ -747,6 +747,9 @@ pub(super) async fn set_practice_analysis_kind(
             "La práctica tiene partes: el tipo de análisis se elige en cada parte, en \"Partes\".",
         ));
     }
+    if practices::is_point_based(Some(kind)) && before.determinations.is_some() {
+        return Err(AppError::bad_request(DETERMINATIONS_ARE_STATISTICAL));
+    }
     let mut after = before.clone();
     after.analysis_kind = Some(kind.to_string());
     guard_change(&before, &after, "cambiar el tipo de analisis")?;
@@ -799,6 +802,9 @@ pub(super) struct DeterminationsBody {
     #[serde(default)]
     determinations: Option<practices::Determinations>,
 }
+
+const DETERMINATIONS_ARE_STATISTICAL: &str =
+    "Tiene determinaciones, que son solo para análisis estadístico: quitalas antes de cambiar el tipo.";
 
 fn validate_determinations(d: &practices::Determinations) -> Result<(), AppError> {
     if !(2..=practices::MAX_OPERATORS).contains(&d.count) {
@@ -1644,14 +1650,13 @@ fn determination_problems(def: &practices::PracticeDefinition) -> Vec<ElementPro
             });
         }
     }
-    let averaging = def.determinations.as_ref().is_some_and(|d| d.average)
-        || def
-            .parts
-            .iter()
-            .any(|p| p.determinations.as_ref().is_some_and(|d| d.average));
-    if averaging {
-        let symbols: Vec<&str> = practices::version_symbols(def).collect();
-        for r in &def.results {
+    let averaged = crate::computation::per_determination_symbols(&def.quantities, &def.results);
+    let symbols: Vec<&str> = practices::version_symbols(def).collect();
+    for r in def.results.iter().filter(|r| averaged.contains(&r.symbol)) {
+        let part = def
+            .result_part(&r.symbol)
+            .and_then(|id| def.parts.iter().find(|p| p.id == id));
+        if determinations_of(def, part).is_some_and(|d| d.average) {
             let average = format!("{}_medio", r.symbol);
             if symbols.contains(&average.as_str()) {
                 problems.push(ElementProblem {
@@ -2523,6 +2528,11 @@ pub(super) async fn create_part(
     require_teacher(&state, &headers).await?;
     require_title(&input.title)?;
     let before = load_definition(&state, &id).await?;
+    if before.determinations.is_some() {
+        return Err(AppError::bad_request(
+            "La práctica tiene determinaciones: quitalas antes de agregar partes.",
+        ));
+    }
     guard_change(&before, &with_new_part(&before), "agregar la parte")?;
     let mut created = practices::create_part(&state.pool, &id, &input).await?;
     let mut after = before;
@@ -2592,6 +2602,14 @@ pub(super) async fn set_part_kind(
     require_teacher(&state, &headers).await?;
     let kind = parse_analysis_kind(&body.analysis_kind)?;
     let before = load_definition(&state, &id).await?;
+    if practices::is_point_based(Some(kind))
+        && before
+            .parts
+            .iter()
+            .any(|p| p.id == pid && p.determinations.is_some())
+    {
+        return Err(AppError::bad_request(DETERMINATIONS_ARE_STATISTICAL));
+    }
     let after = with_part_kind(&before, &pid, kind)
         .ok_or_else(|| AppError::not_found("parte no encontrada"))?;
     guard_change(&before, &after, "cambiar el tipo de la parte")?;
@@ -3141,6 +3159,39 @@ mod tests {
         };
         assert!(validate_quantity(&without_u(true)).is_ok());
         assert!(validate_quantity(&without_u(false)).is_err());
+    }
+
+    #[test]
+    fn only_averaged_results_can_collide_with_medio() {
+        let result = |symbol: &str, formula: &str| crate::db::PracticeResult {
+            id: symbol.into(),
+            symbol: symbol.into(),
+            formula: formula.into(),
+            ..Default::default()
+        };
+        let def = |extra: &str| practices::PracticeDefinition {
+            determinations: Some(practices::Determinations {
+                count: 2,
+                label: "Medida".into(),
+                average: true,
+                display: Default::default(),
+            }),
+            quantities: vec![crate::db::PracticeQuantity {
+                symbol: "T".into(),
+                per_determination: true,
+                ..Default::default()
+            }],
+            results: vec![result("g", "1/T"), result("doble", "2"), result(extra, "3")],
+            ..Default::default()
+        };
+        let collisions = |d: &practices::PracticeDefinition| {
+            determination_problems(d)
+                .into_iter()
+                .filter(|p| p.check == "el promedio de")
+                .count()
+        };
+        assert_eq!(collisions(&def("doble_medio")), 0);
+        assert_eq!(collisions(&def("g_medio")), 1);
     }
 
     #[test]
@@ -5379,5 +5430,62 @@ mod tests {
         let _ = part_determinations().await.unwrap();
         let blocked = operators(2).await.err().unwrap();
         assert!(blocked.message().contains("ya tiene determinaciones"));
+
+        let to_curve = set_part_kind(
+            State(state.clone()),
+            headers.clone(),
+            Path(("p2-cc".to_string(), part.clone())),
+            Json(PartKindBody {
+                analysis_kind: "curva".into(),
+            }),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(to_curve
+            .message()
+            .contains("solo para análisis estadístico"));
+        let copy = practices::duplicate_practice(&pool, "p2-cc", "Copia", "u1")
+            .await
+            .unwrap()
+            .unwrap();
+        let copied = load_definition(&state, &copy.id).await.unwrap();
+        assert_eq!(
+            copied
+                .parts
+                .iter()
+                .filter_map(|p| p.determinations.as_ref())
+                .count(),
+            1,
+            "la copia conserva las determinaciones de la parte"
+        );
+
+        let practice_to_curve = set_practice_analysis_kind(
+            State(state.clone()),
+            headers.clone(),
+            Path(id.clone()),
+            Json(SetAnalysisKindBody {
+                analysis_kind: "curva".into(),
+            }),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(practice_to_curve
+            .message()
+            .contains("solo para análisis estadístico"));
+        let new_part = create_part(
+            State(state.clone()),
+            headers.clone(),
+            Path(id.clone()),
+            Json(practices::PartInput {
+                title: "Otra".into(),
+                help_text: None,
+            }),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(new_part.message().contains("antes de agregar partes"));
     }
 }
