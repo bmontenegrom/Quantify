@@ -115,7 +115,7 @@ async fn validate_student_results_accepts_point_results_per_run() {
     )
     .unwrap();
 
-    for bad in ["Re#x", "Nope#0"] {
+    for bad in ["Re#x", "Re#-0", "Re#01", "Nope#0"] {
         let err = validate_student_results(
             &crate::practices::definition(&pool, "viscosidad")
                 .await

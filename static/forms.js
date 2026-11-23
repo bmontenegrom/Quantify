@@ -10,7 +10,7 @@ import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   prefixFactor, validateMeasurements,
   draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements, POINT_KINDS,
-  determinationsFor, expandDeterminationResults, cssEscape, statisticalDeterminations,
+  determinationsFor, expandDeterminationResults, cssEscape, statisticalDeterminations, symbolPart,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -572,7 +572,7 @@ function finalsByPartHtml(definition, finals) {
 }
 
 function finalPart(definition, r) {
-  return partForResult(r.symbol) ?? expandDeterminationResults(definition, [r])[0].part ?? null;
+  return partForResult(r.symbol) ?? expandDeterminationResults(definition, [r])[0].part ?? symbolPart(definition, r.symbol);
 }
 
 function partForResult(symbol) {
@@ -581,7 +581,12 @@ function partForResult(symbol) {
 }
 
 export function finalResultRowHtml(r, sectionId) {
-  const part = sectionId !== undefined ? sectionId : r.part !== undefined ? r.part : partForResult(r.symbol);
+  const part =
+    sectionId !== undefined
+      ? sectionId
+      : r.part !== undefined
+        ? r.part
+        : partForResult(r.symbol) ?? symbolPart(state.practiceForm?.definition, r.symbol);
   const tab = r.determination?.tabs
     ? ` data-det-scope="${escapeHtml(r.determination.scope)}" data-determination="${r.determination.index}"`
     : "";

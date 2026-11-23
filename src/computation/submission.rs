@@ -345,7 +345,7 @@ pub fn check_student_result_symbols(
                     "el simbolo \"{symbol}\" no es un mensurando de esta practica"
                 ));
             };
-            if point_symbols.contains(base) && k >= 0 {
+            if point_symbols.contains(base) && k >= 0 && k.to_string() == idx {
                 continue;
             }
             if k.to_string() == idx

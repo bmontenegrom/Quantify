@@ -1153,6 +1153,7 @@ test("validateMeasurements: en una práctica de series las determinaciones se va
   const T = (groups) => ({ quantity_id: "T", values: [], operator_replicas: groups });
   assert.equal(validateMeasurements([x, T([[1], [2]])], "regresion_lineal", meta), null);
   assert.match(validateMeasurements([x, T([[1], []])], "regresion_lineal", meta), /falta cargar Medida 2/);
+  assert.match(validateMeasurements([x, T([])], "regresion_lineal", meta), /falta cargar Medida 1/);
 });
 
 test("formulaVariables: deja afuera funciones, espacios de nombres y exponentes", () => {

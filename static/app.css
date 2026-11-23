@@ -1673,7 +1673,8 @@ button.back-link {
   opacity: 0.8;
 }
 
-.det-hidden {
+.det-hidden,
+.practice-part-tabs[hidden] {
   display: none;
 }
 

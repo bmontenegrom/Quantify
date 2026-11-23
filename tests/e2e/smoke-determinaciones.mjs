@@ -130,7 +130,7 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     post(`${mbase}/quantities`, { symbol, name: symbol, unit: "", repeated: false, quantity: null, ...extra });
   const directa = await post(`${mbase}/parts`, { title: "Directa" });
   const ajuste = await post(`${mbase}/parts`, { title: "Ajuste" });
-  await post(`${mbase}/parts/${directa.id}/determinations`, determinations("bloques"));
+  await post(`${mbase}/parts/${directa.id}/determinations`, determinations("pestanas"));
   const sDirecta = await post(`${mbase}/sections`, { title: "Pendulo", part_id: directa.id });
   const sAjuste = await post(`${mbase}/sections`, { title: "Barrido", part_id: ajuste.id });
   const P = await qty("P", {});
@@ -164,21 +164,24 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   await partTabs.nth(0).click();
   const pGroup = sPage.locator(`#measurement-fields .operator-quantity[data-quantity-id="${P.id}"]`);
   assert((await pGroup.locator(".measurement-row").count()) === 3, "P debía cargarse en tres medidas");
-  for (const [i, v] of ["2", "4", "5"].entries()) {
-    await pGroup.locator(".measurement-row").nth(i).locator(".measure-value").first().fill(v);
-  }
   const sGroup = sPage.locator(`#measurement-fields .operator-quantity[data-quantity-id="${S.id}"]`);
   const slots = sGroup.locator(".measure-value");
   assert((await slots.count()) === 3, "la ranura debía pedirse en cada medida");
   assert((await slots.first().getAttribute("max")) === "4", "la ranura por medida debía ir de 1 a 4");
   assert((await sGroup.locator(".prefix-select").count()) === 0, "la ranura no debía tener prefijo");
-  for (const [i, v] of ["1", "2", "3"].entries()) await slots.nth(i).fill(v);
+  const detTabs = sPage.locator("#measurement-fields [data-det-tabs] .part-tab");
+  for (const [i, [pv, sv]] of [["2", "1"], ["4", "2"], ["5", "3"]].entries()) {
+    await detTabs.nth(i).click();
+    await pGroup.locator(".measurement-row").nth(i).locator(".measure-value").first().fill(pv);
+    await slots.nth(i).fill(sv);
+  }
   assert(
     await sPage.locator('[data-final-result][data-symbol="f#3"]').isVisible(),
     "f (sin sección) debía pedirse por medida en su parte",
   );
   await sPage.locator('[data-final-result][data-symbol="f#3"] .final-result-value').fill("0.2");
   await partTabs.nth(1).click();
+  assert(!(await detTabs.first().isVisible()), "las pestañas de las medidas no debían verse en la parte Ajuste");
   assert(
     !(await sPage.locator('.final-results-section:has([data-symbol="f#1"])').isVisible()),
     "el resultado final de f no debía quedar como título vacío en la parte Ajuste",

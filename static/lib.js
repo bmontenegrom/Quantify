@@ -629,8 +629,8 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
 
 function groupError(m, meta) {
   const name = meta.name ?? m.quantity_id;
-  const empty = m.operator_replicas.findIndex((reps) => reps.length === 0);
-  if (m.operator_replicas.length === 0 || empty !== -1) {
+  const empty = m.operator_replicas.length === 0 ? 0 : m.operator_replicas.findIndex((reps) => reps.length === 0);
+  if (empty !== -1) {
     return meta.groupLabel
       ? `"${name}": falta cargar ${meta.groupLabel} ${empty + 1}.`
       : `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
