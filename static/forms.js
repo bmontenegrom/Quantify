@@ -10,6 +10,7 @@ import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   prefixFactor, validateMeasurements,
   draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements, POINT_KINDS,
+  determinationsFor, expandDeterminationResults, cssEscape,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -277,6 +278,49 @@ export function renderPartTabs(practiceId) {
   practicePartTabs.innerHTML = "";
 }
 
+const activeDetermination = new Map();
+
+function determinationTabsHtml(definition) {
+  if ((definition.operator_count ?? 0) >= 2) return "";
+  const scopes = (definition.parts ?? []).length
+    ? definition.parts.map((p) => ({ scope: p.id, d: p.determinations }))
+    : [{ scope: "", d: definition.determinations }];
+  return scopes
+    .filter(({ d }) => d?.display === "pestanas")
+    .map(({ scope, d }) => {
+      const buttons = Array.from(
+        { length: d.count },
+        (_, i) => `<button type="button" class="part-tab" data-determination="${i}">${escapeHtml(d.label.trim())} ${i + 1}</button>`,
+      ).join("");
+      const section = scope ? ` data-section="${escapeHtml(scope)}"` : "";
+      return `<div class="practice-part-tabs determination-tabs" data-det-tabs="${escapeHtml(scope)}"${section}>${buttons}</div>`;
+    })
+    .join("");
+}
+
+function applyDeterminationVisibility() {
+  measurementFields.querySelectorAll("[data-det-tabs]").forEach((strip) => {
+    const scope = strip.dataset.detTabs;
+    const active = activeDetermination.get(scope) ?? 0;
+    strip.querySelectorAll(".part-tab").forEach((tab) => {
+      tab.classList.toggle("active", Number(tab.dataset.determination) === active);
+    });
+    measurementFields.querySelectorAll(`[data-det-scope="${cssEscape(scope)}"]`).forEach((el) => {
+      el.classList.toggle("det-hidden", Number(el.dataset.determination) !== active);
+    });
+  });
+}
+
+function wireDeterminationTabs() {
+  measurementFields.querySelectorAll("[data-det-tabs] .part-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      activeDetermination.set(tab.closest("[data-det-tabs]").dataset.detTabs, Number(tab.dataset.determination));
+      applyDeterminationVisibility();
+    });
+  });
+  applyDeterminationVisibility();
+}
+
 function applyPartVisibility() {
   if (!definitionParts(state.practiceForm?.definition).length) return;
   measurementFields.querySelectorAll("[data-section]").forEach((el) => {
@@ -314,7 +358,11 @@ export function renderMeasurementFields(draft) {
       ? definition.operator_count ?? 0
       : 0;
   const useOperators = operatorCount >= 2;
-  const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
+  const groupOf = (q) => {
+    if (useOperators) return q.repeated && !q.is_given ? { count: operatorCount, label: null, scope: null } : null;
+    const d = q.per_determination ? determinationsFor(definition, q.symbol) : null;
+    return d ? { count: d.count, label: d.label.trim(), scope: d.display === "pestanas" ? d.scope : null } : null;
+  };
   const legendHtml = (q) => quantityNameHtml(q);
   const drafted = state.editPrefill
     ? new Set(state.editPrefill.map((m) => m.quantity_id))
@@ -381,15 +429,31 @@ export function renderMeasurementFields(draft) {
   };
 
   const quantityRowHtml = (q) => {
-    if (!isPerOperator(q)) return measurementRowHtml(q, null);
-    const chrono = Array.from({ length: operatorCount }, (_, i) => rendersChrono(q, i));
+    const group = groupOf(q);
+    if (!group) return measurementRowHtml(q, null);
+    const chrono = Array.from({ length: group.count }, (_, i) => !q.is_given && rendersChrono(q, i));
+    const row = (i) =>
+      q.is_given ? measurementRowHtml({ ...q, is_given: false, repeated: false }, i, false) : measurementRowHtml(q, i, chrono[i]);
+    const tab = (i) =>
+      group.scope != null ? ` data-det-scope="${escapeHtml(group.scope)}" data-determination="${i}"` : "";
     const blocks = chrono
-      .map((isChrono, i) => `<div class="operator-block"><h5 class="operator-label">Operador ${i + 1}</h5>${measurementRowHtml(q, i, isChrono)}</div>`)
+      .map((_, i) => `<div class="operator-block"${tab(i)}><h5 class="operator-label">${escapeHtml(group.label ?? "Operador")} ${i + 1}</h5>${row(i)}</div>`)
       .join("");
+    const sharedU = !hasUncertainty(q)
+      ? ""
+      : `<label>Incertidumbre U (expandida, la misma en todas)
+          <div class="replica-input-wrap">
+            ${prefixSelectHtml()}
+            <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
+            <span class="replica-unit">${unitHtml(q.unit)}</span>
+          </div>
+        </label>`;
+    const per = group.label ? group.label.toLowerCase() : "operador";
+    const labelAttr = group.label ? ` data-group-label="${escapeHtml(group.label)}"` : "";
     return `
-      <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
-        <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por operador</span></h4>
-        ${instrumentSelectorsHtml(instruments, q, chrono.some(Boolean))}
+      <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}"${labelAttr}>
+        <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por ${escapeHtml(per)}</span></h4>
+        ${q.is_given ? sharedU : instrumentSelectorsHtml(instruments, q, chrono.some(Boolean))}
         ${blocks}
       </div>
     `;
@@ -408,7 +472,7 @@ export function renderMeasurementFields(draft) {
       const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
       const finalsHtml = secFinals.length
         ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
-           ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
+           ${expandDeterminationResults(definition, secFinals).map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
         : "";
       return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
@@ -420,12 +484,20 @@ export function renderMeasurementFields(draft) {
     });
     const leftoverFinals = allFinals.filter((r) => !embedded.has(r.symbol));
     measurementFields.innerHTML =
-      partHelpHtml(definition) + blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
+      determinationTabsHtml(definition) +
+      partHelpHtml(definition) +
+      blocks.join("") +
+      rest.map(quantityRowHtml).join("") +
+      finalResultSectionHtml(definition, leftoverFinals);
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
     measurementFields.innerHTML =
-      definition.quantities.map(quantityRowHtml).join("") + helper + finalResultSectionHtml(definition);
+      determinationTabsHtml(definition) +
+      definition.quantities.map(quantityRowHtml).join("") +
+      helper +
+      finalResultSectionHtml(definition);
   }
+  wireDeterminationTabs();
   wireChronoHelpers();
 
   wireInstrumentSelectors(measurementFields);
@@ -446,7 +518,10 @@ function partForResult(symbol) {
 }
 
 export function finalResultRowHtml(r, sectionId) {
-  const part = sectionId !== undefined ? sectionId : partForResult(r.symbol);
+  const part = sectionId !== undefined ? sectionId : partForResult(r.base ?? r.symbol);
+  const tab = r.determination?.tabs
+    ? ` data-det-scope="${escapeHtml(r.determination.scope)}" data-determination="${r.determination.index}"`
+    : "";
   const uField = !hasUncertainty(r)
     ? ""
     : `
@@ -458,8 +533,8 @@ export function finalResultRowHtml(r, sectionId) {
           </div>
         </label>`;
   return `
-    <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}>
-      <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
+    <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}${tab}>
+      <legend>${symbolHtml(r.determination ? r.base : r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
       <div class="form-grid">
         <label>Valor
           <div class="replica-input-wrap">
@@ -514,7 +589,7 @@ function finalResultSectionHtml(definition, finals, part = null) {
     <div class="measurement-section final-results-section"${partAttr}>
       <h4 class="measurement-section-title">Resultado final <span class="submission-meta">— opcional</span></h4>
       <p class="submission-meta">Si ya calculaste tu resultado, cargalo acá. Podés dejarlo para más adelante; el docente puede cargarlo después.</p>
-      ${rows.map((r) => finalResultRowHtml(r)).join("")}
+      ${expandDeterminationResults(definition, rows).map((r) => finalResultRowHtml(r)).join("")}
     </div>
   `;
 }
@@ -612,7 +687,7 @@ export function collectMeasurements() {
       instrument_id: container.querySelector(".measure-instrument")?.value || null,
       scale_id: container.querySelector(".measure-scale")?.value || null,
       values: [],
-      given_u: null,
+      given_u: sharedGivenU(container),
       operator_replicas: rows.map(rowSeriesValues),
     };
   });
@@ -624,6 +699,14 @@ export function collectMeasurements() {
     out.push(collectStandaloneRow(row));
   }
   return out;
+}
+
+function sharedGivenU(container) {
+  const input = container.querySelector(".measure-given-u");
+  const raw = input?.value.trim() ?? "";
+  if (raw === "") return null;
+  const u = Number(raw) * prefixFactor(input.closest(".replica-input-wrap").querySelector(".prefix-select").value);
+  return Number.isFinite(u) ? u : null;
 }
 
 function collectStandaloneRow(row) {
@@ -697,7 +780,11 @@ function buildMetaMap(measurements) {
     const row = measurementFields.querySelector(
       `.measurement-row[data-quantity-id="${CSS.escape(m.quantity_id)}"]`
     );
+    const group = measurementFields.querySelector(
+      `.operator-quantity[data-quantity-id="${CSS.escape(m.quantity_id)}"]`
+    );
     map[m.quantity_id] = {
+      groupLabel: group?.dataset.groupLabel ?? null,
       name: def?.name ?? row?.querySelector("legend")?.textContent?.trim() ?? m.quantity_id,
       isGiven: def?.is_given ?? row?.dataset.isGiven === "1",
       isChrono: row?.dataset.isChrono === "1",
@@ -970,8 +1057,7 @@ function editPrefillByQuantity() {
   for (const e of map.values()) {
     const pIdx = [...e.points.keys()].sort((a, b) => a - b);
     e.pointGroups = pIdx.map((i) => e.points.get(i));
-    const oIdx = [...e.operators.keys()].sort((a, b) => a - b);
-    e.operatorGroups = oIdx.map((i) => e.operators.get(i));
+    e.operatorGroups = Array.from({ length: Math.max(-1, ...e.operators.keys()) + 1 }, (_, i) => e.operators.get(i) ?? []);
     e.values = e.pointGroups.flat();
     delete e.points;
     delete e.operators;
@@ -1064,6 +1150,8 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
     const e = byQ.get(groupEl.dataset.quantityId);
     if (!e) return;
     fillInstrument(groupEl, e);
+    const u = groupEl.querySelector(".measure-given-u");
+    if (u && e.value_u != null) u.value = e.value_u;
     const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
     );

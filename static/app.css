@@ -1673,6 +1673,10 @@ button.back-link {
   opacity: 0.8;
 }
 
+.det-hidden {
+  display: none;
+}
+
 .operator-result {
   margin-top: 12px;
 }

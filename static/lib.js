@@ -381,6 +381,57 @@ export function guideStepOrNext(definition, step) {
   return (steps.find((s) => s.id === step) ?? steps.find((s) => order.indexOf(s.id) > from) ?? steps[0]).id;
 }
 
+function symbolPart(definition, symbol) {
+  return (
+    (definition?.sections ?? []).find(
+      (s) => s.part_id && (s.quantities.includes(symbol) || s.results.includes(symbol)),
+    )?.part_id ?? null
+  );
+}
+
+export function determinationsFor(definition, symbol) {
+  if ((definition?.operator_count ?? 0) >= 2) return null;
+  if (!(definition?.parts ?? []).length) {
+    if (POINT_KINDS.includes(definition?.analysis_kind)) return null;
+    return definition?.determinations ? { scope: "", ...definition.determinations } : null;
+  }
+  const scope = symbolPart(definition, symbol);
+  const d = definition.parts.find((p) => p.id === scope)?.determinations;
+  return d ? { scope, ...d } : null;
+}
+
+export function perDeterminationSymbols(definition) {
+  const symbols = new Set((definition?.quantities ?? []).filter((q) => q.per_determination).map((q) => q.symbol));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const r of definition?.results ?? []) {
+      if (!symbols.has(r.symbol) && (r.formula.match(/[A-Za-z_]\w*/g) ?? []).some((s) => symbols.has(s))) {
+        symbols.add(r.symbol);
+        grew = true;
+      }
+    }
+  }
+  return symbols;
+}
+
+export function expandDeterminationResults(definition, results) {
+  const repeated = perDeterminationSymbols(definition);
+  return results.flatMap((r) => {
+    const d = repeated.has(r.symbol) ? determinationsFor(definition, r.symbol) : null;
+    if (!d) return [r];
+    const label = d.label.trim();
+    const each = Array.from({ length: d.count }, (_, i) => ({
+      ...r,
+      symbol: `${r.symbol}#${i + 1}`,
+      name: `${r.name} — ${label} ${i + 1}`,
+      base: r.symbol,
+      determination: { scope: d.scope, index: i, tabs: d.display === "pestanas" },
+    }));
+    const average = { ...r, symbol: `${r.symbol}_medio`, name: `${r.name} (promedio)`, base: r.symbol };
+    return d.average ? [...each, average] : each;
+  });
+}
+
 export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
   const pointBased = POINT_KINDS.includes(definition?.analysis_kind);
   const operators = !pointBased && (definition?.operator_count ?? 0) >= 2 ? definition.operator_count : 0;
@@ -391,9 +442,15 @@ export function exampleMeasurements(definition, { points = 5, replicas = 3, inst
     const base = q.default_value != null && (q.is_given || q.default_value !== 0) ? q.default_value : quantities.length - i;
     const instrument = q.quantity && !q.is_given ? compatibleInstruments(instruments, q.quantity).find((x) => x.scales?.length) : null;
     const m = { quantity_id: q.id, instrument_id: instrument?.id ?? null, scale_id: instrument?.scales[0].id ?? null, values: [], given_u: null };
+    const groups = q.per_determination ? determinationsFor(definition, q.symbol)?.count ?? 0 : 0;
     if (q.is_given) {
       const value = q.slot_count ? q.default_value ?? 1 : base;
-      return { ...m, values: [value], given_u: hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null };
+      const given_u = hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null;
+      if (groups) {
+        const each = (o) => (q.slot_count ? value : round(value * (1 + 0.02 * o)));
+        return { ...m, given_u, operator_replicas: Array.from({ length: groups }, (_, o) => [each(o)]) };
+      }
+      return { ...m, values: [value], given_u };
     }
     if (pointBased && q.per_point) {
       const at = (p) => base * (1 + p / (i + 2));
@@ -402,8 +459,9 @@ export function exampleMeasurements(definition, { points = 5, replicas = 3, inst
       }
       return { ...m, values: Array.from({ length: points }, (_, p) => round(at(p))) };
     }
-    if (q.repeated && operators) {
-      return { ...m, operator_replicas: Array.from({ length: operators }, (_, o) => series(replicas, base * (1 + 0.02 * o))) };
+    if (groups || (q.repeated && operators)) {
+      const n = q.repeated ? replicas : 1;
+      return { ...m, operator_replicas: Array.from({ length: groups || operators }, (_, o) => series(n, base * (1 + 0.02 * o))) };
     }
     return { ...m, values: q.repeated ? series(replicas, base) : [base] };
   });
@@ -568,17 +626,23 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
     if (meta.optional) {
       continue;
     }
-    if (meta.isGiven) {
+    const empty = m.operator_replicas ? m.operator_replicas.findIndex((reps) => reps.length === 0) : -1;
+    const missingGroup = meta.groupLabel
+      ? `"${name}": falta cargar ${meta.groupLabel} ${empty + 1}.`
+      : `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
+    if (meta.isGiven && m.operator_replicas) {
+      if (m.operator_replicas.length === 0 || empty !== -1) return missingGroup;
+      if (meta.hasUncertainty !== false && m.given_u == null) {
+        return `El dato "${name}" requiere la incertidumbre U.`;
+      }
+    } else if (meta.isGiven) {
       if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
         return meta.hasUncertainty === false
           ? `El dato "${name}" requiere un valor.`
           : `El dato "${name}" requiere valor e incertidumbre U.`;
       }
     } else if (m.operator_replicas) {
-      const empty = m.operator_replicas.findIndex((reps) => reps.length === 0);
-      if (m.operator_replicas.length === 0 || empty !== -1) {
-        return `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
-      }
+      if (m.operator_replicas.length === 0 || empty !== -1) return missingGroup;
     } else if (meta.isChrono) {
       if (m.values.length === 0) {
         return `"${name}": registrá al menos una lectura con el cronómetro antes de entregar.`;
