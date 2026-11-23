@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections } from "./lib.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections, expandDeterminationResults } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -22,6 +22,10 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     if (submission.analysis) {
       body += formAnalysisMarkup(submission.analysis, pairs);
       if (studentResults.length) {
+        const tolerances = { ...(submission.result_tolerances ?? {}) };
+        for (const r of expandDeterminationResults(definition, definition?.results ?? [])) {
+          if (r.base && !r.determination && tolerances[r.base] != null) tolerances[r.symbol] ??= tolerances[r.base];
+        }
         const finalAggregateSymbols = new Set(
           (definition?.aggregates ?? []).filter((a) => a.is_final).map((a) => a.symbol),
         );
@@ -33,9 +37,19 @@ export function renderAnalysis(target, submission, includeReview = false, defini
           body += comparisonMarkup(
             [...(analysis.derived ?? []), ...comparableAggregates],
             studentResults,
-            submission.result_tolerances ?? {},
+            tolerances,
             title,
           );
+          for (const [k, det] of (analysis.determinations ?? []).entries()) {
+            const suffix = `#${k + 1}`;
+            const own = new Set((det.derived ?? []).map((d) => d.symbol));
+            const mine = studentResults
+              .filter((s) => s.symbol.endsWith(suffix) && own.has(s.symbol.slice(0, -suffix.length)))
+              .map((s) => ({ ...s, symbol: s.symbol.slice(0, -suffix.length) }));
+            if (mine.length) {
+              body += comparisonMarkup(det.derived ?? [], mine, tolerances, title ? `${title} — ${det.label}` : det.label);
+            }
+          }
           body += pointResultsComparisonMarkup(analysis, studentResults, title);
         }
       }
@@ -356,9 +370,22 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
     `;
   }
 
+  const determinationBlocks = (analysis.determinations ?? [])
+    .map(
+      (det) => `
+        <section class="operator-result panel">
+          <h4>${escapeHtml(det.label)}</h4>
+          ${quantitiesTableMarkup(det.quantities ?? [])}
+          ${derivedBlockMarkup(det.derived ?? [], "")}
+          ${measuredVsTheoreticalMarkup([...measured, ...(det.quantities ?? [])], det.derived ?? [], pairs)}
+        </section>`,
+    )
+    .join("");
+
   return `
     <h3>Incertidumbres por magnitud</h3>
-    ${quantitiesTable}
+    ${quantities.length || !determinationBlocks ? quantitiesTable : ""}
+    ${determinationBlocks}
     ${derivedBlock}
     ${measuredVsTheoreticalMarkup(measured, derived, pairs)}
     ${renderWarnings(analysis.warnings ?? [])}
@@ -370,7 +397,7 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
     .filter((a) => a.is_final)
     .map((a) => ({ ...a, has_uncertainty: false }));
   const measurands = [
-    ...(definition?.results ?? []).filter((r) => r.is_final),
+    ...expandDeterminationResults(definition, (definition?.results ?? []).filter((r) => r.is_final)),
     ...finalAggregates,
   ];
   if (!measurands.length) return "";
@@ -387,7 +414,7 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
         : `<td class="submission-meta">sin U</td>`;
       return `
         <tr>
-          <td class="directory-primary"><strong>${symbolHtml(m.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(m.name)}${m.unit ? ` (${unitHtml(m.unit)})` : ""}</span></td>
+          <td class="directory-primary"><strong>${symbolHtml(m.determination ? m.base : m.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(m.name)}${m.unit ? ` (${unitHtml(m.unit)})` : ""}</span></td>
           <td><input class="student-value" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${v}" ${dis} placeholder="valor" /></td>
           ${uCell}
         </tr>`;

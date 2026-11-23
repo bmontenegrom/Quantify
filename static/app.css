@@ -1673,6 +1673,11 @@ button.back-link {
   opacity: 0.8;
 }
 
+.det-hidden,
+.practice-part-tabs[hidden] {
+  display: none;
+}
+
 .operator-result {
   margin-top: 12px;
 }

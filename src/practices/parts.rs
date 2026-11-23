@@ -209,6 +209,65 @@ impl PracticeDefinition {
         self
     }
 
+    /// Los mensurandos que se calculan en cada determinación, con las determinaciones de su parte.
+    ///
+    /// ```
+    /// use quantify::practices::{Determinations, PracticeDefinition};
+    /// let q = quantify::db::PracticeQuantity { symbol: "T".into(), per_determination: true, ..Default::default() };
+    /// let r = |s: &str, f: &str| quantify::db::PracticeResult { symbol: s.into(), formula: f.into(), ..Default::default() };
+    /// let d = Determinations { count: 3, label: "Medida".into(), average: true, display: Default::default() };
+    /// let def = PracticeDefinition { quantities: vec![q], results: vec![r("g", "2*T"), r("k", "3")], determinations: Some(d), ..Default::default() };
+    /// let found = def.determination_results();
+    /// assert_eq!(found.len(), 1);
+    /// assert_eq!((found[0].0.as_str(), found[0].1.count), ("g", 3));
+    /// ```
+    pub fn determination_results(&self) -> Vec<(String, super::Determinations)> {
+        let views: Vec<PracticeDefinition> = if self.parts.is_empty() {
+            vec![self.clone()]
+        } else {
+            self.parts.iter().map(|p| self.part_view(p)).collect()
+        };
+        views
+            .into_iter()
+            .filter(|v| !is_point_based(v.analysis_kind.as_deref()))
+            .flat_map(|v| {
+                let Some(d) = v.determinations.clone() else {
+                    return Vec::new();
+                };
+                let per = crate::computation::per_determination_symbols(&v.quantities, &v.results);
+                v.results
+                    .iter()
+                    .filter(|r| per.contains(&r.symbol))
+                    .map(|r| (r.symbol.clone(), d.clone()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Las determinaciones que valen en una parte estadística, o en la práctica si no tiene partes.
+    ///
+    /// ```
+    /// use quantify::practices::{Determinations, PracticeDefinition};
+    /// let d = Determinations { count: 2, label: "Medida".into(), average: false, display: Default::default() };
+    /// let def = PracticeDefinition { determinations: Some(d), ..Default::default() };
+    /// assert_eq!(def.determinations_in(None).map(|d| d.count), Some(2));
+    /// ```
+    pub fn determinations_in<'a>(
+        &'a self,
+        part: Option<&'a PracticePart>,
+    ) -> Option<&'a super::Determinations> {
+        match part {
+            Some(part) => part
+                .determinations
+                .as_ref()
+                .filter(|_| self.part_kind(part) == "estadistico"),
+            None if self.parts.is_empty() && !is_point_based(self.analysis_kind.as_deref()) => {
+                self.determinations.as_ref()
+            }
+            None => None,
+        }
+    }
+
     pub fn part_kind(&self, part: &PracticePart) -> &str {
         self.kind_given_series(part, self.series_part().map(|p| p.id.as_str()))
     }
@@ -352,6 +411,28 @@ impl PracticeDefinition {
         }
         if self.results.iter().any(|r| r.symbol == symbol) {
             return self.result_part_in(symbol, seen);
+        }
+        if let Some(base) = symbol
+            .strip_suffix("_medio")
+            .filter(|_| {
+                let named = |s: &str| s == symbol;
+                !self.quantities.iter().any(|q| named(&q.symbol))
+                    && !self.intermediates.iter().any(|i| named(&i.symbol))
+                    && !self.aggregates.iter().any(|a| named(&a.symbol))
+                    && !self.point_results.iter().any(|p| named(&p.symbol))
+            })
+            .filter(|b| self.results.iter().any(|r| r.symbol == *b))
+        {
+            let part = self.result_part_in(base, seen);
+            let averaged = self
+                .determinations_in(part.and_then(|id| self.parts.iter().find(|p| p.id == id)))
+                .is_some_and(|d| d.average)
+                && crate::computation::per_determination_symbols(&self.quantities, &self.results)
+                    .iter()
+                    .any(|s| s == base);
+            if averaged {
+                return part;
+            }
         }
         let series_part = self.series_part()?;
         let series: Vec<&str> = self

@@ -381,6 +381,94 @@ export function guideStepOrNext(definition, step) {
   return (steps.find((s) => s.id === step) ?? steps.find((s) => order.indexOf(s.id) > from) ?? steps[0]).id;
 }
 
+export function formulaVariables(formula) {
+  return formula.match(/(?<![\w.:])[A-Za-z_]\w*\b(?!\s*\(|:)/g) ?? [];
+}
+
+export function seriesPart(definition) {
+  return (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico");
+}
+
+function seriesSymbolPart(definition, symbol) {
+  const series = seriesPart(definition)?.id;
+  if (!series) return null;
+  const columns = [
+    ...(definition.quantities ?? []).filter((q) => q.per_point && !q.is_given).map((q) => q.symbol),
+    ...(definition.intermediates ?? []).map((it) => it.symbol),
+  ];
+  const fromSeries =
+    ["slope", "intercept"].includes(symbol) ||
+    columns.includes(symbol) ||
+    columns.some((s) => symbol === `${s}_max` || columns.some((t) => symbol === `${t}_at_${s}_max`));
+  return fromSeries ? series : null;
+}
+
+export function symbolPart(definition, symbol, seen = new Set()) {
+  const results = definition?.results ?? [];
+  const section = (definition?.sections ?? []).find((s) => s.quantities.includes(symbol) || s.results.includes(symbol));
+  if (section) return section.part_id ?? null;
+  const defined = ["quantities", "intermediates", "aggregates", "point_results"].some((key) =>
+    (definition?.[key] ?? []).some((item) => item.symbol === symbol),
+  );
+  const base = !defined && symbol.endsWith("_medio") ? symbol.slice(0, -"_medio".length) : null;
+  const result = results.find((r) => r.symbol === symbol) ?? results.find((r) => r.symbol === base);
+  if (!result) return seriesSymbolPart(definition, symbol);
+  if (result.symbol !== symbol) return symbolPart(definition, result.symbol, seen);
+  if (seen.has(symbol)) return null;
+  seen.add(symbol);
+  const parts = new Set(formulaVariables(result.formula).map((s) => symbolPart(definition, s, seen)).filter(Boolean));
+  seen.delete(symbol);
+  return parts.size === 1 ? [...parts][0] : null;
+}
+
+export function determinationsFor(definition, symbol) {
+  if ((definition?.operator_count ?? 0) >= 2) return null;
+  if (!(definition?.parts ?? []).length) {
+    if (POINT_KINDS.includes(definition?.analysis_kind)) return null;
+    return definition?.determinations ? { scope: "", ...definition.determinations } : null;
+  }
+  const scope = symbolPart(definition, symbol);
+  const d = statisticalDeterminations(definition.parts.find((p) => p.id === scope));
+  return d ? { scope, ...d } : null;
+}
+
+export function statisticalDeterminations(part) {
+  return (part?.effective_kind ?? "estadistico") === "estadistico" ? part?.determinations ?? null : null;
+}
+
+export function perDeterminationSymbols(definition) {
+  const symbols = new Set((definition?.quantities ?? []).filter((q) => q.per_determination).map((q) => q.symbol));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const r of definition?.results ?? []) {
+      if (!symbols.has(r.symbol) && formulaVariables(r.formula).some((s) => symbols.has(s))) {
+        symbols.add(r.symbol);
+        grew = true;
+      }
+    }
+  }
+  return symbols;
+}
+
+export function expandDeterminationResults(definition, results) {
+  const repeated = perDeterminationSymbols(definition);
+  return results.flatMap((r) => {
+    const d = repeated.has(r.symbol) ? determinationsFor(definition, r.symbol) : null;
+    if (!d) return [r];
+    const label = d.label.trim();
+    const each = Array.from({ length: d.count }, (_, i) => ({
+      ...r,
+      symbol: `${r.symbol}#${i + 1}`,
+      name: `${r.name} — ${label} ${i + 1}`,
+      base: r.symbol,
+      part: d.scope || null,
+      determination: { scope: d.scope, index: i, tabs: d.display === "pestanas" },
+    }));
+    const average = { ...r, symbol: `${r.symbol}_medio`, name: `${r.name} (promedio)`, base: r.symbol, part: d.scope || null };
+    return d.average ? [...each, average] : each;
+  });
+}
+
 export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
   const pointBased = POINT_KINDS.includes(definition?.analysis_kind);
   const operators = !pointBased && (definition?.operator_count ?? 0) >= 2 ? definition.operator_count : 0;
@@ -391,9 +479,15 @@ export function exampleMeasurements(definition, { points = 5, replicas = 3, inst
     const base = q.default_value != null && (q.is_given || q.default_value !== 0) ? q.default_value : quantities.length - i;
     const instrument = q.quantity && !q.is_given ? compatibleInstruments(instruments, q.quantity).find((x) => x.scales?.length) : null;
     const m = { quantity_id: q.id, instrument_id: instrument?.id ?? null, scale_id: instrument?.scales[0].id ?? null, values: [], given_u: null };
+    const groups = q.per_determination ? determinationsFor(definition, q.symbol)?.count ?? 0 : 0;
     if (q.is_given) {
       const value = q.slot_count ? q.default_value ?? 1 : base;
-      return { ...m, values: [value], given_u: hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null };
+      const given_u = hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null;
+      if (groups) {
+        const each = (o) => (q.slot_count ? value : round(value * (1 + 0.02 * o)));
+        return { ...m, given_u, operator_replicas: Array.from({ length: groups }, (_, o) => [each(o)]) };
+      }
+      return { ...m, values: [value], given_u };
     }
     if (pointBased && q.per_point) {
       const at = (p) => base * (1 + p / (i + 2));
@@ -402,8 +496,9 @@ export function exampleMeasurements(definition, { points = 5, replicas = 3, inst
       }
       return { ...m, values: Array.from({ length: points }, (_, p) => round(at(p))) };
     }
-    if (q.repeated && operators) {
-      return { ...m, operator_replicas: Array.from({ length: operators }, (_, o) => series(replicas, base * (1 + 0.02 * o))) };
+    if (groups || (q.repeated && operators)) {
+      const n = q.repeated ? replicas : 1;
+      return { ...m, operator_replicas: Array.from({ length: groups || operators }, (_, o) => series(n, base * (1 + 0.02 * o))) };
     }
     return { ...m, values: q.repeated ? series(replicas, base) : [base] };
   });
@@ -537,6 +632,20 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
   }, []);
 }
 
+export function groupError(m, meta) {
+  const name = meta.name ?? m.quantity_id;
+  const empty = m.operator_replicas.length === 0 ? 0 : m.operator_replicas.findIndex((reps) => reps.length === 0);
+  if (empty !== -1) {
+    return meta.groupLabel
+      ? `"${name}": falta cargar ${meta.groupLabel} ${empty + 1}.`
+      : `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
+  }
+  if (meta.isGiven && meta.hasUncertainty !== false && m.given_u == null) {
+    return `El dato "${name}" requiere la incertidumbre U.`;
+  }
+  return null;
+}
+
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
   if (POINT_KINDS.includes(analysisKind)) {
     const pointCount = (m) => m.point_replicas?.length ?? m.values.length;
@@ -550,7 +659,10 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
     for (const m of measurements) {
       const meta = metaMap[m.quantity_id] ?? {};
       const name = meta.name ?? m.quantity_id;
-      if (meta.isGiven) {
+      if (m.operator_replicas) {
+        const error = meta.optional ? null : groupError(m, meta);
+        if (error) return error;
+      } else if (meta.isGiven) {
         if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
           return meta.hasUncertainty === false
             ? `El dato "${name}" requiere un valor.`
@@ -568,16 +680,14 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
     if (meta.optional) {
       continue;
     }
-    if (meta.isGiven) {
+    if (m.operator_replicas) {
+      const error = groupError(m, meta);
+      if (error) return error;
+    } else if (meta.isGiven) {
       if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
         return meta.hasUncertainty === false
           ? `El dato "${name}" requiere un valor.`
           : `El dato "${name}" requiere valor e incertidumbre U.`;
-      }
-    } else if (m.operator_replicas) {
-      const empty = m.operator_replicas.findIndex((reps) => reps.length === 0);
-      if (m.operator_replicas.length === 0 || empty !== -1) {
-        return `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
       }
     } else if (meta.isChrono) {
       if (m.values.length === 0) {

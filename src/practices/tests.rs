@@ -4145,6 +4145,46 @@ async fn a_part_with_determinations_is_analyzed_and_round_trips() {
     assert!((average.value - 0.375).abs() < 1e-12);
 }
 
+#[tokio::test]
+async fn a_per_determination_quantity_only_accepts_groups() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let template: PracticeTemplate = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "name": "Con medidas", "analysis_kind": "estadistico",
+        "determinations": {"count": 2, "label": "Medida", "average": true},
+        "quantities": [{"symbol": "T", "name": "T", "unit": "s", "repeated": true,
+                        "per_determination": true}],
+        "results": [{"symbol": "f", "name": "f", "unit": "1/s", "formula": "1/T"}]
+    }))
+    .unwrap();
+    let practice = import_template(&pool, &template, "u1").await.unwrap();
+    let def = definition(&pool, &practice.id).await.unwrap().unwrap();
+    let analyze =
+        |values: Vec<f64>, points: Option<Vec<Vec<f64>>>, groups: Option<Vec<Vec<f64>>>| {
+            let measurements = vec![crate::computation::MeasurementInput {
+                quantity_id: def.quantities[0].id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values,
+                given_u: None,
+                point_replicas: points,
+                operator_replicas: groups,
+            }];
+            let pool = pool.clone();
+            let id = practice.id.clone();
+            async move { crate::computation::analyze(&pool, &id, &measurements).await }
+        };
+    assert!(analyze(vec![], None, Some(vec![vec![2.0], vec![4.0]]))
+        .await
+        .is_ok());
+    for (values, points, groups) in [
+        (vec![2.0], None, None),
+        (vec![], Some(vec![vec![2.0], vec![4.0]]), None),
+        (vec![], None, Some(vec![vec![2.0], vec![4.0], vec![5.0]])),
+    ] {
+        assert!(analyze(values, points, groups).await.is_err());
+    }
+}
+
 #[test]
 fn only_count_and_average_make_determinations_structural() {
     let with = |d: Determinations| PracticeDefinition {
@@ -4184,4 +4224,58 @@ fn only_count_and_average_make_determinations_structural() {
         .kind,
         DraftChangeKind::Structural
     );
+}
+
+#[test]
+fn a_symbol_named_medio_belongs_to_its_base_only_when_it_is_an_undefined_average() {
+    use crate::practices::{
+        Determinations, PracticeAggregate, PracticeDefinition, PracticePart, PracticeSection,
+    };
+    let result = |symbol: &str, formula: &str| crate::db::PracticeResult {
+        symbol: symbol.into(),
+        formula: formula.into(),
+        ..Default::default()
+    };
+    let def = |aggregate: bool, average: bool| PracticeDefinition {
+        parts: vec![
+            PracticePart {
+                id: "stat".into(),
+                determinations: Some(Determinations {
+                    count: 2,
+                    label: "Medida".into(),
+                    average,
+                    display: Default::default(),
+                }),
+                ..Default::default()
+            },
+            PracticePart {
+                id: "reg".into(),
+                ..Default::default()
+            },
+        ],
+        sections: vec![PracticeSection {
+            part_id: Some("stat".into()),
+            quantities: vec!["T".into()],
+            results: vec!["x".into()],
+            ..Default::default()
+        }],
+        quantities: vec![crate::db::PracticeQuantity {
+            symbol: "T".into(),
+            per_determination: true,
+            ..Default::default()
+        }],
+        results: vec![result("x", "1/T"), result("k", "2*x_medio")],
+        aggregates: if aggregate {
+            vec![PracticeAggregate {
+                symbol: "x_medio".into(),
+                ..Default::default()
+            }]
+        } else {
+            vec![]
+        },
+        ..Default::default()
+    };
+    assert_eq!(def(false, true).result_part("k"), Some("stat"));
+    assert_eq!(def(false, false).result_part("k"), None);
+    assert_eq!(def(true, true).result_part("k"), None);
 }

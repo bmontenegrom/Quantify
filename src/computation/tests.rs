@@ -115,7 +115,7 @@ async fn validate_student_results_accepts_point_results_per_run() {
     )
     .unwrap();
 
-    for bad in ["Re#x", "Nope#0"] {
+    for bad in ["Re#x", "Re#-0", "Re#01", "Nope#0"] {
         let err = validate_student_results(
             &crate::practices::definition(&pool, "viscosidad")
                 .await
@@ -3617,4 +3617,106 @@ fn a_result_named_like_a_generated_symbol_does_not_crash() {
         Some(&determinations(false)),
     );
     assert!(analysis.is_ok());
+}
+
+fn per_determination_definition(average: bool) -> crate::practices::PracticeDefinition {
+    let mut t = quantity("T");
+    t.per_determination = true;
+    t.per_point = false;
+    crate::practices::PracticeDefinition {
+        quantities: vec![t],
+        results: vec![
+            PracticeResult {
+                is_final: true,
+                ..det_result("g", "1/T")
+            },
+            det_result("doble", "2"),
+            det_result("rel", "g_medio/2"),
+        ],
+        determinations: Some(determinations(average)),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_common_result_can_use_an_average() {
+    let def = per_determination_definition(true);
+    let measurements = vec![MeasurementInput {
+        operator_replicas: Some(vec![vec![2.0, 2.1], vec![4.0, 4.2], vec![5.0, 5.1]]),
+        ..measurement("T", &[])
+    }];
+    let a = compute(
+        &def.quantities,
+        &def.results,
+        &HashMap::new(),
+        &measurements,
+        None,
+        def.determinations.as_ref(),
+    )
+    .unwrap();
+    let find = |s: &str| a.derived.iter().find(|d| d.symbol == s).unwrap();
+    let (medio, rel) = (find("g_medio"), find("rel"));
+    assert!(close(rel.value, medio.value / 2.0, 1e-12));
+    assert!(close(rel.u, medio.u / 2.0, 1e-12 + 1e-9 * medio.u));
+    assert!(a.warnings.is_empty(), "{:?}", a.warnings);
+}
+
+#[test]
+fn students_report_each_determination_and_the_average() {
+    let result = |symbol: &str| db::StudentResultInput {
+        symbol: symbol.into(),
+        value: 1.0,
+        u_expanded: None,
+    };
+    let ok = |def: &crate::practices::PracticeDefinition, s: &str| {
+        check_student_result_symbols(def, &[result(s)]).is_ok()
+    };
+    let with_average = per_determination_definition(true);
+    for s in ["g#1", "g#3", "g_medio", "doble", "rel"] {
+        assert!(ok(&with_average, s), "{s}");
+    }
+    for s in [
+        "g",
+        "g#0",
+        "g#4",
+        "g#x",
+        "g#01",
+        "g#+1",
+        "doble#1",
+        "doble_medio",
+        "rel#1",
+    ] {
+        assert!(!ok(&with_average, s), "{s}");
+    }
+    let without_average = per_determination_definition(false);
+    assert!(ok(&without_average, "g#2"));
+    assert!(!ok(&without_average, "g_medio"));
+    let mut not_final = per_determination_definition(true);
+    for r in not_final.results.iter_mut().filter(|r| r.symbol == "g") {
+        r.is_final = false;
+    }
+    assert!(!ok(&not_final, "g#1") && !ok(&not_final, "g_medio") && !ok(&not_final, "g"));
+}
+
+#[tokio::test]
+async fn per_determination_measurements_are_checked_against_the_determinations() {
+    let (pool, _dir) = setup().await;
+    let def = per_determination_definition(true);
+    let analyze = |m: MeasurementInput| {
+        let (pool, def) = (pool.clone(), def.clone());
+        async move { analyze_definition(&pool, &def, &[m]).await }
+    };
+    let groups = |n: usize| MeasurementInput {
+        operator_replicas: Some(vec![vec![2.0]; n]),
+        ..measurement("T", &[])
+    };
+    assert!(analyze(groups(3)).await.is_ok());
+    assert!(analyze(groups(2)).await.is_ok());
+    let too_many = analyze(groups(4)).await.unwrap_err().to_string();
+    assert!(too_many.contains("4 determinaciones"), "{too_many}");
+    let flat = analyze(measurement("T", &[2.0]))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(flat.contains("Medida 1"), "{flat}");
 }

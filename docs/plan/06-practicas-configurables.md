@@ -1155,23 +1155,50 @@ Decisiones:
    - Las plantillas exportan e importan los campos nuevos.
    - Tests del motor con una práctica de prueba: el promedio coincide con propagar la fórmula
      expandida.
-2. **`feat(practicas)`: el alumno carga determinaciones (F9, 2/5).**
+2. **`feat(practicas)`: el alumno carga determinaciones (F9, 2/5).** ✅
    - Formulario: `bloques` (reusa el bloque de operadores) y `pestanas` (una pestaña por
-     determinación dentro de la parte).
-   - Payload con el índice de determinación, borradores, cronómetro, datos de ejemplo y
-     validación; resultados finales y comparación por determinación.
-   - Mostrar `determinations` en el análisis (cantidades y mensurandos de cada determinación).
-   - Al reabrir una entrega, cada determinación vuelve a su lugar aunque haya una vacía en el
-     medio: hoy `forms.js` arma los grupos con los índices que quedaron (pasa también con los
-     operadores), así que con la 2 vacía la 3 aparece como 2.
-   - Decidir si un dato de cátedra por determinación lleva una incertidumbre propia en cada una
-     (hoy comparten `given_u`).
-   - Decidir si `<símbolo>_medio` se puede usar en otras fórmulas o como resultado del alumno.
-   - E2E con una práctica de prueba.
+     determinación dentro de la parte; las magnitudes comunes se ven en todas).
+   - El payload reusa `operator_replicas[k-1]`; el servidor rechaza una magnitud por
+     determinación cargada como un único valor o con más determinaciones de las que hay.
+     Borradores, cronómetro, datos de ejemplo y validación por determinación.
+   - El resultado final se informa por determinación como `g#k` y, con promedio, `g_medio`; la
+     comparación se arma por determinación y `g_medio` usa la tolerancia de `g`.
+   - El análisis muestra cada determinación (magnitudes y mensurandos).
+   - Al reabrir una entrega, cada determinación (y cada operador) vuelve a su lugar aunque haya
+     una vacía en el medio.
+   - Decidido: un dato de cátedra por determinación lleva un valor en cada una y **una sola U**
+     (`given_u` compartido).
+   - Decidido: `<símbolo>_medio` se puede usar en otras fórmulas (alcance, ciclos y parte del
+     símbolo lo reconocen) y como resultado del alumno.
+   - E2E `smoke-determinaciones` con una práctica de prueba.
 3. **`feat(practicas)`: el docente configura determinaciones (F9, 3/5).**
    - Editor: cantidad, etiqueta, promedio y forma de mostrar (práctica o parte), y "¿Se repite
      por determinación?" en las magnitudes.
    - Panel de problemas, y revisión con los resultados por determinación y los promedios.
+   - Desde el PR 2, el servidor guarda `per_point = false` en una magnitud por determinación. Al
+     quitarle "por determinación", el editor tiene que volver a pedir el rol (serie o no) en vez
+     de dejar el `per_point` en falso.
+   - El formulario del alumno replica en JS la lógica de partes y determinaciones del servidor
+     (`symbolPart`, `perDeterminationSymbols`, `determinationsFor` frente a `part_of`,
+     `per_determination_symbols`, `determinations_in`) y ya difieren en detalles. Que la
+     definición que recibe el cliente traiga la parte de cada símbolo y los mensurandos por
+     determinación (`determination_results()`), y borrar las copias en JS.
+     Diferencias ya vistas: `symbolPart` no tiene el respaldo `used_by_series` (un resultado
+     final sin sección que solo usa la serie queda sin parte en el cliente) y no exige que `x`
+     se promedie para ubicar `x_medio`. Además, qué resultados se promedian se decide en tres
+     lugares (`averaged_results`, `result_scope_in` y `check_student_result_symbols`): que salga
+     de un solo lugar cuando el servidor lo mande resuelto.
+   - `check_student_result_symbols` acepta `g#k` hasta la cantidad configurada, aunque la
+     entrega traiga menos grupos; y sigue aceptando mensurandos comunes no finales (eso viene de
+     antes de F9). Además, `analyze_definition` solo rechaza más grupos que determinaciones: con
+     menos (por la API, o una magnitud opcional por determinación vacía) la que falta se calcula
+     sin lecturas, con advertencia, y `g_medio` sale mal o no sale. No se puede rechazar ahí
+     porque la vista previa del borrador usa la misma función: va al guardar la entrega. Revisar
+     todo junto con la validación del resto de la entrega.
+   - `determination_results()` clona la definición (o una vista por parte) y se llama varias
+     veces por validación; calcularlo una vez y pasarlo si llega a notarse.
+     Lo mismo en el cliente: `finalPart` llama a `expandDeterminationResults` por cada resultado
+     final; se va con lo anterior cuando el servidor mande la parte de cada símbolo.
 4. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
    - P1 sin partes, con 3 operadores en pestañas; Hidrostática con 26 magnitudes y 3 medidas en
      bloques con promedio.

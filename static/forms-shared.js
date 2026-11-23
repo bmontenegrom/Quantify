@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor, compatibleInstruments, POINT_KINDS } from "./lib.js";
+import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor, compatibleInstruments, POINT_KINDS, seriesPart } from "./lib.js";
 
 export function formPracticeVersion(practiceId) {
   const definition = state.practiceForm?.definition;
@@ -19,13 +19,13 @@ export function definitionSections(definition) {
   const seriesSymbols = new Set(
     pointBased ? definition.quantities.filter((q) => q.per_point && !q.is_given).map((q) => q.symbol) : [],
   );
-  const seriesPart = seriesPartId(definition, seriesSymbols);
-  if (seriesPart) sections.push({ id: seriesPart, series: true });
+  const seriesId = seriesPartId(definition, seriesSymbols);
+  if (seriesId) sections.push({ id: seriesId, series: true });
   return sections;
 }
 
 function seriesPartId(definition, seriesSymbols) {
-  const chosen = (definition.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico");
+  const chosen = seriesPart(definition);
   if (chosen) return chosen.id;
   return definition.sections.find((s) => s.part_id && s.quantities.some((q) => seriesSymbols.has(q)))?.part_id;
 }
@@ -37,7 +37,7 @@ export function definitionParts(definition) {
       .filter((s) => s.part_id && (s.quantities.length || s.results.some((r) => finals.has(r))))
       .map((s) => s.part_id),
   );
-  const series = (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico");
+  const series = seriesPart(definition);
   if (series && (definition?.quantities ?? []).some((q) => q.per_point && !q.is_given)) used.add(series.id);
   return (definition?.parts ?? []).filter((p) => used.has(p.id)).map((p) => ({ id: p.id, label: p.title }));
 }
@@ -85,12 +85,12 @@ export function prefixSelectHtml() {
   return `<select class="prefix-select" title="Prefijo SI">${opts}</select>`;
 }
 
-export function givenValueInputHtml(q) {
+export function givenValueInputHtml(q, inputClass = "measure-given-value") {
   const n = Number(q.slot_count);
   const attrs = q.slot_count ? `min="1" max="${n}" step="1"` : `step="any"`;
   const placeholder = q.slot_count ? `ranura 1 a ${n}` : "valor";
   const value = q.default_value != null ? ` value="${escapeHtml(String(q.default_value))}"` : "";
-  return `${q.slot_count ? `<span class="prefix-placeholder" aria-hidden="true"></span>` : prefixSelectHtml()}<input class="measure-given-value" type="number" ${attrs} placeholder="${placeholder}"${value} />`;
+  return `${q.slot_count ? `<span class="prefix-placeholder" aria-hidden="true"></span>` : prefixSelectHtml()}<input class="${inputClass}" type="number" ${attrs} placeholder="${placeholder}"${value} />`;
 }
 
 export function renderReplicaInput(unit, defaultValue = null) {

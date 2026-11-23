@@ -1,14 +1,16 @@
 import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, canReview, hasUncertainty, analysisSections } from "./lib.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, canReview, hasUncertainty, analysisSections, determinationsFor, expandDeterminationResults } from "./lib.js";
 import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, instrumentSelectorsHtml, wireInstrumentSelectors, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
-import { quantityNameHtml, wireReplicaRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
+import { quantityNameHtml, wireMeasurementRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
 export const SERIES_INITIAL_ROWS = 3;
 
-export function renderSeriesTable(definition) {
+export function renderSeriesTable(definition, quantityRowHtml) {
+  const sharedRow = (q) =>
+    q.per_determination && determinationsFor(definition, q.symbol) ? quantityRowHtml(q) : sharedRowHtml(q);
   const cols = definition.quantities.filter((q) => q.per_point && !q.is_given);
   const shared = definition.quantities.filter((q) => !q.per_point || q.is_given);
   const liveCols = liveIntermediates(definition);
@@ -37,16 +39,16 @@ export function renderSeriesTable(definition) {
         const secFinals = finals.filter((r) => (sec.results ?? []).includes(r.symbol));
         const finalsHtml = secFinals.length
           ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
-             ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
+             ${expandDeterminationResults(definition, secFinals).map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
           : "";
-        return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${formHelpHtml(sec.help_text)}${rows.map((q) => sharedRowHtml(q)).join("")}${finalsHtml}</div>`;
+        return `<div class="shared-quantities measurement-section"${secAttr}><h4>${escapeHtml(sec.title)}</h4>${formHelpHtml(sec.help_text)}${rows.map(sharedRow).join("")}${finalsHtml}</div>`;
       });
     if (rest.length) {
-      blocks.push(`<div class="shared-quantities"><h4>Medidas</h4>${rest.map((q) => sharedRowHtml(q)).join("")}</div>`);
+      blocks.push(`<div class="shared-quantities"><h4>Medidas</h4>${rest.map(sharedRow).join("")}</div>`);
     }
     sharedSection = blocks.join("");
   } else if (shared.length) {
-    sharedSection = `<div class="shared-quantities"><h4>Medidas</h4>${shared.map((q) => sharedRowHtml(q)).join("")}</div>`;
+    sharedSection = `<div class="shared-quantities"><h4>Medidas</h4>${shared.map(sharedRow).join("")}</div>`;
   }
   const seriesHelp = columnSections(definition, sections ?? [])
     .map((sec) => `<h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>${formHelpHtml(sec.help_text)}`)
@@ -78,9 +80,7 @@ export function renderSeriesTable(definition) {
       <section class="series-preview panel" aria-live="polite"></section>
     </div>
   `;
-  measurementFields.querySelectorAll(".shared-quantities .measurement-row:not([data-final-result])").forEach((row) => {
-    if (row.dataset.isGiven !== "1") wireReplicaRow(row);
-  });
+  measurementFields.querySelectorAll(".shared-quantities .measurement-row:not([data-final-result])").forEach(wireMeasurementRow);
   wireInstrumentSelectors(measurementFields);
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
     measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
