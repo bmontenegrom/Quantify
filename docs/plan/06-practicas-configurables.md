@@ -1155,19 +1155,22 @@ Decisiones:
    - Las plantillas exportan e importan los campos nuevos.
    - Tests del motor con una práctica de prueba: el promedio coincide con propagar la fórmula
      expandida.
-2. **`feat(practicas)`: el alumno carga determinaciones (F9, 2/5).**
+2. **`feat(practicas)`: el alumno carga determinaciones (F9, 2/5).** ✅
    - Formulario: `bloques` (reusa el bloque de operadores) y `pestanas` (una pestaña por
-     determinación dentro de la parte).
-   - Payload con el índice de determinación, borradores, cronómetro, datos de ejemplo y
-     validación; resultados finales y comparación por determinación.
-   - Mostrar `determinations` en el análisis (cantidades y mensurandos de cada determinación).
-   - Al reabrir una entrega, cada determinación vuelve a su lugar aunque haya una vacía en el
-     medio: hoy `forms.js` arma los grupos con los índices que quedaron (pasa también con los
-     operadores), así que con la 2 vacía la 3 aparece como 2.
-   - Decidir si un dato de cátedra por determinación lleva una incertidumbre propia en cada una
-     (hoy comparten `given_u`).
-   - Decidir si `<símbolo>_medio` se puede usar en otras fórmulas o como resultado del alumno.
-   - E2E con una práctica de prueba.
+     determinación dentro de la parte; las magnitudes comunes se ven en todas).
+   - El payload reusa `operator_replicas[k-1]`; el servidor rechaza una magnitud por
+     determinación cargada como un único valor o con más determinaciones de las que hay.
+     Borradores, cronómetro, datos de ejemplo y validación por determinación.
+   - El resultado final se informa por determinación como `g#k` y, con promedio, `g_medio`; la
+     comparación se arma por determinación y `g_medio` usa la tolerancia de `g`.
+   - El análisis muestra cada determinación (magnitudes y mensurandos).
+   - Al reabrir una entrega, cada determinación (y cada operador) vuelve a su lugar aunque haya
+     una vacía en el medio.
+   - Decidido: un dato de cátedra por determinación lleva un valor en cada una y **una sola U**
+     (`given_u` compartido).
+   - Decidido: `<símbolo>_medio` se puede usar en otras fórmulas (alcance, ciclos y parte del
+     símbolo lo reconocen) y como resultado del alumno.
+   - E2E `smoke-determinaciones` con una práctica de prueba.
 3. **`feat(practicas)`: el docente configura determinaciones (F9, 3/5).**
    - Editor: cantidad, etiqueta, promedio y forma de mostrar (práctica o parte), y "¿Se repite
      por determinación?" en las magnitudes.
