@@ -110,6 +110,17 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     "el resultado final de la medida 3 debía verse en su pestaña",
   );
   await sPage.screenshot({ path: join(ARTIFACTS, "determinaciones-pestanas.png"), fullPage: true });
+  await sPage.locator('[data-final-result][data-symbol="g#1"] .final-result-u').evaluate((el) => {
+    el.value = "-1";
+  });
+  await sPage.click("#submit-button");
+  await sPage.waitForFunction(
+    () => document.querySelector("[data-det-tabs] .part-tab.active")?.dataset.determination === "0",
+  );
+  assert(
+    await sPage.locator('[data-final-result][data-symbol="g#1"]').isVisible(),
+    "un valor inválido en una pestaña oculta debía abrir esa pestaña",
+  );
 
   step("práctica mixta: la parte estadística con determinaciones convive con un ajuste y se entrega");
   const post = (url, body) => apiPost(page, url, body);

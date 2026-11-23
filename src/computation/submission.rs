@@ -348,9 +348,10 @@ pub fn check_student_result_symbols(
             if point_symbols.contains(base) && k >= 0 {
                 continue;
             }
-            if by_determination
-                .iter()
-                .any(|(s, d)| s == base && (1..=d.count).contains(&k))
+            if k.to_string() == idx
+                && by_determination
+                    .iter()
+                    .any(|(s, d)| s == base && (1..=d.count).contains(&k))
             {
                 continue;
             }

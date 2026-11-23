@@ -386,6 +386,20 @@ export function formulaVariables(formula) {
 }
 const identifiers = formulaVariables;
 
+function seriesSymbolPart(definition, symbol) {
+  const series = (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico")?.id;
+  if (!series) return null;
+  const columns = [
+    ...(definition.quantities ?? []).filter((q) => q.per_point && !q.is_given).map((q) => q.symbol),
+    ...(definition.intermediates ?? []).map((it) => it.symbol),
+  ];
+  const fromSeries =
+    ["slope", "intercept"].includes(symbol) ||
+    columns.includes(symbol) ||
+    columns.some((s) => symbol === `${s}_max` || columns.some((t) => symbol === `${t}_at_${s}_max`));
+  return fromSeries ? series : null;
+}
+
 export function symbolPart(definition, symbol, seen = new Set()) {
   const results = definition?.results ?? [];
   const section = (definition?.sections ?? []).find((s) => s.quantities.includes(symbol) || s.results.includes(symbol));
@@ -393,7 +407,7 @@ export function symbolPart(definition, symbol, seen = new Set()) {
   const isQuantity = (definition?.quantities ?? []).some((q) => q.symbol === symbol);
   const base = !isQuantity && symbol.endsWith("_medio") ? symbol.slice(0, -"_medio".length) : null;
   const result = results.find((r) => r.symbol === symbol) ?? results.find((r) => r.symbol === base);
-  if (!result) return null;
+  if (!result) return seriesSymbolPart(definition, symbol);
   if (result.symbol !== symbol) return symbolPart(definition, result.symbol, seen);
   if (seen.has(symbol)) return null;
   seen.add(symbol);

@@ -286,8 +286,14 @@ function determinationTabsHtml(definition) {
   const scopes = (definition.parts ?? []).length
     ? definition.parts.map((p) => ({ scope: p.id, d: statisticalDeterminations(p) }))
     : [{ scope: "", d: definition.determinations }];
+  const used = new Set(
+    definition.quantities
+      .filter((q) => q.per_determination)
+      .map((q) => determinationsFor(definition, q.symbol)?.scope)
+      .filter((scope) => scope != null),
+  );
   return scopes
-    .filter(({ d }) => d?.display === "pestanas")
+    .filter(({ scope, d }) => d?.display === "pestanas" && used.has(scope))
     .map(({ scope, d }) => {
       const buttons = Array.from(
         { length: d.count },
@@ -327,6 +333,30 @@ function wireDeterminationTabs() {
   });
   applyDeterminationVisibility();
 }
+
+function revealField(field) {
+  const block = field.closest("[data-det-scope]");
+  if (block) {
+    activeDetermination.set(block.dataset.detScope, Number(block.dataset.determination));
+    applyDeterminationVisibility();
+  }
+  const section = field.closest("[data-section][hidden]")?.dataset.section;
+  if (section && practicePartTabs) {
+    activePart = section;
+    practicePartTabs.querySelectorAll(".part-tab").forEach((t) => t.classList.toggle("active", t.dataset.partId === section));
+    applyPartVisibility();
+  }
+}
+
+measurementFields.addEventListener(
+  "invalid",
+  (event) => {
+    if (measurementFields.querySelector("input:invalid, select:invalid, textarea:invalid") === event.target) {
+      revealField(event.target);
+    }
+  },
+  true,
+);
 
 function applyPartVisibility() {
   if (!definitionParts(state.practiceForm?.definition).length) return;
@@ -534,11 +564,10 @@ export function wireMeasurementRow(row) {
 }
 
 function finalsByPartHtml(definition, finals) {
+  const parts = finals.map((r) => finalPart(definition, r));
+  if (parts.includes(null)) return finalResultSectionHtml(definition, finals);
   const byPart = new Map();
-  for (const r of finals) {
-    const part = finalPart(definition, r);
-    byPart.set(part, [...(byPart.get(part) ?? []), r]);
-  }
+  finals.forEach((r, i) => byPart.set(parts[i], [...(byPart.get(parts[i]) ?? []), r]));
   return [...byPart].map(([part, rows]) => finalResultSectionHtml(definition, rows, part)).join("");
 }
 
@@ -606,13 +635,7 @@ function seriesFinalResultsHtml(definition) {
         ${expandDeterminationResults(definition, rows).map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;
   });
-  const byPart = new Map();
-  for (const r of finals.filter((r) => !embedded.has(r.symbol))) {
-    const part = finalPart(definition, r);
-    byPart.set(part, [...(byPart.get(part) ?? []), r]);
-  }
-  const partHtml = [...byPart].map(([part, rows]) => finalResultSectionHtml(definition, rows, part));
-  return titledHtml.join("") + partHtml.join("");
+  return titledHtml.join("") + finalsByPartHtml(definition, finals.filter((r) => !embedded.has(r.symbol)));
 }
 
 function finalResultSectionHtml(definition, finals, part = null) {

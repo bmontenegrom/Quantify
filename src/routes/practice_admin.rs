@@ -2547,7 +2547,12 @@ fn existing_result_scope(
         })
         .unwrap_or_else(|| union_scope(views));
     let excluded = results_using(uses, symbol);
-    scope.retain(|s| !excluded.contains(s));
+    scope.retain(|s| {
+        !excluded.contains(s)
+            && !s
+                .strip_suffix("_medio")
+                .is_some_and(|base| excluded.iter().any(|e| e == base))
+    });
     scope
 }
 
@@ -3258,6 +3263,10 @@ mod tests {
             ..Default::default()
         };
         assert!(result_scope(&def(true, "1/T")).contains(&"g_medio".to_string()));
+        let views = view_scopes(&def(true, "1/T"));
+        let uses = result_uses(&def(true, "1/T"));
+        assert!(!existing_result_scope(&views, &uses, "g").contains(&"g_medio".to_string()));
+        assert!(existing_result_scope(&views, &uses, "rel").contains(&"g_medio".to_string()));
         assert!(!result_scope(&def(false, "1/T")).contains(&"g_medio".to_string()));
         let rel_problems = |d: &practices::PracticeDefinition| {
             formula_problems(d)

@@ -1176,3 +1176,22 @@ test("determinaciones: una parte que ya no es estadística no las pide", () => {
   assert.equal(determinationsFor(def, "T"), null);
   assert.deepEqual(expandDeterminationResults(def, def.results).map((r) => r.symbol), ["g"]);
 });
+
+test("symbolPart: los símbolos de la serie son de la parte de la serie, como en el servidor", () => {
+  const def = {
+    quantities: [{ symbol: "P", per_determination: true }, { symbol: "x", per_point: true }],
+    intermediates: [{ symbol: "v" }],
+    results: [
+      { symbol: "g", name: "g", formula: "1/P", is_final: true },
+      { symbol: "h", name: "h", formula: "g*slope", is_final: true },
+    ],
+    parts: [
+      { id: "stat", effective_kind: "estadistico", determinations: { count: 3, label: "Medida", average: true } },
+      { id: "reg", effective_kind: "regresion_lineal" },
+    ],
+    sections: [{ part_id: "stat", quantities: ["P"], results: [] }],
+  };
+  for (const s of ["slope", "intercept", "x", "v", "x_max", "v_at_x_max"]) assert.equal(symbolPart(def, s), "reg", s);
+  assert.equal(symbolPart(def, "h"), null);
+  assert.deepEqual(expandDeterminationResults(def, def.results.slice(1)).map((r) => r.symbol), ["h"]);
+});

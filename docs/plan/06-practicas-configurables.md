@@ -1175,6 +1175,9 @@ Decisiones:
    - Editor: cantidad, etiqueta, promedio y forma de mostrar (práctica o parte), y "¿Se repite
      por determinación?" en las magnitudes.
    - Panel de problemas, y revisión con los resultados por determinación y los promedios.
+   - Desde el PR 2, el servidor guarda `per_point = false` en una magnitud por determinación. Al
+     quitarle "por determinación", el editor tiene que volver a pedir el rol (serie o no) en vez
+     de dejar el `per_point` en falso.
 4. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
    - P1 sin partes, con 3 operadores en pestañas; Hidrostática con 26 magnitudes y 3 medidas en
      bloques con promedio.
