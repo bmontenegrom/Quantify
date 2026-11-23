@@ -492,6 +492,9 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     .execute(pool)
     .await?;
     add_column_if_missing(pool, "practice_parts", "analysis_kind", "TEXT").await?;
+    for table in ["practices", "practice_parts"] {
+        add_column_if_missing(pool, table, "config_json", "TEXT NOT NULL DEFAULT '{}'").await?;
+    }
     for table in ["practice_parts", "practice_sections"] {
         add_column_if_missing(pool, table, "help_text", "TEXT NOT NULL DEFAULT ''").await?;
     }
@@ -724,6 +727,13 @@ pub async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
         pool,
         "practice_quantities",
         "optional",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+    add_column_if_missing(
+        pool,
+        "practice_quantities",
+        "per_determination",
         "INTEGER NOT NULL DEFAULT 0",
     )
     .await?;

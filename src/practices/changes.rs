@@ -106,9 +106,27 @@ fn ignoring_order(mut definition: Value) -> Value {
     definition
 }
 
+fn without_determination_looks(definition: &PracticeDefinition) -> PracticeDefinition {
+    let plain = |d: &mut Option<super::Determinations>| {
+        if let Some(d) = d {
+            d.label.clear();
+            d.display = Default::default();
+        }
+    };
+    let mut definition = definition.clone();
+    plain(&mut definition.determinations);
+    for part in &mut definition.parts {
+        plain(&mut part.determinations);
+    }
+    definition
+}
+
 fn structure(definition: &PracticeDefinition) -> anyhow::Result<Value> {
     let keys = [VOLATILE_KEYS.as_slice(), COSMETIC_KEYS.as_slice()].concat();
-    Ok(ignoring_order(shape(definition, &keys)?))
+    Ok(ignoring_order(shape(
+        &without_determination_looks(definition),
+        &keys,
+    )?))
 }
 
 fn section_members(definition: &PracticeDefinition) -> BTreeMap<&str, (Option<&str>, Vec<&str>)> {
@@ -202,6 +220,13 @@ fn list_changes(
     }
     if published.operator_count != draft.operator_count {
         changes.push("Cambia la cantidad de operadores".to_string());
+    }
+    let (published, draft) = (
+        &without_determination_looks(published),
+        &without_determination_looks(draft),
+    );
+    if published.determinations != draft.determinations {
+        changes.push("Cambian las determinaciones".to_string());
     }
     diff_items(
         "la parte",
@@ -329,6 +354,27 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
         (old.help_text != new.help_text)
             .then(|| format!("Cambia la ayuda de la sección {}", new.title))
     });
+    let looks =
+        |d: Option<&super::Determinations>| d.map(|d| (d.label.trim().to_string(), d.display));
+    let part_determinations = draft.parts.iter().filter_map(|new| {
+        let old = published.parts.iter().find(|p| p.id == new.id)?;
+        (old.determinations.is_some()
+            && looks(old.determinations.as_ref()) != looks(new.determinations.as_ref()))
+        .then_some(&new.determinations)
+    });
+    let determinations = std::iter::once(&draft.determinations)
+        .filter(|_| {
+            published.determinations.is_some()
+                && looks(published.determinations.as_ref()) != looks(draft.determinations.as_ref())
+        })
+        .chain(part_determinations)
+        .filter_map(|d| d.as_ref())
+        .map(|d| {
+            format!(
+                "Cambia cómo se muestran las determinaciones ({})",
+                d.label.trim()
+            )
+        });
     let description =
         (published.description != draft.description).then(|| "Cambia la descripción".to_string());
     description
@@ -339,6 +385,7 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
         .chain(live)
         .chain(part_help)
         .chain(section_help)
+        .chain(determinations)
         .collect()
 }
 

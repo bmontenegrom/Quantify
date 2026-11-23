@@ -1,8 +1,8 @@
 use super::formula::{compile_formula, eval_compiled, CONSTANTS};
 use super::{
-    AggregateComputation, CurveSpec, DerivedComputation, FormAnalysis, LiveValue, MeasurementInput,
-    OperatorComputation, PartAnalysis, PointResultComputation, QuantityComputation,
-    RegressionResult, ScatterResult,
+    AggregateComputation, CurveSpec, DerivedComputation, DeterminationComputation, FormAnalysis,
+    LiveValue, MeasurementInput, OperatorComputation, PartAnalysis, PointResultComputation,
+    QuantityComputation, RegressionResult, ScatterResult,
 };
 use crate::analysis;
 use crate::db::{InstrumentScale, PracticeQuantity, PracticeResult};
@@ -155,6 +155,7 @@ fn compute_quantities(
 ///     &HashMap::new(),
 ///     &[m("L", vec![1.0], Some(0.002)), m("T", vec![2.0, 2.0], None)],
 ///     None,
+///     None,
 /// )
 /// .unwrap();
 /// assert!((analysis.derived[0].value - std::f64::consts::PI.powi(2)).abs() < 1e-9);
@@ -165,6 +166,7 @@ pub fn compute(
     scales: &HashMap<String, InstrumentScale>,
     measurements: &[MeasurementInput],
     operator_count: Option<i64>,
+    determinations: Option<&crate::practices::Determinations>,
 ) -> anyhow::Result<FormAnalysis> {
     let mut warnings = Vec::new();
     let by_quantity: HashMap<&str, &MeasurementInput> = measurements
@@ -173,6 +175,17 @@ pub fn compute(
         .collect();
     let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
     let operator_count = operator_count.unwrap_or(0);
+
+    if let Some(determinations) = determinations.filter(|_| operator_count <= 1) {
+        return compute_determinations(
+            quantities,
+            results,
+            scales,
+            &by_quantity,
+            determinations,
+            warnings,
+        );
+    }
 
     if operator_count <= 1 {
         let all: Vec<&PracticeQuantity> = quantities.iter().collect();
@@ -194,6 +207,7 @@ pub fn compute(
             scatters: Vec::new(),
             derived,
             operators: Vec::new(),
+            determinations: Vec::new(),
             point_results: Vec::new(),
             aggregates: Vec::new(),
             warnings,
@@ -249,6 +263,258 @@ pub fn compute(
         scatters: Vec::new(),
         derived: Vec::new(),
         operators,
+        determinations: Vec::new(),
+        point_results: Vec::new(),
+        aggregates: Vec::new(),
+        warnings,
+        parts: Vec::new(),
+    })
+}
+
+/// Reescribe los identificadores de una fórmula; deja intactas las funciones (`math::ln`).
+///
+/// ```
+/// # use quantify::computation::rename_symbols;
+/// let renamed = rename_symbols("math::ln(T)*T2 + 1e5*T", |s| (s == "T").then(|| "T__1".to_string()));
+/// assert_eq!(renamed, "math::ln(T__1)*T2 + 1e5*T__1");
+/// ```
+pub fn rename_symbols(formula: &str, rename: impl Fn(&str) -> Option<String>) -> String {
+    let chars: Vec<char> = formula.chars().collect();
+    let mut out = String::with_capacity(formula.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let starts = (c.is_ascii_alphabetic() || c == '_')
+            && (i == 0 || !(chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_'));
+        if !starts {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        let end = (i..chars.len())
+            .find(|&j| !(chars[j].is_ascii_alphanumeric() || chars[j] == '_'))
+            .unwrap_or(chars.len());
+        let ident: String = chars[i..end].iter().collect();
+        let namespaced = out.ends_with("::") || chars[end..].starts_with(&[':', ':']);
+        match rename(&ident).filter(|_| !namespaced) {
+            Some(renamed) => out.push_str(&renamed),
+            None => out.push_str(&ident),
+        }
+        i = end;
+    }
+    out
+}
+
+fn determination_symbol(symbol: &str, k: usize) -> String {
+    format!("{symbol}__{k}")
+}
+
+pub(crate) fn per_determination_symbols(
+    quantities: &[PracticeQuantity],
+    results: &[PracticeResult],
+) -> Vec<String> {
+    let mut symbols: Vec<String> = quantities
+        .iter()
+        .filter(|q| q.per_determination)
+        .map(|q| q.symbol.clone())
+        .collect();
+    loop {
+        let before = symbols.len();
+        for r in results {
+            if !symbols.contains(&r.symbol)
+                && super::formula_symbols(&r.formula)
+                    .iter()
+                    .any(|s| symbols.contains(s))
+            {
+                symbols.push(r.symbol.clone());
+            }
+        }
+        if symbols.len() == before {
+            return symbols;
+        }
+    }
+}
+
+fn group_warning(grouped: &mut Vec<(String, Vec<usize>)>, text: String, k: Option<usize>) {
+    match grouped.iter_mut().find(|(t, _)| *t == text) {
+        Some((_, ks)) => ks.extend(k.filter(|k| !ks.contains(k))),
+        None => grouped.push((text, k.into_iter().collect())),
+    }
+}
+
+fn compute_determinations(
+    quantities: &[PracticeQuantity],
+    results: &[PracticeResult],
+    scales: &HashMap<String, InstrumentScale>,
+    by_quantity: &HashMap<&str, &MeasurementInput>,
+    determinations: &crate::practices::Determinations,
+    mut warnings: Vec<String>,
+) -> anyhow::Result<FormAnalysis> {
+    let count = determinations.count.max(1) as usize;
+    let common: Vec<&PracticeQuantity> =
+        quantities.iter().filter(|q| !q.per_determination).collect();
+    let repeated: Vec<&PracticeQuantity> =
+        quantities.iter().filter(|q| q.per_determination).collect();
+    let mut means = HashMap::new();
+    let mut us = HashMap::new();
+    let common_computed = compute_quantities(
+        &common,
+        by_quantity,
+        scales,
+        None,
+        &mut means,
+        &mut us,
+        &mut warnings,
+    )?;
+
+    let repeated_symbols = per_determination_symbols(quantities, results);
+    let per_result = |r: &PracticeResult| repeated_symbols.contains(&r.symbol);
+
+    let label = |k: usize| format!("{} {k}", determinations.label.trim());
+    let mut renamed: HashMap<String, (String, usize)> = HashMap::new();
+    let mut grouped: Vec<(String, Vec<usize>)> = Vec::new();
+    let mut per_quantities = Vec::with_capacity(count);
+    let mut allowed: Vec<String> = common.iter().map(|q| q.symbol.clone()).collect();
+    for k in 1..=count {
+        let mut local_means = HashMap::new();
+        let mut local_us = HashMap::new();
+        let mut local_warnings = Vec::new();
+        let computed = compute_quantities(
+            &repeated,
+            by_quantity,
+            scales,
+            Some(k - 1),
+            &mut local_means,
+            &mut local_us,
+            &mut local_warnings,
+        )?;
+        for w in local_warnings {
+            group_warning(&mut grouped, w, Some(k));
+        }
+        for q in &repeated {
+            let symbol = determination_symbol(&q.symbol, k);
+            means.insert(symbol.clone(), local_means[&q.symbol]);
+            us.insert(symbol.clone(), local_us[&q.symbol]);
+            allowed.push(symbol.clone());
+            renamed.insert(symbol, (q.symbol.clone(), k));
+        }
+        per_quantities.push(computed);
+    }
+
+    let per_results: Vec<&PracticeResult> = results.iter().filter(|r| per_result(r)).collect();
+    let mut expanded: Vec<PracticeResult> =
+        results.iter().filter(|r| !per_result(r)).cloned().collect();
+    for k in 1..=count {
+        for r in &per_results {
+            let symbol = determination_symbol(&r.symbol, k);
+            renamed.insert(symbol.clone(), (r.symbol.clone(), k));
+            expanded.push(PracticeResult {
+                symbol,
+                formula: rename_symbols(&r.formula, |s| {
+                    repeated_symbols
+                        .iter()
+                        .any(|x| x == s)
+                        .then(|| determination_symbol(s, k))
+                }),
+                ..(*r).clone()
+            });
+        }
+    }
+    let mut averaged: HashMap<String, &str> = HashMap::new();
+    let mut average_texts: Vec<(String, String)> = Vec::new();
+    if determinations.average {
+        for r in &per_results {
+            let symbol = format!("{}_medio", r.symbol);
+            let formula = format!(
+                "({})/{count}",
+                (1..=count)
+                    .map(|k| determination_symbol(&r.symbol, k))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            );
+            average_texts.push((
+                formula.clone(),
+                format!("promedio de {} en las {count} determinaciones", r.symbol),
+            ));
+            averaged.insert(symbol.clone(), &r.symbol);
+            expanded.push(PracticeResult {
+                symbol,
+                name: format!("{} (promedio)", r.name),
+                formula,
+                ..(*r).clone()
+            });
+        }
+    }
+
+    let mut derive_warnings = Vec::new();
+    let mut derived = derive_results(&expanded, &allowed, &means, &us, &mut derive_warnings)?;
+    for mut w in derive_warnings {
+        for (formula, text) in &average_texts {
+            w = w.replace(formula, text);
+        }
+        let k = std::cell::Cell::new(None);
+        let average = std::cell::Cell::new(false);
+        let cleaned = rename_symbols(&w, |s| {
+            average.set(average.get() || averaged.contains_key(s));
+            renamed.get(s).map(|(base, n)| {
+                k.set(k.get().or(Some(*n)));
+                base.clone()
+            })
+        });
+        group_warning(&mut grouped, cleaned, k.get().filter(|_| !average.get()));
+    }
+    for (text, ks) in grouped {
+        warnings.push(if ks.is_empty() || ks.len() == count {
+            text
+        } else {
+            let list: Vec<String> = ks.iter().map(|k| k.to_string()).collect();
+            format!(
+                "{} {}: {text}",
+                determinations.label.trim(),
+                list.join(", ")
+            )
+        });
+    }
+
+    let formulas: HashMap<&str, &str> = results
+        .iter()
+        .map(|r| (r.symbol.as_str(), r.formula.as_str()))
+        .collect();
+    let mut by_determination: Vec<Vec<DerivedComputation>> =
+        (0..count).map(|_| Vec::new()).collect();
+    let mut shared = Vec::new();
+    for mut d in derived.drain(..) {
+        if let Some(((base, k), formula)) = renamed
+            .get(&d.symbol)
+            .and_then(|r| Some((r, *formulas.get(r.0.as_str())?)))
+        {
+            d.formula = formula.to_string();
+            d.symbol = base.clone();
+            by_determination[k - 1].push(d);
+        } else {
+            if let Some(base) = averaged.get(&d.symbol) {
+                d.formula = format!("promedio de {base} en las {count} determinaciones");
+            }
+            shared.push(d);
+        }
+    }
+
+    Ok(FormAnalysis {
+        quantities: common_computed,
+        regression: None,
+        scatters: Vec::new(),
+        derived: shared,
+        operators: Vec::new(),
+        determinations: per_quantities
+            .into_iter()
+            .zip(by_determination)
+            .enumerate()
+            .map(|(i, (quantities, derived))| DeterminationComputation {
+                label: label(i + 1),
+                quantities,
+                derived,
+            })
+            .collect(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
@@ -802,6 +1068,7 @@ pub fn compute_regresion(
         scatters: Vec::new(),
         derived,
         operators: Vec::new(),
+        determinations: Vec::new(),
         point_results: point_results_out,
         aggregates: aggregates_out,
         warnings,
@@ -877,6 +1144,7 @@ pub fn compute_curva(
         scatters,
         derived: Vec::new(),
         operators: Vec::new(),
+        determinations: Vec::new(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
@@ -1269,6 +1537,7 @@ fn run_kind_raw(
         scales,
         measurements,
         definition.operator_count,
+        definition.determinations.as_ref(),
     )
 }
 

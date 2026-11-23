@@ -250,6 +250,14 @@ fn practice_edit_routes(state: SharedState) -> Router<SharedState> {
             "/practices/{id}/operator-count",
             post(set_practice_operator_count),
         )
+        .route(
+            "/practices/{id}/determinations",
+            post(set_practice_determinations),
+        )
+        .route(
+            "/practices/{id}/parts/{pid}/determinations",
+            post(set_part_determinations),
+        )
         .route("/practices/{id}/quantities", post(create_quantity))
         .route(
             "/practices/{id}/quantities/{qid}",
