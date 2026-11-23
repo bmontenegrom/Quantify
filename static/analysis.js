@@ -23,8 +23,8 @@ export function renderAnalysis(target, submission, includeReview = false, defini
       body += formAnalysisMarkup(submission.analysis, pairs);
       if (studentResults.length) {
         const tolerances = { ...(submission.result_tolerances ?? {}) };
-        for (const [symbol, t] of Object.entries(submission.result_tolerances ?? {})) {
-          tolerances[`${symbol}_medio`] ??= t;
+        for (const r of expandDeterminationResults(definition, definition?.results ?? [])) {
+          if (r.base && !r.determination && tolerances[r.base] != null) tolerances[r.symbol] ??= tolerances[r.base];
         }
         const finalAggregateSymbols = new Set(
           (definition?.aggregates ?? []).filter((a) => a.is_final).map((a) => a.symbol),
@@ -42,8 +42,9 @@ export function renderAnalysis(target, submission, includeReview = false, defini
           );
           for (const [k, det] of (analysis.determinations ?? []).entries()) {
             const suffix = `#${k + 1}`;
+            const own = new Set((det.derived ?? []).map((d) => d.symbol));
             const mine = studentResults
-              .filter((s) => s.symbol.endsWith(suffix))
+              .filter((s) => s.symbol.endsWith(suffix) && own.has(s.symbol.slice(0, -suffix.length)))
               .map((s) => ({ ...s, symbol: s.symbol.slice(0, -suffix.length) }));
             if (mine.length) {
               body += comparisonMarkup(det.derived ?? [], mine, tolerances, title ? `${title} — ${det.label}` : det.label);

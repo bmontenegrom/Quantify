@@ -624,6 +624,7 @@ pub(super) struct FormulaScopes {
 fn formula_scopes(def: &practices::PracticeDefinition) -> FormulaScopes {
     let views = view_scopes(def);
     let uses = result_uses(def);
+    let averaged = averaged_results(def);
     let view = def.point_view();
     let key = |id: Option<&str>| id.unwrap_or_default().to_string();
     FormulaScopes {
@@ -642,7 +643,7 @@ fn formula_scopes(def: &practices::PracticeDefinition) -> FormulaScopes {
             .map(|r| {
                 (
                     r.symbol.clone(),
-                    existing_result_scope(&views, &uses, &r.symbol),
+                    existing_result_scope(&views, &uses, &averaged, &r.symbol),
                 )
             })
             .collect(),
@@ -932,9 +933,10 @@ pub(super) async fn create_quantity(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Json(input): Json<QuantityInput>,
+    Json(mut input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
+    input.per_point &= !input.per_determination;
     validate_quantity_in(&load_definition(&state, &id).await?, &input, None)?;
     guard_symbol(
         &state.pool,
@@ -1000,9 +1002,10 @@ pub(super) async fn update_quantity(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path((practice_id, qid)): Path<(String, String)>,
-    Json(input): Json<QuantityInput>,
+    Json(mut input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
+    input.per_point &= !input.per_determination;
     let before = load_definition(&state, &practice_id).await?;
     let after = with_updated_quantity(&before, &qid, &input)
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
@@ -2535,6 +2538,7 @@ fn check_no_cycle(
 fn existing_result_scope(
     views: &[ViewScope],
     uses: &[(String, Vec<String>)],
+    averaged: &[String],
     symbol: &str,
 ) -> Vec<String> {
     let mut scope = views
@@ -2549,9 +2553,9 @@ fn existing_result_scope(
     let excluded = results_using(uses, symbol);
     scope.retain(|s| {
         !excluded.contains(s)
-            && !s
-                .strip_suffix("_medio")
-                .is_some_and(|base| excluded.iter().any(|e| e == base))
+            && !s.strip_suffix("_medio").is_some_and(|base| {
+                excluded.iter().any(|e| e == base) && averaged.iter().any(|a| a == base)
+            })
     });
     scope
 }
@@ -3265,8 +3269,13 @@ mod tests {
         assert!(result_scope(&def(true, "1/T")).contains(&"g_medio".to_string()));
         let views = view_scopes(&def(true, "1/T"));
         let uses = result_uses(&def(true, "1/T"));
-        assert!(!existing_result_scope(&views, &uses, "g").contains(&"g_medio".to_string()));
-        assert!(existing_result_scope(&views, &uses, "rel").contains(&"g_medio".to_string()));
+        let averaged = averaged_results(&def(true, "1/T"));
+        assert!(
+            !existing_result_scope(&views, &uses, &averaged, "g").contains(&"g_medio".to_string())
+        );
+        assert!(
+            existing_result_scope(&views, &uses, &averaged, "rel").contains(&"g_medio".to_string())
+        );
         assert!(!result_scope(&def(false, "1/T")).contains(&"g_medio".to_string()));
         let rel_problems = |d: &practices::PracticeDefinition| {
             formula_problems(d)
@@ -3300,6 +3309,17 @@ mod tests {
             ..Default::default()
         };
         assert!(cycle_problems(&plain).is_empty());
+        let plain_with_y = practices::PracticeDefinition {
+            results: vec![result("y", "1"), result("x", "y + x_medio")],
+            ..plain.clone()
+        };
+        assert!(existing_result_scope(
+            &view_scopes(&plain_with_y),
+            &result_uses(&plain_with_y),
+            &averaged_results(&plain_with_y),
+            "y"
+        )
+        .contains(&"x_medio".to_string()));
         let input = ResultInput {
             symbol: "x".into(),
             formula: "2*x_medio".into(),
