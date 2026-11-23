@@ -3904,7 +3904,19 @@ fn check_template_rejects_what_cannot_be_written() {
         ),
         (
             serde_json::json!({"quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": true, "per_determination": true}]}),
-            "no tiene determinaciones",
+            "parte con determinaciones",
+        ),
+        (
+            serde_json::json!({"analysis_kind": "curva", "parts": [{"title": "A", "determinations": {"count": 2, "label": "M"}}]}),
+            "parte estadística",
+        ),
+        (
+            serde_json::json!({
+                "parts": [{"title": "A", "determinations": {"count": 2, "label": "M"}}, {"title": "B"}],
+                "quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": true, "per_determination": true}],
+                "sections": [{"title": "S", "part": 1, "quantities": ["x"]}]
+            }),
+            "no está en una práctica o parte con determinaciones",
         ),
         (
             serde_json::json!({"parts": [{"title": "A", "analysis_kind": "curva", "determinations": {"count": 2, "label": "M"}}]}),
@@ -4115,4 +4127,42 @@ async fn a_part_with_determinations_is_analyzed_and_round_trips() {
     assert!((part.determinations[1].derived[0].value - 0.25).abs() < 1e-12);
     let average = part.derived.iter().find(|d| d.symbol == "f_medio").unwrap();
     assert!((average.value - 0.375).abs() < 1e-12);
+}
+
+#[test]
+fn only_count_and_average_make_determinations_structural() {
+    let with = |d: Determinations| PracticeDefinition {
+        determinations: Some(d),
+        ..Default::default()
+    };
+    let base = Determinations {
+        count: 3,
+        label: "Medida".into(),
+        average: true,
+        display: DeterminationDisplay::Bloques,
+    };
+    let kind = |d: Determinations| compare_definitions(&with(base.clone()), &with(d)).unwrap();
+    let looks = kind(Determinations {
+        label: "Serie".into(),
+        display: DeterminationDisplay::Pestanas,
+        ..base.clone()
+    });
+    assert_eq!(looks.kind, DraftChangeKind::Cosmetic);
+    assert!(looks.changes[0].contains("Cambia cómo se muestran"));
+    assert_eq!(
+        kind(Determinations {
+            count: 4,
+            ..base.clone()
+        })
+        .kind,
+        DraftChangeKind::Structural
+    );
+    assert_eq!(
+        kind(Determinations {
+            average: false,
+            ..base.clone()
+        })
+        .kind,
+        DraftChangeKind::Structural
+    );
 }

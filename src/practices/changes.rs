@@ -5,7 +5,7 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-const COSMETIC_KEYS: [&str; 10] = [
+const COSMETIC_KEYS: [&str; 12] = [
     "description",
     "name",
     "title",
@@ -16,6 +16,8 @@ const COSMETIC_KEYS: [&str; 10] = [
     "input_widget",
     "compare_with",
     "show_live",
+    "label",
+    "display",
 ];
 const VOLATILE_KEYS: [&str; 3] = ["status", "current_version", "position"];
 const FREELY_ORDERED: [&str; 5] = [
@@ -203,7 +205,8 @@ fn list_changes(
     if published.operator_count != draft.operator_count {
         changes.push("Cambia la cantidad de operadores".to_string());
     }
-    if published.determinations != draft.determinations {
+    let structural = |d: &Option<super::Determinations>| d.as_ref().map(|d| (d.count, d.average));
+    if structural(&published.determinations) != structural(&draft.determinations) {
         changes.push("Cambian las determinaciones".to_string());
     }
     diff_items(
@@ -332,6 +335,25 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
         (old.help_text != new.help_text)
             .then(|| format!("Cambia la ayuda de la sección {}", new.title))
     });
+    let looks =
+        |d: Option<&super::Determinations>| d.map(|d| (d.label.trim().to_string(), d.display));
+    let part_determinations = draft.parts.iter().filter_map(|new| {
+        let old = published.parts.iter().find(|p| p.id == new.id)?;
+        (looks(old.determinations.as_ref()) != looks(new.determinations.as_ref()))
+            .then_some(&new.determinations)
+    });
+    let determinations = std::iter::once(&draft.determinations)
+        .filter(|_| {
+            looks(published.determinations.as_ref()) != looks(draft.determinations.as_ref())
+        })
+        .chain(part_determinations)
+        .filter_map(|d| d.as_ref())
+        .map(|d| {
+            format!(
+                "Cambia cómo se muestran las determinaciones ({})",
+                d.label.trim()
+            )
+        });
     let description =
         (published.description != draft.description).then(|| "Cambia la descripción".to_string());
     description
@@ -342,6 +364,7 @@ fn display_changes(published: &PracticeDefinition, draft: &PracticeDefinition) -
         .chain(live)
         .chain(part_help)
         .chain(section_help)
+        .chain(determinations)
         .collect()
 }
 

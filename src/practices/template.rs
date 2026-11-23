@@ -353,18 +353,37 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
         return Err("Una práctica con partes configura las determinaciones en cada parte.".into());
     }
     let point_based = |kind: &Option<String>| super::is_point_based(kind.as_deref().map(str::trim));
+    let statistical_part = |p: &TemplatePart| {
+        !point_based(if p.analysis_kind.is_some() {
+            &p.analysis_kind
+        } else {
+            &t.analysis_kind
+        })
+    };
     if (t.determinations.is_some() && point_based(&t.analysis_kind))
         || t.parts
             .iter()
-            .any(|p| p.determinations.is_some() && point_based(&p.analysis_kind))
+            .any(|p| p.determinations.is_some() && !statistical_part(p))
     {
         return Err("Las determinaciones son para una práctica o parte estadística.".into());
     }
-    if !any_determinations && t.quantities.iter().any(|q| q.per_determination) {
-        return Err(
-            "Una magnitud se repite por determinación, pero la plantilla no tiene determinaciones."
-                .into(),
-        );
+    for q in t.quantities.iter().filter(|q| q.per_determination) {
+        let has_determinations = if t.parts.is_empty() {
+            t.determinations.is_some()
+        } else {
+            t.sections
+                .iter()
+                .find(|s| s.quantities.contains(&q.symbol))
+                .and_then(|s| s.part)
+                .and_then(|i| t.parts.get(i))
+                .is_some_and(|p| p.determinations.is_some())
+        };
+        if !has_determinations {
+            return Err(format!(
+                "La magnitud \"{}\" se repite por determinación, pero no está en una práctica o parte con determinaciones.",
+                q.symbol
+            ));
+        }
     }
     if any_determinations && t.operator_count.is_some_and(|n| n > 1) {
         return Err("Una práctica con determinaciones no puede usar operadores.".into());

@@ -366,8 +366,27 @@ fn located_structure_problems(def: &practices::PracticeDefinition) -> Vec<(Strin
         problems.push(("no tiene magnitudes de entrada".to_string(), "quantity"));
     }
     if def.parts.is_empty() {
+        if def.determinations.is_some() && practices::is_point_based(def.analysis_kind.as_deref()) {
+            problems.push((
+                "tiene determinaciones pero ya no es estadística".to_string(),
+                "layout",
+            ));
+        }
         problems.extend(kind_problems(def));
         return problems;
+    }
+    for part in def
+        .parts
+        .iter()
+        .filter(|p| p.determinations.is_some() && def.part_kind(p) != "estadistico")
+    {
+        problems.push((
+            format!(
+                "la parte \"{}\" tiene determinaciones pero ya no es estadística",
+                part.title
+            ),
+            "layout",
+        ));
     }
     if def.results.is_empty()
         && def.curves.is_empty()
@@ -2373,12 +2392,15 @@ fn validate_quantity_in(
              (regresión lineal o curva); dejá las réplicas vacías.",
         ));
     }
-    let any_determinations = determinations_of(def, part).is_some()
-        || (part.is_none() && def.parts.iter().any(|p| p.determinations.is_some()));
-    if input.per_determination && !any_determinations {
+    if input.per_determination && determinations_of(def, part).is_none() {
         return Err(AppError::bad_request(
-            "Para repetir una magnitud por determinación, primero configurá las determinaciones \
-             de la práctica o de su parte.",
+            if part.is_none() && !def.parts.is_empty() {
+                "Para repetir una magnitud por determinación, ubicala primero en una parte \
+             con determinaciones."
+            } else {
+                "Para repetir una magnitud por determinación, primero configurá las determinaciones \
+             de la práctica o de su parte."
+            },
         ));
     }
     Ok(())
@@ -5471,5 +5493,45 @@ mod tests {
         .err()
         .unwrap();
         assert!(new_part.message().contains("antes de agregar partes"));
+
+        let unplaced = create_quantity(
+            State(state.clone()),
+            headers.clone(),
+            Path("p2-cc".into()),
+            Json(quantity(true)),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(unplaced.message().contains("ubicala primero"));
+    }
+
+    #[test]
+    fn a_part_that_stops_being_statistical_keeps_no_silent_determinations() {
+        let def = practices::PracticeDefinition {
+            analysis_kind: Some("curva".into()),
+            parts: vec![
+                practices::PracticePart {
+                    id: "a".into(),
+                    title: "A".into(),
+                    determinations: Some(practices::Determinations {
+                        count: 2,
+                        label: "Medida".into(),
+                        average: false,
+                        display: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+                practices::PracticePart {
+                    id: "b".into(),
+                    title: "B".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(located_structure_problems(&def)
+            .iter()
+            .any(|(m, _)| m.contains("\"A\" tiene determinaciones pero ya no es estadística")));
     }
 }
