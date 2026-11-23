@@ -21,7 +21,7 @@ import {
   POINT_KINDS,
   downloadJson,
   readJsonFile,
-  statisticalDeterminations,
+  determinationsFor,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 import { showToast } from "./toast.js";
@@ -1193,7 +1193,7 @@ function renderOperatorCountForm(practice, def) {
 function determinationsFormHtml(part, d) {
   const partAttr = part ? ` data-part-id="${escapeHtml(part.id)}"` : "";
   return `
-    <details class="add-panel">
+    <details class="add-panel" data-add-panel="determinations-${escapeHtml(part?.id ?? "practice")}">
       <summary>Determinaciones${d ? `: ${d.count} (${escapeHtml(d.label)})` : ""}</summary>
       <form class="detail-form detail-form-grid" data-determinations-form${partAttr}>
         <label>Cantidad
@@ -1337,11 +1337,6 @@ function renderCurvesList(def, practiceId) {
   `;
 }
 
-function hasDeterminations() {
-  const def = state.practiceDefinition;
-  return def?.parts?.length ? def.parts.some((p) => statisticalDeterminations(p)) : Boolean(def?.determinations);
-}
-
 function seriesPractice() {
   return POINT_KINDS.includes(state.practiceDefinition?.analysis_kind);
 }
@@ -1381,7 +1376,7 @@ function renderQuantityForm(qty, practiceId) {
       <label data-for-roles="serie_replicas">Réplicas por punto
         <input name="replicas_per_point" type="number" min="1" step="1" required value="${v("replicas_per_point")}" placeholder="cantidad" />
       </label>
-      ${qty?.per_determination || hasDeterminations() ? `<label class="detail-form-checkbox" data-for-roles="unica replicas catedra constante">
+      ${qty?.per_determination || determinationsFor(state.practiceDefinition, qty?.symbol ?? "") ? `<label class="detail-form-checkbox">
         <input type="checkbox" name="per_determination" ${qty?.per_determination ? "checked" : ""} />
         Se repite por determinación
       </label>` : ""}

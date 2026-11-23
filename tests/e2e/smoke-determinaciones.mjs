@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { ARTIFACTS, STUDENT, TEACHER, apiPost, assert, fillAndSubmit, openAddForm, step, waitForStatus, withE2E } from "./lib.mjs";
+import { ARTIFACTS, STUDENT, TEACHER, apiPost, assert, fillAndSubmit, openAddForm, openPractice, step, waitForStatus, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8191";
 const NAME = "Determinaciones";
@@ -13,10 +13,7 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   const { page } = await login(TEACHER, "docente");
   const base = `/api/practices/${ID}`;
   await apiPost(page, "/api/practices", { name: NAME, analysis_kind: "estadistico" });
-  await page.reload();
-  await page.waitForSelector("#app-shell:not(.hidden)");
-  await page.click('.tab.teacher-only[data-view="practices"]');
-  await page.click(`[data-practice-open][data-practice-id="${ID}"]`);
+  await openPractice(page, ID);
   await openAddForm(page, "[data-determinations-form]:not([data-part-id])");
   await fillAndSubmit(page, "[data-determinations-form]:not([data-part-id])", { count: "3", display: "bloques" }, { average: true });
   await waitForStatus(page, "Determinaciones guardadas");
@@ -33,7 +30,7 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   await page.waitForSelector('#practice-workspace tr:has(code:text-is("T")) td:has-text("por determinación")');
   await openAddForm(page, "#new-quantity-form");
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "z", name: "Auxiliar", unit: "s", quantity: "tiempo" }, { per_determination: true, optional: true });
-  await waitForStatus(page, "Magnitud agregada");
+  await page.waitForSelector('#practice-workspace tr:has(code:text-is("z"))');
   await page.click('#practice-workspace tr:has(code:text-is("z")) [data-edit-quantity]');
   await fillAndSubmit(page, "[data-edit-quantity-form]", {}, { per_determination: false });
   await waitForStatus(page, "Magnitud actualizada");
@@ -175,14 +172,16 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     post(`${mbase}/quantities`, { symbol, name: symbol, unit: "", repeated: false, quantity: null, ...extra });
   const directa = await post(`${mbase}/parts`, { title: "Directa" });
   const ajuste = await post(`${mbase}/parts`, { title: "Ajuste" });
-  await page.reload();
-  await page.waitForSelector("#app-shell:not(.hidden)");
-  await page.click('.tab.teacher-only[data-view="practices"]');
-  await page.click(`[data-practice-open][data-practice-id="${mixed.id}"]`);
+  await openPractice(page, mixed.id);
   const partForm = `[data-determinations-form][data-part-id="${directa.id}"]`;
   await openAddForm(page, partForm);
   await fillAndSubmit(page, partForm, { count: "3", display: "pestanas" }, { average: true });
   await waitForStatus(page, "Determinaciones guardadas");
+  await openAddForm(page, "#new-quantity-form");
+  assert(
+    (await page.locator('#new-quantity-form [name="per_determination"]').count()) === 0,
+    "con partes, una magnitud nueva todavía no tiene parte: no debía ofrecer «por determinación»",
+  );
   const directaSaved = (await getJson(page, `${mbase}/definition`)).parts.find((p) => p.id === directa.id);
   assert(directaSaved.determinations?.display === "pestanas", "la parte debía guardar sus determinaciones desde su fila");
   const sDirecta = await post(`${mbase}/sections`, { title: "Pendulo", part_id: directa.id });
@@ -206,10 +205,14 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   await post(`${mbase}/results`, { symbol: "f", name: "Frecuencia", unit: "", formula: "1/P", is_final: true });
   await post(`${mbase}/results`, { symbol: "k", name: "k", unit: "", formula: "slope", is_final: true, section_id: sAjuste.id });
   await post(`${mbase}/results`, { symbol: "c", name: "Constante", unit: "", formula: "2", is_final: true });
-  await page.reload();
-  await page.waitForSelector("#app-shell:not(.hidden)");
-  await page.click('.tab.teacher-only[data-view="practices"]');
-  await page.click(`[data-practice-open][data-practice-id="${mixed.id}"]`);
+  await openPractice(page, mixed.id);
+  const perDetBox = (symbol) =>
+    page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) + tr [name="per_determination"]`);
+  await page.click('#practice-workspace tr:has(code:text-is("P")) [data-edit-quantity]');
+  assert(await perDetBox("P").isChecked(), "P, en la parte con medidas, debía ofrecer «por determinación» marcado");
+  await page.click('#practice-workspace tr:has(code:text-is("x")) [data-edit-quantity]');
+  await page.waitForSelector('#practice-workspace tr:has(code:text-is("x")) + tr [data-edit-quantity-form]');
+  assert((await perDetBox("x").count()) === 0, "x, en la parte de ajuste, no debía ofrecer «por determinación»");
   await page.click("#practice-workspace [data-practice-try-draft]");
   await page.click("#draft-preview-fill:not([disabled])");
   const preview = page.waitForResponse((r) => r.url().includes("/analyze-preview"));
