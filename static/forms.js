@@ -10,7 +10,7 @@ import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   prefixFactor, validateMeasurements,
   draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements, POINT_KINDS,
-  determinationsFor, expandDeterminationResults, cssEscape, statisticalDeterminations, symbolPart,
+  determinationsFor, expandDeterminationResults, cssEscape, statisticalDeterminations, symbolPart, groupError,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -263,13 +263,7 @@ export function renderPartTabs(practiceId) {
       )
       .join("");
     practicePartTabs.querySelectorAll(".part-tab").forEach((tab) => {
-      tab.addEventListener("click", () => {
-        activePart = tab.dataset.partId;
-        practicePartTabs
-          .querySelectorAll(".part-tab")
-          .forEach((t) => t.classList.toggle("active", t === tab));
-        applyPartVisibility();
-      });
+      tab.addEventListener("click", () => activatePart(tab.dataset.partId));
     });
     return;
   }
@@ -341,22 +335,23 @@ function revealField(field) {
     applyDeterminationVisibility();
   }
   const section = field.closest("[data-section][hidden]")?.dataset.section;
-  if (section && practicePartTabs) {
-    activePart = section;
-    practicePartTabs.querySelectorAll(".part-tab").forEach((t) => t.classList.toggle("active", t.dataset.partId === section));
-    applyPartVisibility();
-  }
+  if (section && practicePartTabs) activatePart(section);
 }
 
-function revealEmptyGroup(measurements) {
-  for (const m of measurements) {
-    const empty = (m.operator_replicas ?? []).findIndex((reps) => reps.length === 0);
-    if (empty === -1) continue;
-    const row = measurementFields.querySelector(
-      `.operator-quantity[data-quantity-id="${cssEscape(m.quantity_id)}"] [data-operator-index="${empty}"]`,
-    );
-    if (row) return revealField(row);
-  }
+function activatePart(id) {
+  activePart = id;
+  practicePartTabs.querySelectorAll(".part-tab").forEach((t) => t.classList.toggle("active", t.dataset.partId === id));
+  applyPartVisibility();
+}
+
+function revealEmptyGroup(measurements, metaMap, error) {
+  const m = measurements.find((m) => m.operator_replicas && groupError(m, metaMap[m.quantity_id] ?? {}) === error);
+  const empty = m?.operator_replicas.findIndex((reps) => reps.length === 0);
+  if (empty == null || empty === -1) return;
+  const row = measurementFields.querySelector(
+    `.operator-quantity[data-quantity-id="${cssEscape(m.quantity_id)}"] [data-operator-index="${empty}"]`,
+  );
+  if (row) revealField(row);
 }
 
 measurementFields.addEventListener(
@@ -876,10 +871,11 @@ export async function submitFormSubmission() {
 
   const measurements = collectMeasurements();
   const analysisKind = state.practiceForm?.definition?.analysis_kind ?? "";
-  const validationError = validateMeasurements(measurements, analysisKind, buildMetaMap(measurements));
+  const metaMap = buildMetaMap(measurements);
+  const validationError = validateMeasurements(measurements, analysisKind, metaMap);
   if (validationError) {
     submitStatus.textContent = validationError;
-    revealEmptyGroup(measurements);
+    revealEmptyGroup(measurements, metaMap, validationError);
     return;
   }
 
@@ -1246,7 +1242,7 @@ function prefillGroups(byQ) {
     );
     blocks.forEach((row, i) => {
       const values = e.operatorGroups[i] ?? [];
-      if (!values.length) row.querySelectorAll(".measure-value").forEach((input) => (input.value = ""));
+      if (!values.length && e.operatorGroups.length) row.querySelectorAll(".measure-value").forEach((input) => (input.value = ""));
       fillReplicaRow(row, values);
     });
   });

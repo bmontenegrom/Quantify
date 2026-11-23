@@ -252,13 +252,15 @@ impl PracticeDefinition {
     /// let def = PracticeDefinition { determinations: Some(d), ..Default::default() };
     /// assert_eq!(def.determinations_in(None).map(|d| d.count), Some(2));
     /// ```
-    pub fn determinations_in(&self, part: Option<&PracticePart>) -> Option<&super::Determinations> {
+    pub fn determinations_in<'a>(
+        &'a self,
+        part: Option<&'a PracticePart>,
+    ) -> Option<&'a super::Determinations> {
         match part {
-            Some(part) => self
-                .parts
-                .iter()
-                .find(|p| p.id == part.id && self.part_kind(p) == "estadistico")
-                .and_then(|p| p.determinations.as_ref()),
+            Some(part) => part
+                .determinations
+                .as_ref()
+                .filter(|_| self.part_kind(part) == "estadistico"),
             None if self.parts.is_empty() && !is_point_based(self.analysis_kind.as_deref()) => {
                 self.determinations.as_ref()
             }
@@ -421,7 +423,16 @@ impl PracticeDefinition {
             })
             .filter(|b| self.results.iter().any(|r| r.symbol == *b))
         {
-            return self.result_part_in(base, seen);
+            let part = self.result_part_in(base, seen);
+            let averaged = self
+                .determinations_in(part.and_then(|id| self.parts.iter().find(|p| p.id == id)))
+                .is_some_and(|d| d.average)
+                && crate::computation::per_determination_symbols(&self.quantities, &self.results)
+                    .iter()
+                    .any(|s| s == base);
+            if averaged {
+                return part;
+            }
         }
         let series_part = self.series_part()?;
         let series: Vec<&str> = self

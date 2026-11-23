@@ -132,6 +132,15 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     (await visible(T)).join() === "false,false,true",
     "una medida vacía debía abrir su pestaña al entregar",
   );
+  await group(T).locator(".measurement-row").nth(2).locator(".measure-value").first().fill("1.9");
+  await group(m).locator(".measure-given-u").fill("");
+  await tabs.nth(0).click();
+  await sPage.click("#submit-button");
+  await sPage.waitForSelector('#submit-status:has-text("requiere la incertidumbre U")');
+  assert(
+    (await visible(x)).join() === "true,false,false",
+    "la medida vacía de una magnitud opcional no debía abrir su pestaña",
+  );
 
   step("práctica mixta: la parte estadística con determinaciones convive con un ajuste y se entrega");
   const post = (url, body) => apiPost(page, url, body);

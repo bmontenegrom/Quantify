@@ -385,8 +385,12 @@ export function formulaVariables(formula) {
   return formula.match(/(?<![\w.:])[A-Za-z_]\w*\b(?!\s*\(|:)/g) ?? [];
 }
 
+export function seriesPart(definition) {
+  return (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico");
+}
+
 function seriesSymbolPart(definition, symbol) {
-  const series = (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico")?.id;
+  const series = seriesPart(definition)?.id;
   if (!series) return null;
   const columns = [
     ...(definition.quantities ?? []).filter((q) => q.per_point && !q.is_given).map((q) => q.symbol),
@@ -628,7 +632,7 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
   }, []);
 }
 
-function groupError(m, meta) {
+export function groupError(m, meta) {
   const name = meta.name ?? m.quantity_id;
   const empty = m.operator_replicas.length === 0 ? 0 : m.operator_replicas.findIndex((reps) => reps.length === 0);
   if (empty !== -1) {

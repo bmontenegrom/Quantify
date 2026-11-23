@@ -1188,6 +1188,8 @@ Decisiones:
      antes de F9). Revisar las dos cosas junto con la validación del resto de la entrega.
    - `determination_results()` clona la definición (o una vista por parte) y se llama varias
      veces por validación; calcularlo una vez y pasarlo si llega a notarse.
+     Lo mismo en el cliente: `finalPart` llama a `expandDeterminationResults` por cada resultado
+     final; se va con lo anterior cuando el servidor mande la parte de cada símbolo.
 4. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
    - P1 sin partes, con 3 operadores en pestañas; Hidrostática con 26 magnitudes y 3 medidas en
      bloques con promedio.

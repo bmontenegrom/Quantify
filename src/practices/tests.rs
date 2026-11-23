@@ -4187,22 +4187,25 @@ fn only_count_and_average_make_determinations_structural() {
 }
 
 #[test]
-fn a_symbol_named_medio_belongs_to_its_base_only_when_it_is_not_defined() {
-    use crate::practices::{PracticeAggregate, PracticeDefinition, PracticePart, PracticeSection};
+fn a_symbol_named_medio_belongs_to_its_base_only_when_it_is_an_undefined_average() {
+    use crate::practices::{
+        Determinations, PracticeAggregate, PracticeDefinition, PracticePart, PracticeSection,
+    };
     let result = |symbol: &str, formula: &str| crate::db::PracticeResult {
         symbol: symbol.into(),
         formula: formula.into(),
         ..Default::default()
     };
-    let section = |part: &str, results: &[&str]| PracticeSection {
-        part_id: Some(part.into()),
-        results: results.iter().map(|s| s.to_string()).collect(),
-        ..Default::default()
-    };
-    let def = |aggregate: bool| PracticeDefinition {
+    let def = |aggregate: bool, average: bool| PracticeDefinition {
         parts: vec![
             PracticePart {
                 id: "stat".into(),
+                determinations: Some(Determinations {
+                    count: 2,
+                    label: "Medida".into(),
+                    average,
+                    display: Default::default(),
+                }),
                 ..Default::default()
             },
             PracticePart {
@@ -4210,8 +4213,18 @@ fn a_symbol_named_medio_belongs_to_its_base_only_when_it_is_not_defined() {
                 ..Default::default()
             },
         ],
-        sections: vec![section("stat", &["x"])],
-        results: vec![result("x", "1"), result("k", "2*x_medio")],
+        sections: vec![PracticeSection {
+            part_id: Some("stat".into()),
+            quantities: vec!["T".into()],
+            results: vec!["x".into()],
+            ..Default::default()
+        }],
+        quantities: vec![crate::db::PracticeQuantity {
+            symbol: "T".into(),
+            per_determination: true,
+            ..Default::default()
+        }],
+        results: vec![result("x", "1/T"), result("k", "2*x_medio")],
         aggregates: if aggregate {
             vec![PracticeAggregate {
                 symbol: "x_medio".into(),
@@ -4222,6 +4235,7 @@ fn a_symbol_named_medio_belongs_to_its_base_only_when_it_is_not_defined() {
         },
         ..Default::default()
     };
-    assert_eq!(def(false).result_part("k"), Some("stat"));
-    assert_eq!(def(true).result_part("k"), None);
+    assert_eq!(def(false, true).result_part("k"), Some("stat"));
+    assert_eq!(def(false, false).result_part("k"), None);
+    assert_eq!(def(true, true).result_part("k"), None);
 }
