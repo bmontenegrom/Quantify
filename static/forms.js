@@ -279,6 +279,7 @@ export function renderPartTabs(practiceId) {
 }
 
 const activeDetermination = new Map();
+let determinationPractice = null;
 
 function determinationTabsHtml(definition) {
   if ((definition.operator_count ?? 0) >= 2) return "";
@@ -301,7 +302,8 @@ function determinationTabsHtml(definition) {
 function applyDeterminationVisibility() {
   measurementFields.querySelectorAll("[data-det-tabs]").forEach((strip) => {
     const scope = strip.dataset.detTabs;
-    const active = activeDetermination.get(scope) ?? 0;
+    const count = strip.querySelectorAll(".part-tab").length;
+    const active = Math.min(activeDetermination.get(scope) ?? 0, count - 1);
     strip.querySelectorAll(".part-tab").forEach((tab) => {
       tab.classList.toggle("active", Number(tab.dataset.determination) === active);
     });
@@ -312,6 +314,11 @@ function applyDeterminationVisibility() {
 }
 
 function wireDeterminationTabs() {
+  const practice = state.practiceForm?.definition?.practice_id ?? null;
+  if (practice !== determinationPractice) {
+    activeDetermination.clear();
+    determinationPractice = practice;
+  }
   measurementFields.querySelectorAll("[data-det-tabs] .part-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       activeDetermination.set(tab.closest("[data-det-tabs]").dataset.detTabs, Number(tab.dataset.determination));
@@ -328,31 +335,7 @@ function applyPartVisibility() {
   });
 }
 
-export function renderMeasurementFields(draft) {
-  if (!state.practiceForm) {
-    measurementFields.innerHTML = "";
-    return;
-  }
-  const { definition, instruments } = state.practiceForm;
-  setDisplaySymbols(definition.display_symbols);
-  if (submitButton) submitButton.disabled = false;
-  if (definition.quantities.length === 0) {
-    measurementFields.innerHTML = `<p class="submission-meta">Esta practica todavia no tiene magnitudes definidas.</p>`;
-    return;
-  }
-
-  if (definition.analysis_kind === "curva" && (definition.curves?.length ?? 0) === 0) {
-    measurementFields.innerHTML = `<p class="submission-meta">Esta práctica de curva todavía no tiene curvas definidas. Pedile al docente que las configure antes de entregar.</p>`;
-    if (submitButton) submitButton.disabled = true;
-    return;
-  }
-
-  if (POINT_KINDS.includes(definition.analysis_kind)) {
-    renderSeriesTable(definition);
-    measurementFields.insertAdjacentHTML("beforeend", seriesFinalResultsHtml(definition));
-    return;
-  }
-
+function quantityRowRenderer(definition, instruments, draft) {
   const operatorCount =
     definition.analysis_kind == null || definition.analysis_kind === "estadistico"
       ? definition.operator_count ?? 0
@@ -458,6 +441,36 @@ export function renderMeasurementFields(draft) {
       </div>
     `;
   };
+  return quantityRowHtml;
+}
+
+export function renderMeasurementFields(draft) {
+  if (!state.practiceForm) {
+    measurementFields.innerHTML = "";
+    return;
+  }
+  const { definition, instruments } = state.practiceForm;
+  setDisplaySymbols(definition.display_symbols);
+  if (submitButton) submitButton.disabled = false;
+  if (definition.quantities.length === 0) {
+    measurementFields.innerHTML = `<p class="submission-meta">Esta practica todavia no tiene magnitudes definidas.</p>`;
+    return;
+  }
+
+  if (definition.analysis_kind === "curva" && (definition.curves?.length ?? 0) === 0) {
+    measurementFields.innerHTML = `<p class="submission-meta">Esta práctica de curva todavía no tiene curvas definidas. Pedile al docente que las configure antes de entregar.</p>`;
+    if (submitButton) submitButton.disabled = true;
+    return;
+  }
+
+  const quantityRowHtml = quantityRowRenderer(definition, instruments, draft);
+  if (POINT_KINDS.includes(definition.analysis_kind)) {
+    renderSeriesTable(definition, quantityRowHtml);
+    measurementFields.insertAdjacentHTML("afterbegin", determinationTabsHtml(definition));
+    measurementFields.insertAdjacentHTML("beforeend", seriesFinalResultsHtml(definition));
+    wireDeterminationTabs();
+    return;
+  }
 
   const sections = definitionSections(definition);
   if (sections) {
@@ -502,14 +515,16 @@ export function renderMeasurementFields(draft) {
 
   wireInstrumentSelectors(measurementFields);
 
-  measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
-    if (row.dataset.isChrono === "1") {
-      wireChronometerWidget(row, chronoKeyFor(row));
-      return;
-    }
-    if (row.dataset.isGiven === "1") return;
-    wireReplicaRow(row);
-  });
+  measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach(wireMeasurementRow);
+}
+
+export function wireMeasurementRow(row) {
+  if (row.dataset.isChrono === "1") {
+    wireChronometerWidget(row, chronoKeyFor(row));
+    return;
+  }
+  if (row.dataset.isGiven === "1") return;
+  wireReplicaRow(row);
 }
 
 function partForResult(symbol) {
@@ -518,7 +533,7 @@ function partForResult(symbol) {
 }
 
 export function finalResultRowHtml(r, sectionId) {
-  const part = sectionId !== undefined ? sectionId : partForResult(r.base ?? r.symbol);
+  const part = sectionId !== undefined ? sectionId : r.part !== undefined ? r.part : partForResult(r.symbol);
   const tab = r.determination?.tabs
     ? ` data-det-scope="${escapeHtml(r.determination.scope)}" data-determination="${r.determination.index}"`
     : "";
@@ -569,7 +584,7 @@ function seriesFinalResultsHtml(definition) {
         <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>`;
     return `<div class="measurement-section"${secAttr}>
         ${heading}
-        ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
+        ${expandDeterminationResults(definition, rows).map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;
   });
   const byPart = new Map();
@@ -674,10 +689,12 @@ export function collectMeasurements() {
         ? { quantity_id: id, instrument_id: null, scale_id: null, values: [], given_u: null, point_replicas: replicaPoints.get(id) }
         : { quantity_id: id, instrument_id: null, scale_id: null, values: singleValues.get(id), given_u: null },
     );
-    const shared = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].map(collectStandaloneRow);
-    return [...series, ...shared];
+    return [...series, ...collectGroupsAndStandalone()];
   }
+  return collectGroupsAndStandalone();
+}
 
+function collectGroupsAndStandalone() {
   const out = [...measurementFields.querySelectorAll(".operator-quantity")].map((container) => {
     const rows = [...container.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
@@ -1139,13 +1156,27 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
       });
     });
     measurementFields
-      .querySelectorAll(".shared-quantities .measurement-row")
-      .forEach((row) => prefillStandaloneRow(row, byQ));
+      .querySelectorAll(".shared-quantities .measurement-row:not([data-final-result])")
+      .forEach((row) => {
+        if (!row.closest(".operator-quantity")) prefillStandaloneRow(row, byQ);
+      });
+    prefillGroups(byQ);
     applyFinalResultsPrefillFrom(finalResults);
     refreshSeries();
     return;
   }
 
+  prefillGroups(byQ);
+  const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
+    (row) => !row.closest(".operator-quantity")
+  );
+  for (const row of standalone) {
+    prefillStandaloneRow(row, byQ);
+  }
+  applyFinalResultsPrefillFrom(finalResults);
+}
+
+function prefillGroups(byQ) {
   measurementFields.querySelectorAll(".operator-quantity").forEach((groupEl) => {
     const e = byQ.get(groupEl.dataset.quantityId);
     if (!e) return;
@@ -1157,14 +1188,6 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
     );
     blocks.forEach((row, i) => fillReplicaRow(row, e.operatorGroups[i] ?? []));
   });
-
-  const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
-    (row) => !row.closest(".operator-quantity")
-  );
-  for (const row of standalone) {
-    prefillStandaloneRow(row, byQ);
-  }
-  applyFinalResultsPrefillFrom(finalResults);
 }
 
 function prefillStandaloneRow(row, byQ) {

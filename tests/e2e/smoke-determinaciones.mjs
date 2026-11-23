@@ -110,4 +110,67 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     "el resultado final de la medida 3 debía verse en su pestaña",
   );
   await sPage.screenshot({ path: join(ARTIFACTS, "determinaciones-pestanas.png"), fullPage: true });
+
+  step("práctica mixta: la parte estadística con determinaciones convive con un ajuste y se entrega");
+  const post = (url, body) => apiPost(page, url, body);
+  const mixed = await post("/api/practices", { name: "Mixta", analysis_kind: "estadistico" });
+  const mbase = `/api/practices/${mixed.id}`;
+  const qty = (symbol, extra) =>
+    post(`${mbase}/quantities`, { symbol, name: symbol, unit: "", repeated: false, quantity: null, ...extra });
+  const directa = await post(`${mbase}/parts`, { title: "Directa" });
+  const ajuste = await post(`${mbase}/parts`, { title: "Ajuste" });
+  await post(`${mbase}/parts/${directa.id}/determinations`, determinations("bloques"));
+  const sDirecta = await post(`${mbase}/sections`, { title: "Pendulo", part_id: directa.id });
+  const sAjuste = await post(`${mbase}/sections`, { title: "Barrido", part_id: ajuste.id });
+  const P = await qty("P", { per_point: false });
+  const xq = await qty("x", {});
+  const yq = await qty("y", {});
+  for (const [q, sec] of [[P, sDirecta], [xq, sAjuste], [yq, sAjuste]]) {
+    await post(`${mbase}/quantities/${q.id}/section`, { section_id: sec.id });
+  }
+  await post(`${mbase}/quantities/${P.id}`, {
+    symbol: "P", name: "P", unit: "", repeated: false, quantity: null, per_point: false, per_determination: true,
+  });
+  await post(`${mbase}/parts/${ajuste.id}/analysis-kind`, { analysis_kind: "regresion_lineal" });
+  await post(`${mbase}/regression-formulas`, { x_formula: "x", y_formula: "y" });
+  await post(`${mbase}/results`, { symbol: "f", name: "Frecuencia", unit: "", formula: "1/P", is_final: true });
+  await post(`${mbase}/results`, { symbol: "k", name: "k", unit: "", formula: "slope", is_final: true, section_id: sAjuste.id });
+  await post(`${mbase}/status`, { status: "publicada" });
+  const { courses } = await page.evaluate(async () => (await fetch("/api/academic/context")).json());
+  await post(`/api/academic/courses/${courses[0].id}/practices`, { practice_id: mixed.id });
+
+  await sPage.reload();
+  await sPage.waitForSelector("#app-shell:not(.hidden)");
+  await sPage.click('#practice-nav-children .nav-child:has-text("Mixta")');
+  await sPage.waitForSelector(".series-table", { state: "attached" });
+  await sPage.selectOption("#table-select", "1");
+  const partTabs = sPage.locator("#practice-part-tabs .part-tab");
+  await partTabs.nth(0).click();
+  const pGroup = sPage.locator(`#measurement-fields .operator-quantity[data-quantity-id="${P.id}"]`);
+  assert((await pGroup.locator(".measurement-row").count()) === 3, "P debía cargarse en tres medidas");
+  for (const [i, v] of ["2", "4", "5"].entries()) {
+    await pGroup.locator(".measurement-row").nth(i).locator(".measure-value").first().fill(v);
+  }
+  assert(
+    await sPage.locator('[data-final-result][data-symbol="f#3"]').isVisible(),
+    "f (sin sección) debía pedirse por medida en su parte",
+  );
+  await sPage.locator('[data-final-result][data-symbol="f#3"] .final-result-value').fill("0.2");
+  await partTabs.nth(1).click();
+  const seriesRows = sPage.locator(".series-table tbody .series-row");
+  for (const [i, [xv, yv]] of [[1, 2.1], [2, 3.9], [3, 6.2]].entries()) {
+    await seriesRows.nth(i).locator(`.series-value[data-quantity-id="${xq.id}"]`).fill(String(xv));
+    await seriesRows.nth(i).locator(`.series-value[data-quantity-id="${yq.id}"]`).fill(String(yv));
+  }
+  const [response] = await Promise.all([
+    sPage.waitForResponse((r) => r.url().endsWith("/api/submissions/form") && r.request().method() === "POST"),
+    sPage.click("#submit-button"),
+  ]);
+  assert(response.ok(), `la entrega mixta debía guardarse: ${await response.text()}`);
+  const { id: mixedId } = await response.json();
+  const mixedDetail = await getJson(page, `/api/submissions/${mixedId}`);
+  const directaAnalysis = mixedDetail.analysis.parts.find((p) => p.title === "Directa").analysis;
+  assert(directaAnalysis.determinations?.length === 3, "la parte Directa debía traer tres medidas");
+  assert(directaAnalysis.derived.some((d) => d.symbol === "f_medio"), "debía estar f_medio");
+  assert(mixedDetail.student_results.some((s) => s.symbol === "f#3"), "debía guardarse f#3");
 });

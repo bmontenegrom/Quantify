@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   analysisSections,
   determinationsFor,
+  symbolPart,
   perDeterminationSymbols,
   expandDeterminationResults,
   exampleMeasurements,
@@ -1114,4 +1115,41 @@ test("validateMeasurements: cada determinación necesita lo suyo", () => {
   assert.match(validateMeasurements([T([[1], [], [3]])], "estadistico", meta), /falta cargar Medida 2/);
   assert.match(validateMeasurements([m([[1], [], [1]])], "estadistico", meta), /falta cargar Medida 2/);
   assert.match(validateMeasurements([m([[1], [1], [1]], null)], "estadistico", meta), /incertidumbre U/);
+});
+
+test("determinaciones: un resultado sin sección toma la parte de su fórmula", () => {
+  const def = {
+    analysis_kind: "regresion_lineal",
+    quantities: [{ symbol: "T", per_determination: true }, { symbol: "x_medio" }],
+    results: [
+      { symbol: "g", name: "g", formula: "1/T", is_final: true },
+      { symbol: "h", name: "h", formula: "g_medio*2", is_final: true },
+      { symbol: "y", name: "y", formula: "x_medio", is_final: true },
+    ],
+    parts: [
+      { id: "stat", determinations: { count: 3, label: "Medida", average: true, display: "bloques" } },
+      { id: "reg" },
+    ],
+    sections: [
+      { part_id: "stat", quantities: ["T"], results: [] },
+      { part_id: "reg", quantities: ["x_medio"], results: [] },
+    ],
+  };
+  assert.equal(symbolPart(def, "g"), "stat");
+  assert.equal(symbolPart(def, "h"), "stat");
+  assert.equal(symbolPart(def, "y"), "reg");
+  const rows = expandDeterminationResults(def, def.results.slice(0, 1));
+  assert.deepEqual(rows.map((r) => r.symbol), ["g#1", "g#2", "g#3", "g_medio"]);
+  assert.ok(rows.every((r) => r.part === "stat"));
+});
+
+test("validateMeasurements: en una práctica de series las determinaciones se validan por grupo", () => {
+  const meta = {
+    x: { name: "x", perPoint: true },
+    T: { name: "Periodo", perPoint: false, groupLabel: "Medida" },
+  };
+  const x = { quantity_id: "x", values: [1, 2, 3] };
+  const T = (groups) => ({ quantity_id: "T", values: [], operator_replicas: groups });
+  assert.equal(validateMeasurements([x, T([[1], [2]])], "regresion_lineal", meta), null);
+  assert.match(validateMeasurements([x, T([[1], []])], "regresion_lineal", meta), /falta cargar Medida 2/);
 });

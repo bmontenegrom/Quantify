@@ -1549,11 +1549,12 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
 }
 
 fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
+    let averaged = averaged_results(def);
     let uses: Vec<Vec<usize>> = def
         .results
         .iter()
         .map(|r| {
-            symbols_with_averages(&r.formula)
+            symbols_with_averages(&averaged, &r.formula)
                 .iter()
                 .filter_map(|s| def.results.iter().position(|o| o.symbol == *s))
                 .collect()
@@ -2463,17 +2464,32 @@ fn validate_result(
 }
 
 fn result_uses(def: &practices::PracticeDefinition) -> Vec<(String, Vec<String>)> {
+    let averaged = averaged_results(def);
     def.results
         .iter()
-        .map(|r| (r.symbol.clone(), symbols_with_averages(&r.formula)))
+        .map(|r| {
+            (
+                r.symbol.clone(),
+                symbols_with_averages(&averaged, &r.formula),
+            )
+        })
         .collect()
 }
 
-fn symbols_with_averages(formula: &str) -> Vec<String> {
+fn averaged_results(def: &practices::PracticeDefinition) -> Vec<String> {
+    def.determination_results()
+        .into_iter()
+        .filter(|(_, d)| d.average)
+        .map(|(s, _)| s)
+        .collect()
+}
+
+fn symbols_with_averages(averaged: &[String], formula: &str) -> Vec<String> {
     let mut used = computation::formula_symbols(formula);
     let bases: Vec<String> = used
         .iter()
         .filter_map(|s| s.strip_suffix("_medio"))
+        .filter(|b| averaged.iter().any(|a| a == b))
         .map(str::to_string)
         .collect();
     used.extend(bases);
@@ -2503,7 +2519,7 @@ fn check_no_cycle(
     let symbol = input.symbol.trim();
     let mut excluded = results_using(&result_uses(def), own);
     excluded.push(symbol.to_string());
-    let Some(used) = symbols_with_averages(input.formula.trim())
+    let Some(used) = symbols_with_averages(&averaged_results(def), input.formula.trim())
         .into_iter()
         .find(|s| excluded.contains(s))
     else {
@@ -3265,6 +3281,22 @@ mod tests {
             has_uncertainty: true,
         };
         assert!(check_no_cycle(&def(true, "1/T"), "g", &input).is_err());
+
+        let plain = practices::PracticeDefinition {
+            quantities: vec![crate::db::PracticeQuantity {
+                symbol: "x_medio".into(),
+                ..Default::default()
+            }],
+            results: vec![result("x", "2*x_medio")],
+            ..Default::default()
+        };
+        assert!(cycle_problems(&plain).is_empty());
+        let input = ResultInput {
+            symbol: "x".into(),
+            formula: "2*x_medio".into(),
+            ..input
+        };
+        assert!(check_no_cycle(&plain, "x", &input).is_ok());
     }
 
     #[test]

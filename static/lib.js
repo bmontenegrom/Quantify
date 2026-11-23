@@ -381,12 +381,22 @@ export function guideStepOrNext(definition, step) {
   return (steps.find((s) => s.id === step) ?? steps.find((s) => order.indexOf(s.id) > from) ?? steps[0]).id;
 }
 
-function symbolPart(definition, symbol) {
-  return (
-    (definition?.sections ?? []).find(
-      (s) => s.part_id && (s.quantities.includes(symbol) || s.results.includes(symbol)),
-    )?.part_id ?? null
-  );
+const identifiers = (formula) => formula.match(/[A-Za-z_]\w*/g) ?? [];
+
+export function symbolPart(definition, symbol, seen = new Set()) {
+  const results = definition?.results ?? [];
+  const section = (definition?.sections ?? []).find((s) => s.quantities.includes(symbol) || s.results.includes(symbol));
+  if (section) return section.part_id ?? null;
+  const isQuantity = (definition?.quantities ?? []).some((q) => q.symbol === symbol);
+  const base = !isQuantity && symbol.endsWith("_medio") ? symbol.slice(0, -"_medio".length) : null;
+  const result = results.find((r) => r.symbol === symbol) ?? results.find((r) => r.symbol === base);
+  if (!result) return null;
+  if (result.symbol !== symbol) return symbolPart(definition, result.symbol, seen);
+  if (seen.has(symbol)) return null;
+  seen.add(symbol);
+  const parts = new Set(identifiers(result.formula).map((s) => symbolPart(definition, s, seen)).filter(Boolean));
+  seen.delete(symbol);
+  return parts.size === 1 ? [...parts][0] : null;
 }
 
 export function determinationsFor(definition, symbol) {
@@ -405,7 +415,7 @@ export function perDeterminationSymbols(definition) {
   for (let grew = true; grew; ) {
     grew = false;
     for (const r of definition?.results ?? []) {
-      if (!symbols.has(r.symbol) && (r.formula.match(/[A-Za-z_]\w*/g) ?? []).some((s) => symbols.has(s))) {
+      if (!symbols.has(r.symbol) && identifiers(r.formula).some((s) => symbols.has(s))) {
         symbols.add(r.symbol);
         grew = true;
       }
@@ -425,9 +435,10 @@ export function expandDeterminationResults(definition, results) {
       symbol: `${r.symbol}#${i + 1}`,
       name: `${r.name} — ${label} ${i + 1}`,
       base: r.symbol,
+      part: d.scope || null,
       determination: { scope: d.scope, index: i, tabs: d.display === "pestanas" },
     }));
-    const average = { ...r, symbol: `${r.symbol}_medio`, name: `${r.name} (promedio)`, base: r.symbol };
+    const average = { ...r, symbol: `${r.symbol}_medio`, name: `${r.name} (promedio)`, base: r.symbol, part: d.scope || null };
     return d.average ? [...each, average] : each;
   });
 }
@@ -595,6 +606,20 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
   }, []);
 }
 
+function groupError(m, meta) {
+  const name = meta.name ?? m.quantity_id;
+  const empty = m.operator_replicas.findIndex((reps) => reps.length === 0);
+  if (m.operator_replicas.length === 0 || empty !== -1) {
+    return meta.groupLabel
+      ? `"${name}": falta cargar ${meta.groupLabel} ${empty + 1}.`
+      : `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
+  }
+  if (meta.isGiven && meta.hasUncertainty !== false && m.given_u == null) {
+    return `El dato "${name}" requiere la incertidumbre U.`;
+  }
+  return null;
+}
+
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
   if (POINT_KINDS.includes(analysisKind)) {
     const pointCount = (m) => m.point_replicas?.length ?? m.values.length;
@@ -608,7 +633,10 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
     for (const m of measurements) {
       const meta = metaMap[m.quantity_id] ?? {};
       const name = meta.name ?? m.quantity_id;
-      if (meta.isGiven) {
+      if (m.operator_replicas) {
+        const error = meta.optional ? null : groupError(m, meta);
+        if (error) return error;
+      } else if (meta.isGiven) {
         if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
           return meta.hasUncertainty === false
             ? `El dato "${name}" requiere un valor.`
@@ -626,23 +654,15 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
     if (meta.optional) {
       continue;
     }
-    const empty = m.operator_replicas ? m.operator_replicas.findIndex((reps) => reps.length === 0) : -1;
-    const missingGroup = meta.groupLabel
-      ? `"${name}": falta cargar ${meta.groupLabel} ${empty + 1}.`
-      : `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
-    if (meta.isGiven && m.operator_replicas) {
-      if (m.operator_replicas.length === 0 || empty !== -1) return missingGroup;
-      if (meta.hasUncertainty !== false && m.given_u == null) {
-        return `El dato "${name}" requiere la incertidumbre U.`;
-      }
+    if (m.operator_replicas) {
+      const error = groupError(m, meta);
+      if (error) return error;
     } else if (meta.isGiven) {
       if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
         return meta.hasUncertainty === false
           ? `El dato "${name}" requiere un valor.`
           : `El dato "${name}" requiere valor e incertidumbre U.`;
       }
-    } else if (m.operator_replicas) {
-      if (m.operator_replicas.length === 0 || empty !== -1) return missingGroup;
     } else if (meta.isChrono) {
       if (m.values.length === 0) {
         return `"${name}": registrá al menos una lectura con el cronómetro antes de entregar.`;

@@ -391,6 +391,7 @@ impl PracticeDefinition {
         }
         if let Some(base) = symbol
             .strip_suffix("_medio")
+            .filter(|_| !self.quantities.iter().any(|q| q.symbol == symbol))
             .filter(|b| self.results.iter().any(|r| r.symbol == *b))
         {
             return self.result_part_in(base, seen);
