@@ -151,6 +151,30 @@ pub struct Determinations {
     pub display: DeterminationDisplay,
 }
 
+impl Determinations {
+    /// Revisa la cantidad (de 2 a `MAX_OPERATORS`) y el nombre (hasta 40 caracteres).
+    ///
+    /// ```
+    /// let d = |count| quantify::practices::Determinations { count, label: "Medida".into(), average: false, display: Default::default() };
+    /// assert!(d(3).validate().is_ok() && d(1).validate().is_err());
+    /// ```
+    pub fn validate(&self) -> Result<(), String> {
+        if !(2..=MAX_OPERATORS).contains(&self.count) {
+            return Err(format!(
+                "La cantidad de determinaciones tiene que ser de 2 a {MAX_OPERATORS}."
+            ));
+        }
+        let label = self.label.trim();
+        if label.is_empty() || label.chars().count() > 40 {
+            return Err(
+                "Las determinaciones necesitan un nombre de hasta 40 caracteres (p. ej. «Medida»)."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PracticeConfig {
@@ -167,6 +191,15 @@ impl PracticeConfig {
     /// ```
     pub fn parse(json: &str) -> Self {
         serde_json::from_str(json).unwrap_or_default()
+    }
+
+    /// Lo escribe como `config_json`; sin configuración queda `{}`.
+    ///
+    /// ```
+    /// assert_eq!(quantify::practices::PracticeConfig::default().to_json(), "{}");
+    /// ```
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".into())
     }
 }
 

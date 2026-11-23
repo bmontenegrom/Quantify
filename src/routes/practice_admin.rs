@@ -806,22 +806,6 @@ pub(super) struct DeterminationsBody {
 const DETERMINATIONS_ARE_STATISTICAL: &str =
     "Tiene determinaciones, que son solo para análisis estadístico: quitalas antes de cambiar el tipo.";
 
-fn validate_determinations(d: &practices::Determinations) -> Result<(), AppError> {
-    if !(2..=practices::MAX_OPERATORS).contains(&d.count) {
-        return Err(AppError::bad_request(format!(
-            "La cantidad de determinaciones tiene que ser de 2 a {}.",
-            practices::MAX_OPERATORS
-        )));
-    }
-    let label = d.label.trim();
-    if label.is_empty() || label.chars().count() > 40 {
-        return Err(AppError::bad_request(
-            "Las determinaciones necesitan un nombre de hasta 40 caracteres (p. ej. «Medida»).",
-        ));
-    }
-    Ok(())
-}
-
 async fn save_determinations(
     state: &SharedState,
     headers: &HeaderMap,
@@ -836,7 +820,7 @@ async fn save_determinations(
         ..d
     });
     if let Some(d) = &determinations {
-        validate_determinations(d)?;
+        d.validate().map_err(AppError::bad_request)?;
         if def.operator_count.is_some_and(|n| n > 1) {
             return Err(AppError::bad_request(
                 "La práctica usa operadores: quitalos antes de configurar determinaciones.",

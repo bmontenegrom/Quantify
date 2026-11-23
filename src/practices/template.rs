@@ -131,12 +131,6 @@ fn part_key(part: &TemplatePart) -> Option<&str> {
     part.key.as_deref().map(str::trim).filter(|k| !k.is_empty())
 }
 
-fn config_json(determinations: &Option<Determinations>) -> anyhow::Result<String> {
-    Ok(serde_json::to_string(&super::PracticeConfig {
-        determinations: determinations.clone(),
-    })?)
-}
-
 pub fn axis(formula: Option<&str>) -> Option<String> {
     formula
         .map(str::trim)
@@ -353,13 +347,7 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     let mut any_determinations = false;
     for d in all_determinations {
         any_determinations = true;
-        let label = d.label.trim();
-        if !(2..=MAX_OPERATORS).contains(&d.count) || label.is_empty() || label.chars().count() > 40
-        {
-            return Err(format!(
-                "Las determinaciones tienen que ser de 2 a {MAX_OPERATORS} y tener un nombre de hasta 40 caracteres."
-            ));
-        }
+        d.validate()?;
     }
     if t.determinations.is_some() && !t.parts.is_empty() {
         return Err("Una práctica con partes configura las determinaciones en cada parte.".into());
@@ -550,7 +538,12 @@ async fn write_template(
     .bind(status)
     .bind(created_by)
     .bind(chrono::Utc::now())
-    .bind(config_json(&t.determinations)?)
+    .bind(
+        super::PracticeConfig {
+            determinations: t.determinations.clone(),
+        }
+        .to_json(),
+    )
     .execute(&mut *tx)
     .await?;
     let mut parts = Vec::new();
@@ -571,7 +564,12 @@ async fn write_template(
         .bind(position as i64)
         .bind(part_kind)
         .bind(part.help_text.trim())
-        .bind(config_json(&part.determinations)?)
+        .bind(
+            super::PracticeConfig {
+                determinations: part.determinations.clone(),
+            }
+            .to_json(),
+        )
         .execute(&mut *tx)
         .await?;
         parts.push(part_id);

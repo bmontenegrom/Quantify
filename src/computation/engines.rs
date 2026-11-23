@@ -415,20 +415,26 @@ fn compute_determinations(
         }
     }
     let mut averaged: HashMap<String, &str> = HashMap::new();
+    let mut average_texts: Vec<(String, String)> = Vec::new();
     if determinations.average {
         for r in &per_results {
             let symbol = format!("{}_medio", r.symbol);
+            let formula = format!(
+                "({})/{count}",
+                (1..=count)
+                    .map(|k| determination_symbol(&r.symbol, k))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            );
+            average_texts.push((
+                formula.clone(),
+                format!("promedio de {} en las {count} determinaciones", r.symbol),
+            ));
             averaged.insert(symbol.clone(), &r.symbol);
             expanded.push(PracticeResult {
                 symbol,
                 name: format!("{} (promedio)", r.name),
-                formula: format!(
-                    "({})/{count}",
-                    (1..=count)
-                        .map(|k| determination_symbol(&r.symbol, k))
-                        .collect::<Vec<_>>()
-                        .join(" + ")
-                ),
+                formula,
                 ..(*r).clone()
             });
         }
@@ -436,17 +442,36 @@ fn compute_determinations(
 
     let mut derive_warnings = Vec::new();
     let mut derived = derive_results(&expanded, &allowed, &means, &us, &mut derive_warnings)?;
-    for w in derive_warnings {
+    let mut grouped: Vec<(String, Vec<usize>)> = Vec::new();
+    for mut w in derive_warnings {
+        for (formula, text) in &average_texts {
+            w = w.replace(formula, text);
+        }
         let k = std::cell::Cell::new(None);
+        let average = std::cell::Cell::new(false);
         let cleaned = rename_symbols(&w, |s| {
+            average.set(average.get() || averaged.contains_key(s));
             renamed.get(s).map(|(base, n)| {
                 k.set(k.get().or(Some(*n)));
                 base.clone()
             })
         });
-        warnings.push(match k.get() {
-            Some(k) => format!("{}: {cleaned}", label(k)),
-            None => cleaned,
+        let k = k.get().filter(|_| !average.get());
+        match grouped.iter_mut().find(|(text, _)| *text == cleaned) {
+            Some((_, ks)) => ks.extend(k.filter(|k| !ks.contains(k))),
+            None => grouped.push((cleaned, k.into_iter().collect())),
+        }
+    }
+    for (text, ks) in grouped {
+        warnings.push(if ks.is_empty() || ks.len() == count {
+            text
+        } else {
+            let list: Vec<String> = ks.iter().map(|k| k.to_string()).collect();
+            format!(
+                "{} {}: {text}",
+                determinations.label.trim(),
+                list.join(", ")
+            )
         });
     }
 

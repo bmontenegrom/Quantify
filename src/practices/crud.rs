@@ -907,9 +907,10 @@ pub async fn set_determinations(
     part_id: Option<&str>,
     determinations: Option<&super::Determinations>,
 ) -> anyhow::Result<bool> {
-    let json = serde_json::to_string(&super::PracticeConfig {
+    let json = super::PracticeConfig {
         determinations: determinations.cloned(),
-    })?;
+    }
+    .to_json();
     let result = match part_id {
         Some(part_id) => {
             sqlx::query(

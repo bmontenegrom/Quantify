@@ -3532,3 +3532,46 @@ fn an_empty_determination_warns_with_its_label() {
         a.warnings
     );
 }
+
+#[test]
+fn determination_warnings_are_grouped_and_the_average_is_not_blamed_on_one() {
+    let mut t = quantity("T");
+    t.per_determination = true;
+    let measurements = vec![MeasurementInput {
+        operator_replicas: Some(vec![vec![2.0], vec![0.0], vec![4.0]]),
+        ..measurement("T", &[])
+    }];
+    let a = compute(
+        &[t],
+        &[det_result("f", "1/T"), det_result("h", "T*zzz")],
+        &HashMap::new(),
+        &measurements,
+        None,
+        Some(&determinations(true)),
+    )
+    .unwrap();
+    let about = |needle: &str| -> Vec<&String> {
+        a.warnings.iter().filter(|w| w.contains(needle)).collect()
+    };
+    assert_eq!(about("mensurando h:").len(), 1, "{:?}", a.warnings);
+    assert!(
+        !about("mensurando h:")[0].starts_with("Medida"),
+        "{:?}",
+        a.warnings
+    );
+    assert!(
+        about("\"f\" (f =")
+            .iter()
+            .any(|w| w.starts_with("Medida 2:")),
+        "{:?}",
+        a.warnings
+    );
+    assert!(
+        a.warnings
+            .iter()
+            .filter(|w| w.contains("f_medio"))
+            .all(|w| !w.starts_with("Medida") && w.contains("promedio de f en las 3")),
+        "{:?}",
+        a.warnings
+    );
+}
