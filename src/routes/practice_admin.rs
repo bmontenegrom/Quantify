@@ -1553,7 +1553,7 @@ fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
         .results
         .iter()
         .map(|r| {
-            computation::formula_symbols(&r.formula)
+            symbols_with_averages(&r.formula)
                 .iter()
                 .filter_map(|s| def.results.iter().position(|o| o.symbol == *s))
                 .collect()
@@ -2014,6 +2014,12 @@ fn result_scope_in(def: &practices::PracticeDefinition) -> Vec<String> {
             .iter()
             .map(|q| q.symbol.clone())
             .chain(def.results.iter().map(|r| r.symbol.clone()))
+            .chain(
+                def.determination_results()
+                    .into_iter()
+                    .filter(|(_, d)| d.average)
+                    .map(|(s, _)| format!("{s}_medio")),
+            )
             .collect(),
     }
 }
@@ -2459,8 +2465,19 @@ fn validate_result(
 fn result_uses(def: &practices::PracticeDefinition) -> Vec<(String, Vec<String>)> {
     def.results
         .iter()
-        .map(|r| (r.symbol.clone(), computation::formula_symbols(&r.formula)))
+        .map(|r| (r.symbol.clone(), symbols_with_averages(&r.formula)))
         .collect()
+}
+
+fn symbols_with_averages(formula: &str) -> Vec<String> {
+    let mut used = computation::formula_symbols(formula);
+    let bases: Vec<String> = used
+        .iter()
+        .filter_map(|s| s.strip_suffix("_medio"))
+        .map(str::to_string)
+        .collect();
+    used.extend(bases);
+    used
 }
 
 fn results_using(uses: &[(String, Vec<String>)], symbol: &str) -> Vec<String> {
@@ -2486,7 +2503,7 @@ fn check_no_cycle(
     let symbol = input.symbol.trim();
     let mut excluded = results_using(&result_uses(def), own);
     excluded.push(symbol.to_string());
-    let Some(used) = computation::formula_symbols(input.formula.trim())
+    let Some(used) = symbols_with_averages(input.formula.trim())
         .into_iter()
         .find(|s| excluded.contains(s))
     else {
@@ -3198,6 +3215,56 @@ mod tests {
         };
         assert_eq!(collisions(&def("doble_medio")), 0);
         assert_eq!(collisions(&def("g_medio")), 1);
+    }
+
+    #[test]
+    fn averages_can_be_used_in_formulas_without_cycles() {
+        let result = |symbol: &str, formula: &str| crate::db::PracticeResult {
+            id: symbol.into(),
+            symbol: symbol.into(),
+            name: symbol.into(),
+            formula: formula.into(),
+            ..Default::default()
+        };
+        let def = |average: bool, g: &str| practices::PracticeDefinition {
+            determinations: Some(practices::Determinations {
+                count: 2,
+                label: "Medida".into(),
+                average,
+                display: Default::default(),
+            }),
+            quantities: vec![crate::db::PracticeQuantity {
+                symbol: "T".into(),
+                per_determination: true,
+                ..Default::default()
+            }],
+            results: vec![result("g", g), result("rel", "g_medio/2")],
+            ..Default::default()
+        };
+        assert!(result_scope(&def(true, "1/T")).contains(&"g_medio".to_string()));
+        assert!(!result_scope(&def(false, "1/T")).contains(&"g_medio".to_string()));
+        let rel_problems = |d: &practices::PracticeDefinition| {
+            formula_problems(d)
+                .into_iter()
+                .filter(|(element, _)| element == "el mensurando rel")
+                .count()
+        };
+        assert_eq!(rel_problems(&def(true, "1/T")), 0);
+        assert_eq!(rel_problems(&def(false, "1/T")), 1);
+        let cyclic = def(true, "rel/T");
+        assert_eq!(cycle_problems(&cyclic).len(), 2);
+        let input = ResultInput {
+            display_symbol: None,
+            compare_with: None,
+            symbol: "g".into(),
+            name: "g".into(),
+            unit: String::new(),
+            formula: "rel/T".into(),
+            tolerance: None,
+            is_final: false,
+            has_uncertainty: true,
+        };
+        assert!(check_no_cycle(&def(true, "1/T"), "g", &input).is_err());
     }
 
     #[test]

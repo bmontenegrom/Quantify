@@ -297,7 +297,8 @@ pub fn validate_student_results(
     check_student_result_symbols(definition, results).map_err(|e| anyhow::anyhow!(e))
 }
 
-/// Acepta solo resultados del alumno que sean mensurandos o agregados finales, o `Re#k` por punto.
+/// Acepta solo resultados del alumno que sean mensurandos o agregados finales, `Re#k` por punto,
+/// `g#k` por determinación o el promedio `g_medio`.
 ///
 /// ```
 /// use quantify::computation::check_student_result_symbols;
@@ -335,13 +336,29 @@ pub fn check_student_result_symbols(
         .iter()
         .map(|p| p.symbol.as_str())
         .collect();
+    let by_determination = definition.determination_results();
     for result in results {
         let symbol = result.symbol.trim();
         if let Some((base, idx)) = symbol.split_once('#') {
-            if point_symbols.contains(base) && idx.parse::<usize>().is_ok() {
+            let Ok(k) = idx.parse::<i64>() else {
+                return Err(format!(
+                    "el simbolo \"{symbol}\" no es un mensurando de esta practica"
+                ));
+            };
+            if point_symbols.contains(base) && k >= 0 {
                 continue;
             }
-        } else if valid.contains(symbol) {
+            if by_determination
+                .iter()
+                .any(|(s, d)| s == base && (1..=d.count).contains(&k))
+            {
+                continue;
+            }
+        } else if valid.contains(symbol)
+            || by_determination
+                .iter()
+                .any(|(s, d)| d.average && symbol.strip_suffix("_medio") == Some(s.as_str()))
+        {
             continue;
         }
         return Err(format!(
