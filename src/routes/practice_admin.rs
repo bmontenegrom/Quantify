@@ -2520,9 +2520,14 @@ fn check_no_cycle(
     input: &ResultInput,
 ) -> Result<(), AppError> {
     let symbol = input.symbol.trim();
-    let mut excluded = results_using(&result_uses(def), own);
+    let mut edited = def.clone();
+    if let Some(r) = edited.results.iter_mut().find(|r| r.symbol == own) {
+        r.formula = input.formula.trim().to_string();
+    }
+    let averaged = averaged_results(&edited);
+    let mut excluded = results_using(&result_uses(&edited), own);
     excluded.push(symbol.to_string());
-    let Some(used) = symbols_with_averages(&averaged_results(def), input.formula.trim())
+    let Some(used) = symbols_with_averages(&averaged, input.formula.trim())
         .into_iter()
         .find(|s| excluded.contains(s))
     else {
@@ -3299,6 +3304,10 @@ mod tests {
             has_uncertainty: true,
         };
         assert!(check_no_cycle(&def(true, "1/T"), "g", &input).is_err());
+        assert!(
+            check_no_cycle(&def(true, "2"), "g", &input).is_err(),
+            "g deja de ser constante con esta edición y rel*T forma un ciclo por g_medio"
+        );
 
         let plain = practices::PracticeDefinition {
             quantities: vec![crate::db::PracticeQuantity {

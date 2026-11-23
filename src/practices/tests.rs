@@ -4185,3 +4185,43 @@ fn only_count_and_average_make_determinations_structural() {
         DraftChangeKind::Structural
     );
 }
+
+#[test]
+fn a_symbol_named_medio_belongs_to_its_base_only_when_it_is_not_defined() {
+    use crate::practices::{PracticeAggregate, PracticeDefinition, PracticePart, PracticeSection};
+    let result = |symbol: &str, formula: &str| crate::db::PracticeResult {
+        symbol: symbol.into(),
+        formula: formula.into(),
+        ..Default::default()
+    };
+    let section = |part: &str, results: &[&str]| PracticeSection {
+        part_id: Some(part.into()),
+        results: results.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
+    };
+    let def = |aggregate: bool| PracticeDefinition {
+        parts: vec![
+            PracticePart {
+                id: "stat".into(),
+                ..Default::default()
+            },
+            PracticePart {
+                id: "reg".into(),
+                ..Default::default()
+            },
+        ],
+        sections: vec![section("stat", &["x"])],
+        results: vec![result("x", "1"), result("k", "2*x_medio")],
+        aggregates: if aggregate {
+            vec![PracticeAggregate {
+                symbol: "x_medio".into(),
+                ..Default::default()
+            }]
+        } else {
+            vec![]
+        },
+        ..Default::default()
+    };
+    assert_eq!(def(false).result_part("k"), Some("stat"));
+    assert_eq!(def(true).result_part("k"), None);
+}

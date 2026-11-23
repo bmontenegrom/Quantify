@@ -377,6 +377,7 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
           <h4>${escapeHtml(det.label)}</h4>
           ${quantitiesTableMarkup(det.quantities ?? [])}
           ${derivedBlockMarkup(det.derived ?? [], "")}
+          ${measuredVsTheoreticalMarkup([...measured, ...(det.quantities ?? [])], det.derived ?? [], pairs)}
         </section>`,
     )
     .join("");

@@ -404,8 +404,10 @@ export function symbolPart(definition, symbol, seen = new Set()) {
   const results = definition?.results ?? [];
   const section = (definition?.sections ?? []).find((s) => s.quantities.includes(symbol) || s.results.includes(symbol));
   if (section) return section.part_id ?? null;
-  const isQuantity = (definition?.quantities ?? []).some((q) => q.symbol === symbol);
-  const base = !isQuantity && symbol.endsWith("_medio") ? symbol.slice(0, -"_medio".length) : null;
+  const defined = ["quantities", "intermediates", "aggregates", "point_results"].some((key) =>
+    (definition?.[key] ?? []).some((item) => item.symbol === symbol),
+  );
+  const base = !defined && symbol.endsWith("_medio") ? symbol.slice(0, -"_medio".length) : null;
   const result = results.find((r) => r.symbol === symbol) ?? results.find((r) => r.symbol === base);
   if (!result) return seriesSymbolPart(definition, symbol);
   if (result.symbol !== symbol) return symbolPart(definition, result.symbol, seen);

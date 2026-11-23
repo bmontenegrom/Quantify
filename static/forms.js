@@ -1233,7 +1233,11 @@ function prefillGroups(byQ) {
     const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
     );
-    blocks.forEach((row, i) => fillReplicaRow(row, e.operatorGroups[i] ?? []));
+    blocks.forEach((row, i) => {
+      const values = e.operatorGroups[i] ?? [];
+      if (!values.length) row.querySelectorAll(".measure-value").forEach((input) => (input.value = ""));
+      fillReplicaRow(row, values);
+    });
   });
 }
 

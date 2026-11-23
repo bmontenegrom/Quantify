@@ -21,7 +21,7 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     symbol: "m", name: "Masa", unit: "kg", repeated: false, is_given: true, per_determination: true,
   });
   const x = await apiPost(page, `${base}/quantities`, {
-    symbol: "x", name: "Extra", unit: "s", repeated: true, quantity: "tiempo", input_widget: "teclado", per_determination: true, optional: true,
+    symbol: "x", name: "Extra", unit: "s", repeated: true, quantity: "tiempo", input_widget: "teclado", per_determination: true, optional: true, default_value: 9,
   });
   await apiPost(page, `${base}/results`, { symbol: "g", name: "Gravedad", unit: "m/s2", formula: "m/T^2", is_final: true });
   await apiPost(page, `${base}/results`, { symbol: "rel", name: "Relativo", unit: "", formula: "g_medio/9.8", is_final: true });
@@ -51,6 +51,7 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   }
   await group(m).locator(".measure-given-u").fill("0.5");
   await group(x).locator(".measurement-row").nth(0).locator(".measure-value").first().fill("1");
+  await group(x).locator(".measurement-row").nth(1).locator(".measure-value").first().fill("");
   await group(x).locator(".measurement-row").nth(2).locator(".measure-value").first().fill("5");
   await sPage.locator('[data-final-result][data-symbol="g#2"] .final-result-value').fill("9.5");
   await sPage.locator('[data-final-result][data-symbol="g_medio"] .final-result-value').fill("10");

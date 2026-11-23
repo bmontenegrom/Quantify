@@ -1196,3 +1196,18 @@ test("symbolPart: los símbolos de la serie son de la parte de la serie, como en
   assert.equal(symbolPart(def, "h"), null);
   assert.deepEqual(expandDeterminationResults(def, def.results.slice(1)).map((r) => r.symbol), ["h"]);
 });
+
+test("symbolPart: un x_medio ya definido no se confunde con el promedio de x", () => {
+  const def = (aggregates) => ({
+    quantities: [],
+    aggregates,
+    results: [
+      { symbol: "x", formula: "1" },
+      { symbol: "k", formula: "2*x_medio" },
+    ],
+    parts: [{ id: "stat" }, { id: "reg" }],
+    sections: [{ part_id: "stat", quantities: [], results: ["x"] }],
+  });
+  assert.equal(symbolPart(def([]), "k"), "stat");
+  assert.equal(symbolPart(def([{ symbol: "x_medio" }]), "k"), null);
+});

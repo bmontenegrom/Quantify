@@ -391,7 +391,13 @@ impl PracticeDefinition {
         }
         if let Some(base) = symbol
             .strip_suffix("_medio")
-            .filter(|_| !self.quantities.iter().any(|q| q.symbol == symbol))
+            .filter(|_| {
+                let named = |s: &str| s == symbol;
+                !self.quantities.iter().any(|q| named(&q.symbol))
+                    && !self.intermediates.iter().any(|i| named(&i.symbol))
+                    && !self.aggregates.iter().any(|a| named(&a.symbol))
+                    && !self.point_results.iter().any(|p| named(&p.symbol))
+            })
             .filter(|b| self.results.iter().any(|r| r.symbol == *b))
         {
             return self.result_part_in(base, seen);
