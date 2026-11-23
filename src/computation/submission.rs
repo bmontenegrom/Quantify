@@ -297,8 +297,7 @@ pub fn validate_student_results(
     check_student_result_symbols(definition, results).map_err(|e| anyhow::anyhow!(e))
 }
 
-/// Acepta solo resultados del alumno que sean mensurandos o agregados finales, `Re#k` por punto,
-/// `g#k` por determinación o el promedio `g_medio`.
+/// Acepta mensurandos, agregados finales, `Re#k` por punto, `g#k` por determinación o `g_medio`.
 ///
 /// ```
 /// use quantify::computation::check_student_result_symbols;
@@ -336,7 +335,17 @@ pub fn check_student_result_symbols(
         .iter()
         .map(|p| p.symbol.as_str())
         .collect();
-    let by_determination = definition.determination_results();
+    let finals: std::collections::HashSet<&str> = definition
+        .results
+        .iter()
+        .filter(|r| r.is_final)
+        .map(|r| r.symbol.as_str())
+        .collect();
+    let by_determination: Vec<_> = definition
+        .determination_results()
+        .into_iter()
+        .filter(|(s, _)| finals.contains(s.as_str()))
+        .collect();
     for result in results {
         let symbol = result.symbol.trim();
         if let Some((base, idx)) = symbol.split_once('#') {

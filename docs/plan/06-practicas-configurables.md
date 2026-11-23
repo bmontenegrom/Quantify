@@ -1178,6 +1178,16 @@ Decisiones:
    - Desde el PR 2, el servidor guarda `per_point = false` en una magnitud por determinación. Al
      quitarle "por determinación", el editor tiene que volver a pedir el rol (serie o no) en vez
      de dejar el `per_point` en falso.
+   - El formulario del alumno replica en JS la lógica de partes y determinaciones del servidor
+     (`symbolPart`, `perDeterminationSymbols`, `determinationsFor` frente a `part_of`,
+     `per_determination_symbols`, `determinations_in`) y ya difieren en detalles. Que la
+     definición que recibe el cliente traiga la parte de cada símbolo y los mensurandos por
+     determinación (`determination_results()`), y borrar las copias en JS.
+   - `check_student_result_symbols` acepta `g#k` hasta la cantidad configurada, aunque la
+     entrega traiga menos grupos; y sigue aceptando mensurandos comunes no finales (eso viene de
+     antes de F9). Revisar las dos cosas junto con la validación del resto de la entrega.
+   - `determination_results()` clona la definición (o una vista por parte) y se llama varias
+     veces por validación; calcularlo una vez y pasarlo si llega a notarse.
 4. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
    - P1 sin partes, con 3 operadores en pestañas; Hidrostática con 26 magnitudes y 3 medidas en
      bloques con promedio.

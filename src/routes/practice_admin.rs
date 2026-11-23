@@ -936,7 +936,7 @@ pub(super) async fn create_quantity(
     Json(mut input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
-    input.per_point &= !input.per_determination;
+    input.per_point = input.stored_per_point();
     validate_quantity_in(&load_definition(&state, &id).await?, &input, None)?;
     guard_symbol(
         &state.pool,
@@ -1005,7 +1005,7 @@ pub(super) async fn update_quantity(
     Json(mut input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
-    input.per_point &= !input.per_determination;
+    input.per_point = input.stored_per_point();
     let before = load_definition(&state, &practice_id).await?;
     let after = with_updated_quantity(&before, &qid, &input)
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
@@ -1619,28 +1619,13 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
         .collect()
 }
 
-fn determinations_of<'a>(
-    def: &'a practices::PracticeDefinition,
-    part: Option<&practices::PracticePart>,
-) -> Option<&'a practices::Determinations> {
-    match part {
-        Some(part) => def
-            .parts
-            .iter()
-            .find(|p| p.id == part.id)
-            .and_then(|p| p.determinations.as_ref()),
-        None if def.parts.is_empty() => def.determinations.as_ref(),
-        None => None,
-    }
-}
-
 fn determination_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     let mut problems = Vec::new();
     for q in def.quantities.iter().filter(|q| q.per_determination) {
         let part = def
             .quantity_part(&q.symbol)
             .and_then(|id| def.parts.iter().find(|p| p.id == id));
-        if determinations_of(def, part).is_none() {
+        if def.determinations_in(part).is_none() {
             let place = match part {
                 Some(part) => format!("la parte \"{}\"", part.title),
                 None if def.parts.is_empty() => "la práctica".to_string(),
@@ -1663,7 +1648,7 @@ fn determination_problems(def: &practices::PracticeDefinition) -> Vec<ElementPro
         let part = def
             .result_part(&r.symbol)
             .and_then(|id| def.parts.iter().find(|p| p.id == id));
-        if determinations_of(def, part).is_some_and(|d| d.average) {
+        if def.determinations_in(part).is_some_and(|d| d.average) {
             let average = format!("{}_medio", r.symbol);
             if symbols.contains(&average.as_str()) {
                 problems.push(ElementProblem {
@@ -2402,7 +2387,7 @@ fn validate_quantity_in(
              (regresión lineal o curva); dejá las réplicas vacías.",
         ));
     }
-    if input.per_determination && determinations_of(def, part).is_none() {
+    if input.per_determination && def.determinations_in(part).is_none() {
         return Err(AppError::bad_request(
             if part.is_none() && !def.parts.is_empty() {
                 "Para repetir una magnitud por determinación, ubicala primero en una parte \

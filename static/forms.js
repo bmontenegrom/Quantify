@@ -348,6 +348,17 @@ function revealField(field) {
   }
 }
 
+function revealEmptyGroup(measurements) {
+  for (const m of measurements) {
+    const empty = (m.operator_replicas ?? []).findIndex((reps) => reps.length === 0);
+    if (empty === -1) continue;
+    const row = measurementFields.querySelector(
+      `.operator-quantity[data-quantity-id="${cssEscape(m.quantity_id)}"] [data-operator-index="${empty}"]`,
+    );
+    if (row) return revealField(row);
+  }
+}
+
 measurementFields.addEventListener(
   "invalid",
   (event) => {
@@ -565,7 +576,6 @@ export function wireMeasurementRow(row) {
 
 function finalsByPartHtml(definition, finals) {
   const parts = finals.map((r) => finalPart(definition, r));
-  if (parts.includes(null)) return finalResultSectionHtml(definition, finals);
   const byPart = new Map();
   finals.forEach((r, i) => byPart.set(parts[i], [...(byPart.get(parts[i]) ?? []), r]));
   return [...byPart].map(([part, rows]) => finalResultSectionHtml(definition, rows, part)).join("");
@@ -869,6 +879,7 @@ export async function submitFormSubmission() {
   const validationError = validateMeasurements(measurements, analysisKind, buildMetaMap(measurements));
   if (validationError) {
     submitStatus.textContent = validationError;
+    revealEmptyGroup(measurements);
     return;
   }
 

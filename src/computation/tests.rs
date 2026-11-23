@@ -3626,7 +3626,10 @@ fn per_determination_definition(average: bool) -> crate::practices::PracticeDefi
     crate::practices::PracticeDefinition {
         quantities: vec![t],
         results: vec![
-            det_result("g", "1/T"),
+            PracticeResult {
+                is_final: true,
+                ..det_result("g", "1/T")
+            },
             det_result("doble", "2"),
             det_result("rel", "g_medio/2"),
         ],
@@ -3688,6 +3691,11 @@ fn students_report_each_determination_and_the_average() {
     let without_average = per_determination_definition(false);
     assert!(ok(&without_average, "g#2"));
     assert!(!ok(&without_average, "g_medio"));
+    let mut not_final = per_determination_definition(true);
+    for r in not_final.results.iter_mut().filter(|r| r.symbol == "g") {
+        r.is_final = false;
+    }
+    assert!(!ok(&not_final, "g#1") && !ok(&not_final, "g_medio"));
 }
 
 #[tokio::test]

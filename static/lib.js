@@ -384,7 +384,6 @@ export function guideStepOrNext(definition, step) {
 export function formulaVariables(formula) {
   return formula.match(/(?<![\w.:])[A-Za-z_]\w*\b(?!\s*\(|:)/g) ?? [];
 }
-const identifiers = formulaVariables;
 
 function seriesSymbolPart(definition, symbol) {
   const series = (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico")?.id;
@@ -413,7 +412,7 @@ export function symbolPart(definition, symbol, seen = new Set()) {
   if (result.symbol !== symbol) return symbolPart(definition, result.symbol, seen);
   if (seen.has(symbol)) return null;
   seen.add(symbol);
-  const parts = new Set(identifiers(result.formula).map((s) => symbolPart(definition, s, seen)).filter(Boolean));
+  const parts = new Set(formulaVariables(result.formula).map((s) => symbolPart(definition, s, seen)).filter(Boolean));
   seen.delete(symbol);
   return parts.size === 1 ? [...parts][0] : null;
 }
@@ -438,7 +437,7 @@ export function perDeterminationSymbols(definition) {
   for (let grew = true; grew; ) {
     grew = false;
     for (const r of definition?.results ?? []) {
-      if (!symbols.has(r.symbol) && identifiers(r.formula).some((s) => symbols.has(s))) {
+      if (!symbols.has(r.symbol) && formulaVariables(r.formula).some((s) => symbols.has(s))) {
         symbols.add(r.symbol);
         grew = true;
       }

@@ -209,8 +209,7 @@ impl PracticeDefinition {
         self
     }
 
-    /// Los mensurandos que se calculan en cada determinación, con las determinaciones de su
-    /// parte (o de la práctica, si no tiene partes).
+    /// Los mensurandos que se calculan en cada determinación, con las determinaciones de su parte.
     ///
     /// ```
     /// use quantify::practices::{Determinations, PracticeDefinition};
@@ -243,6 +242,28 @@ impl PracticeDefinition {
                     .collect()
             })
             .collect()
+    }
+
+    /// Las determinaciones que valen en una parte estadística, o en la práctica si no tiene partes.
+    ///
+    /// ```
+    /// use quantify::practices::{Determinations, PracticeDefinition};
+    /// let d = Determinations { count: 2, label: "Medida".into(), average: false, display: Default::default() };
+    /// let def = PracticeDefinition { determinations: Some(d), ..Default::default() };
+    /// assert_eq!(def.determinations_in(None).map(|d| d.count), Some(2));
+    /// ```
+    pub fn determinations_in(&self, part: Option<&PracticePart>) -> Option<&super::Determinations> {
+        match part {
+            Some(part) => self
+                .parts
+                .iter()
+                .find(|p| p.id == part.id && self.part_kind(p) == "estadistico")
+                .and_then(|p| p.determinations.as_ref()),
+            None if self.parts.is_empty() && !is_point_based(self.analysis_kind.as_deref()) => {
+                self.determinations.as_ref()
+            }
+            None => None,
+        }
     }
 
     pub fn part_kind(&self, part: &PracticePart) -> &str {

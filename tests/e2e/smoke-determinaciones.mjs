@@ -122,6 +122,16 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     await sPage.locator('[data-final-result][data-symbol="g#1"]').isVisible(),
     "un valor inválido en una pestaña oculta debía abrir esa pestaña",
   );
+  await sPage.locator('[data-final-result][data-symbol="g#1"] .final-result-u').fill("");
+  await tabs.nth(2).click();
+  await group(T).locator(".measurement-row").nth(2).locator(".measure-value").first().fill("");
+  await tabs.nth(0).click();
+  await sPage.click("#submit-button");
+  await sPage.waitForSelector('#submit-status:has-text("falta cargar Medida 3")');
+  assert(
+    (await visible(T)).join() === "false,false,true",
+    "una medida vacía debía abrir su pestaña al entregar",
+  );
 
   step("práctica mixta: la parte estadística con determinaciones convive con un ajuste y se entrega");
   const post = (url, body) => apiPost(page, url, body);
@@ -152,6 +162,7 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   await post(`${mbase}/regression-formulas`, { x_formula: "x", y_formula: "y" });
   await post(`${mbase}/results`, { symbol: "f", name: "Frecuencia", unit: "", formula: "1/P", is_final: true });
   await post(`${mbase}/results`, { symbol: "k", name: "k", unit: "", formula: "slope", is_final: true, section_id: sAjuste.id });
+  await post(`${mbase}/results`, { symbol: "c", name: "Constante", unit: "", formula: "2", is_final: true });
   await post(`${mbase}/status`, { status: "publicada" });
   const { courses } = await page.evaluate(async () => (await fetch("/api/academic/context")).json());
   await post(`/api/academic/courses/${courses[0].id}/practices`, { practice_id: mixed.id });
@@ -186,6 +197,10 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   assert(
     !(await sPage.locator('.final-results-section:has([data-symbol="f#1"])').isVisible()),
     "el resultado final de f no debía quedar como título vacío en la parte Ajuste",
+  );
+  assert(
+    await sPage.locator('[data-final-result][data-symbol="c"]').isVisible(),
+    "el resultado final común debía verse en todas las partes",
   );
   const seriesRows = sPage.locator(".series-table tbody .series-row");
   for (const [i, [xv, yv]] of [[1, 2.1], [2, 3.9], [3, 6.2]].entries()) {

@@ -45,6 +45,18 @@ pub struct QuantityInput {
     pub per_determination: bool,
 }
 
+impl QuantityInput {
+    /// Una magnitud por determinación no es por punto, aunque el JSON diga lo contrario.
+    ///
+    /// ```
+    /// let q = quantify::practices::QuantityInput { per_determination: true, ..Default::default() };
+    /// assert!(q.per_point && !q.stored_per_point());
+    /// ```
+    pub fn stored_per_point(&self) -> bool {
+        self.per_point && !self.per_determination
+    }
+}
+
 impl Default for QuantityInput {
     /// Igual que el JSON sin esos campos: `per_point` y `has_uncertainty` arrancan en `true`.
     ///
