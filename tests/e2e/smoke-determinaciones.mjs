@@ -122,14 +122,19 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   await post(`${mbase}/parts/${directa.id}/determinations`, determinations("bloques"));
   const sDirecta = await post(`${mbase}/sections`, { title: "Pendulo", part_id: directa.id });
   const sAjuste = await post(`${mbase}/sections`, { title: "Barrido", part_id: ajuste.id });
-  const P = await qty("P", { per_point: false });
+  const P = await qty("P", {});
+  const S = await qty("S", { is_given: true, slot_count: 4, has_uncertainty: false });
   const xq = await qty("x", {});
   const yq = await qty("y", {});
-  for (const [q, sec] of [[P, sDirecta], [xq, sAjuste], [yq, sAjuste]]) {
+  for (const [q, sec] of [[P, sDirecta], [S, sDirecta], [xq, sAjuste], [yq, sAjuste]]) {
     await post(`${mbase}/quantities/${q.id}/section`, { section_id: sec.id });
   }
   await post(`${mbase}/quantities/${P.id}`, {
-    symbol: "P", name: "P", unit: "", repeated: false, quantity: null, per_point: false, per_determination: true,
+    symbol: "P", name: "P", unit: "", repeated: false, quantity: null, per_determination: true,
+  });
+  await post(`${mbase}/quantities/${S.id}`, {
+    symbol: "S", name: "S", unit: "", repeated: false, quantity: null, is_given: true, slot_count: 4,
+    has_uncertainty: false, per_determination: true,
   });
   await post(`${mbase}/parts/${ajuste.id}/analysis-kind`, { analysis_kind: "regresion_lineal" });
   await post(`${mbase}/regression-formulas`, { x_formula: "x", y_formula: "y" });
@@ -151,12 +156,22 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   for (const [i, v] of ["2", "4", "5"].entries()) {
     await pGroup.locator(".measurement-row").nth(i).locator(".measure-value").first().fill(v);
   }
+  const sGroup = sPage.locator(`#measurement-fields .operator-quantity[data-quantity-id="${S.id}"]`);
+  const slots = sGroup.locator(".measure-value");
+  assert((await slots.count()) === 3, "la ranura debía pedirse en cada medida");
+  assert((await slots.first().getAttribute("max")) === "4", "la ranura por medida debía ir de 1 a 4");
+  assert((await sGroup.locator(".prefix-select").count()) === 0, "la ranura no debía tener prefijo");
+  for (const [i, v] of ["1", "2", "3"].entries()) await slots.nth(i).fill(v);
   assert(
     await sPage.locator('[data-final-result][data-symbol="f#3"]').isVisible(),
     "f (sin sección) debía pedirse por medida en su parte",
   );
   await sPage.locator('[data-final-result][data-symbol="f#3"] .final-result-value').fill("0.2");
   await partTabs.nth(1).click();
+  assert(
+    !(await sPage.locator('.final-results-section:has([data-symbol="f#1"])').isVisible()),
+    "el resultado final de f no debía quedar como título vacío en la parte Ajuste",
+  );
   const seriesRows = sPage.locator(".series-table tbody .series-row");
   for (const [i, [xv, yv]] of [[1, 2.1], [2, 3.9], [3, 6.2]].entries()) {
     await seriesRows.nth(i).locator(`.series-value[data-quantity-id="${xq.id}"]`).fill(String(xv));

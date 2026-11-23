@@ -1312,15 +1312,26 @@ pub async fn analyze_definition(
             anyhow::bail!("una de las mediciones no corresponde a una magnitud de esta practica");
         };
         if quantity.per_determination {
-            let determinations = match definition.quantity_part(&quantity.symbol) {
+            let found = match definition.quantity_part(&quantity.symbol) {
                 Some(id) => definition
                     .parts
                     .iter()
-                    .find(|p| p.id == id)
-                    .and_then(|p| p.determinations.as_ref()),
-                None => definition.determinations.as_ref(),
+                    .find(|p| p.id == id && definition.part_kind(p) == "estadistico")
+                    .and_then(|p| {
+                        Some((
+                            p.determinations.as_ref()?,
+                            format!("la parte \"{}\"", p.title),
+                        ))
+                    }),
+                None if !crate::practices::is_point_based(definition.analysis_kind.as_deref()) => {
+                    definition
+                        .determinations
+                        .as_ref()
+                        .map(|d| (d, "la práctica".to_string()))
+                }
+                None => None,
             };
-            if let Some(d) = determinations {
+            if let Some((d, place)) = found {
                 let groups = measurement.operator_replicas.as_ref().map_or(0, Vec::len);
                 if !measurement.values.is_empty() {
                     anyhow::bail!(
@@ -1333,7 +1344,7 @@ pub async fn analyze_definition(
                 }
                 if groups > d.count as usize {
                     anyhow::bail!(
-                        "\"{}\" ({}) trae lecturas para {groups} determinaciones, pero la práctica tiene {}",
+                        "\"{}\" ({}) trae lecturas para {groups} determinaciones, pero {place} tiene {}",
                         quantity.name,
                         quantity.symbol,
                         d.count

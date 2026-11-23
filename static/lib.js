@@ -409,8 +409,12 @@ export function determinationsFor(definition, symbol) {
     return definition?.determinations ? { scope: "", ...definition.determinations } : null;
   }
   const scope = symbolPart(definition, symbol);
-  const d = definition.parts.find((p) => p.id === scope)?.determinations;
+  const d = statisticalDeterminations(definition.parts.find((p) => p.id === scope));
   return d ? { scope, ...d } : null;
+}
+
+export function statisticalDeterminations(part) {
+  return (part?.effective_kind ?? "estadistico") === "estadistico" ? part?.determinations ?? null : null;
 }
 
 export function perDeterminationSymbols(definition) {

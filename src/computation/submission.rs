@@ -354,7 +354,7 @@ pub fn check_student_result_symbols(
             {
                 continue;
             }
-        } else if valid.contains(symbol)
+        } else if valid.contains(symbol) && !by_determination.iter().any(|(s, _)| s == symbol)
             || by_determination
                 .iter()
                 .any(|(s, d)| d.average && symbol.strip_suffix("_medio") == Some(s.as_str()))

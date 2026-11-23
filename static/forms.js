@@ -10,7 +10,7 @@ import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   prefixFactor, validateMeasurements,
   draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements, POINT_KINDS,
-  determinationsFor, expandDeterminationResults, cssEscape,
+  determinationsFor, expandDeterminationResults, cssEscape, statisticalDeterminations,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -284,7 +284,7 @@ let determinationPractice = null;
 function determinationTabsHtml(definition) {
   if ((definition.operator_count ?? 0) >= 2) return "";
   const scopes = (definition.parts ?? []).length
-    ? definition.parts.map((p) => ({ scope: p.id, d: p.determinations }))
+    ? definition.parts.map((p) => ({ scope: p.id, d: statisticalDeterminations(p) }))
     : [{ scope: "", d: definition.determinations }];
   return scopes
     .filter(({ d }) => d?.display === "pestanas")
@@ -415,8 +415,14 @@ function quantityRowRenderer(definition, instruments, draft) {
     const group = groupOf(q);
     if (!group) return measurementRowHtml(q, null);
     const chrono = Array.from({ length: group.count }, (_, i) => !q.is_given && rendersChrono(q, i));
-    const row = (i) =>
-      q.is_given ? measurementRowHtml({ ...q, is_given: false, repeated: false }, i, false) : measurementRowHtml(q, i, chrono[i]);
+    const givenRow = (i) => `
+      <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}" data-operator-index="${i}">
+        <legend>${quantityNameHtml(q)}</legend>
+        <div class="measure-values" data-repeated="0">
+          <div class="replica">${givenValueInputHtml(q, "measure-value")}<span class="replica-unit">${unitHtml(q.unit)}</span></div>
+        </div>
+      </fieldset>`;
+    const row = (i) => (q.is_given ? givenRow(i) : measurementRowHtml(q, i, chrono[i]));
     const tab = (i) =>
       group.scope != null ? ` data-det-scope="${escapeHtml(group.scope)}" data-determination="${i}"` : "";
     const blocks = chrono
@@ -501,7 +507,7 @@ export function renderMeasurementFields(draft) {
       partHelpHtml(definition) +
       blocks.join("") +
       rest.map(quantityRowHtml).join("") +
-      finalResultSectionHtml(definition, leftoverFinals);
+      finalsByPartHtml(definition, leftoverFinals);
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
     measurementFields.innerHTML =
@@ -525,6 +531,19 @@ export function wireMeasurementRow(row) {
   }
   if (row.dataset.isGiven === "1") return;
   wireReplicaRow(row);
+}
+
+function finalsByPartHtml(definition, finals) {
+  const byPart = new Map();
+  for (const r of finals) {
+    const part = finalPart(definition, r);
+    byPart.set(part, [...(byPart.get(part) ?? []), r]);
+  }
+  return [...byPart].map(([part, rows]) => finalResultSectionHtml(definition, rows, part)).join("");
+}
+
+function finalPart(definition, r) {
+  return partForResult(r.symbol) ?? expandDeterminationResults(definition, [r])[0].part ?? null;
 }
 
 function partForResult(symbol) {
@@ -589,7 +608,7 @@ function seriesFinalResultsHtml(definition) {
   });
   const byPart = new Map();
   for (const r of finals.filter((r) => !embedded.has(r.symbol))) {
-    const part = partForResult(r.symbol);
+    const part = finalPart(definition, r);
     byPart.set(part, [...(byPart.get(part) ?? []), r]);
   }
   const partHtml = [...byPart].map(([part, rows]) => finalResultSectionHtml(definition, rows, part));
@@ -765,7 +784,7 @@ function rowSeriesValues(row) {
   return [...row.querySelectorAll(".replica")].reduce((acc, replica) => {
     const raw = replica.querySelector(".measure-value").value.trim();
     if (raw === "") return acc;
-    const factor = prefixFactor(replica.querySelector(".prefix-select").value);
+    const factor = prefixFactor(replica.querySelector(".prefix-select")?.value ?? "");
     const n = Number(raw) * factor;
     if (Number.isFinite(n)) acc.push(n);
     return acc;

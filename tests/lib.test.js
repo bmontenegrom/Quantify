@@ -1165,3 +1165,14 @@ test("formulaVariables: deja afuera funciones, espacios de nombres y exponentes"
   };
   assert.ok(!perDeterminationSymbols(def).has("r"));
 });
+
+test("determinaciones: una parte que ya no es estadística no las pide", () => {
+  const def = {
+    quantities: [{ symbol: "T", per_determination: true }],
+    results: [{ symbol: "g", name: "g", formula: "1/T", is_final: true }],
+    parts: [{ id: "p", effective_kind: "regresion_lineal", determinations: { count: 3, label: "Medida", average: true } }],
+    sections: [{ part_id: "p", quantities: ["T"], results: [] }],
+  };
+  assert.equal(determinationsFor(def, "T"), null);
+  assert.deepEqual(expandDeterminationResults(def, def.results).map((r) => r.symbol), ["g"]);
+});

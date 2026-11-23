@@ -3669,10 +3669,10 @@ fn students_report_each_determination_and_the_average() {
         check_student_result_symbols(def, &[result(s)]).is_ok()
     };
     let with_average = per_determination_definition(true);
-    for s in ["g", "g#1", "g#3", "g_medio", "doble"] {
+    for s in ["g#1", "g#3", "g_medio", "doble", "rel"] {
         assert!(ok(&with_average, s), "{s}");
     }
-    for s in ["g#0", "g#4", "g#x", "doble#1", "doble_medio", "rel#1"] {
+    for s in ["g", "g#0", "g#4", "g#x", "doble#1", "doble_medio", "rel#1"] {
         assert!(!ok(&with_average, s), "{s}");
     }
     let without_average = per_determination_definition(false);
