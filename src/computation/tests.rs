@@ -3600,3 +3600,21 @@ fn a_quantity_missing_in_every_determination_warns_once() {
     assert_eq!(missing.len(), 1, "{:?}", a.warnings);
     assert!(!missing[0].starts_with("Medida"), "{:?}", a.warnings);
 }
+
+#[test]
+fn a_result_named_like_a_generated_symbol_does_not_crash() {
+    let mut t = quantity("T");
+    t.per_determination = true;
+    let analysis = compute(
+        &[t],
+        &[det_result("f", "1/T"), det_result("T__1", "2")],
+        &HashMap::new(),
+        &[MeasurementInput {
+            operator_replicas: Some(vec![vec![2.0], vec![4.0], vec![5.0]]),
+            ..measurement("T", &[])
+        }],
+        None,
+        Some(&determinations(false)),
+    );
+    assert!(analysis.is_ok());
+}

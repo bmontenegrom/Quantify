@@ -484,8 +484,11 @@ fn compute_determinations(
         (0..count).map(|_| Vec::new()).collect();
     let mut shared = Vec::new();
     for mut d in derived.drain(..) {
-        if let Some((base, k)) = renamed.get(&d.symbol) {
-            d.formula = formulas[base.as_str()].to_string();
+        if let Some(((base, k), formula)) = renamed
+            .get(&d.symbol)
+            .and_then(|r| Some((r, *formulas.get(r.0.as_str())?)))
+        {
+            d.formula = formula.to_string();
             d.symbol = base.clone();
             by_determination[k - 1].push(d);
         } else {

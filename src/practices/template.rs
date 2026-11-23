@@ -293,18 +293,6 @@ pub fn version_error(found: u64) -> String {
     format!("El archivo usa la versión {found} del formato y esta versión de Quantify lee la {TEMPLATE_VERSION}.")
 }
 
-/// Lo que impide escribir una plantilla; el resto lo muestra el panel de problemas del borrador.
-///
-/// ```
-/// use quantify::practices::{check_template, PracticeTemplate};
-/// let t: PracticeTemplate = serde_json::from_value(serde_json::json!({
-///     "schema_version": 1, "name": "P", "analysis_kind": "estadistico", "quantities": [
-///         {"symbol": "x", "name": "x", "unit": "", "repeated": false},
-///         {"symbol": "x", "name": "otra", "unit": "", "repeated": false}
-///     ]
-/// })).unwrap();
-/// assert!(check_template(&t).unwrap_err().contains("\"x\""));
-/// ```
 fn stored_kinds(t: &PracticeTemplate) -> (Option<String>, Vec<Option<String>>) {
     let trimmed = |k: &Option<String>| k.as_deref().map(|k| k.trim().to_string());
     let has_part_kinds = t.parts.iter().any(|p| p.analysis_kind.is_some());
@@ -366,6 +354,18 @@ fn effective_part_kinds(t: &PracticeTemplate) -> Vec<String> {
     .part_kinds()
 }
 
+/// Lo que impide escribir una plantilla; el resto lo muestra el panel de problemas del borrador.
+///
+/// ```
+/// use quantify::practices::{check_template, PracticeTemplate};
+/// let t: PracticeTemplate = serde_json::from_value(serde_json::json!({
+///     "schema_version": 1, "name": "P", "analysis_kind": "estadistico", "quantities": [
+///         {"symbol": "x", "name": "x", "unit": "", "repeated": false},
+///         {"symbol": "x", "name": "otra", "unit": "", "repeated": false}
+///     ]
+/// })).unwrap();
+/// assert!(check_template(&t).unwrap_err().contains("\"x\""));
+/// ```
 pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     if t.schema_version != TEMPLATE_VERSION {
         return Err(version_error(t.schema_version.into()));

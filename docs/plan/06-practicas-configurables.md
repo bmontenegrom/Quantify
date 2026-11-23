@@ -1160,6 +1160,13 @@ Decisiones:
      determinación dentro de la parte).
    - Payload con el índice de determinación, borradores, cronómetro, datos de ejemplo y
      validación; resultados finales y comparación por determinación.
+   - Mostrar `determinations` en el análisis (cantidades y mensurandos de cada determinación).
+   - Al reabrir una entrega, cada determinación vuelve a su lugar aunque haya una vacía en el
+     medio: hoy `forms.js` arma los grupos con los índices que quedaron (pasa también con los
+     operadores), así que con la 2 vacía la 3 aparece como 2.
+   - Decidir si un dato de cátedra por determinación lleva una incertidumbre propia en cada una
+     (hoy comparten `given_u`).
+   - Decidir si `<símbolo>_medio` se puede usar en otras fórmulas o como resultado del alumno.
    - E2E con una práctica de prueba.
 3. **`feat(practicas)`: el docente configura determinaciones (F9, 3/5).**
    - Editor: cantidad, etiqueta, promedio y forma de mostrar (práctica o parte), y "¿Se repite
