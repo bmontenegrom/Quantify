@@ -1323,7 +1323,7 @@ pub async fn analyze_definition(
             });
             if let Some((d, place)) = found {
                 let groups = measurement.operator_replicas.as_ref().map_or(0, Vec::len);
-                if !measurement.values.is_empty() {
+                if !measurement.values.is_empty() || measurement.point_replicas.is_some() {
                     anyhow::bail!(
                         "\"{}\" ({}) se carga en cada determinación ({} 1, {} 2…), no como un único valor",
                         quantity.name,
