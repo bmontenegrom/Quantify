@@ -1183,6 +1183,11 @@ Decisiones:
      `per_determination_symbols`, `determinations_in`) y ya difieren en detalles. Que la
      definición que recibe el cliente traiga la parte de cada símbolo y los mensurandos por
      determinación (`determination_results()`), y borrar las copias en JS.
+     Diferencias ya vistas: `symbolPart` no tiene el respaldo `used_by_series` (un resultado
+     final sin sección que solo usa la serie queda sin parte en el cliente) y no exige que `x`
+     se promedie para ubicar `x_medio`. Además, qué resultados se promedian se decide en tres
+     lugares (`averaged_results`, `result_scope_in` y `check_student_result_symbols`): que salga
+     de un solo lugar cuando el servidor lo mande resuelto.
    - `check_student_result_symbols` acepta `g#k` hasta la cantidad configurada, aunque la
      entrega traiga menos grupos; y sigue aceptando mensurandos comunes no finales (eso viene de
      antes de F9). Revisar las dos cosas junto con la validación del resto de la entrega.
