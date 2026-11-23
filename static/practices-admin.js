@@ -364,6 +364,7 @@ export function renderPracticesPage() {
   }
 
   const kind = def?.analysis_kind;
+  const statistical = kind == null || kind === "estadistico";
   const pointBased = POINT_KINDS.includes(kind);
   const openPanels = new Set(
     [...practiceWorkspace.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel),
@@ -409,8 +410,8 @@ export function renderPracticesPage() {
       ${def?.parts?.length
         ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes».</p>`
         : renderAnalysisKindForm(practice, def)}
-      ${kind == null || kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
-      ${!def?.parts?.length && (kind == null || kind === "estadistico") ? determinationsFormHtml(null, def?.determinations) : ""}
+      ${statistical ? renderOperatorCountForm(practice, def) : ""}
+      ${!def?.parts?.length && statistical ? determinationsFormHtml(null, def?.determinations) : ""}
     </section>
 
     ${renderLayoutSection(practice, def)}
@@ -1191,11 +1192,14 @@ function renderOperatorCountForm(practice, def) {
 }
 
 function determinationsFormHtml(part, d) {
+  if ((state.practiceDefinition?.operator_count ?? 0) >= 2) {
+    return `<p class="submission-meta">Determinaciones: quitá los operadores para usarlas.</p>`;
+  }
   const partAttr = part ? ` data-part-id="${escapeHtml(part.id)}"` : "";
   return `
     <details class="add-panel" data-add-panel="determinations-${escapeHtml(part?.id ?? "practice")}">
       <summary>Determinaciones${d ? `: ${d.count} (${escapeHtml(d.label)})` : ""}</summary>
-      <form class="detail-form detail-form-grid" data-determinations-form${partAttr}>
+      <form class="detail-form detail-form-grid" data-determinations-form${partAttr}${d ? " data-had-determinations" : ""}>
         <label>Cantidad
           <input name="count" type="number" min="2" step="1" value="${d?.count ?? ""}" placeholder="sin determinaciones" />
         </label>
@@ -1618,7 +1622,7 @@ async function saveDeterminations(event, practiceId) {
   await runPracticeAction(async () => {
     await postJson(url, { determinations });
     await reloadDefinition(practiceId);
-  }, count ? "Determinaciones guardadas" : "Determinaciones quitadas");
+  }, count ? "Determinaciones guardadas" : form.dataset.hadDeterminations ? "Determinaciones quitadas" : "Sin determinaciones");
 }
 
 async function savePracticeRegressionFormulas(event) {

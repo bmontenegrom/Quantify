@@ -13,6 +13,14 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   const { page } = await login(TEACHER, "docente");
   const base = `/api/practices/${ID}`;
   await apiPost(page, "/api/practices", { name: NAME, analysis_kind: "estadistico" });
+  await apiPost(page, `${base}/operator-count`, { count: 2 });
+  await openPractice(page, ID);
+  await page.waitForSelector('#practice-workspace :text("quitá los operadores para usarlas")');
+  assert(
+    (await page.locator("[data-determinations-form]").count()) === 0,
+    "con operadores no debía ofrecerse el formulario de determinaciones",
+  );
+  await apiPost(page, `${base}/operator-count`, { count: 0 });
   await openPractice(page, ID);
   await openAddForm(page, "[data-determinations-form]:not([data-part-id])");
   await fillAndSubmit(page, "[data-determinations-form]:not([data-part-id])", { count: "3", display: "bloques" }, { average: true });
