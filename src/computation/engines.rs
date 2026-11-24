@@ -11,7 +11,7 @@ use crate::uncertainty::{self, BModel, ScaleSpec};
 use evalexpr::Node;
 use std::collections::HashMap;
 
-/// Convierte una escala del catálogo ([`InstrumentScale`]) en la especificación que entiende
+/// La especificación del tipo B de una escala del catálogo, en la unidad de la escala.
 ///
 /// ```
 /// use quantify::db::InstrumentScale;
@@ -59,6 +59,25 @@ pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
     })
 }
 
+fn scale_to_quantity(scale: &InstrumentScale, unit: &str) -> Result<(f64, f64), String> {
+    let (from, to) = (scale.unit.trim(), unit.trim());
+    if from.is_empty() || to.is_empty() || from == to {
+        return Ok((1.0, 0.0));
+    }
+    let why = match (crate::units::parse(from), crate::units::parse(to)) {
+        (Some(f), Some(t)) if f.compatible(&t) => {
+            return Ok((f.factor / t.factor, (t.offset - f.offset) / t.factor))
+        }
+        (Some(_), Some(_)) => format!("la escala mide en {from} y la magnitud está en {to}"),
+        (None, _) => format!("no se reconoce la unidad {from}"),
+        (_, None) => format!("no se reconoce la unidad {to}"),
+    };
+    Err(format!(
+        "{why}: la incertidumbre de la escala \"{}\" no se convirtió",
+        scale.label
+    ))
+}
+
 fn compute_quantities(
     quantities: &[&PracticeQuantity],
     by_quantity: &HashMap<&str, &MeasurementInput>,
@@ -102,14 +121,28 @@ fn compute_quantities(
                     quantity.name, quantity.symbol
                 ));
             }
-            let spec = match instrument.1 {
-                Some(scale_id) => match scales.get(scale_id) {
-                    Some(scale) => Some(scale_spec(scale)?),
-                    None => anyhow::bail!("la escala seleccionada no existe"),
-                },
-                None => None,
-            };
-            uncertainty::measured_quantity(&values, spec.as_ref())
+            match instrument.1 {
+                Some(scale_id) => {
+                    let Some(scale) = scales.get(scale_id) else {
+                        anyhow::bail!("la escala seleccionada no existe");
+                    };
+                    let spec = scale_spec(scale)?;
+                    let (factor, shift) =
+                        scale_to_quantity(scale, &quantity.unit).unwrap_or_else(|w| {
+                            if !values.is_empty() {
+                                warnings.push(format!(
+                                    "\"{}\" ({}): {w}.",
+                                    quantity.name, quantity.symbol
+                                ));
+                            }
+                            (1.0, 0.0)
+                        });
+                    uncertainty::measured_with(&values, |mean| {
+                        uncertainty::type_b(&spec, (mean + shift) / factor) * factor
+                    })
+                }
+                None => uncertainty::measured_quantity(&values, None),
+            }
         };
 
         means.insert(quantity.symbol.clone(), result.mean);

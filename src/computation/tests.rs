@@ -335,6 +335,124 @@ fn fab_scale() -> InstrumentScale {
     }
 }
 
+fn type_b_in(scale: &InstrumentScale, unit: &str, value: f64) -> (f64, Vec<String>) {
+    let q = PracticeQuantity {
+        unit: unit.into(),
+        ..quantity("x")
+    };
+    let m = MeasurementInput {
+        instrument_id: Some("i1".into()),
+        scale_id: Some("s1".into()),
+        ..measurement("x", &[value])
+    };
+    let scales = HashMap::from([("s1".to_string(), scale.clone())]);
+    let analysis = compute(&[q], &[], &scales, &[m], None).unwrap();
+    (analysis.quantities[0].result.u_b, analysis.warnings)
+}
+
+#[test]
+fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
+    let rule = InstrumentScale {
+        b_model: "resolucion".into(),
+        step: 1.0,
+        spec_pct_reading: None,
+        spec_step_coeff: None,
+        unit: "mm".into(),
+        label: "regla".into(),
+        ..fab_scale()
+    };
+    let rect = 2.0 * 3f64.sqrt();
+    for (unit, step) in [("mm", 1.0), ("cm", 0.1), ("m", 0.001)] {
+        let (u_b, _) = type_b_in(&rule, unit, 1.0);
+        assert!(close(u_b, step / rect, 1e-15), "{unit}: {u_b}");
+    }
+
+    let densimeter = InstrumentScale {
+        b_model: "apreciacion".into(),
+        step: 0.001,
+        appreciation: Some(0.001),
+        u_cal_fixed: 0.001,
+        spec_pct_reading: None,
+        spec_step_coeff: None,
+        unit: "g/cm3".into(),
+        ..fab_scale()
+    };
+    let (in_g_cm3, _) = type_b_in(&densimeter, "g/cm3", 1.0);
+    let (in_kg_m3, _) = type_b_in(&densimeter, "kg/m3", 1000.0);
+    let expected = ((0.001f64 / 6f64.sqrt()).powi(2) + 0.001f64.powi(2)).sqrt();
+    assert!(close(in_g_cm3, expected, 1e-15));
+    assert!(close(in_kg_m3, 1000.0 * expected, 1e-12));
+
+    let clock = InstrumentScale {
+        unit: "s".into(),
+        label: "milesimas".into(),
+        ..rule.clone()
+    };
+    let (u_b, warnings) = type_b_in(&clock, "g", 1.0);
+    assert!(close(u_b, 1.0 / rect, 1e-15), "sin convertir, como antes");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("mide en s y la magnitud está en g")
+                && w.contains("\"milesimas\" no se convirtió")),
+        "{warnings:?}"
+    );
+
+    let thermometer = InstrumentScale {
+        b_model: "fabricante".into(),
+        step: 0.1,
+        spec_pct_reading: Some(1.0),
+        spec_step_coeff: Some(0.0),
+        spec_fixed: Some(0.0),
+        unit: "°C".into(),
+        ..fab_scale()
+    };
+    let at = |unit: &str, value: f64| type_b_in(&thermometer, unit, value).0;
+    assert!(close(at("K", 273.15), at("°C", 0.0), 1e-12));
+    assert!(close(at("K", 373.15), at("°C", 100.0), 1e-12));
+    let kelvin = InstrumentScale {
+        unit: "K".into(),
+        ..thermometer.clone()
+    };
+    let (in_celsius, _) = type_b_in(&kelvin, "°C", 0.0);
+    let (in_kelvin, _) = type_b_in(&kelvin, "K", 273.15);
+    assert!(close(in_celsius, in_kelvin, 1e-12));
+
+    let divisions = InstrumentScale {
+        unit: "div".into(),
+        ..rule
+    };
+    let (u_b, warnings) = type_b_in(&divisions, "mm", 1.0);
+    assert!(close(u_b, 1.0 / rect, 1e-15));
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("no se reconoce la unidad div") && w.contains("no se convirtió")),
+        "{warnings:?}"
+    );
+    assert!(type_b_in(&divisions, "div", 1.0).1.is_empty());
+    let empty = compute(
+        &[PracticeQuantity {
+            unit: "mm".into(),
+            ..quantity("x")
+        }],
+        &[],
+        &HashMap::from([("s1".to_string(), divisions)]),
+        &[MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            ..measurement("x", &[])
+        }],
+        None,
+    )
+    .unwrap();
+    assert!(
+        !empty.warnings.iter().any(|w| w.contains("no se convirtió")),
+        "sin lecturas no hay incertidumbre que convertir: {:?}",
+        empty.warnings
+    );
+}
+
 #[test]
 fn scale_spec_maps_models_and_options() {
     let spec = scale_spec(&fab_scale()).unwrap();
@@ -821,7 +939,7 @@ async fn determination_submission_stores_each_determination_with_its_instrument(
         .await
         .unwrap();
     let (instrument_id, scale_id): (String, String) =
-        sqlx::query_as("SELECT instrument_id, id FROM instrument_scales LIMIT 1")
+        sqlx::query_as("SELECT instrument_id, id FROM instrument_scales WHERE unit = 's' LIMIT 1")
             .fetch_one(&pool)
             .await
             .unwrap();

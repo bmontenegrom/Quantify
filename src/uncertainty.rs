@@ -143,8 +143,20 @@ pub fn expand(u: f64, k: f64) -> f64 {
 /// assert!((r.u_expanded - 2.0 / 3.0_f64.sqrt()).abs() < 1e-12);
 /// ```
 pub fn measured_quantity(values: &[f64], spec: Option<&ScaleSpec>) -> QuantityResult {
+    measured_with(values, |mean| {
+        spec.map(|sp| type_b(sp, mean)).unwrap_or(0.0)
+    })
+}
+
+/// Como [`measured_quantity`], con el tipo B calculado por `u_b` a partir de la media.
+///
+/// ```
+/// let r = quantify::uncertainty::measured_with(&[2.0, 2.0], |media| media / 100.0);
+/// assert_eq!((r.mean, r.u_b), (2.0, 0.02));
+/// ```
+pub fn measured_with(values: &[f64], u_b: impl Fn(f64) -> f64) -> QuantityResult {
     let (mean, s, u_a) = type_a(values);
-    let u_b = spec.map(|sp| type_b(sp, mean)).unwrap_or(0.0);
+    let u_b = u_b(mean);
     let u_c = combine(u_a, u_b);
     QuantityResult {
         n: values.len(),
