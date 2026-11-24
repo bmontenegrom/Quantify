@@ -2854,18 +2854,29 @@ async fn analyze_validates_the_instruments_per_determination() {
             .id
             .clone()
     };
-    let m8 = |instruments: usize| {
+    db::seed_academic(&pool).await.unwrap();
+    crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
+        .await
+        .unwrap();
+    let (instrument_id, scale_id): (String, String) = sqlx::query_as(
+        "SELECT instrument_id, id FROM instrument_scales WHERE label = '0.1 g (calibracion 3 %)'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let with = |shared: Option<&str>, groups: usize, instruments: usize| {
         vec![MeasurementInput {
             quantity_id: id_of("m_8"),
-            instrument_id: None,
-            scale_id: Some("escala-borrada".into()),
+            instrument_id: shared.map(|_| instrument_id.clone()),
+            scale_id: shared.map(Into::into),
             values: vec![],
             given_u: None,
             point_replicas: None,
-            operator_replicas: Some(vec![vec![0.0], vec![2.0], vec![0.0]]),
+            operator_replicas: Some(vec![vec![2.0]; groups]),
             operator_instruments: Some(vec![Default::default(); instruments]),
         }]
     };
+    let m8 = |instruments: usize| with(None, 3, instruments);
     let err_of = |measurements: Vec<MeasurementInput>| {
         let pool = pool.clone();
         async move {
@@ -2877,7 +2888,15 @@ async fn analyze_validates_the_instruments_per_determination() {
     };
 
     assert!(analyze(&pool, "hidrostatica", &m8(3)).await.is_ok());
-    let err = err_of(m8(2)).await;
+    let partial = analyze(&pool, "hidrostatica", &with(Some(&scale_id), 1, 1))
+        .await
+        .unwrap();
+    assert!(
+        !partial.warnings.iter().any(|w| w.contains("no existe")),
+        "las medidas sin instrumento propio usan el compartido: {:?}",
+        partial.warnings
+    );
+    let err = err_of(with(Some("escala-borrada"), 3, 3)).await;
     assert!(err.contains("la escala seleccionada no existe"), "{err}");
     let err = err_of(m8(4)).await;
     assert!(
