@@ -1279,7 +1279,7 @@ Decisiones:
    - `src/units.rs`: interpretar, compatibilidad, conversión y unidades de entrada, con tests
      para todas las unidades en uso. Sin cambios de comportamiento.
    - Las plantillas que usan `C` para temperatura pasan a `°C`.
-2. **`fix(incertidumbres)`: el tipo B convierte la escala a la unidad de la magnitud (F10, 2/4).**
+2. **`fix(incertidumbres)`: el tipo B convierte la escala a la unidad de la magnitud (F10, 2/4).** ✅
    - Si las dos unidades se reconocen y son compatibles, se convierten `step`, `appreciation`,
      `spec_fixed` y `u_cal_fixed` (los términos en % no cambian).
    - Si se reconocen y no son compatibles (un cronómetro en una masa), el análisis da un error

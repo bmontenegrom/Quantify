@@ -34,11 +34,14 @@ use std::collections::HashMap;
 ///     unit: "mm".into(),
 ///     position: 0,
 /// };
-/// let spec = quantify::computation::scale_spec(&escala).unwrap();
+/// let spec = quantify::computation::scale_spec(&escala, "mm").unwrap();
 /// assert!(matches!(spec.b_model, BModel::Resolucion));
 /// assert_eq!(spec.step, 0.01);
+/// let en_cm = quantify::computation::scale_spec(&escala, "cm").unwrap();
+/// assert!((en_cm.step - 0.001).abs() < 1e-15);
+/// assert!(quantify::computation::scale_spec(&escala, "s").is_err());
 /// ```
-pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
+pub fn scale_spec(scale: &InstrumentScale, unit: &str) -> anyhow::Result<ScaleSpec> {
     let b_model = match scale.b_model.as_str() {
         "resolucion" => BModel::Resolucion,
         "apreciacion" => BModel::Apreciacion,
@@ -47,15 +50,29 @@ pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
             anyhow::bail!("la escala tiene un modelo de incertidumbre desconocido: {other}")
         }
     };
+    let factor = match crate::units::scale_factor(&scale.unit, unit) {
+        Some(factor) => factor,
+        None if [scale.unit.as_str(), unit]
+            .iter()
+            .all(|u| !u.trim().is_empty() && crate::units::parse(u).is_some()) =>
+        {
+            anyhow::bail!(
+                "la escala \"{}\" mide en {} y la magnitud está en {unit}: no se pueden convertir",
+                scale.label,
+                scale.unit
+            )
+        }
+        None => 1.0,
+    };
     Ok(ScaleSpec {
         b_model,
-        step: scale.step,
-        appreciation: scale.appreciation,
+        step: scale.step * factor,
+        appreciation: scale.appreciation.map(|a| a * factor),
         spec_pct_reading: scale.spec_pct_reading.unwrap_or(0.0),
         spec_step_coeff: scale.spec_step_coeff.unwrap_or(0.0),
-        spec_fixed: scale.spec_fixed.unwrap_or(0.0),
+        spec_fixed: scale.spec_fixed.unwrap_or(0.0) * factor,
         u_cal_pct: scale.u_cal_pct,
-        u_cal_fixed: scale.u_cal_fixed,
+        u_cal_fixed: scale.u_cal_fixed * factor,
     })
 }
 
@@ -104,7 +121,9 @@ fn compute_quantities(
             }
             let spec = match instrument.1 {
                 Some(scale_id) => match scales.get(scale_id) {
-                    Some(scale) => Some(scale_spec(scale)?),
+                    Some(scale) => Some(scale_spec(scale, &quantity.unit).map_err(|e| {
+                        anyhow::anyhow!("\"{}\" ({}): {e}", quantity.name, quantity.symbol)
+                    })?),
                     None => anyhow::bail!("la escala seleccionada no existe"),
                 },
                 None => None,

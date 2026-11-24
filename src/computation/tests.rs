@@ -335,9 +335,75 @@ fn fab_scale() -> InstrumentScale {
     }
 }
 
+fn u_b_in(scale: InstrumentScale, unit: &str) -> anyhow::Result<f64> {
+    let q = PracticeQuantity {
+        unit: unit.into(),
+        ..quantity("x")
+    };
+    let m = MeasurementInput {
+        instrument_id: Some("i1".into()),
+        scale_id: Some("s1".into()),
+        ..measurement("x", &[1.0])
+    };
+    let scales = HashMap::from([("s1".to_string(), scale)]);
+    let analysis = compute(&[q], &[], &scales, &[m], None)?;
+    Ok(analysis.quantities[0].result.u_b)
+}
+
+#[test]
+fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
+    let rule = InstrumentScale {
+        b_model: "resolucion".into(),
+        step: 1.0,
+        spec_pct_reading: None,
+        spec_step_coeff: None,
+        unit: "mm".into(),
+        label: "regla".into(),
+        ..fab_scale()
+    };
+    let rect = 2.0 * 3f64.sqrt();
+    for (unit, step) in [("mm", 1.0), ("cm", 0.1), ("m", 0.001)] {
+        let u_b = u_b_in(rule.clone(), unit).unwrap();
+        assert!(close(u_b, step / rect, 1e-15), "{unit}: {u_b}");
+    }
+
+    let densimeter = InstrumentScale {
+        b_model: "apreciacion".into(),
+        step: 0.001,
+        appreciation: Some(0.001),
+        u_cal_fixed: 0.001,
+        spec_pct_reading: None,
+        spec_step_coeff: None,
+        unit: "g/cm3".into(),
+        ..fab_scale()
+    };
+    let in_g_cm3 = u_b_in(densimeter.clone(), "g/cm3").unwrap();
+    let in_kg_m3 = u_b_in(densimeter, "kg/m3").unwrap();
+    let expected = ((0.001f64 / 6f64.sqrt()).powi(2) + 0.001f64.powi(2)).sqrt();
+    assert!(close(in_g_cm3, expected, 1e-15));
+    assert!(close(in_kg_m3, 1000.0 * expected, 1e-12));
+
+    let clock = InstrumentScale {
+        unit: "s".into(),
+        label: "milesimas".into(),
+        ..rule.clone()
+    };
+    let error = u_b_in(clock, "g").unwrap_err().to_string();
+    assert!(
+        error.contains("\"milesimas\" mide en s") && error.contains("en g"),
+        "{error}"
+    );
+
+    let divisions = InstrumentScale {
+        unit: "div".into(),
+        ..rule
+    };
+    assert!(close(u_b_in(divisions, "mm").unwrap(), 1.0 / rect, 1e-15));
+}
+
 #[test]
 fn scale_spec_maps_models_and_options() {
-    let spec = scale_spec(&fab_scale()).unwrap();
+    let spec = scale_spec(&fab_scale(), "A").unwrap();
     assert_eq!(spec.b_model, BModel::Fabricante);
     assert_eq!(spec.spec_pct_reading, 1.0);
     assert_eq!(spec.spec_step_coeff, 5.0);
@@ -345,7 +411,7 @@ fn scale_spec_maps_models_and_options() {
 
     let mut bad = fab_scale();
     bad.b_model = "otro".into();
-    assert!(scale_spec(&bad).is_err());
+    assert!(scale_spec(&bad, "A").is_err());
 }
 
 #[test]
@@ -821,7 +887,7 @@ async fn determination_submission_stores_each_determination_with_its_instrument(
         .await
         .unwrap();
     let (instrument_id, scale_id): (String, String) =
-        sqlx::query_as("SELECT instrument_id, id FROM instrument_scales LIMIT 1")
+        sqlx::query_as("SELECT instrument_id, id FROM instrument_scales WHERE unit = 's' LIMIT 1")
             .fetch_one(&pool)
             .await
             .unwrap();
