@@ -1346,7 +1346,7 @@ function renderCurvesList(def, practiceId) {
 
 function offersPerDetermination(qty) {
   const def = state.practiceDefinition;
-  if (!qty) return !def?.parts?.length && Boolean(def?.determinations);
+  if (!qty) return Boolean(def?.resolved?.practice_determinations);
   return qty.per_determination || Boolean(determinationsFor(def, qty.symbol));
 }
 

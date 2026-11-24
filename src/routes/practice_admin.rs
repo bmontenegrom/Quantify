@@ -1622,11 +1622,8 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
 fn determination_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     let mut problems = Vec::new();
     for q in def.quantities.iter().filter(|q| q.per_determination) {
-        let part = def
-            .quantity_part(&q.symbol)
-            .and_then(|id| def.parts.iter().find(|p| p.id == id));
-        if def.determinations_in(part).is_none() {
-            let place = match part {
+        if def.quantity_determinations(&q.symbol).is_none() {
+            let place = match def.part_of_quantity(&q.symbol) {
                 Some(part) => format!("la parte \"{}\"", part.title),
                 None if def.parts.is_empty() => "la práctica".to_string(),
                 None => "los datos compartidos".to_string(),
@@ -3251,8 +3248,9 @@ mod tests {
         };
         assert!(result_scope(&def(true, "1/T")).contains(&"g_medio".to_string()));
         let views = view_scopes(&def(true, "1/T"));
-        let averaged = def(true, "1/T").averaged_results();
-        let uses = result_uses(&def(true, "1/T"), &averaged);
+        let averaged_def = def(true, "1/T");
+        let averaged = averaged_def.averaged_results();
+        let uses = result_uses(&averaged_def, &averaged);
         assert!(
             !existing_result_scope(&views, &uses, &averaged, "g").contains(&"g_medio".to_string())
         );
@@ -3300,10 +3298,11 @@ mod tests {
             results: vec![result("y", "1"), result("x", "y + x_medio")],
             ..plain.clone()
         };
+        let plain_averaged = plain_with_y.averaged_results();
         assert!(existing_result_scope(
             &view_scopes(&plain_with_y),
-            &result_uses(&plain_with_y, &plain_with_y.averaged_results()),
-            &plain_with_y.averaged_results(),
+            &result_uses(&plain_with_y, &plain_averaged),
+            &plain_averaged,
             "y"
         )
         .contains(&"x_medio".to_string()));

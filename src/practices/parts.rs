@@ -26,6 +26,7 @@ impl From<PracticeDefinition> for ClientDefinition {
 
 #[derive(Debug, Default, serde::Serialize)]
 pub struct Resolved {
+    pub practice_determinations: Option<super::Determinations>,
     pub symbol_parts: std::collections::BTreeMap<String, String>,
     pub determinations: std::collections::BTreeMap<String, ScopedDeterminations>,
 }
@@ -282,7 +283,7 @@ impl PracticeDefinition {
             .collect()
     }
 
-    /// La parte de cada símbolo y las determinaciones de cada magnitud y mensurando que se repite.
+    /// La parte de cada símbolo, y las determinaciones de la práctica, de cada magnitud y de cada mensurando que se repite.
     ///
     /// ```
     /// use quantify::practices::{Determinations, PracticeDefinition};
@@ -314,10 +315,7 @@ impl PracticeDefinition {
             .quantities
             .iter()
             .filter_map(|q| {
-                let part = self
-                    .quantity_part(&q.symbol)
-                    .and_then(|id| self.parts.iter().find(|p| p.id == id));
-                let d = self.determinations_in(part)?;
+                let d = self.quantity_determinations(&q.symbol)?;
                 Some((q.symbol.clone(), scoped(&q.symbol, d)))
             })
             .collect();
@@ -326,9 +324,28 @@ impl PracticeDefinition {
             determinations.insert(symbol, entry);
         }
         Resolved {
+            practice_determinations: self.determinations_in(None).cloned(),
             symbol_parts,
             determinations,
         }
+    }
+
+    pub fn part_of_quantity(&self, symbol: &str) -> Option<&PracticePart> {
+        let id = self.quantity_part(symbol)?;
+        self.parts.iter().find(|p| p.id == id)
+    }
+
+    /// Las determinaciones que valen donde está la magnitud, la repita o no.
+    ///
+    /// ```
+    /// use quantify::practices::{Determinations, PracticeDefinition};
+    /// let q = quantify::db::PracticeQuantity { symbol: "L".into(), ..Default::default() };
+    /// let d = Determinations { count: 2, label: "Medida".into(), average: false, display: Default::default() };
+    /// let def = PracticeDefinition { quantities: vec![q], determinations: Some(d), ..Default::default() };
+    /// assert_eq!(def.quantity_determinations("L").map(|d| d.count), Some(2));
+    /// ```
+    pub fn quantity_determinations(&self, symbol: &str) -> Option<&super::Determinations> {
+        self.determinations_in(self.part_of_quantity(symbol))
     }
 
     /// Las determinaciones que valen en una parte estadística, o en la práctica si no tiene partes.

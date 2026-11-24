@@ -385,10 +385,7 @@ pub fn check_determination_groups(
         .iter()
         .filter(|q| q.per_determination && !q.optional)
     {
-        let part = definition
-            .quantity_part(&q.symbol)
-            .and_then(|id| definition.parts.iter().find(|p| p.id == id));
-        let Some(d) = definition.determinations_in(part) else {
+        let Some(d) = definition.quantity_determinations(&q.symbol) else {
             continue;
         };
         let groups = measurements
