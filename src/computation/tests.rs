@@ -394,6 +394,33 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
         "{error}"
     );
 
+    let thermometer = InstrumentScale {
+        b_model: "fabricante".into(),
+        step: 0.1,
+        spec_pct_reading: Some(1.0),
+        spec_step_coeff: Some(0.0),
+        spec_fixed: Some(0.0),
+        unit: "°C".into(),
+        ..fab_scale()
+    };
+    let at = |unit: &str, value: f64| {
+        let q = PracticeQuantity {
+            unit: unit.into(),
+            ..quantity("x")
+        };
+        let m = MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            ..measurement("x", &[value])
+        };
+        let scales = HashMap::from([("s1".to_string(), thermometer.clone())]);
+        compute(&[q], &[], &scales, &[m], None).unwrap().quantities[0]
+            .result
+            .u_b
+    };
+    assert!(close(at("K", 273.15), at("°C", 0.0), 1e-12));
+    assert!(close(at("K", 373.15), at("°C", 100.0), 1e-12));
+
     let divisions = InstrumentScale {
         unit: "div".into(),
         ..rule

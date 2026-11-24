@@ -25,6 +25,8 @@ pub struct ScaleSpec {
     pub u_cal_pct: f64,
     #[serde(default)]
     pub u_cal_fixed: f64,
+    #[serde(default)]
+    pub reading_shift: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +83,7 @@ pub fn type_a(values: &[f64]) -> (f64, f64, f64) {
 ///     spec_fixed: 0.0,
 ///     u_cal_pct: 0.0,
 ///     u_cal_fixed: 0.0,
+///     reading_shift: 0.0,
 /// };
 /// assert!((type_b(&spec, 100.0) - 3.0).abs() < 1e-12);
 ///
@@ -94,23 +97,25 @@ pub fn type_a(values: &[f64]) -> (f64, f64, f64) {
 ///     spec_fixed: 0.0,
 ///     u_cal_pct: 3.0,
 ///     u_cal_fixed: 0.0,
+///     reading_shift: 0.0,
 /// };
 /// let base = 0.1 / (2.0 * 3.0_f64.sqrt());
 /// let esperado = (base * base + (0.03 * 10.0) * (0.03 * 10.0)).sqrt();
 /// assert!((type_b(&balanza, 10.0) - esperado).abs() < 1e-12);
 /// ```
 pub fn type_b(spec: &ScaleSpec, value: f64) -> f64 {
+    let reading = (value + spec.reading_shift).abs();
     let base = match spec.b_model {
         BModel::Resolucion => spec.step / (2.0 * SQRT_3),
         BModel::Apreciacion => spec.appreciation.unwrap_or(spec.step) / SQRT_6,
         BModel::Fabricante => {
-            let u_spec = (spec.spec_pct_reading / 100.0) * value.abs()
+            let u_spec = (spec.spec_pct_reading / 100.0) * reading
                 + spec.spec_step_coeff * spec.step
                 + spec.spec_fixed;
             u_spec / EXPANSION_K
         }
     };
-    let u_cal = (spec.u_cal_pct / 100.0) * value.abs();
+    let u_cal = (spec.u_cal_pct / 100.0) * reading;
     (base * base + u_cal * u_cal + spec.u_cal_fixed * spec.u_cal_fixed).sqrt()
 }
 
@@ -248,6 +253,7 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
+            reading_shift: 0.0,
         };
         assert!(close(type_b(&spec, 1.23), 0.01 / (2.0 * SQRT_3), 1e-15));
     }
@@ -263,6 +269,7 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
+            reading_shift: 0.0,
         };
         assert!(close(type_b(&spec, 10.0), 1.0 / SQRT_6, 1e-15));
     }
@@ -278,6 +285,7 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
+            reading_shift: 0.0,
         };
         assert!(close(type_b(&spec, 100.0), 3.0, 1e-12));
     }
@@ -293,6 +301,7 @@ mod tests {
             spec_fixed: 0.001,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
+            reading_shift: 0.0,
         };
         assert!(close(type_b(&spec, 5.0), 0.1755, 1e-12));
     }
@@ -308,6 +317,7 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.001,
+            reading_shift: 0.0,
         };
         let base = 0.001 / SQRT_6;
         let esperado = (base * base + 0.001 * 0.001_f64).sqrt();
@@ -320,6 +330,7 @@ mod tests {
             appreciation: None,
             b_model: BModel::Resolucion,
             u_cal_fixed: 0.0005,
+            reading_shift: 0.0,
             ..spec.clone()
         };
         assert!(close(type_b(&brazos, 0.09), 0.0005, 1e-15));
@@ -327,6 +338,7 @@ mod tests {
         let sin_cal = ScaleSpec {
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
+            reading_shift: 0.0,
             ..spec
         };
         assert!(close(type_b(&sin_cal, 0.998), base, 1e-15));
@@ -366,6 +378,7 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
+            reading_shift: 0.0,
         };
         let r = measured_quantity(&[1.0, 2.0, 3.0], Some(&spec));
         assert!(close(r.u_b, 0.0, 1e-15));

@@ -64,6 +64,10 @@ pub fn scale_spec(scale: &InstrumentScale, unit: &str) -> anyhow::Result<ScaleSp
         }
         None => 1.0,
     };
+    let reading_shift = match (crate::units::parse(&scale.unit), crate::units::parse(unit)) {
+        (Some(from), Some(to)) if from.compatible(&to) => (to.offset - from.offset) / to.factor,
+        _ => 0.0,
+    };
     Ok(ScaleSpec {
         b_model,
         step: scale.step * factor,
@@ -73,6 +77,7 @@ pub fn scale_spec(scale: &InstrumentScale, unit: &str) -> anyhow::Result<ScaleSp
         spec_fixed: scale.spec_fixed.unwrap_or(0.0) * factor,
         u_cal_pct: scale.u_cal_pct,
         u_cal_fixed: scale.u_cal_fixed * factor,
+        reading_shift,
     })
 }
 
