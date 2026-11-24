@@ -23,6 +23,9 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   await apiPost(page, `${base}/operator-count`, { count: 0 });
   await openPractice(page, ID);
   await openAddForm(page, "[data-determinations-form]:not([data-part-id])");
+  await fillAndSubmit(page, "[data-determinations-form]:not([data-part-id])", {});
+  await waitForStatus(page, "no hay nada que guardar");
+  await openAddForm(page, "[data-determinations-form]:not([data-part-id])");
   await fillAndSubmit(page, "[data-determinations-form]:not([data-part-id])", { count: "3", display: "bloques" }, { average: true });
   await waitForStatus(page, "Determinaciones guardadas");
   const saved = (await getJson(page, `${base}/definition`)).determinations;

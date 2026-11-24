@@ -1615,7 +1615,10 @@ async function saveDeterminations(event, practiceId) {
   const form = event.currentTarget;
   const raw = Object.fromEntries(new FormData(form).entries());
   const count = Number(raw.count) || 0;
-  if (!count && !form.dataset.hadDeterminations) return;
+  if (!count && !form.dataset.hadDeterminations) {
+    await runPracticeAction(async () => {}, "Sin determinaciones: no hay nada que guardar");
+    return;
+  }
   const determinations = count
     ? { count, label: raw.label.trim(), average: "average" in raw, display: raw.display }
     : null;
