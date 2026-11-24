@@ -3670,16 +3670,24 @@ fn a_submission_needs_every_determination_of_a_required_quantity() {
             ..measurement("T", &[])
         }]
     };
-    assert!(
-        check_determination_groups(&def, &groups(vec![vec![2.0], vec![3.0], vec![4.0]])).is_ok()
-    );
-    let short = check_determination_groups(&def, &groups(vec![vec![2.0], vec![3.0]])).unwrap_err();
+    assert!(super::submission::check_determination_groups(
+        &def,
+        &groups(vec![vec![2.0], vec![3.0], vec![4.0]])
+    )
+    .is_ok());
+    let short =
+        super::submission::check_determination_groups(&def, &groups(vec![vec![2.0], vec![3.0]]))
+            .unwrap_err();
     assert_eq!(short.to_string(), "\"T\": falta cargar Medida 3.");
-    assert!(check_determination_groups(&def, &groups(vec![vec![2.0], vec![], vec![4.0]])).is_err());
-    assert!(check_determination_groups(&def, &[]).is_err());
+    assert!(super::submission::check_determination_groups(
+        &def,
+        &groups(vec![vec![2.0], vec![], vec![4.0]])
+    )
+    .is_err());
+    assert!(super::submission::check_determination_groups(&def, &[]).is_err());
     let mut optional = def.clone();
     optional.quantities[0].optional = true;
-    assert!(check_determination_groups(&optional, &[]).is_ok());
+    assert!(super::submission::check_determination_groups(&optional, &[]).is_ok());
 }
 
 #[test]

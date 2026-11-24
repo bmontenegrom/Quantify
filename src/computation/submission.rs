@@ -376,7 +376,7 @@ pub fn check_student_result_symbols(
     Ok(())
 }
 
-pub fn check_determination_groups(
+pub(crate) fn check_determination_groups(
     definition: &crate::practices::PracticeDefinition,
     measurements: &[MeasurementInput],
 ) -> anyhow::Result<()> {
