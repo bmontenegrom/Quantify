@@ -75,15 +75,9 @@ const PREFIXES: &[(&str, f64)] = &[
     ("T", 1e12),
 ];
 
+const CELSIUS_OFFSET: f64 = 273.15;
+
 const WHOLE: &[(&str, Unit)] = &[
-    (
-        "°C",
-        Unit {
-            factor: 1.0,
-            offset: 273.15,
-            dims: [0, 0, 0, 0, 1, 0, 0, 0],
-        },
-    ),
     (
         "%",
         Unit {
@@ -123,7 +117,7 @@ const CANDIDATES: &[&str] = &[
     "ms", "s", "min", "h", "°C", "K", "µmol", "mmol", "mol", "µM", "mM", "M", "mmol/L", "mol/L",
     "mg/L", "g/L", "g/cm3", "g/mL", "kg/m3", "µV", "mV", "V", "kV", "µA", "mA", "A", "ohm", "kohm",
     "Mohm", "pF", "nF", "µF", "mF", "F", "µH", "mH", "H", "Hz", "kHz", "MHz", "Pa", "hPa", "kPa",
-    "°", "rad", "%", "ppm", "ppb",
+    "MPa", "°", "rad", "%", "ppm", "ppb",
 ];
 
 const INPUT_PREFIXES: &[&str] = &["p", "n", "µ", "m", "", "k", "M", "G", "T"];
@@ -215,13 +209,27 @@ fn factor_unit(token: &str) -> Option<(Unit, i32)> {
 }
 
 fn product(text: &str) -> Option<Unit> {
-    text.split(['.', '·', '*']).try_fold(ONE, |acc, piece| {
+    let symbols: Vec<&str> = text
+        .split(['.', '·', '*', ' '])
+        .filter(|t| !t.is_empty() && *t != "1")
+        .collect();
+    let lone_celsius = matches!(symbols[..], [only] if only.trim_end_matches(['1', '^']) == "°C");
+    let unit = text.split(['.', '·', '*']).try_fold(ONE, |acc, piece| {
         let mut tokens = piece.split_whitespace().peekable();
         tokens.peek()?;
         tokens.try_fold(acc, |acc, token| {
             let (unit, exp) = factor_unit(token)?;
             acc.times(unit, exp)
         })
+    })?;
+    let kelvin = [0, 0, 0, 0, 1, 0, 0, 0];
+    Some(Unit {
+        offset: if lone_celsius && unit.dims == kelvin {
+            CELSIUS_OFFSET
+        } else {
+            0.0
+        },
+        ..unit
     })
 }
 
@@ -516,12 +524,18 @@ mod tests {
         assert!(!labels("k\u{2126}").contains(&"kohm".to_string()));
         assert!(labels("kg/m3").contains(&"g/cm3".to_string()));
         assert!(!labels("kg/m3").contains(&"g/mL".to_string()));
+        assert!(labels("Pa").contains(&"MPa".to_string()));
     }
 
     #[test]
     fn temperature_keeps_its_offset_only_alone() {
         assert_eq!(si("°C").offset, 273.15);
         assert_eq!(si("J/°C").offset, 0.0);
+        for same in ["°C1", "°C^1", "1 °C", "1.°C"] {
+            assert_eq!(si(same), si("°C"), "{same}");
+        }
+        assert_eq!(si("°C2").offset, 0.0);
+        assert_eq!(si("1/°C").offset, 0.0);
         assert!(si("°C").compatible(&si("K")));
     }
 
@@ -596,7 +610,11 @@ mod tests {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/practices");
         let mut found = vec![];
         for entry in std::fs::read_dir(dir).unwrap() {
-            let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(path).unwrap();
             units(&serde_json::from_str(&text).unwrap(), &mut found);
         }
         assert!(found.len() > 50);
