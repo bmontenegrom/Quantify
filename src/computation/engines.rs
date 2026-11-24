@@ -11,7 +11,7 @@ use crate::uncertainty::{self, BModel, ScaleSpec};
 use evalexpr::Node;
 use std::collections::HashMap;
 
-/// La especificación del tipo B de una escala, en la unidad de la magnitud, y el aviso si no se puede convertir.
+/// La especificación del tipo B de una escala del catálogo, en la unidad de la escala.
 ///
 /// ```
 /// use quantify::db::InstrumentScale;
@@ -34,19 +34,11 @@ use std::collections::HashMap;
 ///     unit: "mm".into(),
 ///     position: 0,
 /// };
-/// let (spec, aviso) = quantify::computation::scale_spec(&escala, "mm").unwrap();
+/// let spec = quantify::computation::scale_spec(&escala).unwrap();
 /// assert!(matches!(spec.b_model, BModel::Resolucion));
-/// assert_eq!((spec.step, aviso), (0.01, None));
-/// let (en_cm, _) = quantify::computation::scale_spec(&escala, "cm").unwrap();
-/// assert!((en_cm.step - 0.001).abs() < 1e-15);
-/// let (en_s, aviso) = quantify::computation::scale_spec(&escala, "s").unwrap();
-/// assert_eq!(en_s.step, 0.01);
-/// assert!(aviso.is_some());
+/// assert_eq!(spec.step, 0.01);
 /// ```
-pub fn scale_spec(
-    scale: &InstrumentScale,
-    unit: &str,
-) -> anyhow::Result<(ScaleSpec, Option<String>)> {
+pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
     let b_model = match scale.b_model.as_str() {
         "resolucion" => BModel::Resolucion,
         "apreciacion" => BModel::Apreciacion,
@@ -55,39 +47,51 @@ pub fn scale_spec(
             anyhow::bail!("la escala tiene un modelo de incertidumbre desconocido: {other}")
         }
     };
-    let known = |u: &str| {
-        Some(u)
-            .filter(|u| !u.trim().is_empty())
-            .and_then(crate::units::parse)
+    Ok(ScaleSpec {
+        b_model,
+        step: scale.step,
+        appreciation: scale.appreciation,
+        spec_pct_reading: scale.spec_pct_reading.unwrap_or(0.0),
+        spec_step_coeff: scale.spec_step_coeff.unwrap_or(0.0),
+        spec_fixed: scale.spec_fixed.unwrap_or(0.0),
+        u_cal_pct: scale.u_cal_pct,
+        u_cal_fixed: scale.u_cal_fixed,
+    })
+}
+
+fn scale_to_quantity(scale: &InstrumentScale, unit: &str) -> (f64, f64, Option<String>) {
+    let (from, to) = (scale.unit.trim(), unit.trim());
+    if from.is_empty() || to.is_empty() || from == to {
+        return (1.0, 0.0, None);
+    }
+    let not_converted = |why: String| {
+        let label = &scale.label;
+        Some(format!(
+            "{why}: la incertidumbre de la escala \"{label}\" no se convirtió"
+        ))
     };
-    let (factor, reading_shift, warning) = match (known(&scale.unit), known(unit)) {
-        (Some(from), Some(to)) if from.compatible(&to) => (
-            from.factor / to.factor,
-            (to.offset - from.offset) / to.factor,
-            None,
-        ),
+    match (crate::units::parse(from), crate::units::parse(to)) {
+        (Some(f), Some(t)) if f.compatible(&t) => {
+            (f.factor / t.factor, (t.offset - f.offset) / t.factor, None)
+        }
         (Some(_), Some(_)) => (
             1.0,
             0.0,
-            Some(format!(
-                "la escala \"{}\" mide en {} y la magnitud está en {unit}: su incertidumbre no se convirtió",
-                scale.label, scale.unit
+            not_converted(format!(
+                "la escala mide en {from} y la magnitud está en {to}"
             )),
         ),
-        _ => (1.0, 0.0, None),
-    };
-    let spec = ScaleSpec {
-        b_model,
-        step: scale.step * factor,
-        appreciation: scale.appreciation.map(|a| a * factor),
-        spec_pct_reading: scale.spec_pct_reading.unwrap_or(0.0),
-        spec_step_coeff: scale.spec_step_coeff.unwrap_or(0.0),
-        spec_fixed: scale.spec_fixed.unwrap_or(0.0) * factor,
-        u_cal_pct: scale.u_cal_pct,
-        u_cal_fixed: scale.u_cal_fixed * factor,
-        reading_shift,
-    };
-    Ok((spec, warning))
+        (None, _) => (
+            1.0,
+            0.0,
+            not_converted(format!("no se reconoce la unidad {from}")),
+        ),
+        (_, None) => (
+            1.0,
+            0.0,
+            not_converted(format!("no se reconoce la unidad {to}")),
+        ),
+    }
 }
 
 fn compute_quantities(
@@ -133,21 +137,22 @@ fn compute_quantities(
                     quantity.name, quantity.symbol
                 ));
             }
-            let spec = match instrument.1 {
-                Some(scale_id) => match scales.get(scale_id) {
-                    Some(scale) => {
-                        let (spec, warning) = scale_spec(scale, &quantity.unit)?;
-                        if let Some(w) = warning {
-                            warnings
-                                .push(format!("\"{}\" ({}): {w}.", quantity.name, quantity.symbol));
-                        }
-                        Some(spec)
+            match instrument.1 {
+                Some(scale_id) => {
+                    let Some(scale) = scales.get(scale_id) else {
+                        anyhow::bail!("la escala seleccionada no existe");
+                    };
+                    let spec = scale_spec(scale)?;
+                    let (factor, shift, warning) = scale_to_quantity(scale, &quantity.unit);
+                    if let Some(w) = warning {
+                        warnings.push(format!("\"{}\" ({}): {w}.", quantity.name, quantity.symbol));
                     }
-                    None => anyhow::bail!("la escala seleccionada no existe"),
-                },
-                None => None,
-            };
-            uncertainty::measured_quantity(&values, spec.as_ref())
+                    uncertainty::measured_with(&values, |mean| {
+                        uncertainty::type_b(&spec, (mean + shift) / factor) * factor
+                    })
+                }
+                None => uncertainty::measured_quantity(&values, None),
+            }
         };
 
         means.insert(quantity.symbol.clone(), result.mean);

@@ -25,8 +25,6 @@ pub struct ScaleSpec {
     pub u_cal_pct: f64,
     #[serde(default)]
     pub u_cal_fixed: f64,
-    #[serde(default)]
-    pub reading_shift: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,7 +81,6 @@ pub fn type_a(values: &[f64]) -> (f64, f64, f64) {
 ///     spec_fixed: 0.0,
 ///     u_cal_pct: 0.0,
 ///     u_cal_fixed: 0.0,
-///     reading_shift: 0.0,
 /// };
 /// assert!((type_b(&spec, 100.0) - 3.0).abs() < 1e-12);
 ///
@@ -97,25 +94,23 @@ pub fn type_a(values: &[f64]) -> (f64, f64, f64) {
 ///     spec_fixed: 0.0,
 ///     u_cal_pct: 3.0,
 ///     u_cal_fixed: 0.0,
-///     reading_shift: 0.0,
 /// };
 /// let base = 0.1 / (2.0 * 3.0_f64.sqrt());
 /// let esperado = (base * base + (0.03 * 10.0) * (0.03 * 10.0)).sqrt();
 /// assert!((type_b(&balanza, 10.0) - esperado).abs() < 1e-12);
 /// ```
 pub fn type_b(spec: &ScaleSpec, value: f64) -> f64 {
-    let reading = (value + spec.reading_shift).abs();
     let base = match spec.b_model {
         BModel::Resolucion => spec.step / (2.0 * SQRT_3),
         BModel::Apreciacion => spec.appreciation.unwrap_or(spec.step) / SQRT_6,
         BModel::Fabricante => {
-            let u_spec = (spec.spec_pct_reading / 100.0) * reading
+            let u_spec = (spec.spec_pct_reading / 100.0) * value.abs()
                 + spec.spec_step_coeff * spec.step
                 + spec.spec_fixed;
             u_spec / EXPANSION_K
         }
     };
-    let u_cal = (spec.u_cal_pct / 100.0) * reading;
+    let u_cal = (spec.u_cal_pct / 100.0) * value.abs();
     (base * base + u_cal * u_cal + spec.u_cal_fixed * spec.u_cal_fixed).sqrt()
 }
 
@@ -148,8 +143,20 @@ pub fn expand(u: f64, k: f64) -> f64 {
 /// assert!((r.u_expanded - 2.0 / 3.0_f64.sqrt()).abs() < 1e-12);
 /// ```
 pub fn measured_quantity(values: &[f64], spec: Option<&ScaleSpec>) -> QuantityResult {
+    measured_with(values, |mean| {
+        spec.map(|sp| type_b(sp, mean)).unwrap_or(0.0)
+    })
+}
+
+/// Como [`measured_quantity`], con el tipo B calculado por `u_b` a partir de la media.
+///
+/// ```
+/// let r = quantify::uncertainty::measured_with(&[2.0, 2.0], |media| media / 100.0);
+/// assert_eq!((r.mean, r.u_b), (2.0, 0.02));
+/// ```
+pub fn measured_with(values: &[f64], u_b: impl Fn(f64) -> f64) -> QuantityResult {
     let (mean, s, u_a) = type_a(values);
-    let u_b = spec.map(|sp| type_b(sp, mean)).unwrap_or(0.0);
+    let u_b = u_b(mean);
     let u_c = combine(u_a, u_b);
     QuantityResult {
         n: values.len(),
@@ -253,7 +260,6 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
-            reading_shift: 0.0,
         };
         assert!(close(type_b(&spec, 1.23), 0.01 / (2.0 * SQRT_3), 1e-15));
     }
@@ -269,7 +275,6 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
-            reading_shift: 0.0,
         };
         assert!(close(type_b(&spec, 10.0), 1.0 / SQRT_6, 1e-15));
     }
@@ -285,7 +290,6 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
-            reading_shift: 0.0,
         };
         assert!(close(type_b(&spec, 100.0), 3.0, 1e-12));
     }
@@ -301,7 +305,6 @@ mod tests {
             spec_fixed: 0.001,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
-            reading_shift: 0.0,
         };
         assert!(close(type_b(&spec, 5.0), 0.1755, 1e-12));
     }
@@ -317,7 +320,6 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.001,
-            reading_shift: 0.0,
         };
         let base = 0.001 / SQRT_6;
         let esperado = (base * base + 0.001 * 0.001_f64).sqrt();
@@ -330,7 +332,6 @@ mod tests {
             appreciation: None,
             b_model: BModel::Resolucion,
             u_cal_fixed: 0.0005,
-            reading_shift: 0.0,
             ..spec.clone()
         };
         assert!(close(type_b(&brazos, 0.09), 0.0005, 1e-15));
@@ -338,7 +339,6 @@ mod tests {
         let sin_cal = ScaleSpec {
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
-            reading_shift: 0.0,
             ..spec
         };
         assert!(close(type_b(&sin_cal, 0.998), base, 1e-15));
@@ -378,7 +378,6 @@ mod tests {
             spec_fixed: 0.0,
             u_cal_pct: 0.0,
             u_cal_fixed: 0.0,
-            reading_shift: 0.0,
         };
         let r = measured_quantity(&[1.0, 2.0, 3.0], Some(&spec));
         assert!(close(r.u_b, 0.0, 1e-15));

@@ -393,7 +393,8 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
     assert!(
         warnings
             .iter()
-            .any(|w| w.contains("\"milesimas\" mide en s") && w.contains("no se convirtió")),
+            .any(|w| w.contains("mide en s y la magnitud está en g")
+                && w.contains("\"milesimas\" no se convirtió")),
         "{warnings:?}"
     );
 
@@ -409,18 +410,32 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
     let at = |unit: &str, value: f64| type_b_in(&thermometer, unit, value).0;
     assert!(close(at("K", 273.15), at("°C", 0.0), 1e-12));
     assert!(close(at("K", 373.15), at("°C", 100.0), 1e-12));
+    let kelvin = InstrumentScale {
+        unit: "K".into(),
+        ..thermometer.clone()
+    };
+    let (in_celsius, _) = type_b_in(&kelvin, "°C", 0.0);
+    let (in_kelvin, _) = type_b_in(&kelvin, "K", 273.15);
+    assert!(close(in_celsius, in_kelvin, 1e-12));
 
     let divisions = InstrumentScale {
         unit: "div".into(),
         ..rule
     };
     let (u_b, warnings) = type_b_in(&divisions, "mm", 1.0);
-    assert!(close(u_b, 1.0 / rect, 1e-15) && warnings.is_empty());
+    assert!(close(u_b, 1.0 / rect, 1e-15));
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("no se reconoce la unidad div") && w.contains("no se convirtió")),
+        "{warnings:?}"
+    );
+    assert!(type_b_in(&divisions, "div", 1.0).1.is_empty());
 }
 
 #[test]
 fn scale_spec_maps_models_and_options() {
-    let (spec, _) = scale_spec(&fab_scale(), "A").unwrap();
+    let spec = scale_spec(&fab_scale()).unwrap();
     assert_eq!(spec.b_model, BModel::Fabricante);
     assert_eq!(spec.spec_pct_reading, 1.0);
     assert_eq!(spec.spec_step_coeff, 5.0);
@@ -428,7 +443,7 @@ fn scale_spec_maps_models_and_options() {
 
     let mut bad = fab_scale();
     bad.b_model = "otro".into();
-    assert!(scale_spec(&bad, "A").is_err());
+    assert!(scale_spec(&bad).is_err());
 }
 
 #[test]
