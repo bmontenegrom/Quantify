@@ -208,26 +208,24 @@ fn factor_unit(token: &str) -> Option<(Unit, i32)> {
         }
         symbol = symbol.strip_suffix('^').unwrap_or(symbol);
     }
-    if exp == 0 {
+    if exp == 0 || symbol == "C" {
         return None;
     }
     Some((symbol_unit(symbol)?, exp))
 }
 
 fn product(text: &str) -> Option<Unit> {
-    let mut tokens = text
-        .split(['.', '·', '*', ' '])
-        .filter(|t| !t.is_empty())
-        .peekable();
-    tokens.peek()?;
-    tokens.try_fold(ONE, |acc, token| {
-        let (unit, exp) = factor_unit(token)?;
-        acc.times(unit, exp)
+    text.split(['.', '·', '*']).try_fold(ONE, |acc, piece| {
+        let mut tokens = piece.split_whitespace().peekable();
+        tokens.peek()?;
+        tokens.try_fold(acc, |acc, token| {
+            let (unit, exp) = factor_unit(token)?;
+            acc.times(unit, exp)
+        })
     })
 }
 
-/// Interpreta una unidad escrita como en las prácticas (`m/s2`, `Pa.s`, `kohm`, `°C`, `mol/L`).
-/// La vacía es adimensional; lo que no reconoce da `None`.
+/// Interpreta una unidad como `m/s2`, `Pa.s` o `°C`: la vacía es adimensional y la desconocida, `None`.
 ///
 /// ```
 /// use quantify::units::parse;
@@ -270,7 +268,7 @@ pub fn parse(text: &str) -> Option<Unit> {
     }
 }
 
-const NOT_UNITS: &[&str] = &["pH", "C"];
+const NOT_UNITS: &[&str] = &["pH"];
 
 fn normalize(text: &str) -> String {
     text.chars()
@@ -282,6 +280,8 @@ fn normalize(text: &str) -> String {
             '³' => '3',
             '¹' => '1',
             '⁻' => '-',
+            '⋅' => '·',
+            '×' => '*',
             other => other,
         })
         .collect::<String>()
@@ -307,8 +307,7 @@ fn relative(label: &str, unit: Unit, declared: Unit) -> InputUnit {
     }
 }
 
-/// Unidades en las que se puede cargar un valor de una magnitud en `declared`, con la declarada
-/// primero: el valor en la declarada es `escrito·factor + offset`.
+/// Unidades para cargar un valor en `declared`, la declarada primero: valor = `escrito·factor + offset`.
 ///
 /// ```
 /// use quantify::units::input_units;
@@ -364,8 +363,10 @@ fn push_new(out: &mut Vec<InputUnit>, input: InputUnit) {
 fn unprefixed(declared: &str) -> Option<&str> {
     let first = declared.split(['/', '.', '·', '*', ' ']).next()?;
     let symbol = first.trim_end_matches(|c: char| c.is_ascii_digit() || c == '-' || c == '^');
-    if matches!(lookup(symbol), Some((_, true))) {
-        return Some(declared);
+    match lookup(symbol) {
+        Some((_, true)) => return Some(declared),
+        Some((_, false)) => return None,
+        None => {}
     }
     PREFIXES.iter().find_map(|(prefix, _)| {
         let rest = symbol.strip_prefix(prefix)?;
@@ -373,8 +374,7 @@ fn unprefixed(declared: &str) -> Option<&str> {
     })
 }
 
-/// Factor para pasar un paso o una incertidumbre de `from` a `to`, si las dos se reconocen y son
-/// compatibles.
+/// Factor para pasar un paso o una incertidumbre de `from` a `to`, si son unidades compatibles.
 ///
 /// ```
 /// use quantify::units::scale_factor;
@@ -454,7 +454,6 @@ mod tests {
         assert!(close(si("hPa").factor, 100.0));
         assert_eq!(si("cd").dims, [0, 0, 0, 0, 0, 0, 1, 0]);
         assert_eq!(si("mC").dims, [0, 0, 1, 1, 0, 0, 0, 0]);
-        assert_eq!(si("C/s").dims, si("A").dims);
         assert!(parse("kmin").is_none());
         assert!(parse("k°").is_none());
     }
@@ -463,7 +462,8 @@ mod tests {
     fn unknown_or_malformed_units_are_not_recognized() {
         for text in [
             "div", "m/s/s", "/s", "m/", "xyz", "m3x", "m256", "J64", "m127.m", "km120", "*", ".",
-            "· ", "m/(.)", "*/s", "m/()", "pH", "m0", "s-0", "% m/m", "% v/v", "C",
+            "· ", "m/(.)", "*/s", "m/()", "pH", "m0", "s-0", "% m/m", "% v/v", "C", "C/min",
+            "J/(g.C)", "C/s", "m.", "*s", "m..s", "m* /s",
         ] {
             assert!(parse(text).is_none(), "{text}");
         }
@@ -489,6 +489,8 @@ mod tests {
             .find(|u| u.label == "min")
             .unwrap();
         assert!(close(min.factor, 1.0 / 60.0));
+        let squared: Vec<String> = input_units("hs2").into_iter().map(|u| u.label).collect();
+        assert!(!squared.iter().any(|l| l == "ks2"), "{squared:?}");
     }
 
     #[test]
@@ -498,6 +500,8 @@ mod tests {
         assert_eq!(si("m/s²"), si("m/s2"));
         assert_eq!(si("cm³"), si("cm3"));
         assert_eq!(si("s⁻¹"), si("s-1"));
+        assert_eq!(si("Pa⋅s"), si("Pa.s"));
+        assert_eq!(si("kg×m"), si("kg*m"));
         assert_eq!(si("k\u{2126}"), si("kohm"));
     }
 
@@ -574,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn every_unit_of_the_library_and_the_seeded_instruments_is_recognized() {
+    fn every_unit_of_the_library_is_recognized() {
         fn units(value: &serde_json::Value, out: &mut Vec<String>) {
             match value {
                 serde_json::Value::Object(map) => {
@@ -596,8 +600,26 @@ mod tests {
             units(&serde_json::from_str(&text).unwrap(), &mut found);
         }
         assert!(found.len() > 50);
-        found.extend(["mm", "s", "g", "g/cm3", "A", "V", "ohm", "Hz", "F"].map(String::from));
         for unit in found.iter().filter(|u| *u != "div") {
+            assert!(parse(unit).is_some(), "no reconoce {unit:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn every_unit_of_the_seeded_instruments_is_recognized() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        crate::db::seed_academic(&pool).await.unwrap();
+        crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
+            .await
+            .unwrap();
+        let units: Vec<String> = sqlx::query_scalar(
+            "SELECT unit FROM instruments UNION SELECT unit FROM instrument_scales",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(units.len() >= 5, "{units:?}");
+        for unit in units.iter().filter(|u| *u != "div") {
             assert!(parse(unit).is_some(), "no reconoce {unit:?}");
         }
     }
