@@ -381,79 +381,21 @@ export function guideStepOrNext(definition, step) {
   return (steps.find((s) => s.id === step) ?? steps.find((s) => order.indexOf(s.id) > from) ?? steps[0]).id;
 }
 
-export function formulaVariables(formula) {
-  return formula.match(/(?<![\w.:])[A-Za-z_]\w*\b(?!\s*\(|:)/g) ?? [];
-}
-
 export function seriesPart(definition) {
   return (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico");
 }
 
-function seriesSymbolPart(definition, symbol) {
-  const series = seriesPart(definition)?.id;
-  if (!series) return null;
-  const columns = [
-    ...(definition.quantities ?? []).filter((q) => q.per_point && !q.is_given).map((q) => q.symbol),
-    ...(definition.intermediates ?? []).map((it) => it.symbol),
-  ];
-  const fromSeries =
-    ["slope", "intercept"].includes(symbol) ||
-    columns.includes(symbol) ||
-    columns.some((s) => symbol === `${s}_max` || columns.some((t) => symbol === `${t}_at_${s}_max`));
-  return fromSeries ? series : null;
-}
-
-export function symbolPart(definition, symbol, seen = new Set()) {
-  const results = definition?.results ?? [];
-  const section = (definition?.sections ?? []).find((s) => s.quantities.includes(symbol) || s.results.includes(symbol));
-  if (section) return section.part_id ?? null;
-  const defined = ["quantities", "intermediates", "aggregates", "point_results"].some((key) =>
-    (definition?.[key] ?? []).some((item) => item.symbol === symbol),
-  );
-  const base = !defined && symbol.endsWith("_medio") ? symbol.slice(0, -"_medio".length) : null;
-  const result = results.find((r) => r.symbol === symbol) ?? results.find((r) => r.symbol === base);
-  if (!result) return seriesSymbolPart(definition, symbol);
-  if (result.symbol !== symbol) return symbolPart(definition, result.symbol, seen);
-  if (seen.has(symbol)) return null;
-  seen.add(symbol);
-  const parts = new Set(formulaVariables(result.formula).map((s) => symbolPart(definition, s, seen)).filter(Boolean));
-  seen.delete(symbol);
-  return parts.size === 1 ? [...parts][0] : null;
+export function symbolPart(definition, symbol) {
+  return definition?.resolved?.symbol_parts?.[symbol] ?? null;
 }
 
 export function determinationsFor(definition, symbol) {
-  if ((definition?.operator_count ?? 0) >= 2) return null;
-  if (!(definition?.parts ?? []).length) {
-    if (POINT_KINDS.includes(definition?.analysis_kind)) return null;
-    return definition?.determinations ? { scope: "", ...definition.determinations } : null;
-  }
-  const scope = symbolPart(definition, symbol);
-  const d = statisticalDeterminations(definition.parts.find((p) => p.id === scope));
-  return d ? { scope, ...d } : null;
-}
-
-export function statisticalDeterminations(part) {
-  return (part?.effective_kind ?? "estadistico") === "estadistico" ? part?.determinations ?? null : null;
-}
-
-export function perDeterminationSymbols(definition) {
-  const symbols = new Set((definition?.quantities ?? []).filter((q) => q.per_determination).map((q) => q.symbol));
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const r of definition?.results ?? []) {
-      if (!symbols.has(r.symbol) && formulaVariables(r.formula).some((s) => symbols.has(s))) {
-        symbols.add(r.symbol);
-        grew = true;
-      }
-    }
-  }
-  return symbols;
+  return definition?.resolved?.determinations?.[symbol] ?? null;
 }
 
 export function expandDeterminationResults(definition, results) {
-  const repeated = perDeterminationSymbols(definition);
   return results.flatMap((r) => {
-    const d = repeated.has(r.symbol) ? determinationsFor(definition, r.symbol) : null;
+    const d = determinationsFor(definition, r.symbol);
     if (!d) return [r];
     const label = d.label.trim();
     const each = Array.from({ length: d.count }, (_, i) => ({

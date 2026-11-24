@@ -1307,15 +1307,20 @@ pub async fn analyze_definition(
         .iter()
         .map(|q| (q.id.as_str(), q))
         .collect();
+    let mut seen = std::collections::HashSet::new();
     for measurement in measurements {
         let Some(quantity) = by_id.get(measurement.quantity_id.as_str()) else {
             anyhow::bail!("una de las mediciones no corresponde a una magnitud de esta practica");
         };
+        if !seen.insert(measurement.quantity_id.as_str()) {
+            anyhow::bail!(
+                "\"{}\" ({}) viene más de una vez en la entrega",
+                quantity.name,
+                quantity.symbol
+            );
+        }
         if quantity.per_determination {
-            let part = definition
-                .quantity_part(&quantity.symbol)
-                .and_then(|id| definition.parts.iter().find(|p| p.id == id));
-            if let Some(d) = definition.determinations_in(part) {
+            if let Some(d) = definition.quantity_determinations(&quantity.symbol) {
                 let groups = measurement.operator_replicas.as_ref().map_or(0, Vec::len);
                 if !measurement.values.is_empty() || measurement.point_replicas.is_some() {
                     anyhow::bail!(
@@ -1327,9 +1332,11 @@ pub async fn analyze_definition(
                     );
                 }
                 if groups > d.count as usize {
-                    let place = part.map_or("la práctica".to_string(), |p| {
-                        format!("la parte \"{}\"", p.title)
-                    });
+                    let place = definition
+                        .part_of_quantity(&quantity.symbol)
+                        .map_or("la práctica".to_string(), |p| {
+                            format!("la parte \"{}\"", p.title)
+                        });
                     anyhow::bail!(
                         "\"{}\" ({}) trae lecturas para {groups} determinaciones, pero {place} tiene {}",
                         quantity.name,

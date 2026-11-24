@@ -5,8 +5,6 @@ import {
   analysisSections,
   determinationsFor,
   symbolPart,
-  formulaVariables,
-  perDeterminationSymbols,
   expandDeterminationResults,
   exampleMeasurements,
   practiceGuideSteps,
@@ -1041,9 +1039,12 @@ test("guideStepOrNext: un paso que ya no aplica cae al siguiente que sí", () =>
 });
 
 function determinationDefinition(display = "bloques", average = true) {
+  const determinations = { count: 3, label: "Medida", average, display };
+  const scoped = { scope: "", ...determinations };
   return {
     analysis_kind: "estadistico",
-    determinations: { count: 3, label: "Medida", average, display },
+    determinations,
+    resolved: { symbol_parts: {}, determinations: { T: scoped, m: scoped, L: scoped, g: scoped, k: scoped } },
     quantities: [
       { id: "qT", symbol: "T", repeated: true, per_determination: true },
       { id: "qm", symbol: "m", is_given: true, per_determination: true, default_value: 2 },
@@ -1058,30 +1059,17 @@ function determinationDefinition(display = "bloques", average = true) {
   };
 }
 
-test("determinaciones: se encuentran por parte o en la práctica", () => {
+test("determinaciones: el cliente lee lo que resolvió el servidor", () => {
   const def = determinationDefinition();
   assert.equal(determinationsFor(def, "T").count, 3);
-  assert.equal(determinationsFor(def, "T").scope, "");
-  assert.equal(determinationsFor({ ...def, operator_count: 2 }, "T"), null);
-  const withParts = {
-    ...def,
-    determinations: null,
-    parts: [
-      { id: "p1", determinations: { count: 2, label: "Op", average: false, display: "pestanas" } },
-      { id: "p2" },
-    ],
-    sections: [
-      { part_id: "p1", quantities: ["T"], results: ["g"] },
-      { part_id: "p2", quantities: ["L"], results: [] },
-    ],
-  };
-  assert.equal(determinationsFor(withParts, "T").scope, "p1");
-  assert.equal(determinationsFor(withParts, "L"), null);
+  assert.equal(determinationsFor(def, "doble"), null);
+  assert.equal(determinationsFor({}, "T"), null);
+  assert.equal(symbolPart({ resolved: { symbol_parts: { g: "stat" } } }, "g"), "stat");
+  assert.equal(symbolPart(def, "g"), null);
 });
 
-test("determinaciones: resultados encadenados y filas del resultado final", () => {
+test("determinaciones: filas del resultado final", () => {
   const def = determinationDefinition();
-  assert.deepEqual([...perDeterminationSymbols(def)].sort(), ["T", "g", "k", "m"]);
   const rows = expandDeterminationResults(def, def.results);
   assert.deepEqual(
     rows.map((r) => r.symbol),
@@ -1118,32 +1106,6 @@ test("validateMeasurements: cada determinación necesita lo suyo", () => {
   assert.match(validateMeasurements([m([[1], [1], [1]], null)], "estadistico", meta), /incertidumbre U/);
 });
 
-test("determinaciones: un resultado sin sección toma la parte de su fórmula", () => {
-  const def = {
-    analysis_kind: "regresion_lineal",
-    quantities: [{ symbol: "T", per_determination: true }, { symbol: "x_medio" }],
-    results: [
-      { symbol: "g", name: "g", formula: "1/T", is_final: true },
-      { symbol: "h", name: "h", formula: "g_medio*2", is_final: true },
-      { symbol: "y", name: "y", formula: "x_medio", is_final: true },
-    ],
-    parts: [
-      { id: "stat", determinations: { count: 3, label: "Medida", average: true, display: "bloques" } },
-      { id: "reg" },
-    ],
-    sections: [
-      { part_id: "stat", quantities: ["T"], results: [] },
-      { part_id: "reg", quantities: ["x_medio"], results: [] },
-    ],
-  };
-  assert.equal(symbolPart(def, "g"), "stat");
-  assert.equal(symbolPart(def, "h"), "stat");
-  assert.equal(symbolPart(def, "y"), "reg");
-  const rows = expandDeterminationResults(def, def.results.slice(0, 1));
-  assert.deepEqual(rows.map((r) => r.symbol), ["g#1", "g#2", "g#3", "g_medio"]);
-  assert.ok(rows.every((r) => r.part === "stat"));
-});
-
 test("validateMeasurements: en una práctica de series las determinaciones se validan por grupo", () => {
   const meta = {
     x: { name: "x", perPoint: true },
@@ -1154,60 +1116,4 @@ test("validateMeasurements: en una práctica de series las determinaciones se va
   assert.equal(validateMeasurements([x, T([[1], [2]])], "regresion_lineal", meta), null);
   assert.match(validateMeasurements([x, T([[1], []])], "regresion_lineal", meta), /falta cargar Medida 2/);
   assert.match(validateMeasurements([x, T([])], "regresion_lineal", meta), /falta cargar Medida 1/);
-});
-
-test("formulaVariables: deja afuera funciones, espacios de nombres y exponentes", () => {
-  assert.deepEqual(formulaVariables("math::sqrt(4) + sqrt*2"), ["sqrt"]);
-  assert.deepEqual(formulaVariables("4*pi^2*L/T^2 + 1e5*x_1 + f (y)"), ["pi", "L", "T", "x_1", "y"]);
-  assert.deepEqual(formulaVariables("math::ln(g_medio)/2.5e-3"), ["g_medio"]);
-  const def = {
-    quantities: [{ symbol: "sqrt", per_determination: true }],
-    results: [{ symbol: "r", formula: "math::sqrt(4)" }],
-  };
-  assert.ok(!perDeterminationSymbols(def).has("r"));
-});
-
-test("determinaciones: una parte que ya no es estadística no las pide", () => {
-  const def = {
-    quantities: [{ symbol: "T", per_determination: true }],
-    results: [{ symbol: "g", name: "g", formula: "1/T", is_final: true }],
-    parts: [{ id: "p", effective_kind: "regresion_lineal", determinations: { count: 3, label: "Medida", average: true } }],
-    sections: [{ part_id: "p", quantities: ["T"], results: [] }],
-  };
-  assert.equal(determinationsFor(def, "T"), null);
-  assert.deepEqual(expandDeterminationResults(def, def.results).map((r) => r.symbol), ["g"]);
-});
-
-test("symbolPart: los símbolos de la serie son de la parte de la serie, como en el servidor", () => {
-  const def = {
-    quantities: [{ symbol: "P", per_determination: true }, { symbol: "x", per_point: true }],
-    intermediates: [{ symbol: "v" }],
-    results: [
-      { symbol: "g", name: "g", formula: "1/P", is_final: true },
-      { symbol: "h", name: "h", formula: "g*slope", is_final: true },
-    ],
-    parts: [
-      { id: "stat", effective_kind: "estadistico", determinations: { count: 3, label: "Medida", average: true } },
-      { id: "reg", effective_kind: "regresion_lineal" },
-    ],
-    sections: [{ part_id: "stat", quantities: ["P"], results: [] }],
-  };
-  for (const s of ["slope", "intercept", "x", "v", "x_max", "v_at_x_max"]) assert.equal(symbolPart(def, s), "reg", s);
-  assert.equal(symbolPart(def, "h"), null);
-  assert.deepEqual(expandDeterminationResults(def, def.results.slice(1)).map((r) => r.symbol), ["h"]);
-});
-
-test("symbolPart: un x_medio ya definido no se confunde con el promedio de x", () => {
-  const def = (aggregates) => ({
-    quantities: [],
-    aggregates,
-    results: [
-      { symbol: "x", formula: "1" },
-      { symbol: "k", formula: "2*x_medio" },
-    ],
-    parts: [{ id: "stat" }, { id: "reg" }],
-    sections: [{ part_id: "stat", quantities: [], results: ["x"] }],
-  });
-  assert.equal(symbolPart(def([]), "k"), "stat");
-  assert.equal(symbolPart(def([{ symbol: "x_medio" }]), "k"), null);
 });

@@ -1344,6 +1344,12 @@ function renderCurvesList(def, practiceId) {
   `;
 }
 
+function offersPerDetermination(qty) {
+  const def = state.practiceDefinition;
+  if (!qty) return Boolean(def?.resolved?.practice_determinations);
+  return qty.per_determination || Boolean(determinationsFor(def, qty.symbol));
+}
+
 function seriesPractice() {
   return POINT_KINDS.includes(state.practiceDefinition?.analysis_kind);
 }
@@ -1383,7 +1389,7 @@ function renderQuantityForm(qty, practiceId) {
       <label data-for-roles="serie_replicas">Réplicas por punto
         <input name="replicas_per_point" type="number" min="1" step="1" required value="${v("replicas_per_point")}" placeholder="cantidad" />
       </label>
-      ${qty?.per_determination || determinationsFor(state.practiceDefinition, qty?.symbol ?? "") ? `<label class="detail-form-checkbox">
+      ${offersPerDetermination(qty) ? `<label class="detail-form-checkbox">
         <input type="checkbox" name="per_determination" ${qty?.per_determination ? "checked" : ""} />
         Se repite por determinación
       </label>` : ""}

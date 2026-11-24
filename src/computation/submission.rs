@@ -167,6 +167,7 @@ pub async fn create_form_submission(
     validate_student_results(&definition, &input.student_results)?;
 
     let analysis = analyze_definition(pool, &definition, &input.measurements).await?;
+    check_determination_groups(&definition, &input.measurements)?;
     let series = series_quantity_ids(&definition);
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match &input.meta {
@@ -297,7 +298,7 @@ pub fn validate_student_results(
     check_student_result_symbols(definition, results).map_err(|e| anyhow::anyhow!(e))
 }
 
-/// Acepta mensurandos, agregados finales, `Re#k` por punto, `g#k` por determinación o `g_medio`.
+/// Acepta mensurandos y agregados finales, `Re#k` por punto, y `g#k` o `g_medio` de un final que se repite.
 ///
 /// ```
 /// use quantify::computation::check_student_result_symbols;
@@ -318,10 +319,15 @@ pub fn check_student_result_symbols(
     definition: &crate::practices::PracticeDefinition,
     results: &[db::StudentResultInput],
 ) -> Result<(), String> {
-    let valid: std::collections::HashSet<&str> = definition
+    let finals: std::collections::HashSet<&str> = definition
         .results
         .iter()
+        .filter(|r| r.is_final)
         .map(|r| r.symbol.as_str())
+        .collect();
+    let valid: std::collections::HashSet<&str> = finals
+        .iter()
+        .copied()
         .chain(
             definition
                 .aggregates
@@ -335,16 +341,8 @@ pub fn check_student_result_symbols(
         .iter()
         .map(|p| p.symbol.as_str())
         .collect();
-    let finals: std::collections::HashSet<&str> = definition
-        .results
-        .iter()
-        .filter(|r| r.is_final)
-        .map(|r| r.symbol.as_str())
-        .collect();
-    let (by_determination, non_final): (Vec<_>, Vec<_>) = definition
-        .determination_results()
-        .into_iter()
-        .partition(|(s, _)| finals.contains(s.as_str()));
+    let repeated = definition.determination_results();
+    let averaged = definition.averaged_results();
     for result in results {
         let symbol = result.symbol.trim();
         if let Some((base, idx)) = symbol.split_once('#') {
@@ -357,26 +355,47 @@ pub fn check_student_result_symbols(
                 continue;
             }
             if k.to_string() == idx
-                && by_determination
+                && finals.contains(base)
+                && repeated
                     .iter()
                     .any(|(s, d)| s == base && (1..=d.count).contains(&k))
             {
                 continue;
             }
-        } else if valid.contains(symbol)
-            && !by_determination
-                .iter()
-                .chain(&non_final)
-                .any(|(s, _)| s == symbol)
-            || by_determination
-                .iter()
-                .any(|(s, d)| d.average && symbol.strip_suffix("_medio") == Some(s.as_str()))
+        } else if valid.contains(symbol) && !repeated.iter().any(|(s, _)| s == symbol)
+            || symbol
+                .strip_suffix("_medio")
+                .is_some_and(|b| finals.contains(b) && averaged.iter().any(|a| a == b))
         {
             continue;
         }
         return Err(format!(
             "el simbolo \"{symbol}\" no es un mensurando de esta practica"
         ));
+    }
+    Ok(())
+}
+
+pub(crate) fn check_determination_groups(
+    definition: &crate::practices::PracticeDefinition,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<()> {
+    for q in definition
+        .quantities
+        .iter()
+        .filter(|q| q.per_determination && !q.optional)
+    {
+        let Some(d) = definition.quantity_determinations(&q.symbol) else {
+            continue;
+        };
+        let groups = measurements
+            .iter()
+            .find(|m| m.quantity_id == q.id)
+            .and_then(|m| m.operator_replicas.as_deref())
+            .unwrap_or_default();
+        if let Some(k) = (0..d.count as usize).find(|&k| groups.get(k).is_none_or(Vec::is_empty)) {
+            anyhow::bail!("\"{}\": falta cargar {} {}.", q.name, d.label.trim(), k + 1);
+        }
     }
     Ok(())
 }
@@ -397,6 +416,7 @@ pub async fn update_form_submission(
     }
 
     let analysis = analyze_definition(pool, &definition, measurements).await?;
+    check_determination_groups(&definition, measurements)?;
     let series = series_quantity_ids(&definition);
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match meta {

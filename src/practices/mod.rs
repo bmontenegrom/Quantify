@@ -388,6 +388,6 @@ pub use display::version_symbols;
 pub use layout::*;
 pub use library::*;
 pub use lifecycle::*;
-pub use parts::{is_point_based, CompareOptions};
+pub use parts::{is_point_based, ClientDefinition, CompareOptions, Resolved, ScopedDeterminations};
 pub use template::*;
 pub use versions::*;

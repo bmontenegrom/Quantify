@@ -589,11 +589,11 @@ pub(super) async fn practice_definition(
         return Ok(Json(DefinitionView {
             compare_options: Some(definition.compare_options()),
             formula_scopes: Some(formula_scopes(&definition)),
-            definition,
+            definition: practices::ClientDefinition::from(definition),
         }));
     }
     Ok(Json(DefinitionView {
-        definition: published_definition(&state, &id).await?,
+        definition: published_definition(&state, &id).await?.into(),
         compare_options: None,
         formula_scopes: None,
     }))
@@ -602,7 +602,7 @@ pub(super) async fn practice_definition(
 #[derive(Debug, Serialize)]
 pub(super) struct DefinitionView {
     #[serde(flatten)]
-    definition: practices::PracticeDefinition,
+    definition: practices::ClientDefinition,
     #[serde(skip_serializing_if = "Option::is_none")]
     compare_options: Option<practices::CompareOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -623,8 +623,8 @@ pub(super) struct FormulaScopes {
 
 fn formula_scopes(def: &practices::PracticeDefinition) -> FormulaScopes {
     let views = view_scopes(def);
-    let uses = result_uses(def);
-    let averaged = averaged_results(def);
+    let averaged = def.averaged_results();
+    let uses = result_uses(def, &averaged);
     let view = def.point_view();
     let key = |id: Option<&str>| id.unwrap_or_default().to_string();
     FormulaScopes {
@@ -1552,7 +1552,7 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
 }
 
 fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
-    let averaged = averaged_results(def);
+    let averaged = def.averaged_results();
     let uses: Vec<Vec<usize>> = def
         .results
         .iter()
@@ -1622,11 +1622,8 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
 fn determination_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     let mut problems = Vec::new();
     for q in def.quantities.iter().filter(|q| q.per_determination) {
-        let part = def
-            .quantity_part(&q.symbol)
-            .and_then(|id| def.parts.iter().find(|p| p.id == id));
-        if def.determinations_in(part).is_none() {
-            let place = match part {
+        if def.quantity_determinations(&q.symbol).is_none() {
+            let place = match def.part_of_quantity(&q.symbol) {
                 Some(part) => format!("la parte \"{}\"", part.title),
                 None if def.parts.is_empty() => "la práctica".to_string(),
                 None => "los datos compartidos".to_string(),
@@ -1642,25 +1639,20 @@ fn determination_problems(def: &practices::PracticeDefinition) -> Vec<ElementPro
             });
         }
     }
-    let averaged = crate::computation::per_determination_symbols(&def.quantities, &def.results);
+    let averaged = def.averaged_results();
     let symbols: Vec<&str> = practices::version_symbols(def).collect();
     for r in def.results.iter().filter(|r| averaged.contains(&r.symbol)) {
-        let part = def
-            .result_part(&r.symbol)
-            .and_then(|id| def.parts.iter().find(|p| p.id == id));
-        if def.determinations_in(part).is_some_and(|d| d.average) {
-            let average = format!("{}_medio", r.symbol);
-            if symbols.contains(&average.as_str()) {
-                problems.push(ElementProblem {
-                    check: "el promedio de",
-                    element: format!("el mensurando {}", r.symbol),
-                    message: format!(
-                        "su promedio se llamaría {average}, que ya es otro símbolo de la práctica"
-                    ),
-                    kind: "result",
-                    id: Some(r.id.clone()),
-                });
-            }
+        let average = format!("{}_medio", r.symbol);
+        if symbols.contains(&average.as_str()) {
+            problems.push(ElementProblem {
+                check: "el promedio de",
+                element: format!("el mensurando {}", r.symbol),
+                message: format!(
+                    "su promedio se llamaría {average}, que ya es otro símbolo de la práctica"
+                ),
+                kind: "result",
+                id: Some(r.id.clone()),
+            });
         }
     }
     problems
@@ -2004,10 +1996,9 @@ fn result_scope_in(def: &practices::PracticeDefinition) -> Vec<String> {
             .map(|q| q.symbol.clone())
             .chain(def.results.iter().map(|r| r.symbol.clone()))
             .chain(
-                def.determination_results()
+                def.averaged_results()
                     .into_iter()
-                    .filter(|(_, d)| d.average)
-                    .map(|(s, _)| format!("{s}_medio")),
+                    .map(|s| format!("{s}_medio")),
             )
             .collect(),
     }
@@ -2374,8 +2365,7 @@ fn validate_quantity_in(
     validate_quantity(input)?;
     let part = quantity_id
         .and_then(|id| def.quantities.iter().find(|q| q.id == id))
-        .and_then(|q| def.quantity_part(&q.symbol))
-        .and_then(|id| def.parts.iter().find(|p| p.id == id));
+        .and_then(|q| def.part_of_quantity(&q.symbol));
     let point_based = match part {
         Some(part) => practices::is_point_based(Some(def.part_kind(part))),
         None if !def.parts.is_empty() => def.series_part().is_some(),
@@ -2451,24 +2441,18 @@ fn validate_result(
         .map_err(|e| AppError::bad_request(e.to_string()))
 }
 
-fn result_uses(def: &practices::PracticeDefinition) -> Vec<(String, Vec<String>)> {
-    let averaged = averaged_results(def);
+fn result_uses(
+    def: &practices::PracticeDefinition,
+    averaged: &[String],
+) -> Vec<(String, Vec<String>)> {
     def.results
         .iter()
         .map(|r| {
             (
                 r.symbol.clone(),
-                symbols_with_averages(&averaged, &r.formula),
+                symbols_with_averages(averaged, &r.formula),
             )
         })
-        .collect()
-}
-
-fn averaged_results(def: &practices::PracticeDefinition) -> Vec<String> {
-    def.determination_results()
-        .into_iter()
-        .filter(|(_, d)| d.average)
-        .map(|(s, _)| s)
         .collect()
 }
 
@@ -2509,8 +2493,8 @@ fn check_no_cycle(
     if let Some(r) = edited.results.iter_mut().find(|r| r.symbol == own) {
         r.formula = input.formula.trim().to_string();
     }
-    let averaged = averaged_results(&edited);
-    let mut excluded = results_using(&result_uses(&edited), own);
+    let averaged = edited.averaged_results();
+    let mut excluded = results_using(&result_uses(&edited, &averaged), own);
     excluded.push(symbol.to_string());
     let Some(used) = symbols_with_averages(&averaged, input.formula.trim())
         .into_iter()
@@ -3258,8 +3242,9 @@ mod tests {
         };
         assert!(result_scope(&def(true, "1/T")).contains(&"g_medio".to_string()));
         let views = view_scopes(&def(true, "1/T"));
-        let uses = result_uses(&def(true, "1/T"));
-        let averaged = averaged_results(&def(true, "1/T"));
+        let averaged_def = def(true, "1/T");
+        let averaged = averaged_def.averaged_results();
+        let uses = result_uses(&averaged_def, &averaged);
         assert!(
             !existing_result_scope(&views, &uses, &averaged, "g").contains(&"g_medio".to_string())
         );
@@ -3307,10 +3292,11 @@ mod tests {
             results: vec![result("y", "1"), result("x", "y + x_medio")],
             ..plain.clone()
         };
+        let plain_averaged = plain_with_y.averaged_results();
         assert!(existing_result_scope(
             &view_scopes(&plain_with_y),
-            &result_uses(&plain_with_y),
-            &averaged_results(&plain_with_y),
+            &result_uses(&plain_with_y, &plain_averaged),
+            &plain_averaged,
             "y"
         )
         .contains(&"x_medio".to_string()));

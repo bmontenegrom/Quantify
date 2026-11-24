@@ -3662,6 +3662,35 @@ fn a_common_result_can_use_an_average() {
 }
 
 #[test]
+fn a_submission_needs_every_determination_of_a_required_quantity() {
+    let def = per_determination_definition(true);
+    let groups = |g: Vec<Vec<f64>>| {
+        vec![MeasurementInput {
+            operator_replicas: Some(g),
+            ..measurement("T", &[])
+        }]
+    };
+    assert!(super::submission::check_determination_groups(
+        &def,
+        &groups(vec![vec![2.0], vec![3.0], vec![4.0]])
+    )
+    .is_ok());
+    let short =
+        super::submission::check_determination_groups(&def, &groups(vec![vec![2.0], vec![3.0]]))
+            .unwrap_err();
+    assert_eq!(short.to_string(), "\"T\": falta cargar Medida 3.");
+    assert!(super::submission::check_determination_groups(
+        &def,
+        &groups(vec![vec![2.0], vec![], vec![4.0]])
+    )
+    .is_err());
+    assert!(super::submission::check_determination_groups(&def, &[]).is_err());
+    let mut optional = def.clone();
+    optional.quantities[0].optional = true;
+    assert!(super::submission::check_determination_groups(&optional, &[]).is_ok());
+}
+
+#[test]
 fn students_report_each_determination_and_the_average() {
     let result = |symbol: &str| db::StudentResultInput {
         symbol: symbol.into(),
@@ -3672,10 +3701,12 @@ fn students_report_each_determination_and_the_average() {
         check_student_result_symbols(def, &[result(s)]).is_ok()
     };
     let with_average = per_determination_definition(true);
-    for s in ["g#1", "g#3", "g_medio", "doble", "rel"] {
+    for s in ["g#1", "g#3", "g_medio"] {
         assert!(ok(&with_average, s), "{s}");
     }
     for s in [
+        "doble",
+        "rel",
         "g",
         "g#0",
         "g#4",
@@ -3688,6 +3719,15 @@ fn students_report_each_determination_and_the_average() {
     ] {
         assert!(!ok(&with_average, s), "{s}");
     }
+    let mut final_common = per_determination_definition(true);
+    for r in final_common
+        .results
+        .iter_mut()
+        .filter(|r| r.symbol == "doble")
+    {
+        r.is_final = true;
+    }
+    assert!(ok(&final_common, "doble"));
     let without_average = per_determination_definition(false);
     assert!(ok(&without_average, "g#2"));
     assert!(!ok(&without_average, "g_medio"));
