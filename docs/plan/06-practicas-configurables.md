@@ -1171,13 +1171,16 @@ Decisiones:
    - Decidido: `<símbolo>_medio` se puede usar en otras fórmulas (alcance, ciclos y parte del
      símbolo lo reconocen) y como resultado del alumno.
    - E2E `smoke-determinaciones` con una práctica de prueba.
-3. **`feat(practicas)`: el docente configura determinaciones (F9, 3/5).**
-   - Editor: cantidad, etiqueta, promedio y forma de mostrar (práctica o parte), y "¿Se repite
-     por determinación?" en las magnitudes.
-   - Panel de problemas, y revisión con los resultados por determinación y los promedios.
-   - Desde el PR 2, el servidor guarda `per_point = false` en una magnitud por determinación. Al
-     quitarle "por determinación", el editor tiene que volver a pedir el rol (serie o no) en vez
-     de dejar el `per_point` en falso.
+3. **`feat(practicas)`: el docente configura determinaciones (F9, 3a/5).** ✅
+   - Editor: cantidad, etiqueta, promedio y forma de mostrar, en "Configuración del análisis"
+     (práctica sin partes) o en la fila de cada parte estadística; y "Se repite por
+     determinación" en las magnitudes (con la marca en la columna "Cómo se ingresa").
+   - El panel de problemas y la prueba del borrador ya mostraban las determinaciones y los
+     promedios: no cambian.
+   - El servidor guarda `per_point = false` en una magnitud por determinación; al desmarcarla, el
+     editor vuelve a derivar `per_point` del rol, como en una magnitud nueva.
+4. **`feat(practicas)`: el servidor manda resueltas partes y determinaciones, y se valida la
+   entrega (F9, 3b/5).**
    - El formulario del alumno replica en JS la lógica de partes y determinaciones del servidor
      (`symbolPart`, `perDeterminationSymbols`, `determinationsFor` frente a `part_of`,
      `per_determination_symbols`, `determinations_in`) y ya difieren en detalles. Que la
@@ -1199,12 +1202,12 @@ Decisiones:
      veces por validación; calcularlo una vez y pasarlo si llega a notarse.
      Lo mismo en el cliente: `finalPart` llama a `expandDeterminationResults` por cada resultado
      final; se va con lo anterior cuando el servidor mande la parte de cada símbolo.
-4. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
+5. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
    - P1 sin partes, con 3 operadores en pestañas; Hidrostática con 26 magnitudes y 3 medidas en
      bloques con promedio.
    - Golden regenerados, más el test con los números de hoy.
    - Los E2E que usan `p1-estadistica-op1` o los símbolos `m1_3`… se actualizan.
-5. **`refactor(practicas)`: se retira `operator_count` (F9, 5/5).**
+6. **`refactor(practicas)`: se retira `operator_count` (F9, 5/5).**
    - Las determinaciones reemplazan al motor de operadores, su ruta y su editor;
      `smoke-operadores` pasa a determinaciones.
    - Doc: F9 queda marcada como hecha.

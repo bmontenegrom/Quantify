@@ -21,6 +21,7 @@ import {
   POINT_KINDS,
   downloadJson,
   readJsonFile,
+  determinationsFor,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 import { showToast } from "./toast.js";
@@ -363,6 +364,7 @@ export function renderPracticesPage() {
   }
 
   const kind = def?.analysis_kind;
+  const statistical = kind == null || kind === "estadistico";
   const pointBased = POINT_KINDS.includes(kind);
   const openPanels = new Set(
     [...practiceWorkspace.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel),
@@ -408,7 +410,8 @@ export function renderPracticesPage() {
       ${def?.parts?.length
         ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes».</p>`
         : renderAnalysisKindForm(practice, def)}
-      ${kind == null || kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
+      ${statistical ? renderOperatorCountForm(practice, def) : ""}
+      ${!def?.parts?.length && statistical ? determinationsFormHtml(def, null, def?.determinations) : ""}
     </section>
 
     ${renderLayoutSection(practice, def)}
@@ -475,6 +478,9 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelector("#practice-kind-form")?.addEventListener("submit", savePracticeKind);
   practiceWorkspace.querySelector("#practice-regression-form")?.addEventListener("submit", savePracticeRegressionFormulas);
   practiceWorkspace.querySelector("#practice-operators-form")?.addEventListener("submit", savePracticeOperatorCount);
+  practiceWorkspace.querySelectorAll("[data-determinations-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => saveDeterminations(event, practice.id));
+  });
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
   practiceWorkspace.querySelector('#new-result-form [name="section_id"]')?.addEventListener("change", (e) => {
@@ -1170,6 +1176,9 @@ function renderRegressionFormulasForm(practice, def) {
 }
 
 function renderOperatorCountForm(practice, def) {
+  if (def?.determinations || def?.parts?.some((p) => p.determinations)) {
+    return `<p class="submission-meta">Operadores: quitá las determinaciones para usarlos.</p>`;
+  }
   const count = def?.operator_count ?? "";
   return `
     <form id="practice-operators-form" class="detail-form detail-form-grid">
@@ -1182,6 +1191,34 @@ function renderOperatorCountForm(practice, def) {
         <button type="submit">Guardar operadores</button>
       </div>
     </form>
+  `;
+}
+
+function determinationsFormHtml(def, part, d) {
+  if ((def?.operator_count ?? 0) >= 2) {
+    return `<p class="submission-meta">Determinaciones: quitá los operadores para usarlas.</p>`;
+  }
+  const partAttr = part ? ` data-part-id="${escapeHtml(part.id)}"` : "";
+  return `
+    <details class="add-panel" data-add-panel="determinations-${escapeHtml(part?.id ?? "practice")}">
+      <summary>Determinaciones${d ? `: ${d.count} (${escapeHtml(d.label)})` : ""}</summary>
+      <form class="detail-form detail-form-grid" data-determinations-form${partAttr}${d ? " data-had-determinations" : ""}>
+        <label>Cantidad
+          <input name="count" type="number" min="2" step="1" value="${d?.count ?? ""}" placeholder="sin determinaciones" />
+        </label>
+        <label>Etiqueta <input name="label" maxlength="40" value="${escapeHtml(d?.label ?? "Medida")}" /></label>
+        ${selectFieldHtml("Mostrar en", "display", [
+          ["bloques", "Bloques (todas juntas)"],
+          ["pestanas", "Pestañas (una por determinación)"],
+        ], d?.display ?? "bloques")}
+        <label class="detail-form-checkbox">
+          <input type="checkbox" name="average" ${d?.average ? "checked" : ""} />
+          Promediar (cada mensurando suma &lt;símbolo&gt;_medio)
+        </label>
+        <p class="submission-meta">Las magnitudes marcadas «Se repite por determinación» se cargan una vez por determinación y sus mensurandos se calculan en cada una. Vacío = sin determinaciones.</p>
+        <div class="detail-actions"><button type="submit">Guardar determinaciones</button></div>
+      </form>
+    </details>
   `;
 }
 
@@ -1346,6 +1383,10 @@ function renderQuantityForm(qty, practiceId) {
       <label data-for-roles="serie_replicas">Réplicas por punto
         <input name="replicas_per_point" type="number" min="1" step="1" required value="${v("replicas_per_point")}" placeholder="cantidad" />
       </label>
+      ${qty?.per_determination || determinationsFor(state.practiceDefinition, qty?.symbol ?? "") ? `<label class="detail-form-checkbox">
+        <input type="checkbox" name="per_determination" ${qty?.per_determination ? "checked" : ""} />
+        Se repite por determinación
+      </label>` : ""}
       <label class="detail-form-checkbox">
         <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />
         Opcional (puede quedar sin lecturas sin bloquear la entrega)
@@ -1385,7 +1426,7 @@ function renderQuantitiesList(def, practiceId) {
         <td>${inlineMathHtml(q.name)}</td>
         <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
-        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedFor(q))).short}</td>
+        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedFor(q))).short}${q.per_determination ? " · por determinación" : ""}</td>
         <td>${sectionSelectHtml(def, "quantities", q)}</td>
         <td class="directory-actions">
           ${moveButtonsHtml("quantities", q.id, i, quantities.length)}
@@ -1569,6 +1610,28 @@ async function savePracticeOperatorCount(event) {
   }, "Operadores actualizados");
 }
 
+async function saveDeterminations(event, practiceId) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const raw = Object.fromEntries(new FormData(form).entries());
+  const count = Number(raw.count) || 0;
+  if (!count && !form.dataset.hadDeterminations) {
+    await runPracticeAction(async () => {}, "Sin determinaciones: no hay nada que guardar");
+    return;
+  }
+  const determinations = count
+    ? { count, label: raw.label.trim(), average: "average" in raw, display: raw.display }
+    : null;
+  const part = form.dataset.partId;
+  const url = part
+    ? `/api/practices/${practiceId}/parts/${part}/determinations`
+    : `/api/practices/${practiceId}/determinations`;
+  await runPracticeAction(async () => {
+    await postJson(url, { determinations });
+    await reloadDefinition(practiceId);
+  }, count ? "Determinaciones guardadas" : "Determinaciones quitadas");
+}
+
 async function savePracticeRegressionFormulas(event) {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
@@ -1604,7 +1667,7 @@ function syncQuantityForm(form, { initial = false } = {}) {
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
   const flags = roleFlags(raw.role, seriesPractice(), {
-    per_point: form.dataset.perPoint === "1",
+    per_point: form.dataset.perPoint === "1" || form.dataset.perDetermination === "1",
     repeated: form.dataset.repeated === "1",
     is_given: form.dataset.given === "1",
     replicas_per_point: Number(form.dataset.replicas) || null,
@@ -1622,7 +1685,7 @@ function quantityPayloadFromForm(form) {
     ...flags,
     replicas_per_point: raw.replicas_per_point && replicas > 0 ? replicas : null,
     optional: "optional" in raw,
-    per_determination: form.dataset.perDetermination === "1",
+    per_determination: "per_determination" in raw,
     slot_count: slots,
     display_symbol: raw.display_symbol,
     label_mode: raw.label_mode,
@@ -1758,6 +1821,7 @@ function renderLayoutSection(practice, def) {
             `<option value="${k}" ${k === p.effective_kind ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
           ).join("")}
         </select>
+        ${p.effective_kind === "estadistico" ? determinationsFormHtml(def, p, p.determinations) : ""}
       </td>
       <td class="directory-actions">
         ${moveButtonsHtml("parts", p.id, i, parts.length)}

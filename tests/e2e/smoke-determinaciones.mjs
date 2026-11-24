@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { ARTIFACTS, STUDENT, TEACHER, apiPost, assert, step, withE2E } from "./lib.mjs";
+import { ARTIFACTS, STUDENT, TEACHER, apiPost, assert, fillAndSubmit, openAddForm, openPractice, step, waitForStatus, withE2E } from "./lib.mjs";
 
 const PORT = process.env.E2E_PORT ?? "8191";
 const NAME = "Determinaciones";
@@ -13,10 +13,45 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   const { page } = await login(TEACHER, "docente");
   const base = `/api/practices/${ID}`;
   await apiPost(page, "/api/practices", { name: NAME, analysis_kind: "estadistico" });
-  await apiPost(page, `${base}/determinations`, determinations("bloques"));
-  const T = await apiPost(page, `${base}/quantities`, {
-    symbol: "T", name: "Periodo", unit: "s", repeated: true, quantity: "tiempo", input_widget: "teclado", per_determination: true,
-  });
+  await apiPost(page, `${base}/operator-count`, { count: 2 });
+  await openPractice(page, ID);
+  await page.waitForSelector('#practice-workspace :text("quitá los operadores para usarlas")');
+  assert(
+    (await page.locator("[data-determinations-form]").count()) === 0,
+    "con operadores no debía ofrecerse el formulario de determinaciones",
+  );
+  await apiPost(page, `${base}/operator-count`, { count: 0 });
+  await openPractice(page, ID);
+  await openAddForm(page, "[data-determinations-form]:not([data-part-id])");
+  await fillAndSubmit(page, "[data-determinations-form]:not([data-part-id])", {});
+  await waitForStatus(page, "no hay nada que guardar");
+  await openAddForm(page, "[data-determinations-form]:not([data-part-id])");
+  await fillAndSubmit(page, "[data-determinations-form]:not([data-part-id])", { count: "3", display: "bloques" }, { average: true });
+  await waitForStatus(page, "Determinaciones guardadas");
+  const saved = (await getJson(page, `${base}/definition`)).determinations;
+  assert(
+    saved?.count === 3 && saved.label === "Medida" && saved.average && saved.display === "bloques",
+    `determinaciones guardadas desde el editor: ${JSON.stringify(saved)}`,
+  );
+  await page.waitForSelector('#practice-workspace :text("quitá las determinaciones para usarlos")');
+  assert((await page.locator("#practice-operators-form").count()) === 0, "con determinaciones no debía ofrecerse el formulario de operadores");
+
+  step("docente: marca T como «se repite por determinación» y, al desmarcar otra, vuelve a su rol");
+  await openAddForm(page, "#new-quantity-form");
+  await fillAndSubmit(page, "#new-quantity-form", { symbol: "T", name: "Periodo", unit: "s", quantity: "tiempo" }, { per_determination: true });
+  await waitForStatus(page, "Magnitud agregada");
+  await page.waitForSelector('#practice-workspace tr:has(code:text-is("T")) td:has-text("por determinación")');
+  await openAddForm(page, "#new-quantity-form");
+  await fillAndSubmit(page, "#new-quantity-form", { symbol: "z", name: "Auxiliar", unit: "s", quantity: "tiempo" }, { per_determination: true, optional: true });
+  await page.waitForSelector('#practice-workspace tr:has(code:text-is("z"))');
+  await page.click('#practice-workspace tr:has(code:text-is("z")) [data-edit-quantity]');
+  await fillAndSubmit(page, "[data-edit-quantity-form]", {}, { per_determination: false });
+  await waitForStatus(page, "Magnitud actualizada");
+  const byDef = (await getJson(page, `${base}/definition`)).quantities;
+  const T = byDef.find((q) => q.symbol === "T");
+  const z = byDef.find((q) => q.symbol === "z");
+  assert(T.per_determination, "T debía quedar por determinación");
+  assert(!z.per_determination && z.per_point, `z sin determinación debía volver a per_point por su rol: ${JSON.stringify(z)}`);
   const m = await apiPost(page, `${base}/quantities`, {
     symbol: "m", name: "Masa", unit: "kg", repeated: false, is_given: true, per_determination: true,
   });
@@ -150,7 +185,18 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     post(`${mbase}/quantities`, { symbol, name: symbol, unit: "", repeated: false, quantity: null, ...extra });
   const directa = await post(`${mbase}/parts`, { title: "Directa" });
   const ajuste = await post(`${mbase}/parts`, { title: "Ajuste" });
-  await post(`${mbase}/parts/${directa.id}/determinations`, determinations("pestanas"));
+  await openPractice(page, mixed.id);
+  const partForm = `[data-determinations-form][data-part-id="${directa.id}"]`;
+  await openAddForm(page, partForm);
+  await fillAndSubmit(page, partForm, { count: "3", display: "pestanas" }, { average: true });
+  await waitForStatus(page, "Determinaciones guardadas");
+  await openAddForm(page, "#new-quantity-form");
+  assert(
+    (await page.locator('#new-quantity-form [name="per_determination"]').count()) === 0,
+    "con partes, una magnitud nueva todavía no tiene parte: no debía ofrecer «por determinación»",
+  );
+  const directaSaved = (await getJson(page, `${mbase}/definition`)).parts.find((p) => p.id === directa.id);
+  assert(directaSaved.determinations?.display === "pestanas", "la parte debía guardar sus determinaciones desde su fila");
   const sDirecta = await post(`${mbase}/sections`, { title: "Pendulo", part_id: directa.id });
   const sAjuste = await post(`${mbase}/sections`, { title: "Barrido", part_id: ajuste.id });
   const P = await qty("P", {});
@@ -172,6 +218,24 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   await post(`${mbase}/results`, { symbol: "f", name: "Frecuencia", unit: "", formula: "1/P", is_final: true });
   await post(`${mbase}/results`, { symbol: "k", name: "k", unit: "", formula: "slope", is_final: true, section_id: sAjuste.id });
   await post(`${mbase}/results`, { symbol: "c", name: "Constante", unit: "", formula: "2", is_final: true });
+  await openPractice(page, mixed.id);
+  const perDetBox = (symbol) =>
+    page.locator(`#practice-workspace tr:has(code:text-is("${symbol}")) + tr [name="per_determination"]`);
+  await page.click('#practice-workspace tr:has(code:text-is("P")) [data-edit-quantity]');
+  assert(await perDetBox("P").isChecked(), "P, en la parte con medidas, debía ofrecer «por determinación» marcado");
+  await page.click('#practice-workspace tr:has(code:text-is("x")) [data-edit-quantity]');
+  await page.waitForSelector('#practice-workspace tr:has(code:text-is("x")) + tr [data-edit-quantity-form]');
+  assert((await perDetBox("x").count()) === 0, "x, en la parte de ajuste, no debía ofrecer «por determinación»");
+  await page.click("#practice-workspace [data-practice-try-draft]");
+  await page.click("#draft-preview-fill:not([disabled])");
+  const preview = page.waitForResponse((r) => r.url().includes("/analyze-preview"));
+  await page.click("#submit-button");
+  const previewed = await (await preview).json();
+  const directaPreview = previewed.parts.find((p) => p.analysis.determinations?.length === 3)?.analysis;
+  assert(directaPreview, "la prueba del borrador debía calcular las tres medidas de la parte");
+  assert(directaPreview.derived.some((d) => d.symbol === "f_medio"), "la prueba del borrador debía traer f_medio");
+  await page.waitForSelector('#submit-status:has-text("no se guardó nada")');
+  await page.click("#draft-preview-back");
   await post(`${mbase}/status`, { status: "publicada" });
   const { courses } = await page.evaluate(async () => (await fetch("/api/academic/context")).json());
   await post(`/api/academic/courses/${courses[0].id}/practices`, { practice_id: mixed.id });
