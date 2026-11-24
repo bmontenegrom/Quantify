@@ -27,6 +27,9 @@ const fn base(symbol: &'static str, factor: f64, dims: Dims, prefixable: bool) -
 
 const BASES: &[Base] = &[
     base("m", 1.0, [1, 0, 0, 0, 0, 0, 0, 0], true),
+    base("%", 1e-2, NONE, false),
+    base("ppm", 1e-6, NONE, false),
+    base("ppb", 1e-9, NONE, false),
     base("g", 1e-3, [0, 1, 0, 0, 0, 0, 0, 0], true),
     base("s", 1.0, [0, 0, 1, 0, 0, 0, 0, 0], true),
     base("A", 1.0, [0, 0, 0, 1, 0, 0, 0, 0], true),
@@ -77,40 +80,14 @@ const PREFIXES: &[(&str, f64)] = &[
 
 const CELSIUS_OFFSET: f64 = 273.15;
 
-const WHOLE: &[(&str, Unit)] = &[
-    (
-        "%",
-        Unit {
-            factor: 1e-2,
-            offset: 0.0,
-            dims: NONE,
-        },
-    ),
-    (
-        "ppm",
-        Unit {
-            factor: 1e-6,
-            offset: 0.0,
-            dims: NONE,
-        },
-    ),
-    (
-        "ppb",
-        Unit {
-            factor: 1e-9,
-            offset: 0.0,
-            dims: NONE,
-        },
-    ),
-    (
-        "% m/v",
-        Unit {
-            factor: 10.0,
-            offset: 0.0,
-            dims: [-3, 1, 0, 0, 0, 0, 0, 0],
-        },
-    ),
-];
+const WHOLE: &[(&str, Unit)] = &[(
+    "% m/v",
+    Unit {
+        factor: 10.0,
+        offset: 0.0,
+        dims: [-3, 1, 0, 0, 0, 0, 0, 0],
+    },
+)];
 
 const CANDIDATES: &[&str] = &[
     "nm", "µm", "mm", "cm", "m", "km", "µL", "mL", "L", "cm3", "m3", "µg", "mg", "g", "kg", "µs",
@@ -184,9 +161,9 @@ fn symbol_unit(symbol: &str) -> Option<Unit> {
     })
 }
 
-fn factor_unit(token: &str) -> Option<(Unit, i32)> {
+fn factor_unit(token: &str) -> Option<(Unit, i32, &str)> {
     if token == "1" {
-        return Some((ONE, 1));
+        return Some((ONE, 1, token));
     }
     let digits = token.len() - token.trim_end_matches(|c: char| c.is_ascii_digit()).len();
     let (mut symbol, exponent) = token.split_at(token.len() - digits);
@@ -205,7 +182,7 @@ fn factor_unit(token: &str) -> Option<(Unit, i32)> {
     if exp == 0 || symbol == "C" {
         return None;
     }
-    Some((symbol_unit(symbol)?, exp))
+    Some((symbol_unit(symbol)?, exp, symbol))
 }
 
 fn product(text: &str) -> Option<Unit> {
@@ -215,10 +192,10 @@ fn product(text: &str) -> Option<Unit> {
         let mut tokens = piece.split_whitespace().peekable();
         tokens.peek()?;
         tokens.try_fold(acc, |acc, token| {
-            let (unit, exp) = factor_unit(token)?;
+            let (unit, exp, symbol) = factor_unit(token)?;
             if token != "1" {
                 factors += 1;
-                celsius = exp == 1 && token.trim_end_matches(['1', '^']) == "°C";
+                celsius = exp == 1 && symbol == "°C";
             }
             acc.times(unit, exp)
         })
@@ -279,7 +256,7 @@ pub fn parse(text: &str) -> Option<Unit> {
     }
 }
 
-const NOT_UNITS: &[&str] = &["pH"];
+const NOT_UNITS: &[&str] = &["pH", "% m/m", "% v/v"];
 
 fn normalize(text: &str) -> String {
     text.chars()
@@ -366,10 +343,11 @@ pub fn input_units(declared: &str) -> Vec<InputUnit> {
 }
 
 fn push_new(out: &mut Vec<InputUnit>, input: InputUnit) {
-    let same = |a: f64, b: f64| (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1e-12);
+    let same_factor = |a: f64, b: f64| (a - b).abs() <= 1e-9 * a.abs().max(b.abs());
+    let same_offset = |a: f64, b: f64| (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1e-12);
     if !out
         .iter()
-        .any(|u| same(u.factor, input.factor) && same(u.offset, input.offset))
+        .any(|u| same_factor(u.factor, input.factor) && same_offset(u.offset, input.offset))
     {
         out.push(input);
     }
@@ -400,6 +378,9 @@ fn unprefixed(declared: &str) -> Option<&str> {
 /// assert_eq!(scale_factor("", "%"), None);
 /// ```
 pub fn scale_factor(from: &str, to: &str) -> Option<f64> {
+    if normalize(from) == normalize(to) {
+        return Some(1.0);
+    }
     if from.trim().is_empty() || to.trim().is_empty() {
         return None;
     }
@@ -537,6 +518,8 @@ mod tests {
         assert!(labels("kg/m3").contains(&"g/cm3".to_string()));
         assert!(!labels("kg/m3").contains(&"g/mL".to_string()));
         assert!(labels("Pa").contains(&"MPa".to_string()));
+        let tiny = labels("TN/m");
+        assert!(tiny.contains(&"nN/m".to_string()), "{tiny:?}");
         let angular = labels("rad/s");
         assert!(angular.contains(&"°/s".to_string()), "{angular:?}");
         assert!(!angular.contains(&"Grad/s".to_string()), "{angular:?}");
@@ -546,7 +529,9 @@ mod tests {
     fn temperature_keeps_its_offset_only_alone() {
         assert_eq!(si("°C").offset, 273.15);
         assert_eq!(si("J/°C").offset, 0.0);
-        for same in ["°C1", "°C^1", "1 °C", "1.°C", "°C/1", "°C/(1)"] {
+        for same in [
+            "°C1", "°C^1", "°C01", "°C^01", "1 °C", "1.°C", "°C/1", "°C/(1)",
+        ] {
             assert_eq!(si(same), si("°C"), "{same}");
         }
         assert_eq!(si("°C2").offset, 0.0);
@@ -604,6 +589,11 @@ mod tests {
         assert!(close(scale_factor("g/cm3", "kg/m3").unwrap(), 1e3));
         assert!(close(scale_factor("M", "mol/L").unwrap(), 1.0));
         assert_eq!(scale_factor("s", "g"), None);
+        assert_eq!(scale_factor("div", "div"), Some(1.0));
+        assert_eq!(scale_factor("", ""), Some(1.0));
+        assert!(close(si("%/°C").factor, 1e-2));
+        assert!(si("ppm/K").compatible(&si("1/K")));
+        assert!(close(si("%/min").factor, 1e-2 / 60.0));
     }
 
     #[test]

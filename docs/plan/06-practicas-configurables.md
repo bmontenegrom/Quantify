@@ -1288,6 +1288,11 @@ Decisiones:
 3. **`feat(formularios)`: el alumno carga en la unidad que elija (F10, 3/4).**
    - Desplegable de unidades compatibles en lugar del prefijo, en los mismos 8 lugares, también
      en los resultados finales. Se guarda en la unidad declarada, como hoy.
+   - Decidir qué pasa con las diferencias de temperatura: `input_units` aplica el desplazamiento
+     de 273,15 entre K y °C, que está bien para una temperatura pero no para una diferencia
+     (un ΔT declarado en K, cargado en °C, se guardaría con 273,15 de más). La unidad sola no
+     lo distingue: o el desplegable no ofrece conversiones con desplazamiento, o la magnitud
+     dice si es una diferencia.
    - En `src/units.rs`, la lógica de prefijos está dos veces: `unprefixed` repite el recorrido
      de prefijos de `symbol_unit`, e `INPUT_PREFIXES` es una copia a mano de `PREFIXES` (sin
      `u`, `c`, `d` y `h`, con `""`). Unificarlo cuando `input_units` pase a usarse acá, por
