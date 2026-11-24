@@ -117,7 +117,7 @@ const CANDIDATES: &[&str] = &[
     "ms", "s", "min", "h", "°C", "K", "µmol", "mmol", "mol", "µM", "mM", "M", "mmol/L", "mol/L",
     "mg/L", "g/L", "g/cm3", "g/mL", "kg/m3", "µV", "mV", "V", "kV", "µA", "mA", "A", "ohm", "kohm",
     "Mohm", "pF", "nF", "µF", "mF", "F", "µH", "mH", "H", "Hz", "kHz", "MHz", "Pa", "hPa", "kPa",
-    "MPa", "°", "rad", "%", "ppm", "ppb",
+    "MPa", "°", "rad", "°/s", "rad/s", "%", "ppm", "ppb",
 ];
 
 const INPUT_PREFIXES: &[&str] = &["p", "n", "µ", "m", "", "k", "M", "G", "T"];
@@ -209,22 +209,22 @@ fn factor_unit(token: &str) -> Option<(Unit, i32)> {
 }
 
 fn product(text: &str) -> Option<Unit> {
-    let symbols: Vec<&str> = text
-        .split(['.', '·', '*', ' '])
-        .filter(|t| !t.is_empty() && *t != "1")
-        .collect();
-    let lone_celsius = matches!(symbols[..], [only] if only.trim_end_matches(['1', '^']) == "°C");
+    let mut factors = 0;
+    let mut celsius = false;
     let unit = text.split(['.', '·', '*']).try_fold(ONE, |acc, piece| {
         let mut tokens = piece.split_whitespace().peekable();
         tokens.peek()?;
         tokens.try_fold(acc, |acc, token| {
             let (unit, exp) = factor_unit(token)?;
+            if token != "1" {
+                factors += 1;
+                celsius = exp == 1 && token.trim_end_matches(['1', '^']) == "°C";
+            }
             acc.times(unit, exp)
         })
     })?;
-    let kelvin = [0, 0, 0, 0, 1, 0, 0, 0];
     Some(Unit {
-        offset: if lone_celsius && unit.dims == kelvin {
+        offset: if factors == 1 && celsius {
             CELSIUS_OFFSET
         } else {
             0.0
@@ -271,7 +271,10 @@ pub fn parse(text: &str) -> Option<Unit> {
     };
     let unit = product(numerator)?;
     match denominator {
-        Some(d) => unit.times(product(d)?, -1),
+        Some(d) => match product(d)? {
+            d if d.factor == 1.0 && d.dims == NONE => Some(unit),
+            d => unit.times(d, -1),
+        },
         None => Some(unit),
     }
 }
@@ -287,8 +290,15 @@ fn normalize(text: &str) -> String {
             '²' => '2',
             '³' => '3',
             '¹' => '1',
-            '⁻' => '-',
-            '⋅' => '·',
+            '⁰' => '0',
+            '⁴' => '4',
+            '⁵' => '5',
+            '⁶' => '6',
+            '⁷' => '7',
+            '⁸' => '8',
+            '⁹' => '9',
+            '⁻' | '−' => '-',
+            '⋅' | '∙' | '•' => '·',
             '×' => '*',
             other => other,
         })
@@ -339,7 +349,7 @@ pub fn input_units(declared: &str) -> Vec<InputUnit> {
     let Some(unit) = parse(declared).filter(|_| !declared.is_empty()) else {
         return out;
     };
-    for candidate in CANDIDATES.iter().filter(|c| **c != declared) {
+    for candidate in CANDIDATES {
         if let Some(c) = parse(candidate).filter(|c| c.compatible(&unit)) {
             push_new(&mut out, relative(candidate, c, unit));
         }
@@ -347,9 +357,6 @@ pub fn input_units(declared: &str) -> Vec<InputUnit> {
     if let Some(base) = unprefixed(declared).filter(|_| out.len() == 1) {
         for prefix in INPUT_PREFIXES {
             let label = format!("{prefix}{base}");
-            if label == declared {
-                continue;
-            }
             if let Some(c) = parse(&label).filter(|c| c.compatible(&unit)) {
                 push_new(&mut out, relative(&label, c, unit));
             }
@@ -509,6 +516,11 @@ mod tests {
         assert_eq!(si("cm³"), si("cm3"));
         assert_eq!(si("s⁻¹"), si("s-1"));
         assert_eq!(si("Pa⋅s"), si("Pa.s"));
+        assert_eq!(si("Pa∙s"), si("Pa.s"));
+        assert_eq!(si("Pa•s"), si("Pa.s"));
+        assert_eq!(si("s−1"), si("s-1"));
+        assert_eq!(si("m⁴"), si("m4"));
+        assert_eq!(si("s⁻⁹"), si("s-9"));
         assert_eq!(si("kg×m"), si("kg*m"));
         assert_eq!(si("k\u{2126}"), si("kohm"));
     }
@@ -525,13 +537,16 @@ mod tests {
         assert!(labels("kg/m3").contains(&"g/cm3".to_string()));
         assert!(!labels("kg/m3").contains(&"g/mL".to_string()));
         assert!(labels("Pa").contains(&"MPa".to_string()));
+        let angular = labels("rad/s");
+        assert!(angular.contains(&"°/s".to_string()), "{angular:?}");
+        assert!(!angular.contains(&"Grad/s".to_string()), "{angular:?}");
     }
 
     #[test]
     fn temperature_keeps_its_offset_only_alone() {
         assert_eq!(si("°C").offset, 273.15);
         assert_eq!(si("J/°C").offset, 0.0);
-        for same in ["°C1", "°C^1", "1 °C", "1.°C"] {
+        for same in ["°C1", "°C^1", "1 °C", "1.°C", "°C/1", "°C/(1)"] {
             assert_eq!(si(same), si("°C"), "{same}");
         }
         assert_eq!(si("°C2").offset, 0.0);

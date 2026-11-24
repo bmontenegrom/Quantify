@@ -1288,6 +1288,10 @@ Decisiones:
 3. **`feat(formularios)`: el alumno carga en la unidad que elija (F10, 3/4).**
    - Desplegable de unidades compatibles en lugar del prefijo, en los mismos 8 lugares, también
      en los resultados finales. Se guarda en la unidad declarada, como hoy.
+   - En `src/units.rs`, la lógica de prefijos está dos veces: `unprefixed` repite el recorrido
+     de prefijos de `symbol_unit`, e `INPUT_PREFIXES` es una copia a mano de `PREFIXES` (sin
+     `u`, `c`, `d` y `h`, con `""`). Unificarlo cuando `input_units` pase a usarse acá, por
+     ejemplo con un `symbol_unit` que devuelva el prefijo que encontró.
 4. **`feat(editor)`: el docente ve si la unidad se reconoce (F10, 4/4).**
    - Aviso en el panel de problemas para unidades que no se reconocen, y vista previa de las
      unidades de entrada en la magnitud.
