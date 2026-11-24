@@ -227,12 +227,15 @@ fn factor_unit(token: &str) -> Option<(Unit, i32)> {
 }
 
 fn product(text: &str) -> Option<Unit> {
-    text.split(['.', '·', '*', ' '])
+    let mut tokens = text
+        .split(['.', '·', '*', ' '])
         .filter(|t| !t.is_empty())
-        .try_fold(ONE, |acc, token| {
-            let (unit, exp) = factor_unit(token)?;
-            acc.times(unit, exp)
-        })
+        .peekable();
+    tokens.peek()?;
+    tokens.try_fold(ONE, |acc, token| {
+        let (unit, exp) = factor_unit(token)?;
+        acc.times(unit, exp)
+    })
 }
 
 /// Interpreta una unidad escrita como en las prácticas (`m/s2`, `Pa.s`, `kohm`, `°C`, `mol/L`).
@@ -428,7 +431,8 @@ mod tests {
     #[test]
     fn unknown_or_malformed_units_are_not_recognized() {
         for text in [
-            "div", "m/s/s", "/s", "m/", "xyz", "m3x", "m256", "J64", "m127.m", "km120",
+            "div", "m/s/s", "/s", "m/", "xyz", "m3x", "m256", "J64", "m127.m", "km120", "*", ".",
+            "· ", "m/(.)", "*/s", "m/()",
         ] {
             assert!(parse(text).is_none(), "{text}");
         }
@@ -476,6 +480,7 @@ mod tests {
             ["m/s2", "pm/s2", "nm/s2", "µm/s2", "mm/s2", "km/s2", "Mm/s2", "Gm/s2", "Tm/s2"]
         );
         assert_eq!(labels("div"), ["div"]);
+        assert_eq!(labels("*"), ["*"]);
         assert_eq!(labels(""), [""]);
         let kelvin = input_units("°C")
             .into_iter()
