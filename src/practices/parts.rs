@@ -384,21 +384,12 @@ impl PracticeDefinition {
         }
     }
 
-    fn statistical_operators(&self) -> Option<i64> {
-        if is_point_based(self.analysis_kind.as_deref()) {
-            None
-        } else {
-            self.operator_count
-        }
-    }
-
     pub fn shared_view(&self) -> PracticeDefinition {
         let has_series = self.series_part().is_some();
         PracticeDefinition {
             analysis_kind: Some("estadistico".into()),
             x_formula: None,
             y_formula: None,
-            operator_count: self.statistical_operators(),
             determinations: None,
             quantities: self
                 .quantities
@@ -430,7 +421,6 @@ impl PracticeDefinition {
             analysis_kind: Some(self.part_kind(part).to_string()),
             x_formula: self.x_formula.clone().filter(|_| is_series),
             y_formula: self.y_formula.clone().filter(|_| is_series),
-            operator_count: self.statistical_operators(),
             determinations: part
                 .determinations
                 .clone()

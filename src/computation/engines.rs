@@ -1,8 +1,8 @@
 use super::formula::{compile_formula, eval_compiled, CONSTANTS};
 use super::{
     AggregateComputation, CurveSpec, DerivedComputation, DeterminationComputation, FormAnalysis,
-    LiveValue, MeasurementInput, OperatorComputation, PartAnalysis, PointResultComputation,
-    QuantityComputation, RegressionResult, ScatterResult,
+    LiveValue, MeasurementInput, PartAnalysis, PointResultComputation, QuantityComputation,
+    RegressionResult, ScatterResult,
 };
 use crate::analysis;
 use crate::db::{InstrumentScale, PracticeQuantity, PracticeResult};
@@ -157,7 +157,6 @@ fn compute_quantities(
 ///     &HashMap::new(),
 ///     &[m("L", vec![1.0], Some(0.002)), m("T", vec![2.0, 2.0], None)],
 ///     None,
-///     None,
 /// )
 /// .unwrap();
 /// assert!((analysis.derived[0].value - std::f64::consts::PI.powi(2)).abs() < 1e-9);
@@ -167,7 +166,6 @@ pub fn compute(
     results: &[PracticeResult],
     scales: &HashMap<String, InstrumentScale>,
     measurements: &[MeasurementInput],
-    operator_count: Option<i64>,
     determinations: Option<&crate::practices::Determinations>,
 ) -> anyhow::Result<FormAnalysis> {
     let mut warnings = Vec::new();
@@ -176,9 +174,7 @@ pub fn compute(
         .map(|m| (m.quantity_id.as_str(), m))
         .collect();
     let symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    let operator_count = operator_count.unwrap_or(0);
-
-    if let Some(determinations) = determinations.filter(|_| operator_count <= 1) {
+    if let Some(determinations) = determinations {
         return compute_determinations(
             quantities,
             results,
@@ -189,82 +185,24 @@ pub fn compute(
         );
     }
 
-    if operator_count <= 1 {
-        let all: Vec<&PracticeQuantity> = quantities.iter().collect();
-        let mut means = HashMap::new();
-        let mut us = HashMap::new();
-        let computed = compute_quantities(
-            &all,
-            &by_quantity,
-            scales,
-            None,
-            &mut means,
-            &mut us,
-            &mut warnings,
-        )?;
-        let derived = derive_results(results, &symbols, &means, &us, &mut warnings)?;
-        return Ok(FormAnalysis {
-            quantities: computed,
-            regression: None,
-            scatters: Vec::new(),
-            derived,
-            operators: Vec::new(),
-            determinations: Vec::new(),
-            point_results: Vec::new(),
-            aggregates: Vec::new(),
-            warnings,
-            parts: Vec::new(),
-        });
-    }
-
-    let shared: Vec<&PracticeQuantity> = quantities
-        .iter()
-        .filter(|q| q.is_given || !q.repeated)
-        .collect();
-    let per_operator: Vec<&PracticeQuantity> = quantities
-        .iter()
-        .filter(|q| q.repeated && !q.is_given)
-        .collect();
-
-    let mut shared_means = HashMap::new();
-    let mut shared_us = HashMap::new();
-    let shared_computed = compute_quantities(
-        &shared,
+    let all: Vec<&PracticeQuantity> = quantities.iter().collect();
+    let mut means = HashMap::new();
+    let mut us = HashMap::new();
+    let computed = compute_quantities(
+        &all,
         &by_quantity,
         scales,
         None,
-        &mut shared_means,
-        &mut shared_us,
+        &mut means,
+        &mut us,
         &mut warnings,
     )?;
-
-    let mut operators = Vec::with_capacity(operator_count as usize);
-    for i in 0..operator_count as usize {
-        let mut means = shared_means.clone();
-        let mut us = shared_us.clone();
-        let op_quantities = compute_quantities(
-            &per_operator,
-            &by_quantity,
-            scales,
-            Some(i),
-            &mut means,
-            &mut us,
-            &mut warnings,
-        )?;
-        let derived = derive_results(results, &symbols, &means, &us, &mut warnings)?;
-        operators.push(OperatorComputation {
-            label: format!("Operador {}", i + 1),
-            quantities: op_quantities,
-            derived,
-        });
-    }
-
+    let derived = derive_results(results, &symbols, &means, &us, &mut warnings)?;
     Ok(FormAnalysis {
-        quantities: shared_computed,
+        quantities: computed,
         regression: None,
         scatters: Vec::new(),
-        derived: Vec::new(),
-        operators,
+        derived,
         determinations: Vec::new(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
@@ -506,7 +444,6 @@ fn compute_determinations(
         regression: None,
         scatters: Vec::new(),
         derived: shared,
-        operators: Vec::new(),
         determinations: per_quantities
             .into_iter()
             .zip(by_determination)
@@ -1071,7 +1008,6 @@ pub fn compute_regresion(
         }),
         scatters: Vec::new(),
         derived,
-        operators: Vec::new(),
         determinations: Vec::new(),
         point_results: point_results_out,
         aggregates: aggregates_out,
@@ -1148,7 +1084,6 @@ pub fn compute_curva(
         regression: None,
         scatters,
         derived: Vec::new(),
-        operators: Vec::new(),
         determinations: Vec::new(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
@@ -1437,14 +1372,6 @@ pub async fn analyze_definition(
         part_analysis
             .derived
             .retain(|d| !shared_results.contains(&d.symbol.as_str()));
-        for operator in &mut part_analysis.operators {
-            operator
-                .quantities
-                .retain(|q| !shared_symbols.contains(&q.symbol.as_str()));
-            operator
-                .derived
-                .retain(|d| !shared_results.contains(&d.symbol.as_str()));
-        }
         part_analysis
             .warnings
             .retain(|w| !analysis.warnings.contains(w));
@@ -1594,7 +1521,6 @@ fn run_kind_raw(
         &definition.results,
         scales,
         measurements,
-        definition.operator_count,
         definition.determinations.as_ref(),
     )
 }

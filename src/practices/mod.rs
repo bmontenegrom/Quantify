@@ -133,7 +133,6 @@ pub struct PracticeDefinition {
     pub quantities: Vec<PracticeQuantity>,
     pub results: Vec<PracticeResult>,
     pub curves: Vec<PracticeCurve>,
-    pub operator_count: Option<i64>,
     pub intermediates: Vec<PracticeIntermediate>,
     pub point_results: Vec<PracticePointResult>,
     pub aggregates: Vec<PracticeAggregate>,
@@ -164,16 +163,16 @@ pub struct Determinations {
 }
 
 impl Determinations {
-    /// Revisa la cantidad (de 2 a `MAX_OPERATORS`) y el nombre (hasta 40 caracteres).
+    /// Revisa la cantidad (de 2 a `MAX_DETERMINATIONS`) y el nombre (hasta 40 caracteres).
     ///
     /// ```
     /// let d = |count| quantify::practices::Determinations { count, label: "Medida".into(), average: false, display: Default::default() };
     /// assert!(d(3).validate().is_ok() && d(1).validate().is_err());
     /// ```
     pub fn validate(&self) -> Result<(), String> {
-        if !(2..=MAX_OPERATORS).contains(&self.count) {
+        if !(2..=MAX_DETERMINATIONS).contains(&self.count) {
             return Err(format!(
-                "La cantidad de determinaciones tiene que ser de 2 a {MAX_OPERATORS}."
+                "La cantidad de determinaciones tiene que ser de 2 a {MAX_DETERMINATIONS}."
             ));
         }
         let label = self.label.trim();

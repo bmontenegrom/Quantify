@@ -27,7 +27,6 @@ pub(crate) fn flattened(mut analysis: FormAnalysis) -> FormAnalysis {
         analysis.quantities.extend(a.quantities);
         analysis.derived.extend(a.derived);
         analysis.scatters.extend(a.scatters);
-        analysis.operators.extend(a.operators);
         analysis.point_results.extend(a.point_results);
         analysis.aggregates.extend(a.aggregates);
         analysis.warnings.extend(a.warnings);
@@ -217,7 +216,6 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
             ..Default::default()
         }],
         curves: vec![],
-        operator_count: None,
         intermediates: vec![],
         point_results: vec![PracticePointResult {
             id: "Re".into(),
@@ -407,15 +405,7 @@ fn compute_propagates_q_l_a_b() {
         measurement("a", &[3.0]),
         measurement("b", &[4.0]),
     ];
-    let analysis = compute(
-        &quantities,
-        &results,
-        &HashMap::new(),
-        &measurements,
-        None,
-        None,
-    )
-    .unwrap();
+    let analysis = compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
     assert_eq!(analysis.quantities.len(), 3);
     let q_l = &analysis.quantities[0];
     assert_eq!(q_l.symbol, "l");
@@ -447,15 +437,7 @@ fn compute_propagates_uncertainty_to_measurand() {
         measurement("a", &[2.0]),
         measurement("b", &[3.0]),
     ];
-    let analysis = compute(
-        &quantities,
-        &results,
-        &HashMap::new(),
-        &measurements,
-        None,
-        None,
-    )
-    .unwrap();
+    let analysis = compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
     let q_l = &analysis.quantities[0];
     assert!(close(q_l.result.u_a, 1.0, 1e-12));
     let q = &analysis.derived[0];
@@ -467,65 +449,9 @@ fn compute_propagates_uncertainty_to_measurand() {
 #[test]
 fn compute_warns_on_missing_readings() {
     let quantities = vec![quantity("l")];
-    let analysis = compute(&quantities, &[], &HashMap::new(), &[], None, None).unwrap();
+    let analysis = compute(&quantities, &[], &HashMap::new(), &[], None).unwrap();
     assert_eq!(analysis.warnings.len(), 1);
     assert!(analysis.warnings[0].contains("no tiene lecturas"));
-}
-
-#[test]
-fn compute_with_operators_derives_per_operator() {
-    let t = quantity("T");
-    let mut l = quantity("L");
-    l.repeated = false;
-    let quantities = vec![t, l];
-    let results = vec![PracticeResult {
-        id: "r1".into(),
-        practice_id: "p1-estadistica".into(),
-        symbol: "g".into(),
-        name: "g".into(),
-        unit: "u".into(),
-        formula: "T + L".into(),
-        position: 0,
-        tolerance: None,
-        is_final: false,
-        has_uncertainty: true,
-        ..Default::default()
-    }];
-    let measurements = vec![
-        MeasurementInput {
-            quantity_id: "q-T".into(),
-            instrument_id: None,
-            scale_id: None,
-            values: vec![],
-            given_u: None,
-            point_replicas: None,
-            operator_replicas: Some(vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
-            operator_instruments: None,
-        },
-        measurement("L", &[5.0]),
-    ];
-    let a = compute(
-        &quantities,
-        &results,
-        &HashMap::new(),
-        &measurements,
-        Some(2),
-        None,
-    )
-    .unwrap();
-
-    assert_eq!(a.quantities.len(), 1);
-    assert_eq!(a.quantities[0].symbol, "L");
-    assert!(a.derived.is_empty());
-
-    assert_eq!(a.operators.len(), 2);
-    assert_eq!(a.operators[0].label, "Operador 1");
-    assert_eq!(a.operators[0].quantities.len(), 1);
-    assert_eq!(a.operators[0].quantities[0].symbol, "T");
-    assert!(close(a.operators[0].quantities[0].result.mean, 10.0, 1e-12));
-    assert!(close(a.operators[0].derived[0].value, 15.0, 1e-9));
-    assert!(close(a.operators[1].quantities[0].result.mean, 20.0, 1e-12));
-    assert!(close(a.operators[1].derived[0].value, 25.0, 1e-9));
 }
 
 #[tokio::test]
@@ -858,10 +784,8 @@ async fn create_form_submission_rejects_unknown_student_result_symbol() {
 }
 
 #[tokio::test]
-async fn operator_submission_stores_operator_index_per_operator() {
+async fn determination_submission_stores_each_determination_with_its_instrument() {
     let (pool, _dir) = setup().await;
-    p1_partes(&pool).await;
-    drop_parts(&pool, "p1-partes").await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -888,14 +812,10 @@ async fn operator_submission_stores_operator_index_per_operator() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    crate::practices::set_operator_count(&pool, "p1-partes", 2)
-        .await
-        .unwrap();
-    let def = crate::practices::definition(&pool, "p1-partes")
+    let def = crate::practices::definition(&pool, "p1-estadistica")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(def.operator_count, Some(2));
     db::seed_academic(&pool).await.unwrap();
     crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
         .await
@@ -908,23 +828,29 @@ async fn operator_submission_stores_operator_index_per_operator() {
     let t_id = def
         .quantities
         .iter()
-        .find(|q| q.symbol == "T1")
+        .find(|q| q.symbol == "T")
         .unwrap()
         .id
         .clone();
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-partes".into(),
+        practice_id: "p1-estadistica".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id.clone(),
-            instrument_id: Some(instrument_id),
-            scale_id: Some(scale_id.clone()),
+            instrument_id: None,
+            scale_id: None,
             values: vec![],
             given_u: None,
             point_replicas: None,
             operator_replicas: Some(vec![vec![1.0, 1.1], vec![2.0, 2.1, 2.2]]),
-            operator_instruments: None,
+            operator_instruments: Some(vec![
+                Default::default(),
+                crate::computation::InstrumentChoice {
+                    instrument_id: Some(instrument_id),
+                    scale_id: Some(scale_id.clone()),
+                },
+            ]),
         }],
         meta: None,
         table_number: None,
@@ -932,9 +858,6 @@ async fn operator_submission_stores_operator_index_per_operator() {
         student_comment: None,
         practice_version: None,
     };
-    crate::practices::publish_version(&pool, "p1-partes", None)
-        .await
-        .unwrap();
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
     let rows = db::measurements_for(&pool, &detail.id).await.unwrap();
     let t_rows: Vec<_> = rows.iter().filter(|m| m.quantity_id == t_id).collect();
@@ -950,16 +873,17 @@ async fn operator_submission_stores_operator_index_per_operator() {
         assert_eq!(reps, (0..expected_n as i64).collect::<Vec<_>>());
     }
     for m in &t_rows {
+        let expected = (m.operator_index == 1).then_some(scale_id.as_str());
         assert_eq!(
             m.scale_id.as_deref(),
-            Some(scale_id.as_str()),
+            expected,
             "operador {}",
             m.operator_index
         );
     }
 
-    let operators = detail.analysis["operators"].as_array().unwrap();
-    assert_eq!(operators.len(), 2);
+    let determinations = detail.analysis["determinations"].as_array().unwrap();
+    assert_eq!(determinations.len(), 3);
 }
 
 #[tokio::test]
@@ -2926,15 +2850,7 @@ fn compute_skips_a_result_it_cannot_evaluate_and_keeps_the_rest() {
     let quantities = vec![quantity("l"), quantity("a")];
     let results = vec![result("ok", "l*a"), result("roto", "l*zzz")];
     let measurements = vec![measurement("l", &[2.0]), measurement("a", &[3.0])];
-    let analysis = compute(
-        &quantities,
-        &results,
-        &HashMap::new(),
-        &measurements,
-        None,
-        None,
-    )
-    .unwrap();
+    let analysis = compute(&quantities, &results, &HashMap::new(), &measurements, None).unwrap();
     let symbols: Vec<&str> = analysis.derived.iter().map(|d| d.symbol.as_str()).collect();
     assert_eq!(symbols, ["ok"]);
     assert!(analysis
@@ -2999,7 +2915,6 @@ fn chained_results_propagate_against_the_inputs() {
         &HashMap::new(),
         &[measurement("x", &[1.0, 2.0, 3.0])],
         None,
-        None,
     )
     .unwrap();
     let by = |s: &str| a.derived.iter().find(|d| d.symbol == s).unwrap();
@@ -3027,7 +2942,6 @@ fn a_cycle_skips_its_results_with_a_warning() {
         &results,
         &HashMap::new(),
         &[measurement("x", &[1.0, 2.0])],
-        None,
         None,
     )
     .unwrap();
@@ -3661,7 +3575,6 @@ fn determinations_match_separate_symbols_and_a_hand_written_average() {
         &results,
         &HashMap::new(),
         &measurements,
-        None,
         Some(&d),
     )
     .unwrap();
@@ -3682,7 +3595,6 @@ fn determinations_match_separate_symbols_and_a_hand_written_average() {
         &separate_results,
         &HashMap::new(),
         &separate_measurements,
-        None,
         None,
     )
     .unwrap();
@@ -3730,7 +3642,6 @@ fn determinations_match_separate_symbols_and_a_hand_written_average() {
         &results,
         &HashMap::new(),
         &measurements,
-        None,
         Some(&determinations(false)),
     )
     .unwrap();
@@ -3757,7 +3668,6 @@ fn an_empty_determination_warns_with_its_label() {
         &[det_result("f", "1/T")],
         &HashMap::new(),
         &measurements,
-        None,
         Some(&crate::practices::Determinations {
             count: 12,
             ..determinations(false)
@@ -3797,7 +3707,6 @@ fn determination_warnings_are_grouped_and_the_average_is_not_blamed_on_one() {
         &[det_result("f", "1/T"), det_result("h", "T*zzz")],
         &HashMap::new(),
         &measurements,
-        None,
         Some(&determinations(true)),
     )
     .unwrap();
@@ -3840,7 +3749,6 @@ fn a_quantity_missing_in_every_determination_warns_once() {
             operator_instruments: None,
             ..measurement("T", &[])
         }],
-        None,
         Some(&determinations(false)),
     )
     .unwrap();
@@ -3866,7 +3774,6 @@ fn a_result_named_like_a_generated_symbol_does_not_crash() {
             operator_instruments: None,
             ..measurement("T", &[])
         }],
-        None,
         Some(&determinations(false)),
     );
     assert!(analysis.is_ok());
@@ -3904,7 +3811,6 @@ fn a_common_result_can_use_an_average() {
         &def.results,
         &HashMap::new(),
         &measurements,
-        None,
         def.determinations.as_ref(),
     )
     .unwrap();

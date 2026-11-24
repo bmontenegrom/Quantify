@@ -5,7 +5,6 @@
   "analysis_kind": "estadistico",
   "x_formula": null,
   "y_formula": null,
-  "operator_count": null,
   "parts": [
     {
       "key": "op1",

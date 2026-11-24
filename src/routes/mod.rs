@@ -247,10 +247,6 @@ fn practice_edit_routes(state: SharedState) -> Router<SharedState> {
             post(set_practice_regression_formulas),
         )
         .route(
-            "/practices/{id}/operator-count",
-            post(set_practice_operator_count),
-        )
-        .route(
             "/practices/{id}/determinations",
             post(set_practice_determinations),
         )

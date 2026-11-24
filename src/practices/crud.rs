@@ -14,7 +14,6 @@ struct PracticeConfigRow {
     analysis_kind: Option<String>,
     x_formula: Option<String>,
     y_formula: Option<String>,
-    operator_count: Option<i64>,
     current_version: Option<i64>,
     config_json: String,
 }
@@ -31,7 +30,7 @@ pub async fn definition_in(
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
     let row: Option<PracticeConfigRow> = sqlx::query_as(
-        "SELECT description, status, analysis_kind, x_formula, y_formula, operator_count, \
+        "SELECT description, status, analysis_kind, x_formula, y_formula, \
          (SELECT number FROM practice_versions WHERE id = practices.current_version_id) \
          AS current_version, config_json FROM practices WHERE id = ?1",
     )
@@ -61,7 +60,6 @@ pub async fn definition_in(
             quantities,
             results,
             curves,
-            operator_count: row.operator_count,
             intermediates,
             point_results,
             aggregates,
@@ -930,20 +928,6 @@ pub async fn set_determinations(
                 .await?
         }
     };
-    Ok(result.rows_affected() > 0)
-}
-
-pub async fn set_operator_count(
-    pool: &SqlitePool,
-    practice_id: &str,
-    count: i64,
-) -> anyhow::Result<bool> {
-    let stored: Option<i64> = if count <= 1 { None } else { Some(count) };
-    let result = sqlx::query("UPDATE practices SET operator_count = ?2 WHERE id = ?1")
-        .bind(practice_id)
-        .bind(stored)
-        .execute(pool)
-        .await?;
     Ok(result.rows_affected() > 0)
 }
 

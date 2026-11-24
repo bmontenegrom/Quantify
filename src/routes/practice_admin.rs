@@ -786,38 +786,6 @@ pub(super) struct RegressionFormulasBody {
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct OperatorCountBody {
-    count: i64,
-}
-
-pub(super) async fn set_practice_operator_count(
-    State(state): State<SharedState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    Json(body): Json<OperatorCountBody>,
-) -> Result<Json<Health>, AppError> {
-    require_teacher(&state, &headers).await?;
-    if body.count > 1 {
-        let def = load_definition(&state, &id).await?;
-        if def.determinations.is_some() || def.parts.iter().any(|p| p.determinations.is_some()) {
-            return Err(AppError::bad_request(
-                "La práctica ya tiene determinaciones: quitalas antes de usar operadores.",
-            ));
-        }
-    }
-    if body.count > practices::MAX_OPERATORS {
-        return Err(AppError::bad_request(format!(
-            "La cantidad de operadores no puede superar {}.",
-            practices::MAX_OPERATORS
-        )));
-    }
-    if !practices::set_operator_count(&state.pool, &id, body.count).await? {
-        return Err(AppError::not_found("practica no encontrada"));
-    }
-    Ok(Json(Health { status: "ok" }))
-}
-
-#[derive(Debug, Deserialize)]
 pub(super) struct DeterminationsBody {
     #[serde(default)]
     determinations: Option<practices::Determinations>,
@@ -841,11 +809,6 @@ async fn save_determinations(
     });
     if let Some(d) = &determinations {
         d.validate().map_err(AppError::bad_request)?;
-        if def.operator_count.is_some_and(|n| n > 1) {
-            return Err(AppError::bad_request(
-                "La práctica usa operadores: quitalos antes de configurar determinaciones.",
-            ));
-        }
     }
     let mut after = def.clone();
     match part_id {
@@ -2965,7 +2928,6 @@ mod tests {
             quantities: vec![qty("V"), qty("t")],
             results: vec![],
             curves: vec![],
-            operator_count: None,
             intermediates: vec![practices::PracticeIntermediate {
                 id: "i1".into(),
                 practice_id: "p".into(),
@@ -3057,7 +3019,6 @@ mod tests {
                 ..Default::default()
             }],
             curves: vec![],
-            operator_count: None,
             intermediates: vec![practices::PracticeIntermediate {
                 id: "i1".into(),
                 practice_id: "p".into(),
@@ -3518,7 +3479,6 @@ mod tests {
             quantities: vec![],
             results: vec![],
             curves: vec![],
-            operator_count: None,
             intermediates: vec![],
             point_results: vec![],
             aggregates: vec![],
@@ -5145,7 +5105,6 @@ mod tests {
         let mut all: Vec<&computation::DerivedComputation> = analysis.derived.iter().collect();
         for part in &analysis.parts {
             all.extend(&part.analysis.derived);
-            all.extend(part.analysis.operators.iter().flat_map(|o| &o.derived));
         }
         assert_eq!(all.iter().filter(|d| d.symbol == "L2").count(), 1);
         assert!(analysis.derived.iter().any(|d| d.symbol == "L2"));
@@ -5522,14 +5481,6 @@ mod tests {
             .unwrap()
             .id
             .clone();
-        let operators = |count: i64| {
-            set_practice_operator_count(
-                State(state.clone()),
-                headers.clone(),
-                Path("p2-cc".into()),
-                Json(OperatorCountBody { count }),
-            )
-        };
         let part_determinations = || {
             set_part_determinations(
                 State(state.clone()),
@@ -5543,13 +5494,7 @@ mod tests {
                 ),
             )
         };
-        let _ = operators(2).await.unwrap();
-        let blocked = part_determinations().await.err().unwrap();
-        assert!(blocked.message().contains("usa operadores"));
-        let _ = operators(1).await.unwrap();
         let _ = part_determinations().await.unwrap();
-        let blocked = operators(2).await.err().unwrap();
-        assert!(blocked.message().contains("ya tiene determinaciones"));
 
         let to_curve = set_part_kind(
             State(state.clone()),

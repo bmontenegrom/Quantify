@@ -1,7 +1,6 @@
 {
   "aggregates": [],
   "derived": [],
-  "operators": [],
   "parts": [
     {
       "analysis": {
@@ -28,7 +27,6 @@
             "value": 0.47608936349335795
           }
         ],
-        "operators": [],
         "point_results": [],
         "quantities": [
           {
@@ -140,7 +138,6 @@
             "value": 0.0009943636333428563
           }
         ],
-        "operators": [],
         "point_results": [],
         "quantities": [],
         "regression": {

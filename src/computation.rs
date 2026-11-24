@@ -140,13 +140,6 @@ pub struct ScatterResult {
 }
 
 #[derive(Debug, Serialize)]
-pub struct OperatorComputation {
-    pub label: String,
-    pub quantities: Vec<QuantityComputation>,
-    pub derived: Vec<DerivedComputation>,
-}
-
-#[derive(Debug, Serialize)]
 pub struct DeterminationComputation {
     pub label: String,
     pub quantities: Vec<QuantityComputation>,
@@ -182,8 +175,6 @@ pub struct FormAnalysis {
     pub regression: Option<RegressionResult>,
     pub scatters: Vec<ScatterResult>,
     pub derived: Vec<DerivedComputation>,
-    #[serde(default)]
-    pub operators: Vec<OperatorComputation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub determinations: Vec<DeterminationComputation>,
     #[serde(default)]
