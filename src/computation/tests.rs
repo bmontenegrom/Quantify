@@ -884,6 +884,19 @@ async fn determination_submission_stores_each_determination_with_its_instrument(
 
     let determinations = detail.analysis["determinations"].as_array().unwrap();
     assert_eq!(determinations.len(), 3);
+    let t_of = |k: usize| {
+        determinations[k]["quantities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|q| q["symbol"] == "T")
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(t_of(0)["scale_id"], serde_json::Value::Null);
+    assert_eq!(t_of(0)["result"]["u_b"], 0.0);
+    assert_eq!(t_of(1)["scale_id"], scale_id.as_str());
+    assert!(t_of(1)["result"]["u_b"].as_f64().unwrap() > 0.0);
 }
 
 #[tokio::test]
@@ -2843,6 +2856,19 @@ async fn analyze_validates_the_instruments_per_determination() {
         err.contains("no lleva un instrumento por determinación"),
         "{err}"
     );
+
+    let grouped = vec![MeasurementInput {
+        quantity_id: id_of("m_goma"),
+        instrument_id: None,
+        scale_id: None,
+        values: vec![],
+        given_u: None,
+        point_replicas: None,
+        operator_replicas: Some(vec![vec![12.5], vec![12.6]]),
+        operator_instruments: None,
+    }];
+    let err = err_of(grouped).await;
+    assert!(err.contains("no se carga por determinación"), "{err}");
 }
 
 #[test]

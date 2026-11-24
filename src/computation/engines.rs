@@ -1259,6 +1259,18 @@ pub async fn analyze_definition(
                 quantity.symbol
             );
         }
+        if measurement.operator_replicas.is_some()
+            && !(quantity.per_determination
+                && definition
+                    .quantity_determinations(&quantity.symbol)
+                    .is_some())
+        {
+            anyhow::bail!(
+                "\"{}\" ({}) no se carga por determinación: va como un único grupo de lecturas",
+                quantity.name,
+                quantity.symbol
+            );
+        }
         if measurement.operator_instruments.is_some()
             && (!quantity.per_determination || quantity.is_given)
         {
