@@ -50,6 +50,7 @@ const BASES: &[Base] = &[
     base("rad", 1.0, [0, 0, 0, 0, 0, 0, 0, 1], true),
     base("min", 60.0, [0, 0, 1, 0, 0, 0, 0, 0], false),
     base("h", 3600.0, [0, 0, 1, 0, 0, 0, 0, 0], false),
+    base("hs", 3600.0, [0, 0, 1, 0, 0, 0, 0, 0], false),
     base("°C", 1.0, [0, 0, 0, 0, 1, 0, 0, 0], false),
     base(
         "°",
@@ -108,22 +109,6 @@ const WHOLE: &[(&str, Unit)] = &[
         },
     ),
     (
-        "% m/m",
-        Unit {
-            factor: 1e-2,
-            offset: 0.0,
-            dims: NONE,
-        },
-    ),
-    (
-        "% v/v",
-        Unit {
-            factor: 1e-2,
-            offset: 0.0,
-            dims: NONE,
-        },
-    ),
-    (
         "% m/v",
         Unit {
             factor: 10.0,
@@ -136,7 +121,7 @@ const WHOLE: &[(&str, Unit)] = &[
 const CANDIDATES: &[&str] = &[
     "nm", "µm", "mm", "cm", "m", "km", "µL", "mL", "L", "cm3", "m3", "µg", "mg", "g", "kg", "µs",
     "ms", "s", "min", "h", "°C", "K", "µmol", "mmol", "mol", "µM", "mM", "M", "mmol/L", "mol/L",
-    "mg/L", "g/L", "g/mL", "g/cm3", "kg/m3", "µV", "mV", "V", "kV", "µA", "mA", "A", "ohm", "kohm",
+    "mg/L", "g/L", "g/cm3", "g/mL", "kg/m3", "µV", "mV", "V", "kV", "µA", "mA", "A", "ohm", "kohm",
     "Mohm", "pF", "nF", "µF", "mF", "F", "µH", "mH", "H", "Hz", "kHz", "MHz", "Pa", "hPa", "kPa",
     "°", "rad", "%", "ppm", "ppb",
 ];
@@ -223,6 +208,9 @@ fn factor_unit(token: &str) -> Option<(Unit, i32)> {
         }
         symbol = symbol.strip_suffix('^').unwrap_or(symbol);
     }
+    if exp == 0 {
+        return None;
+    }
     Some((symbol_unit(symbol)?, exp))
 }
 
@@ -250,7 +238,11 @@ fn product(text: &str) -> Option<Unit> {
 /// assert!(parse("div").is_none());
 /// ```
 pub fn parse(text: &str) -> Option<Unit> {
-    let text = text.trim();
+    let normalized = normalize(text);
+    let text = normalized.trim();
+    if NOT_UNITS.contains(&text) {
+        return None;
+    }
     if text.is_empty() {
         return Some(ONE);
     }
@@ -275,6 +267,23 @@ pub fn parse(text: &str) -> Option<Unit> {
         Some(d) => unit.times(product(d)?, -1),
         None => Some(unit),
     }
+}
+
+const NOT_UNITS: &[&str] = &["pH"];
+
+fn normalize(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            'º' => '°',
+            'μ' => 'µ',
+            'Ω' => 'Ω',
+            '²' => '2',
+            '³' => '3',
+            '¹' => '1',
+            '⁻' => '-',
+            other => other,
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -318,7 +327,7 @@ pub fn input_units(declared: &str) -> Vec<InputUnit> {
     };
     for candidate in CANDIDATES.iter().filter(|c| **c != declared) {
         if let Some(c) = parse(candidate).filter(|c| c.compatible(&unit)) {
-            out.push(relative(candidate, c, unit));
+            push_new(&mut out, relative(candidate, c, unit));
         }
     }
     if let Some(base) = unprefixed(declared).filter(|_| out.len() == 1) {
@@ -328,11 +337,21 @@ pub fn input_units(declared: &str) -> Vec<InputUnit> {
                 continue;
             }
             if let Some(c) = parse(&label).filter(|c| c.compatible(&unit)) {
-                out.push(relative(&label, c, unit));
+                push_new(&mut out, relative(&label, c, unit));
             }
         }
     }
     out
+}
+
+fn push_new(out: &mut Vec<InputUnit>, input: InputUnit) {
+    let same = |a: f64, b: f64| (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1e-12);
+    if !out
+        .iter()
+        .any(|u| same(u.factor, input.factor) && same(u.offset, input.offset))
+    {
+        out.push(input);
+    }
 }
 
 fn unprefixed(declared: &str) -> Option<&str> {
@@ -432,10 +451,43 @@ mod tests {
     fn unknown_or_malformed_units_are_not_recognized() {
         for text in [
             "div", "m/s/s", "/s", "m/", "xyz", "m3x", "m256", "J64", "m127.m", "km120", "*", ".",
-            "· ", "m/(.)", "*/s", "m/()",
+            "· ", "m/(.)", "*/s", "m/()", "pH", "m0", "s-0", "% m/m", "% v/v",
         ] {
             assert!(parse(text).is_none(), "{text}");
         }
+    }
+
+    #[test]
+    fn hs_is_hours_not_hectoseconds() {
+        assert!(close(si("hs").factor, 3600.0));
+        let min = input_units("hs")
+            .into_iter()
+            .find(|u| u.label == "min")
+            .unwrap();
+        assert!(close(min.factor, 1.0 / 60.0));
+    }
+
+    #[test]
+    fn lookalike_characters_are_normalized() {
+        assert_eq!(si("ºC"), si("°C"));
+        assert_eq!(si("\u{3bc}m"), si("\u{b5}m"));
+        assert_eq!(si("m/s²"), si("m/s2"));
+        assert_eq!(si("cm³"), si("cm3"));
+        assert_eq!(si("s⁻¹"), si("s-1"));
+        assert_eq!(si("k\u{2126}"), si("kohm"));
+    }
+
+    #[test]
+    fn input_units_skip_synonyms_of_what_is_already_offered() {
+        let labels = |unit: &str| -> Vec<String> {
+            input_units(unit).into_iter().map(|u| u.label).collect()
+        };
+        assert!(!labels("uF").contains(&"µF".to_string()));
+        assert!(!labels("M").contains(&"mol/L".to_string()));
+        assert!(!labels("mM").contains(&"mmol/L".to_string()));
+        assert!(!labels("k\u{2126}").contains(&"kohm".to_string()));
+        assert!(labels("kg/m3").contains(&"g/cm3".to_string()));
+        assert!(!labels("kg/m3").contains(&"g/mL".to_string()));
     }
 
     #[test]
