@@ -7,6 +7,36 @@ pub struct CompareOptions {
     pub shared: Vec<String>,
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct ClientDefinition {
+    #[serde(flatten)]
+    pub definition: PracticeDefinition,
+    pub resolved: Resolved,
+}
+
+impl From<PracticeDefinition> for ClientDefinition {
+    fn from(definition: PracticeDefinition) -> Self {
+        let resolved = definition.resolved();
+        ClientDefinition {
+            definition,
+            resolved,
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+pub struct Resolved {
+    pub symbol_parts: std::collections::BTreeMap<String, String>,
+    pub determinations: std::collections::BTreeMap<String, ScopedDeterminations>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ScopedDeterminations {
+    pub scope: String,
+    #[serde(flatten)]
+    pub determinations: super::Determinations,
+}
+
 fn symbols(view: &PracticeDefinition) -> Vec<String> {
     view.quantities.iter().map(|q| q.symbol.clone()).collect()
 }
@@ -242,6 +272,63 @@ impl PracticeDefinition {
                     .collect()
             })
             .collect()
+    }
+
+    pub fn averaged_results(&self) -> Vec<String> {
+        self.determination_results()
+            .into_iter()
+            .filter(|(_, d)| d.average)
+            .map(|(s, _)| s)
+            .collect()
+    }
+
+    /// La parte de cada símbolo y las determinaciones de cada magnitud y mensurando que se repite.
+    ///
+    /// ```
+    /// use quantify::practices::{Determinations, PracticeDefinition};
+    /// let q = quantify::db::PracticeQuantity { symbol: "T".into(), per_determination: true, ..Default::default() };
+    /// let r = |s: &str, f: &str| quantify::db::PracticeResult { symbol: s.into(), formula: f.into(), ..Default::default() };
+    /// let d = Determinations { count: 3, label: "Medida".into(), average: true, display: Default::default() };
+    /// let def = PracticeDefinition { quantities: vec![q], results: vec![r("g", "2*T"), r("k", "3")], determinations: Some(d), ..Default::default() };
+    /// let resolved = def.resolved();
+    /// assert_eq!(resolved.determinations["g"].determinations.count, 3);
+    /// assert!(resolved.determinations.contains_key("T") && !resolved.determinations.contains_key("k"));
+    /// ```
+    pub fn resolved(&self) -> Resolved {
+        let symbols = self
+            .quantities
+            .iter()
+            .map(|q| q.symbol.as_str())
+            .chain(self.results.iter().map(|r| r.symbol.as_str()))
+            .chain(self.intermediates.iter().map(|i| i.symbol.as_str()))
+            .chain(self.aggregates.iter().map(|a| a.symbol.as_str()))
+            .chain(self.point_results.iter().map(|p| p.symbol.as_str()));
+        let symbol_parts: std::collections::BTreeMap<String, String> = symbols
+            .filter_map(|s| Some((s.to_string(), self.symbol_part(s)?.to_string())))
+            .collect();
+        let scoped = |symbol: &str, d: &super::Determinations| ScopedDeterminations {
+            scope: symbol_parts.get(symbol).cloned().unwrap_or_default(),
+            determinations: d.clone(),
+        };
+        let mut determinations: std::collections::BTreeMap<String, ScopedDeterminations> = self
+            .quantities
+            .iter()
+            .filter_map(|q| {
+                let part = self
+                    .quantity_part(&q.symbol)
+                    .and_then(|id| self.parts.iter().find(|p| p.id == id));
+                let d = self.determinations_in(part)?;
+                Some((q.symbol.clone(), scoped(&q.symbol, d)))
+            })
+            .collect();
+        for (symbol, d) in self.determination_results() {
+            let entry = scoped(&symbol, &d);
+            determinations.insert(symbol, entry);
+        }
+        Resolved {
+            symbol_parts,
+            determinations,
+        }
     }
 
     /// Las determinaciones que valen en una parte estadística, o en la práctica si no tiene partes.

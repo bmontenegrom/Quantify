@@ -10,7 +10,7 @@ import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   prefixFactor, validateMeasurements,
   draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements, POINT_KINDS,
-  determinationsFor, expandDeterminationResults, cssEscape, statisticalDeterminations, symbolPart, groupError,
+  determinationsFor, expandDeterminationResults, cssEscape, symbolPart, groupError,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
@@ -276,19 +276,15 @@ const activeDetermination = new Map();
 let determinationPractice = null;
 
 function determinationTabsHtml(definition) {
-  if ((definition.operator_count ?? 0) >= 2) return "";
-  const scopes = (definition.parts ?? []).length
-    ? definition.parts.map((p) => ({ scope: p.id, d: statisticalDeterminations(p) }))
-    : [{ scope: "", d: definition.determinations }];
-  const used = new Set(
+  const scopes = new Map(
     definition.quantities
       .filter((q) => q.per_determination)
-      .map((q) => determinationsFor(definition, q.symbol)?.scope)
-      .filter((scope) => scope != null),
+      .map((q) => determinationsFor(definition, q.symbol))
+      .filter((d) => d?.display === "pestanas")
+      .map((d) => [d.scope, d]),
   );
-  return scopes
-    .filter(({ scope, d }) => d?.display === "pestanas" && used.has(scope))
-    .map(({ scope, d }) => {
+  return [...scopes]
+    .map(([scope, d]) => {
       const buttons = Array.from(
         { length: d.count },
         (_, i) => `<button type="button" class="part-tab" data-determination="${i}">${escapeHtml(d.label.trim())} ${i + 1}</button>`,
@@ -577,7 +573,7 @@ function finalsByPartHtml(definition, finals) {
 }
 
 function finalPart(definition, r) {
-  return partForResult(r.symbol) ?? expandDeterminationResults(definition, [r])[0].part ?? symbolPart(definition, r.symbol);
+  return partForResult(r.symbol) ?? symbolPart(definition, r.symbol);
 }
 
 function partForResult(symbol) {

@@ -43,12 +43,12 @@ pub(super) async fn submission_definition(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<practices::PracticeDefinition>, AppError> {
+) -> Result<Json<practices::ClientDefinition>, AppError> {
     let user = current_user(&state, &headers).await?;
     ensure_submission_access(&state, &user, &id).await?;
     practices::submission_definition(&state.pool, &id)
         .await?
-        .map(Json)
+        .map(|d| Json(d.into()))
         .ok_or_else(|| AppError::not_found("entrega no encontrada"))
 }
 

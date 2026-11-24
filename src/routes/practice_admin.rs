@@ -589,11 +589,11 @@ pub(super) async fn practice_definition(
         return Ok(Json(DefinitionView {
             compare_options: Some(definition.compare_options()),
             formula_scopes: Some(formula_scopes(&definition)),
-            definition,
+            definition: practices::ClientDefinition::from(definition),
         }));
     }
     Ok(Json(DefinitionView {
-        definition: published_definition(&state, &id).await?,
+        definition: published_definition(&state, &id).await?.into(),
         compare_options: None,
         formula_scopes: None,
     }))
@@ -602,7 +602,7 @@ pub(super) async fn practice_definition(
 #[derive(Debug, Serialize)]
 pub(super) struct DefinitionView {
     #[serde(flatten)]
-    definition: practices::PracticeDefinition,
+    definition: practices::ClientDefinition,
     #[serde(skip_serializing_if = "Option::is_none")]
     compare_options: Option<practices::CompareOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -623,8 +623,8 @@ pub(super) struct FormulaScopes {
 
 fn formula_scopes(def: &practices::PracticeDefinition) -> FormulaScopes {
     let views = view_scopes(def);
-    let uses = result_uses(def);
-    let averaged = averaged_results(def);
+    let averaged = def.averaged_results();
+    let uses = result_uses(def, &averaged);
     let view = def.point_view();
     let key = |id: Option<&str>| id.unwrap_or_default().to_string();
     FormulaScopes {
@@ -1552,7 +1552,7 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
 }
 
 fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
-    let averaged = averaged_results(def);
+    let averaged = def.averaged_results();
     let uses: Vec<Vec<usize>> = def
         .results
         .iter()
@@ -2004,10 +2004,9 @@ fn result_scope_in(def: &practices::PracticeDefinition) -> Vec<String> {
             .map(|q| q.symbol.clone())
             .chain(def.results.iter().map(|r| r.symbol.clone()))
             .chain(
-                def.determination_results()
+                def.averaged_results()
                     .into_iter()
-                    .filter(|(_, d)| d.average)
-                    .map(|(s, _)| format!("{s}_medio")),
+                    .map(|s| format!("{s}_medio")),
             )
             .collect(),
     }
@@ -2451,24 +2450,18 @@ fn validate_result(
         .map_err(|e| AppError::bad_request(e.to_string()))
 }
 
-fn result_uses(def: &practices::PracticeDefinition) -> Vec<(String, Vec<String>)> {
-    let averaged = averaged_results(def);
+fn result_uses(
+    def: &practices::PracticeDefinition,
+    averaged: &[String],
+) -> Vec<(String, Vec<String>)> {
     def.results
         .iter()
         .map(|r| {
             (
                 r.symbol.clone(),
-                symbols_with_averages(&averaged, &r.formula),
+                symbols_with_averages(averaged, &r.formula),
             )
         })
-        .collect()
-}
-
-fn averaged_results(def: &practices::PracticeDefinition) -> Vec<String> {
-    def.determination_results()
-        .into_iter()
-        .filter(|(_, d)| d.average)
-        .map(|(s, _)| s)
         .collect()
 }
 
@@ -2509,8 +2502,8 @@ fn check_no_cycle(
     if let Some(r) = edited.results.iter_mut().find(|r| r.symbol == own) {
         r.formula = input.formula.trim().to_string();
     }
-    let averaged = averaged_results(&edited);
-    let mut excluded = results_using(&result_uses(&edited), own);
+    let averaged = edited.averaged_results();
+    let mut excluded = results_using(&result_uses(&edited, &averaged), own);
     excluded.push(symbol.to_string());
     let Some(used) = symbols_with_averages(&averaged, input.formula.trim())
         .into_iter()
@@ -3258,8 +3251,8 @@ mod tests {
         };
         assert!(result_scope(&def(true, "1/T")).contains(&"g_medio".to_string()));
         let views = view_scopes(&def(true, "1/T"));
-        let uses = result_uses(&def(true, "1/T"));
-        let averaged = averaged_results(&def(true, "1/T"));
+        let averaged = def(true, "1/T").averaged_results();
+        let uses = result_uses(&def(true, "1/T"), &averaged);
         assert!(
             !existing_result_scope(&views, &uses, &averaged, "g").contains(&"g_medio".to_string())
         );
@@ -3309,8 +3302,8 @@ mod tests {
         };
         assert!(existing_result_scope(
             &view_scopes(&plain_with_y),
-            &result_uses(&plain_with_y),
-            &averaged_results(&plain_with_y),
+            &result_uses(&plain_with_y, &plain_with_y.averaged_results()),
+            &plain_with_y.averaged_results(),
             "y"
         )
         .contains(&"x_medio".to_string()));

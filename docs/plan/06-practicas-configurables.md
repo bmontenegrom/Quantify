@@ -1179,29 +1179,22 @@ Decisiones:
      promedios: no cambian.
    - El servidor guarda `per_point = false` en una magnitud por determinación; al desmarcarla, el
      editor vuelve a derivar `per_point` del rol, como en una magnitud nueva.
-4. **`feat(practicas)`: el servidor manda resueltas partes y determinaciones, y se valida la
-   entrega (F9, 3b/5).**
-   - El formulario del alumno replica en JS la lógica de partes y determinaciones del servidor
-     (`symbolPart`, `perDeterminationSymbols`, `determinationsFor` frente a `part_of`,
-     `per_determination_symbols`, `determinations_in`) y ya difieren en detalles. Que la
-     definición que recibe el cliente traiga la parte de cada símbolo y los mensurandos por
-     determinación (`determination_results()`), y borrar las copias en JS.
-     Diferencias ya vistas: `symbolPart` no tiene el respaldo `used_by_series` (un resultado
-     final sin sección que solo usa la serie queda sin parte en el cliente) y no exige que `x`
-     se promedie para ubicar `x_medio`. Además, qué resultados se promedian se decide en tres
-     lugares (`averaged_results`, `result_scope_in` y `check_student_result_symbols`): que salga
-     de un solo lugar cuando el servidor lo mande resuelto.
-   - `check_student_result_symbols` acepta `g#k` hasta la cantidad configurada, aunque la
-     entrega traiga menos grupos; y sigue aceptando mensurandos comunes no finales (eso viene de
-     antes de F9). Además, `analyze_definition` solo rechaza más grupos que determinaciones: con
-     menos (por la API, o una magnitud opcional por determinación vacía) la que falta se calcula
-     sin lecturas, con advertencia, y `g_medio` sale mal o no sale. No se puede rechazar ahí
-     porque la vista previa del borrador usa la misma función: va al guardar la entrega. Revisar
-     todo junto con la validación del resto de la entrega.
-   - `determination_results()` clona la definición (o una vista por parte) y se llama varias
-     veces por validación; calcularlo una vez y pasarlo si llega a notarse.
-     Lo mismo en el cliente: `finalPart` llama a `expandDeterminationResults` por cada resultado
-     final; se va con lo anterior cuando el servidor mande la parte de cada símbolo.
+4. **`feat(practicas)`: el servidor resuelve partes y determinaciones (F9, 3b/5).** ✅
+   - La definición que recibe el cliente (`/definition` y `/submissions/{id}/definition`) trae
+     `resolved`: la parte de cada símbolo (`symbol_part`) y las determinaciones de cada magnitud
+     y de cada mensurando que se repite. Se calcula al servir, no entra en las versiones.
+   - Se borraron las copias en JS (`symbolPart` recursivo, `perDeterminationSymbols`,
+     `formulaVariables`, `statisticalDeterminations`); `determinationsFor` y `symbolPart` leen
+     `resolved`.
+   - Qué mensurandos se promedian lo decide `PracticeDefinition::averaged_results()`, en un solo
+     lugar.
+   - Al guardar la entrega, una magnitud por determinación obligatoria tiene que traer todas las
+     determinaciones (`check_determination_groups`); la vista previa del borrador sigue
+     aceptando datos incompletos.
+   - Decidido: el alumno solo puede informar mensurandos finales (antes se aceptaban también los
+     no finales, aunque el formulario no los ofrecía).
+   - Queda: `determination_results()` clona la definición por parte y se llama varias veces por
+     pedido; calcularlo una vez si llega a notarse.
 5. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
    - P1 sin partes, con 3 operadores en pestañas; Hidrostática con 26 magnitudes y 3 medidas en
      bloques con promedio.

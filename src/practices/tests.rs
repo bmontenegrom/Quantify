@@ -4278,4 +4278,12 @@ fn a_symbol_named_medio_belongs_to_its_base_only_when_it_is_an_undefined_average
     assert_eq!(def(false, true).result_part("k"), Some("stat"));
     assert_eq!(def(false, false).result_part("k"), None);
     assert_eq!(def(true, true).result_part("k"), None);
+    let resolved = def(false, true).resolved();
+    assert_eq!(
+        resolved.symbol_parts.get("k").map(String::as_str),
+        Some("stat")
+    );
+    assert_eq!(resolved.determinations["x"].scope, "stat");
+    assert_eq!(resolved.determinations["T"].scope, "stat");
+    assert!(!resolved.determinations.contains_key("k"));
 }
