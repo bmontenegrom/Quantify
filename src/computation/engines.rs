@@ -11,7 +11,7 @@ use crate::uncertainty::{self, BModel, ScaleSpec};
 use evalexpr::Node;
 use std::collections::HashMap;
 
-/// Convierte una escala del catálogo ([`InstrumentScale`]) en la especificación que entiende
+/// La especificación del tipo B de una escala, en la unidad de la magnitud, y el aviso si no se puede convertir.
 ///
 /// ```
 /// use quantify::db::InstrumentScale;
@@ -34,14 +34,19 @@ use std::collections::HashMap;
 ///     unit: "mm".into(),
 ///     position: 0,
 /// };
-/// let spec = quantify::computation::scale_spec(&escala, "mm").unwrap();
+/// let (spec, aviso) = quantify::computation::scale_spec(&escala, "mm").unwrap();
 /// assert!(matches!(spec.b_model, BModel::Resolucion));
-/// assert_eq!(spec.step, 0.01);
-/// let en_cm = quantify::computation::scale_spec(&escala, "cm").unwrap();
+/// assert_eq!((spec.step, aviso), (0.01, None));
+/// let (en_cm, _) = quantify::computation::scale_spec(&escala, "cm").unwrap();
 /// assert!((en_cm.step - 0.001).abs() < 1e-15);
-/// assert!(quantify::computation::scale_spec(&escala, "s").is_err());
+/// let (en_s, aviso) = quantify::computation::scale_spec(&escala, "s").unwrap();
+/// assert_eq!(en_s.step, 0.01);
+/// assert!(aviso.is_some());
 /// ```
-pub fn scale_spec(scale: &InstrumentScale, unit: &str) -> anyhow::Result<ScaleSpec> {
+pub fn scale_spec(
+    scale: &InstrumentScale,
+    unit: &str,
+) -> anyhow::Result<(ScaleSpec, Option<String>)> {
     let b_model = match scale.b_model.as_str() {
         "resolucion" => BModel::Resolucion,
         "apreciacion" => BModel::Apreciacion,
@@ -50,25 +55,28 @@ pub fn scale_spec(scale: &InstrumentScale, unit: &str) -> anyhow::Result<ScaleSp
             anyhow::bail!("la escala tiene un modelo de incertidumbre desconocido: {other}")
         }
     };
-    let factor = match crate::units::scale_factor(&scale.unit, unit) {
-        Some(factor) => factor,
-        None if [scale.unit.as_str(), unit]
-            .iter()
-            .all(|u| !u.trim().is_empty() && crate::units::parse(u).is_some()) =>
-        {
-            anyhow::bail!(
-                "la escala \"{}\" mide en {} y la magnitud está en {unit}: no se pueden convertir",
-                scale.label,
-                scale.unit
-            )
-        }
-        None => 1.0,
+    let known = |u: &str| {
+        Some(u)
+            .filter(|u| !u.trim().is_empty())
+            .and_then(crate::units::parse)
     };
-    let reading_shift = match (crate::units::parse(&scale.unit), crate::units::parse(unit)) {
-        (Some(from), Some(to)) if from.compatible(&to) => (to.offset - from.offset) / to.factor,
-        _ => 0.0,
+    let (factor, reading_shift, warning) = match (known(&scale.unit), known(unit)) {
+        (Some(from), Some(to)) if from.compatible(&to) => (
+            from.factor / to.factor,
+            (to.offset - from.offset) / to.factor,
+            None,
+        ),
+        (Some(_), Some(_)) => (
+            1.0,
+            0.0,
+            Some(format!(
+                "la escala \"{}\" mide en {} y la magnitud está en {unit}: su incertidumbre no se convirtió",
+                scale.label, scale.unit
+            )),
+        ),
+        _ => (1.0, 0.0, None),
     };
-    Ok(ScaleSpec {
+    let spec = ScaleSpec {
         b_model,
         step: scale.step * factor,
         appreciation: scale.appreciation.map(|a| a * factor),
@@ -78,7 +86,8 @@ pub fn scale_spec(scale: &InstrumentScale, unit: &str) -> anyhow::Result<ScaleSp
         u_cal_pct: scale.u_cal_pct,
         u_cal_fixed: scale.u_cal_fixed * factor,
         reading_shift,
-    })
+    };
+    Ok((spec, warning))
 }
 
 fn compute_quantities(
@@ -126,9 +135,14 @@ fn compute_quantities(
             }
             let spec = match instrument.1 {
                 Some(scale_id) => match scales.get(scale_id) {
-                    Some(scale) => Some(scale_spec(scale, &quantity.unit).map_err(|e| {
-                        anyhow::anyhow!("\"{}\" ({}): {e}", quantity.name, quantity.symbol)
-                    })?),
+                    Some(scale) => {
+                        let (spec, warning) = scale_spec(scale, &quantity.unit)?;
+                        if let Some(w) = warning {
+                            warnings
+                                .push(format!("\"{}\" ({}): {w}.", quantity.name, quantity.symbol));
+                        }
+                        Some(spec)
+                    }
                     None => anyhow::bail!("la escala seleccionada no existe"),
                 },
                 None => None,

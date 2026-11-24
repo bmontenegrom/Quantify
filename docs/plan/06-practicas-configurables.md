@@ -1281,18 +1281,24 @@ Decisiones:
    - Las plantillas que usan `C` para temperatura pasan a `°C`.
 2. **`fix(incertidumbres)`: el tipo B convierte la escala a la unidad de la magnitud (F10, 2/4).** ✅
    - Si las dos unidades se reconocen y son compatibles, se convierten `step`, `appreciation`,
-     `spec_fixed` y `u_cal_fixed` (los términos en % no cambian).
-   - Si se reconocen y no son compatibles (un cronómetro en una masa), el análisis da un error
-     claro. Si alguna no se reconoce, queda como hoy.
-   - Golden idénticos; tests con la regla en cm y en m y el densímetro en kg/m³.
+     `spec_fixed` y `u_cal_fixed`. Los términos en % se calculan sobre la lectura en la escala:
+     con desplazamientos distintos (°C y K), `ScaleSpec.reading_shift` corre la lectura antes
+     de aplicar el porcentaje.
+   - Si se reconocen y no son compatibles (un cronómetro en una masa), se calcula sin convertir,
+     como antes, con una advertencia; no frena el análisis (así una entrega guardada se sigue
+     pudiendo recalcular, y pares como `Hz` y `rad/s` no rompen). Si alguna no se reconoce o
+     está vacía, queda como antes.
+   - Golden idénticos; tests con la regla en cm y en m, el densímetro en kg/m³ y un termómetro
+     en °C sobre una magnitud en K.
 3. **`feat(formularios)`: el alumno carga en la unidad que elija (F10, 3/4).**
    - Desplegable de unidades compatibles en lugar del prefijo, en los mismos 8 lugares, también
      en los resultados finales. Se guarda en la unidad declarada, como hoy.
    - Decidir qué pasa con las diferencias de temperatura: `input_units` aplica el desplazamiento
      de 273,15 entre K y °C, que está bien para una temperatura pero no para una diferencia
-     (un ΔT declarado en K, cargado en °C, se guardaría con 273,15 de más). La unidad sola no
-     lo distingue: o el desplegable no ofrece conversiones con desplazamiento, o la magnitud
-     dice si es una diferencia.
+     (un ΔT declarado en K, cargado en °C, se guardaría con 273,15 de más). Lo mismo en el tipo
+     B: el corrimiento de lectura (`reading_shift`) infla el término en % de lectura si un ΔT
+     en K se mide con una escala en °C. La unidad sola no lo distingue: o no se ofrecen ni se
+     aplican conversiones con desplazamiento, o la magnitud dice si es una diferencia.
    - En `src/units.rs`, la lógica de prefijos está dos veces: `unprefixed` repite el recorrido
      de prefijos de `symbol_unit`, e `INPUT_PREFIXES` es una copia a mano de `PREFIXES` (sin
      `u`, `c`, `d` y `h`, con `""`). Unificarlo cuando `input_units` pase a usarse acá, por

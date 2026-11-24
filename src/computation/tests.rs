@@ -335,7 +335,7 @@ fn fab_scale() -> InstrumentScale {
     }
 }
 
-fn u_b_in(scale: InstrumentScale, unit: &str) -> anyhow::Result<f64> {
+fn type_b_in(scale: &InstrumentScale, unit: &str, value: f64) -> (f64, Vec<String>) {
     let q = PracticeQuantity {
         unit: unit.into(),
         ..quantity("x")
@@ -343,11 +343,11 @@ fn u_b_in(scale: InstrumentScale, unit: &str) -> anyhow::Result<f64> {
     let m = MeasurementInput {
         instrument_id: Some("i1".into()),
         scale_id: Some("s1".into()),
-        ..measurement("x", &[1.0])
+        ..measurement("x", &[value])
     };
-    let scales = HashMap::from([("s1".to_string(), scale)]);
-    let analysis = compute(&[q], &[], &scales, &[m], None)?;
-    Ok(analysis.quantities[0].result.u_b)
+    let scales = HashMap::from([("s1".to_string(), scale.clone())]);
+    let analysis = compute(&[q], &[], &scales, &[m], None).unwrap();
+    (analysis.quantities[0].result.u_b, analysis.warnings)
 }
 
 #[test]
@@ -363,7 +363,7 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
     };
     let rect = 2.0 * 3f64.sqrt();
     for (unit, step) in [("mm", 1.0), ("cm", 0.1), ("m", 0.001)] {
-        let u_b = u_b_in(rule.clone(), unit).unwrap();
+        let (u_b, _) = type_b_in(&rule, unit, 1.0);
         assert!(close(u_b, step / rect, 1e-15), "{unit}: {u_b}");
     }
 
@@ -377,8 +377,8 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
         unit: "g/cm3".into(),
         ..fab_scale()
     };
-    let in_g_cm3 = u_b_in(densimeter.clone(), "g/cm3").unwrap();
-    let in_kg_m3 = u_b_in(densimeter, "kg/m3").unwrap();
+    let (in_g_cm3, _) = type_b_in(&densimeter, "g/cm3", 1.0);
+    let (in_kg_m3, _) = type_b_in(&densimeter, "kg/m3", 1000.0);
     let expected = ((0.001f64 / 6f64.sqrt()).powi(2) + 0.001f64.powi(2)).sqrt();
     assert!(close(in_g_cm3, expected, 1e-15));
     assert!(close(in_kg_m3, 1000.0 * expected, 1e-12));
@@ -388,10 +388,13 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
         label: "milesimas".into(),
         ..rule.clone()
     };
-    let error = u_b_in(clock, "g").unwrap_err().to_string();
+    let (u_b, warnings) = type_b_in(&clock, "g", 1.0);
+    assert!(close(u_b, 1.0 / rect, 1e-15), "sin convertir, como antes");
     assert!(
-        error.contains("\"milesimas\" mide en s") && error.contains("en g"),
-        "{error}"
+        warnings
+            .iter()
+            .any(|w| w.contains("\"milesimas\" mide en s") && w.contains("no se convirtió")),
+        "{warnings:?}"
     );
 
     let thermometer = InstrumentScale {
@@ -403,21 +406,7 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
         unit: "°C".into(),
         ..fab_scale()
     };
-    let at = |unit: &str, value: f64| {
-        let q = PracticeQuantity {
-            unit: unit.into(),
-            ..quantity("x")
-        };
-        let m = MeasurementInput {
-            instrument_id: Some("i1".into()),
-            scale_id: Some("s1".into()),
-            ..measurement("x", &[value])
-        };
-        let scales = HashMap::from([("s1".to_string(), thermometer.clone())]);
-        compute(&[q], &[], &scales, &[m], None).unwrap().quantities[0]
-            .result
-            .u_b
-    };
+    let at = |unit: &str, value: f64| type_b_in(&thermometer, unit, value).0;
     assert!(close(at("K", 273.15), at("°C", 0.0), 1e-12));
     assert!(close(at("K", 373.15), at("°C", 100.0), 1e-12));
 
@@ -425,12 +414,13 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
         unit: "div".into(),
         ..rule
     };
-    assert!(close(u_b_in(divisions, "mm").unwrap(), 1.0 / rect, 1e-15));
+    let (u_b, warnings) = type_b_in(&divisions, "mm", 1.0);
+    assert!(close(u_b, 1.0 / rect, 1e-15) && warnings.is_empty());
 }
 
 #[test]
 fn scale_spec_maps_models_and_options() {
-    let spec = scale_spec(&fab_scale(), "A").unwrap();
+    let (spec, _) = scale_spec(&fab_scale(), "A").unwrap();
     assert_eq!(spec.b_model, BModel::Fabricante);
     assert_eq!(spec.spec_pct_reading, 1.0);
     assert_eq!(spec.spec_step_coeff, 5.0);
