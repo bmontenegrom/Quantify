@@ -251,6 +251,7 @@ pub fn parse(text: &str) -> Option<Unit> {
     }
     let (numerator, denominator) = match text.split_once('/') {
         Some((n, d)) => {
+            let d = d.trim();
             let d = d
                 .strip_prefix('(')
                 .and_then(|d| d.strip_suffix(')'))
@@ -269,7 +270,7 @@ pub fn parse(text: &str) -> Option<Unit> {
     }
 }
 
-const NOT_UNITS: &[&str] = &["pH"];
+const NOT_UNITS: &[&str] = &["pH", "C"];
 
 fn normalize(text: &str) -> String {
     text.chars()
@@ -283,7 +284,12 @@ fn normalize(text: &str) -> String {
             '⁻' => '-',
             other => other,
         })
-        .collect()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("° C", "°C")
+        .replace("%m/v", "% m/v")
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -316,12 +322,13 @@ fn relative(label: &str, unit: Unit, declared: Unit) -> InputUnit {
 /// assert_eq!(input_units("").len(), 1);
 /// ```
 pub fn input_units(declared: &str) -> Vec<InputUnit> {
-    let declared = declared.trim();
     let mut out = vec![InputUnit {
-        label: declared.to_string(),
+        label: declared.trim().to_string(),
         factor: 1.0,
         offset: 0.0,
     }];
+    let normalized = normalize(declared);
+    let declared = normalized.as_str();
     let Some(unit) = parse(declared).filter(|_| !declared.is_empty()) else {
         return out;
     };
@@ -375,8 +382,12 @@ fn unprefixed(declared: &str) -> Option<&str> {
 /// assert_eq!(scale_factor("°C", "K"), Some(1.0));
 /// assert_eq!(scale_factor("s", "g"), None);
 /// assert_eq!(scale_factor("div", "mm"), None);
+/// assert_eq!(scale_factor("", "%"), None);
 /// ```
 pub fn scale_factor(from: &str, to: &str) -> Option<f64> {
+    if from.trim().is_empty() || to.trim().is_empty() {
+        return None;
+    }
     let (from, to) = (parse(from)?, parse(to)?);
     from.compatible(&to).then(|| from.factor / to.factor)
 }
@@ -442,7 +453,8 @@ mod tests {
         assert!(close(si("h").factor, 3600.0));
         assert!(close(si("hPa").factor, 100.0));
         assert_eq!(si("cd").dims, [0, 0, 0, 0, 0, 0, 1, 0]);
-        assert_eq!(si("C").dims, [0, 0, 1, 1, 0, 0, 0, 0]);
+        assert_eq!(si("mC").dims, [0, 0, 1, 1, 0, 0, 0, 0]);
+        assert_eq!(si("C/s").dims, si("A").dims);
         assert!(parse("kmin").is_none());
         assert!(parse("k°").is_none());
     }
@@ -451,10 +463,22 @@ mod tests {
     fn unknown_or_malformed_units_are_not_recognized() {
         for text in [
             "div", "m/s/s", "/s", "m/", "xyz", "m3x", "m256", "J64", "m127.m", "km120", "*", ".",
-            "· ", "m/(.)", "*/s", "m/()", "pH", "m0", "s-0", "% m/m", "% v/v",
+            "· ", "m/(.)", "*/s", "m/()", "pH", "m0", "s-0", "% m/m", "% v/v", "C",
         ] {
             assert!(parse(text).is_none(), "{text}");
         }
+    }
+
+    #[test]
+    fn spacing_variants_are_the_same_unit() {
+        assert_eq!(si("° C"), si("°C"));
+        assert_eq!(si("º  C"), si("°C"));
+        assert_eq!(si("J / (mol K)"), si("J/(mol.K)"));
+        assert_eq!(si("%m/v"), si("% m/v"));
+        assert_eq!(si("%  m/v"), si("% m/v"));
+        let labels: Vec<String> = input_units("m²/s").into_iter().map(|u| u.label).collect();
+        assert_eq!(labels[0], "m²/s");
+        assert!(labels.contains(&"mm2/s".to_string()));
     }
 
     #[test]
