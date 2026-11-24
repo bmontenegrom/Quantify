@@ -1195,11 +1195,17 @@ Decisiones:
      no finales, aunque el formulario no los ofrecía).
    - Queda: `determination_results()` clona la definición por parte y se llama varias veces por
      pedido; calcularlo una vez si llega a notarse.
-5. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
-   - P1 sin partes, con 3 operadores en pestañas; Hidrostática con 26 magnitudes y 3 medidas en
-     bloques con promedio.
-   - Golden regenerados, más el test con los números de hoy.
-   - Los E2E que usan `p1-estadistica-op1` o los símbolos `m1_3`… se actualizan.
+5. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).** ✅
+   - P1 sin partes: `T` se repite en 3 operadores en pestañas, sin promedio; `g` y `Q` se
+     calculan por operador (Q ya no usa solo el del operador 1).
+   - Hidrostática con 26 magnitudes: `m_1..m_9`, `mw` y `dw` por medida, en bloques con
+     promedio; `E`, `rho` y `gamma` con `E_medio`, `rho_medio` y `gamma_medio` automáticos.
+   - Golden regenerados, más `determinations_keep_the_numbers_of_the_hand_written_practices`,
+     que fija valor y U de hoy símbolo por símbolo.
+   - Decidido: `T` es opcional (ningún operador obligatorio); `E`, `rho` y `gamma` son finales,
+     así que el alumno informa cada medida y el promedio (antes, solo el promedio).
+   - Los tests que usaban la forma vieja de P1 (partes y `T1/T2/T3`) siguen con una copia en
+     `tests/fixtures/p1-partes.json`.
 6. **`refactor(practicas)`: se retira `operator_count` (F9, 5/5).**
    - Las determinaciones reemplazan al motor de operadores, su ruta y su editor;
      `smoke-operadores` pasa a determinaciones.

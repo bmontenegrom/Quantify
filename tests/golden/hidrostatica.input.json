@@ -93,174 +93,6 @@
       "given_u": 0.1
     },
     {
-      "symbol": "m1_1",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m1_2",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m1_3",
-      "values": [
-        1.0
-      ],
-      "scale": "Balanza digital / 0.01 g"
-    },
-    {
-      "symbol": "m1_4",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m1_5",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m1_6",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m1_7",
-      "values": [
-        2.0
-      ],
-      "scale": "Balanza digital / 0.01 g"
-    },
-    {
-      "symbol": "m1_8",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m1_9",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m2_1",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m2_2",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m2_3",
-      "values": [
-        1.02
-      ],
-      "scale": "Balanza digital / 0.01 g"
-    },
-    {
-      "symbol": "m2_4",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m2_5",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m2_6",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m2_7",
-      "values": [
-        1.98
-      ],
-      "scale": "Balanza digital / 0.01 g"
-    },
-    {
-      "symbol": "m2_8",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m2_9",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m3_1",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m3_2",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m3_3",
-      "values": [
-        0.99
-      ],
-      "scale": "Balanza digital / 0.01 g"
-    },
-    {
-      "symbol": "m3_4",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m3_5",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m3_6",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m3_7",
-      "values": [
-        2.01
-      ],
-      "scale": "Balanza digital / 0.01 g"
-    },
-    {
-      "symbol": "m3_8",
-      "values": [
-        0.0
-      ]
-    },
-    {
-      "symbol": "m3_9",
-      "values": [
-        0.0
-      ]
-    },
-    {
       "symbol": "l",
       "values": [
         5.0
@@ -273,42 +105,171 @@
       ]
     },
     {
-      "symbol": "mw1",
-      "values": [
-        0.5
-      ],
-      "scale": "Balanza digital / 0.01 g"
-    },
-    {
-      "symbol": "dw1",
-      "values": [
-        4.0
+      "symbol": "m_1",
+      "values": [],
+      "operator_replicas": [
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
       ]
     },
     {
-      "symbol": "mw2",
-      "values": [
-        0.52
-      ],
-      "scale": "Balanza digital / 0.01 g"
-    },
-    {
-      "symbol": "dw2",
-      "values": [
-        4.0
+      "symbol": "m_2",
+      "values": [],
+      "operator_replicas": [
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
       ]
     },
     {
-      "symbol": "mw3",
-      "values": [
-        0.49
+      "symbol": "m_3",
+      "values": [],
+      "operator_replicas": [
+        [
+          1.0
+        ],
+        [
+          1.02
+        ],
+        [
+          0.99
+        ]
       ],
       "scale": "Balanza digital / 0.01 g"
     },
     {
-      "symbol": "dw3",
-      "values": [
-        4.0
+      "symbol": "m_4",
+      "values": [],
+      "operator_replicas": [
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ]
+    },
+    {
+      "symbol": "m_5",
+      "values": [],
+      "operator_replicas": [
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ]
+    },
+    {
+      "symbol": "m_6",
+      "values": [],
+      "operator_replicas": [
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ]
+    },
+    {
+      "symbol": "m_7",
+      "values": [],
+      "operator_replicas": [
+        [
+          2.0
+        ],
+        [
+          1.98
+        ],
+        [
+          2.01
+        ]
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "m_8",
+      "values": [],
+      "operator_replicas": [
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ]
+    },
+    {
+      "symbol": "m_9",
+      "values": [],
+      "operator_replicas": [
+        [
+          0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          0.0
+        ]
+      ]
+    },
+    {
+      "symbol": "mw",
+      "values": [],
+      "operator_replicas": [
+        [
+          0.5
+        ],
+        [
+          0.52
+        ],
+        [
+          0.49
+        ]
+      ],
+      "scale": "Balanza digital / 0.01 g"
+    },
+    {
+      "symbol": "dw",
+      "values": [],
+      "operator_replicas": [
+        [
+          4.0
+        ],
+        [
+          4.0
+        ],
+        [
+          4.0
+        ]
       ]
     }
   ]

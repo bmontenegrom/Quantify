@@ -85,6 +85,13 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     await group(m).locator(".measure-value").nth(i).fill(String(40 + i));
   }
   await group(m).locator(".measure-given-u").fill("0.5");
+  const instrumentsOf = (q) => group(q).locator(".measurement-row .measure-instrument");
+  assert((await instrumentsOf(T).count()) === 3, "cada medida debía tener su propio instrumento");
+  for (const i of [0, 2]) await instrumentsOf(T).nth(i).selectOption("");
+  const timer = await instrumentsOf(T).nth(1).locator("option:not([value=''])").first().getAttribute("value");
+  assert(timer, "el curso debía ofrecer un instrumento de tiempo");
+  await instrumentsOf(T).nth(1).selectOption(timer);
+  await instrumentsOf(x).nth(0).selectOption(timer);
   await group(x).locator(".measurement-row").nth(0).locator(".measure-value").first().fill("1");
   await group(x).locator(".measurement-row").nth(1).locator(".measure-value").first().fill("");
   await group(x).locator(".measurement-row").nth(2).locator(".measure-value").first().fill("5");
@@ -109,6 +116,16 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   const detail = await getJson(page, `/api/submissions/${submission.id}`);
   const dets = detail.analysis.determinations;
   assert(dets?.length === 3, `debía haber tres medidas, hay ${dets?.length}`);
+  const instrumentByMedida = dets.map((d) => d.quantities.find((q) => q.quantity_id === T.id).instrument_id);
+  assert(
+    instrumentByMedida.join() === `,${timer},`,
+    `solo la medida 2 debía llevar instrumento: ${JSON.stringify(instrumentByMedida)}`,
+  );
+  assert(
+    dets[0].quantities.find((q) => q.quantity_id === T.id).result.u_b === 0 &&
+      dets[1].quantities.find((q) => q.quantity_id === T.id).result.u_b > 0,
+    "la incertidumbre del instrumento debía sumarse solo en la medida 2",
+  );
   const g2 = dets[1].derived.find((d) => d.symbol === "g");
   assert(Math.abs(g2.value - 41 / 2.1 ** 2) < 1e-9, `g de la medida 2 inesperado: ${g2.value}`);
   const medio = detail.analysis.derived.find((d) => d.symbol === "g_medio");
@@ -141,6 +158,10 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   assert((await value(1)) === "", "la medida 2 de Extra debía quedar vacía");
   assert((await value(2)) === "5", `la medida 3 de Extra debía conservar 5, vi "${await value(2)}"`);
   assert((await group(m).locator(".measure-given-u").inputValue()) === "0.5", "la U del dato de cátedra debía volver");
+  const restored = await group(T).locator(".measurement-row .measure-instrument").evaluateAll((els) => els.map((e) => e.value));
+  assert(restored.join() === `,${timer},`, `al editar, cada medida debía recuperar su instrumento: ${restored}`);
+  const extra = await group(x).locator(".measurement-row .measure-instrument").evaluateAll((els) => els.map((e) => e.value));
+  assert(extra.join() === `${timer},,`, `la medida vacía no debía heredar el instrumento de otra: ${extra}`);
   assert(
     await sPage.locator('[data-final-result][data-symbol="g#3"]').isVisible(),
     "el resultado final de la medida 3 debía verse en su pestaña",

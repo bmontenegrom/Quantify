@@ -36,6 +36,56 @@ pub(crate) fn flattened(mut analysis: FormAnalysis) -> FormAnalysis {
     analysis
 }
 
+fn by_determination(analysis: &FormAnalysis) -> HashMap<String, f64> {
+    let mut found = HashMap::new();
+    let views = std::iter::once(analysis).chain(analysis.parts.iter().map(|p| &p.analysis));
+    for view in views {
+        for d in &view.derived {
+            found.insert(d.symbol.clone(), d.value);
+        }
+        for (k, det) in view.determinations.iter().enumerate() {
+            for d in &det.derived {
+                found.insert(format!("{}{}", d.symbol, k + 1), d.value);
+            }
+        }
+    }
+    found
+}
+
+fn hidrostatica_input(
+    def: &crate::practices::PracticeDefinition,
+    value: impl Fn(&str, usize) -> f64,
+) -> Vec<MeasurementInput> {
+    def.quantities
+        .iter()
+        .map(|q| MeasurementInput {
+            quantity_id: q.id.clone(),
+            instrument_id: None,
+            scale_id: None,
+            values: if q.per_determination {
+                vec![]
+            } else {
+                vec![value(&q.symbol, 0)]
+            },
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: q
+                .per_determination
+                .then(|| (1..=3).map(|k| vec![value(&q.symbol, k)]).collect()),
+            operator_instruments: None,
+        })
+        .collect()
+}
+
+pub(crate) async fn p1_partes(pool: &SqlitePool) {
+    crate::practices::seed_fixture(
+        pool,
+        include_str!("../../tests/fixtures/p1-partes.json"),
+        "p1-partes",
+    )
+    .await;
+}
+
 pub(crate) async fn setup() -> (SqlitePool, TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let url = format!("sqlite:{}", dir.path().join("t.db").to_string_lossy());
@@ -233,6 +283,7 @@ fn measurement(symbol: &str, values: &[f64]) -> MeasurementInput {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }
 }
 
@@ -449,6 +500,7 @@ fn compute_with_operators_derives_per_operator() {
             given_u: None,
             point_replicas: None,
             operator_replicas: Some(vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
+            operator_instruments: None,
         },
         measurement("L", &[5.0]),
     ];
@@ -479,8 +531,9 @@ fn compute_with_operators_derives_per_operator() {
 #[tokio::test]
 async fn analyze_uses_type_a_with_replicas() {
     let (pool, _dir) = setup().await;
-    drop_parts(&pool, "p1-estadistica").await;
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    p1_partes(&pool).await;
+    drop_parts(&pool, "p1-partes").await;
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -499,10 +552,9 @@ async fn analyze_uses_type_a_with_replicas() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }];
-    let analysis = analyze(&pool, "p1-estadistica", &measurements)
-        .await
-        .unwrap();
+    let analysis = analyze(&pool, "p1-partes", &measurements).await.unwrap();
     let q_t = analysis
         .quantities
         .iter()
@@ -516,6 +568,7 @@ async fn analyze_uses_type_a_with_replicas() {
 #[tokio::test]
 async fn create_form_submission_persists_and_reads_back() {
     let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -542,7 +595,7 @@ async fn create_form_submission_persists_and_reads_back() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -556,7 +609,7 @@ async fn create_form_submission_persists_and_reads_back() {
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id,
             instrument_id: None,
@@ -565,6 +618,7 @@ async fn create_form_submission_persists_and_reads_back() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
         table_number: None,
@@ -583,6 +637,7 @@ async fn create_form_submission_persists_and_reads_back() {
 #[tokio::test]
 async fn create_form_submission_trims_and_persists_student_comment() {
     let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -609,7 +664,7 @@ async fn create_form_submission_trims_and_persists_student_comment() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -623,7 +678,7 @@ async fn create_form_submission_trims_and_persists_student_comment() {
     let mk = |comment: Option<&str>| FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id.clone(),
             instrument_id: None,
@@ -632,6 +687,7 @@ async fn create_form_submission_trims_and_persists_student_comment() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -662,6 +718,7 @@ async fn create_form_submission_trims_and_persists_student_comment() {
 #[tokio::test]
 async fn create_form_submission_persists_optional_student_result() {
     let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -688,7 +745,7 @@ async fn create_form_submission_persists_optional_student_result() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -702,7 +759,7 @@ async fn create_form_submission_persists_optional_student_result() {
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id,
             instrument_id: None,
@@ -711,6 +768,7 @@ async fn create_form_submission_persists_optional_student_result() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -731,6 +789,7 @@ async fn create_form_submission_persists_optional_student_result() {
 #[tokio::test]
 async fn create_form_submission_rejects_unknown_student_result_symbol() {
     let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -757,7 +816,7 @@ async fn create_form_submission_rejects_unknown_student_result_symbol() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -771,7 +830,7 @@ async fn create_form_submission_rejects_unknown_student_result_symbol() {
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id,
             instrument_id: None,
@@ -780,6 +839,7 @@ async fn create_form_submission_rejects_unknown_student_result_symbol() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -800,7 +860,8 @@ async fn create_form_submission_rejects_unknown_student_result_symbol() {
 #[tokio::test]
 async fn operator_submission_stores_operator_index_per_operator() {
     let (pool, _dir) = setup().await;
-    drop_parts(&pool, "p1-estadistica").await;
+    p1_partes(&pool).await;
+    drop_parts(&pool, "p1-partes").await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -827,14 +888,23 @@ async fn operator_submission_stores_operator_index_per_operator() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    crate::practices::set_operator_count(&pool, "p1-estadistica", 2)
+    crate::practices::set_operator_count(&pool, "p1-partes", 2)
         .await
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
     assert_eq!(def.operator_count, Some(2));
+    db::seed_academic(&pool).await.unwrap();
+    crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
+        .await
+        .unwrap();
+    let (instrument_id, scale_id): (String, String) =
+        sqlx::query_as("SELECT instrument_id, id FROM instrument_scales LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     let t_id = def
         .quantities
         .iter()
@@ -845,15 +915,16 @@ async fn operator_submission_stores_operator_index_per_operator() {
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id.clone(),
-            instrument_id: None,
-            scale_id: None,
+            instrument_id: Some(instrument_id),
+            scale_id: Some(scale_id.clone()),
             values: vec![],
             given_u: None,
             point_replicas: None,
             operator_replicas: Some(vec![vec![1.0, 1.1], vec![2.0, 2.1, 2.2]]),
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -861,7 +932,7 @@ async fn operator_submission_stores_operator_index_per_operator() {
         student_comment: None,
         practice_version: None,
     };
-    crate::practices::publish_version(&pool, "p1-estadistica", None)
+    crate::practices::publish_version(&pool, "p1-partes", None)
         .await
         .unwrap();
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
@@ -878,6 +949,14 @@ async fn operator_submission_stores_operator_index_per_operator() {
         reps.sort_unstable();
         assert_eq!(reps, (0..expected_n as i64).collect::<Vec<_>>());
     }
+    for m in &t_rows {
+        assert_eq!(
+            m.scale_id.as_deref(),
+            Some(scale_id.as_str()),
+            "operador {}",
+            m.operator_index
+        );
+    }
 
     let operators = detail.analysis["operators"].as_array().unwrap();
     assert_eq!(operators.len(), 2);
@@ -886,7 +965,8 @@ async fn operator_submission_stores_operator_index_per_operator() {
 #[tokio::test]
 async fn point_based_submission_stores_point_index_per_point() {
     let (pool, _dir) = setup().await;
-    drop_parts(&pool, "p1-estadistica").await;
+    p1_partes(&pool).await;
+    drop_parts(&pool, "p1-partes").await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -913,12 +993,12 @@ async fn point_based_submission_stores_point_index_per_point() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+    crate::practices::set_analysis_kind(&pool, "p1-partes", "curva")
         .await
         .unwrap();
     crate::practices::create_curve(
         &pool,
-        "p1-estadistica",
+        "p1-partes",
         crate::practices::CurveInput {
             x_formula: "T1".into(),
             y_formula: "T2".into(),
@@ -929,12 +1009,12 @@ async fn point_based_submission_stores_point_index_per_point() {
     .unwrap();
     sqlx::query(
         "UPDATE practice_quantities SET per_point = 0 \
-         WHERE practice_id = 'p1-estadistica' AND symbol = 'T3'",
+         WHERE practice_id = 'p1-partes' AND symbol = 'T3'",
     )
     .execute(&pool)
     .await
     .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -949,7 +1029,7 @@ async fn point_based_submission_stores_point_index_per_point() {
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![
             MeasurementInput {
                 quantity_id: qid("T1"),
@@ -959,6 +1039,7 @@ async fn point_based_submission_stores_point_index_per_point() {
                 given_u: None,
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             },
             MeasurementInput {
                 quantity_id: qid("T3"),
@@ -968,6 +1049,7 @@ async fn point_based_submission_stores_point_index_per_point() {
                 given_u: None,
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             },
             MeasurementInput {
                 quantity_id: qid("T2"),
@@ -977,6 +1059,7 @@ async fn point_based_submission_stores_point_index_per_point() {
                 given_u: None,
                 point_replicas: Some(vec![vec![4.0, 4.2], vec![5.0, 5.1], vec![6.0, 5.9]]),
                 operator_replicas: None,
+                operator_instruments: None,
             },
         ],
         meta: None,
@@ -985,7 +1068,7 @@ async fn point_based_submission_stores_point_index_per_point() {
         student_comment: None,
         practice_version: None,
     };
-    crate::practices::publish_version(&pool, "p1-estadistica", None)
+    crate::practices::publish_version(&pool, "p1-partes", None)
         .await
         .unwrap();
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
@@ -1024,7 +1107,8 @@ async fn point_based_submission_stores_point_index_per_point() {
 #[tokio::test]
 async fn point_based_submission_stores_variable_replicas_per_point() {
     let (pool, _dir) = setup().await;
-    drop_parts(&pool, "p1-estadistica").await;
+    p1_partes(&pool).await;
+    drop_parts(&pool, "p1-partes").await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -1051,12 +1135,12 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+    crate::practices::set_analysis_kind(&pool, "p1-partes", "curva")
         .await
         .unwrap();
     crate::practices::create_curve(
         &pool,
-        "p1-estadistica",
+        "p1-partes",
         crate::practices::CurveInput {
             x_formula: "T1".into(),
             y_formula: "T2".into(),
@@ -1065,7 +1149,7 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
     )
     .await
     .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -1080,7 +1164,7 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![
             MeasurementInput {
                 quantity_id: qid("T1"),
@@ -1090,6 +1174,7 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
                 given_u: None,
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             },
             MeasurementInput {
                 quantity_id: qid("T2"),
@@ -1099,6 +1184,7 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
                 given_u: None,
                 point_replicas: Some(vec![vec![4.0], vec![5.0, 5.1, 5.2], vec![6.0, 6.1]]),
                 operator_replicas: None,
+                operator_instruments: None,
             },
         ],
         meta: None,
@@ -1107,7 +1193,7 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
         student_comment: None,
         practice_version: None,
     };
-    crate::practices::publish_version(&pool, "p1-estadistica", None)
+    crate::practices::publish_version(&pool, "p1-partes", None)
         .await
         .unwrap();
     let detail = create_form_submission(&pool, &user, input).await.unwrap();
@@ -1137,7 +1223,8 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
 #[tokio::test]
 async fn update_form_submission_replaces_measurements_and_is_editable() {
     let (pool, _dir) = setup().await;
-    drop_parts(&pool, "p1-estadistica").await;
+    p1_partes(&pool).await;
+    drop_parts(&pool, "p1-partes").await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -1164,7 +1251,7 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -1178,7 +1265,7 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
     let mk = |vals: Vec<f64>| FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id.clone(),
             instrument_id: None,
@@ -1187,6 +1274,7 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -1194,7 +1282,7 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
         student_comment: None,
         practice_version: None,
     };
-    crate::practices::publish_version(&pool, "p1-estadistica", None)
+    crate::practices::publish_version(&pool, "p1-partes", None)
         .await
         .unwrap();
     let created = create_form_submission(&pool, &user, mk(vec![5.0, 5.2, 4.9]))
@@ -1227,6 +1315,7 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
 #[tokio::test]
 async fn cancel_submission_deletes_and_frees_table() {
     let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -1253,7 +1342,7 @@ async fn cancel_submission_deletes_and_frees_table() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -1267,7 +1356,7 @@ async fn cancel_submission_deletes_and_frees_table() {
     let mk = || FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id.clone(),
             instrument_id: None,
@@ -1276,6 +1365,7 @@ async fn cancel_submission_deletes_and_frees_table() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: Some(1),
@@ -1292,12 +1382,10 @@ async fn cancel_submission_deletes_and_frees_table() {
     assert_eq!(created.student_results.len(), 1);
     assert_eq!(created.members.len(), 1);
 
-    assert!(
-        db::find_existing_report(&pool, "p1-estadistica", &group.id, 1)
-            .await
-            .unwrap()
-            .is_some()
-    );
+    assert!(db::find_existing_report(&pool, "p1-partes", &group.id, 1)
+        .await
+        .unwrap()
+        .is_some());
 
     let existed = db::delete_submission(&pool, &created.id).await.unwrap();
     assert!(existed);
@@ -1307,12 +1395,10 @@ async fn cancel_submission_deletes_and_frees_table() {
         .unwrap()
         .is_none());
 
-    assert!(
-        db::find_existing_report(&pool, "p1-estadistica", &group.id, 1)
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(db::find_existing_report(&pool, "p1-partes", &group.id, 1)
+        .await
+        .unwrap()
+        .is_none());
 
     assert!(!db::delete_submission(&pool, &created.id).await.unwrap());
 
@@ -1324,6 +1410,7 @@ async fn cancel_submission_deletes_and_frees_table() {
 #[tokio::test]
 async fn update_form_submission_replaces_student_comment() {
     let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -1350,7 +1437,7 @@ async fn update_form_submission_replaces_student_comment() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -1369,11 +1456,12 @@ async fn update_form_submission_replaces_student_comment() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }];
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: measurements.clone(),
         meta: None,
         table_number: None,
@@ -1416,6 +1504,7 @@ async fn analyze_rejects_foreign_quantity_id() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }];
     assert!(analyze(&pool, "p1-estadistica", &measurements)
         .await
@@ -1425,13 +1514,14 @@ async fn analyze_rejects_foreign_quantity_id() {
 #[tokio::test]
 async fn create_form_submission_rejects_unknown_course_and_rolls_back() {
     let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
     let user = db::users(&pool)
         .await
         .unwrap()
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -1445,7 +1535,7 @@ async fn create_form_submission_rejects_unknown_course_and_rolls_back() {
     let input = FormSubmissionInput {
         course_id: "curso-fantasma".into(),
         group_id: "grupo-fantasma".into(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id,
             instrument_id: None,
@@ -1454,6 +1544,7 @@ async fn create_form_submission_rejects_unknown_course_and_rolls_back() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -1533,6 +1624,7 @@ fn compute_regresion_uses_per_point_intermediate_averaged_over_replicas() {
         given_u: None,
         point_replicas: Some(groups),
         operator_replicas: None,
+        operator_instruments: None,
     };
     let measurements = vec![
         rep(vec![vec![10.0, 10.0], vec![20.0, 20.0]], "q-V"),
@@ -1553,6 +1645,7 @@ fn point_rep(id: &str, groups: Vec<Vec<f64>>) -> MeasurementInput {
         given_u: None,
         point_replicas: Some(groups),
         operator_replicas: None,
+        operator_instruments: None,
     }
 }
 
@@ -2113,6 +2206,7 @@ fn build_points_averages_per_point_replicas() {
             given_u: None,
             point_replicas: Some(vec![vec![3.0, 5.0], vec![8.0, 10.0, 12.0]]),
             operator_replicas: None,
+            operator_instruments: None,
         },
     ];
     let a = reg(&quantities, &[], &[], "px", "py", &measurements).unwrap();
@@ -2141,6 +2235,7 @@ fn measurement_for(
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }
 }
 
@@ -2174,6 +2269,7 @@ async fn seeded_fluidos_1_computes_regression_mu_and_reynolds() {
             given_u,
             point_replicas,
             operator_replicas: None,
+            operator_instruments: None,
         }
     };
     let measurements = vec![
@@ -2250,6 +2346,7 @@ async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
             given_u,
             point_replicas,
             operator_replicas: None,
+            operator_instruments: None,
         }
     };
     let measurements = vec![
@@ -2285,13 +2382,14 @@ async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
 #[tokio::test]
 async fn analyze_routes_curva_to_scatter() {
     let (pool, _dir) = setup().await;
-    drop_parts(&pool, "p1-estadistica").await;
-    crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+    p1_partes(&pool).await;
+    drop_parts(&pool, "p1-partes").await;
+    crate::practices::set_analysis_kind(&pool, "p1-partes", "curva")
         .await
         .unwrap();
     crate::practices::create_curve(
         &pool,
-        "p1-estadistica",
+        "p1-partes",
         crate::practices::CurveInput {
             x_formula: "T1".into(),
             y_formula: "T2".into(),
@@ -2300,7 +2398,7 @@ async fn analyze_routes_curva_to_scatter() {
     )
     .await
     .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -2308,9 +2406,7 @@ async fn analyze_routes_curva_to_scatter() {
         measurement_for(&def, "T1", &[1.0, 2.0, 3.0]),
         measurement_for(&def, "T2", &[4.0, 5.0, 6.0]),
     ];
-    let analysis = analyze(&pool, "p1-estadistica", &measurements)
-        .await
-        .unwrap();
+    let analysis = analyze(&pool, "p1-partes", &measurements).await.unwrap();
     assert!(analysis.regression.is_none());
     assert_eq!(analysis.scatters.len(), 1);
     assert_eq!(
@@ -2322,13 +2418,14 @@ async fn analyze_routes_curva_to_scatter() {
 #[tokio::test]
 async fn analyze_curva_graphs_each_curve_in_the_list() {
     let (pool, _dir) = setup().await;
-    drop_parts(&pool, "p1-estadistica").await;
-    crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+    p1_partes(&pool).await;
+    drop_parts(&pool, "p1-partes").await;
+    crate::practices::set_analysis_kind(&pool, "p1-partes", "curva")
         .await
         .unwrap();
     crate::practices::create_curve(
         &pool,
-        "p1-estadistica",
+        "p1-partes",
         crate::practices::CurveInput {
             x_formula: "T1".into(),
             y_formula: "T2".into(),
@@ -2339,7 +2436,7 @@ async fn analyze_curva_graphs_each_curve_in_the_list() {
     .unwrap();
     crate::practices::create_curve(
         &pool,
-        "p1-estadistica",
+        "p1-partes",
         crate::practices::CurveInput {
             x_formula: "T2".into(),
             y_formula: "T1".into(),
@@ -2348,7 +2445,7 @@ async fn analyze_curva_graphs_each_curve_in_the_list() {
     )
     .await
     .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -2356,9 +2453,7 @@ async fn analyze_curva_graphs_each_curve_in_the_list() {
         measurement_for(&def, "T1", &[1.0, 2.0, 3.0]),
         measurement_for(&def, "T2", &[4.0, 5.0, 6.0]),
     ];
-    let analysis = analyze(&pool, "p1-estadistica", &measurements)
-        .await
-        .unwrap();
+    let analysis = analyze(&pool, "p1-partes", &measurements).await.unwrap();
     assert_eq!(analysis.scatters.len(), 2);
     assert_eq!(analysis.scatters[0].x_label, "T1");
     assert_eq!(analysis.scatters[0].y_label, "T2");
@@ -2376,18 +2471,19 @@ async fn analyze_curva_graphs_each_curve_in_the_list() {
 #[tokio::test]
 async fn analyze_curva_without_curves_errors() {
     let (pool, _dir) = setup().await;
-    crate::practices::set_analysis_kind(&pool, "p1-estadistica", "curva")
+    p1_partes(&pool).await;
+    crate::practices::set_analysis_kind(&pool, "p1-partes", "curva")
         .await
         .unwrap();
-    let by_part = analyze(&pool, "p1-estadistica", &[]).await.unwrap();
+    let by_part = analyze(&pool, "p1-partes", &[]).await.unwrap();
     assert!(by_part
         .warnings
         .iter()
         .any(|w| w.contains("No se pudo calcular la parte") && w.contains("curvas")));
     assert!(!by_part.parts.is_empty());
 
-    drop_parts(&pool, "p1-estadistica").await;
-    let result = analyze(&pool, "p1-estadistica", &[]).await;
+    drop_parts(&pool, "p1-partes").await;
+    let result = analyze(&pool, "p1-partes", &[]).await;
     assert!(result.is_err());
 }
 
@@ -2425,6 +2521,7 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         });
     };
     push("R", 100.0);
@@ -2488,38 +2585,33 @@ async fn analyze_hidrostatica_torque_cero_avisa_sin_romper_la_serializacion() {
         .await
         .unwrap()
         .unwrap();
-    let measurements: Vec<MeasurementInput> = def
-        .quantities
-        .iter()
-        .map(|q| MeasurementInput {
-            quantity_id: q.id.clone(),
-            instrument_id: None,
-            scale_id: None,
-            values: vec![q.default_value.unwrap_or(1.0)],
-            given_u: None,
-            point_replicas: None,
-            operator_replicas: None,
-        })
-        .collect();
-
-    let analysis = flattened(analyze(&pool, "hidrostatica", &measurements).await.unwrap());
-    for symbol in ["rho1", "rho2", "rho3", "rho_medio"] {
-        assert!(
-            analysis
-                .warnings
-                .iter()
-                .any(|w| w.contains(&format!("({symbol} ="))),
-            "falta la advertencia de valor no finito para {symbol}: {:?}",
-            analysis.warnings
-        );
-        let derived = analysis
-            .derived
+    let measurements = hidrostatica_input(&def, |symbol, _| {
+        def.quantities
             .iter()
-            .find(|d| d.symbol == symbol)
-            .unwrap();
-        assert!(!derived.value.is_finite());
+            .find(|q| q.symbol == symbol)
+            .and_then(|q| q.default_value)
+            .unwrap_or(1.0)
+    });
+
+    let analysis = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    let warnings: Vec<&String> = analysis
+        .parts
+        .iter()
+        .flat_map(|p| &p.analysis.warnings)
+        .collect();
+    assert!(
+        warnings.iter().any(|w| w.contains("(rho =")),
+        "falta la advertencia de valor no finito para rho: {warnings:?}"
+    );
+    assert!(
+        warnings.iter().any(|w| w.contains("promedio de rho")),
+        "falta la advertencia de valor no finito para rho_medio: {warnings:?}"
+    );
+    assert!(!warnings.iter().any(|w| w.contains("(E =")));
+    let found = by_determination(&analysis);
+    for symbol in ["rho1", "rho2", "rho3", "rho_medio"] {
+        assert!(!found[symbol].is_finite(), "{symbol}");
     }
-    assert!(!analysis.warnings.iter().any(|w| w.contains("(E1 =")));
     let json = serde_json::to_string(&analysis).unwrap();
     assert!(json.contains("rho_medio"));
 }
@@ -2541,48 +2633,20 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
 
     let gamma = 0.5 * g_ac * 4.0 * 100.0 / (2.0 * 5.0 * 10.0 * 1000.0);
 
-    let mut measurements = Vec::new();
-    let mut push = |symbol: &str, value: f64| {
-        let id = def
-            .quantities
-            .iter()
-            .find(|q| q.symbol == symbol)
-            .unwrap_or_else(|| panic!("falta la magnitud {symbol}"))
-            .id
-            .clone();
-        measurements.push(MeasurementInput {
-            quantity_id: id,
-            instrument_id: None,
-            scale_id: None,
-            values: vec![value],
-            given_u: None,
-            point_replicas: None,
-            operator_replicas: None,
-        });
-    };
-    push("m_goma", m_goma);
-    push("rho_f", rho_f);
-    push("g_ac", g_ac);
-    push("b_E", 10.0);
-    for i in 1..=9 {
-        push(&format!("b{i}"), i as f64);
-    }
-    for k in 1..=3 {
-        for i in 1..=9 {
-            let masa = match i {
-                3 => 1.0,
-                7 => 2.0,
-                _ => 0.0,
-            };
-            push(&format!("m{k}_{i}"), masa);
-        }
-    }
-    push("l", 5.0);
-    push("d", 10.0);
-    for k in 1..=3 {
-        push(&format!("mw{k}"), 0.5);
-        push(&format!("dw{k}"), 4.0);
-    }
+    let mut measurements = hidrostatica_input(&def, |symbol, _| match symbol {
+        "m_goma" => m_goma,
+        "rho_f" => rho_f,
+        "g_ac" => g_ac,
+        "b_E" => 10.0,
+        "m_3" => 1.0,
+        "m_7" => 2.0,
+        "l" => 5.0,
+        "d" => 10.0,
+        "mw" => 0.5,
+        "dw" => 4.0,
+        b if b.starts_with('b') => b[1..].parse().unwrap(),
+        _ => 0.0,
+    });
 
     db::seed_academic(&pool).await.unwrap();
     crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
@@ -2607,7 +2671,9 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     goma.instrument_id = Some(instrument_id);
     goma.scale_id = Some(scale_id);
 
-    let analysis = flattened(analyze(&pool, "hidrostatica", &measurements).await.unwrap());
+    let analysis = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    let found = by_determination(&analysis);
+    let analysis = flattened(analysis);
     let u_b_goma = analysis
         .quantities
         .iter()
@@ -2626,12 +2692,9 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
         analysis.warnings
     );
     let get = |symbol: &str| -> f64 {
-        analysis
-            .derived
-            .iter()
-            .find(|d| d.symbol == symbol)
+        *found
+            .get(symbol)
             .unwrap_or_else(|| panic!("falta el mensurando {symbol}"))
-            .value
     };
 
     for k in 1..=3 {
@@ -2646,23 +2709,122 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
 }
 
 #[tokio::test]
+async fn hidrostatica_un_slot_vacio_no_aporta_incertidumbre_a_su_medida() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
+        .await
+        .unwrap()
+        .unwrap();
+    db::seed_academic(&pool).await.unwrap();
+    crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
+        .await
+        .unwrap();
+    let (instrument_id, scale_id): (String, String) = sqlx::query_as(
+        "SELECT instrument_id, id FROM instrument_scales WHERE label = '0.1 g (calibracion 3 %)'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let m8_id = &def
+        .quantities
+        .iter()
+        .find(|q| q.symbol == "m_8")
+        .unwrap()
+        .id;
+    let input = || {
+        hidrostatica_input(&def, |symbol, k| match (symbol, k) {
+            ("m_goma", _) => 12.5,
+            ("rho_f", _) => 0.998,
+            ("g_ac", _) => 9.8,
+            ("b_E", _) => 10.0,
+            ("m_3", _) => 1.0,
+            ("m_7", 1 | 3) => 2.0,
+            ("m_8", 2) => 2.0,
+            ("l", _) => 5.0,
+            ("d", _) => 10.0,
+            ("mw", _) => 0.5,
+            ("dw", _) => 4.0,
+            (b, _) if b.starts_with('b') => b[1..].parse().unwrap(),
+            _ => 0.0,
+        })
+    };
+    let u_of = |analysis: &FormAnalysis, symbol: &str, k: usize| -> f64 {
+        analysis
+            .parts
+            .iter()
+            .flat_map(|p| p.analysis.determinations.get(k))
+            .flat_map(|d| &d.derived)
+            .find(|d| d.symbol == symbol)
+            .unwrap()
+            .u
+    };
+
+    let with_m8 = |choices: Vec<Option<(&str, &str)>>| {
+        let mut measurements = input();
+        let m8 = measurements
+            .iter_mut()
+            .find(|m| &m.quantity_id == m8_id)
+            .unwrap();
+        m8.operator_instruments = Some(
+            choices
+                .into_iter()
+                .map(|c| crate::computation::InstrumentChoice {
+                    instrument_id: c.map(|(i, _)| i.into()),
+                    scale_id: c.map(|(_, s)| s.into()),
+                })
+                .collect(),
+        );
+        measurements
+    };
+    let balanza = Some((instrument_id.as_str(), scale_id.as_str()));
+    let sin_balanza = analyze(&pool, "hidrostatica", &input()).await.unwrap();
+    let con_balanza = analyze(&pool, "hidrostatica", &with_m8(vec![None, balanza, None]))
+        .await
+        .unwrap();
+    let en_todas = analyze(&pool, "hidrostatica", &with_m8(vec![balanza; 3]))
+        .await
+        .unwrap();
+
+    assert!(u_of(&con_balanza, "E", 1) > u_of(&sin_balanza, "E", 1));
+    assert!(
+        u_of(&en_todas, "E", 0) > u_of(&sin_balanza, "E", 0),
+        "una lectura de 0 con instrumento conserva su incertidumbre"
+    );
+    for k in [0, 2] {
+        assert_eq!(
+            u_of(&con_balanza, "E", k),
+            u_of(&sin_balanza, "E", k),
+            "medida {}",
+            k + 1
+        );
+        assert_eq!(
+            u_of(&con_balanza, "rho", k),
+            u_of(&sin_balanza, "rho", k),
+            "medida {}",
+            k + 1
+        );
+    }
+}
+
+#[tokio::test]
 async fn analyze_rejects_a_slot_outside_the_balance() {
     let (pool, _dir) = setup().await;
     let def = crate::practices::definition(&pool, "hidrostatica")
         .await
         .unwrap()
         .unwrap();
-    let dw1 = def.quantities.iter().find(|q| q.symbol == "dw1").unwrap();
-    assert_eq!(dw1.slot_count, Some(9));
+    let dw = def.quantities.iter().find(|q| q.symbol == "dw").unwrap();
+    assert_eq!(dw.slot_count, Some(9));
     let with_value = |value: f64| {
         vec![MeasurementInput {
-            quantity_id: dw1.id.clone(),
+            quantity_id: dw.id.clone(),
             instrument_id: None,
             scale_id: None,
-            values: vec![value],
+            values: vec![],
             given_u: None,
             point_replicas: None,
-            operator_replicas: None,
+            operator_replicas: Some(vec![vec![4.0], vec![value], vec![4.0]]),
+            operator_instruments: None,
         }]
     };
     for bad in [0.0, 4.5, 10.0] {
@@ -2675,6 +2837,88 @@ async fn analyze_rejects_a_slot_outside_the_balance() {
     assert!(analyze(&pool, "hidrostatica", &with_value(4.0))
         .await
         .is_ok());
+}
+
+#[tokio::test]
+async fn analyze_validates_the_instruments_per_determination() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
+        .await
+        .unwrap()
+        .unwrap();
+    let id_of = |symbol: &str| {
+        def.quantities
+            .iter()
+            .find(|q| q.symbol == symbol)
+            .unwrap()
+            .id
+            .clone()
+    };
+    db::seed_academic(&pool).await.unwrap();
+    crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
+        .await
+        .unwrap();
+    let (instrument_id, scale_id): (String, String) = sqlx::query_as(
+        "SELECT instrument_id, id FROM instrument_scales WHERE label = '0.1 g (calibracion 3 %)'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let with = |shared: Option<&str>, groups: usize, instruments: usize| {
+        vec![MeasurementInput {
+            quantity_id: id_of("m_8"),
+            instrument_id: shared.map(|_| instrument_id.clone()),
+            scale_id: shared.map(Into::into),
+            values: vec![],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: Some(vec![vec![2.0]; groups]),
+            operator_instruments: Some(vec![Default::default(); instruments]),
+        }]
+    };
+    let m8 = |instruments: usize| with(None, 3, instruments);
+    let err_of = |measurements: Vec<MeasurementInput>| {
+        let pool = pool.clone();
+        async move {
+            analyze(&pool, "hidrostatica", &measurements)
+                .await
+                .unwrap_err()
+                .to_string()
+        }
+    };
+
+    assert!(analyze(&pool, "hidrostatica", &m8(3)).await.is_ok());
+    let partial = analyze(&pool, "hidrostatica", &with(Some(&scale_id), 1, 1))
+        .await
+        .unwrap();
+    assert!(
+        !partial.warnings.iter().any(|w| w.contains("no existe")),
+        "las medidas sin instrumento propio usan el compartido: {:?}",
+        partial.warnings
+    );
+    let err = err_of(with(Some("escala-borrada"), 3, 3)).await;
+    assert!(err.contains("la escala seleccionada no existe"), "{err}");
+    let err = err_of(m8(4)).await;
+    assert!(
+        err.contains("instrumentos para más determinaciones"),
+        "{err}"
+    );
+
+    let given = vec![MeasurementInput {
+        quantity_id: id_of("b_E"),
+        instrument_id: None,
+        scale_id: None,
+        values: vec![10.0],
+        given_u: None,
+        point_replicas: None,
+        operator_replicas: None,
+        operator_instruments: Some(vec![]),
+    }];
+    let err = err_of(given).await;
+    assert!(
+        err.contains("no lleva un instrumento por determinación"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -2852,6 +3096,7 @@ async fn curve_results_chain_and_skip_what_depends_on_series_values() {
             given_u: m["given_u"].as_f64(),
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         })
         .collect();
     let a = analyze(&pool, "filtros", &measurements).await.unwrap();
@@ -2892,6 +3137,7 @@ fn derived_value(analysis: &serde_json::Value, symbol: &str) -> Option<f64> {
 #[tokio::test]
 async fn editing_a_published_practice_does_not_change_old_submissions() {
     let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -2918,7 +3164,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let def = crate::practices::definition(&pool, "p1-estadistica")
+    let def = crate::practices::definition(&pool, "p1-partes")
         .await
         .unwrap()
         .unwrap();
@@ -2938,6 +3184,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
         given_u,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
     let measurements = vec![
         m("L", vec![1.0], Some(0.002)),
@@ -2947,7 +3194,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
     let mk = || FormSubmissionInput {
         course_id: course.id.clone(),
         group_id: group.id.clone(),
-        practice_id: "p1-estadistica".into(),
+        practice_id: "p1-partes".into(),
         measurements: measurements.clone(),
         meta: None,
         table_number: None,
@@ -2960,7 +3207,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
 
     sqlx::query(
         "UPDATE practice_results SET formula = '2*(' || formula || ')', tolerance = 5 \
-         WHERE practice_id = 'p1-estadistica' AND symbol = 'g1'",
+         WHERE practice_id = 'p1-partes' AND symbol = 'g1'",
     )
     .execute(&pool)
     .await
@@ -2982,7 +3229,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
         .formula;
     assert!(!old_formula.starts_with("2*("), "{old_formula}");
 
-    let v2 = crate::practices::publish_version(&pool, "p1-estadistica", None)
+    let v2 = crate::practices::publish_version(&pool, "p1-partes", None)
         .await
         .unwrap()
         .unwrap();
@@ -3128,6 +3375,7 @@ async fn a_practice_without_a_published_version_rejects_submissions() {
 #[tokio::test]
 async fn a_retired_quantity_stays_in_the_submissions_that_used_it() {
     let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
     let course = db::create_course(
         &pool,
         db::CreateCourse {
@@ -3154,7 +3402,7 @@ async fn a_retired_quantity_stays_in_the_submissions_that_used_it() {
         .into_iter()
         .find(|u| u.email == "docente@quantify.local")
         .unwrap();
-    let practice = "p1-estadistica";
+    let practice = "p1-partes";
     let def = crate::practices::definition(&pool, practice)
         .await
         .unwrap()
@@ -3175,6 +3423,7 @@ async fn a_retired_quantity_stays_in_the_submissions_that_used_it() {
         given_u,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
     let measurements = vec![
         m("L", vec![1.0], Some(0.002)),
@@ -3400,6 +3649,7 @@ fn determinations_match_separate_symbols_and_a_hand_written_average() {
     let measurements = vec![
         MeasurementInput {
             operator_replicas: Some(replicas.clone()),
+            operator_instruments: None,
             ..measurement("T", &[])
         },
         measurement("L", &[1.0, 1.02, 0.98]),
@@ -3539,6 +3789,7 @@ fn determination_warnings_are_grouped_and_the_average_is_not_blamed_on_one() {
     t.per_determination = true;
     let measurements = vec![MeasurementInput {
         operator_replicas: Some(vec![vec![2.0], vec![0.0], vec![4.0]]),
+        operator_instruments: None,
         ..measurement("T", &[])
     }];
     let a = compute(
@@ -3586,6 +3837,7 @@ fn a_quantity_missing_in_every_determination_warns_once() {
         &HashMap::new(),
         &[MeasurementInput {
             operator_replicas: Some(vec![vec![], vec![], vec![]]),
+            operator_instruments: None,
             ..measurement("T", &[])
         }],
         None,
@@ -3611,6 +3863,7 @@ fn a_result_named_like_a_generated_symbol_does_not_crash() {
         &HashMap::new(),
         &[MeasurementInput {
             operator_replicas: Some(vec![vec![2.0], vec![4.0], vec![5.0]]),
+            operator_instruments: None,
             ..measurement("T", &[])
         }],
         None,
@@ -3643,6 +3896,7 @@ fn a_common_result_can_use_an_average() {
     let def = per_determination_definition(true);
     let measurements = vec![MeasurementInput {
         operator_replicas: Some(vec![vec![2.0, 2.1], vec![4.0, 4.2], vec![5.0, 5.1]]),
+        operator_instruments: None,
         ..measurement("T", &[])
     }];
     let a = compute(
@@ -3667,6 +3921,7 @@ fn a_submission_needs_every_determination_of_a_required_quantity() {
     let groups = |g: Vec<Vec<f64>>| {
         vec![MeasurementInput {
             operator_replicas: Some(g),
+            operator_instruments: None,
             ..measurement("T", &[])
         }]
     };
@@ -3748,6 +4003,7 @@ async fn per_determination_measurements_are_checked_against_the_determinations()
     };
     let groups = |n: usize| MeasurementInput {
         operator_replicas: Some(vec![vec![2.0]; n]),
+        operator_instruments: None,
         ..measurement("T", &[])
     };
     assert!(analyze(groups(3)).await.is_ok());

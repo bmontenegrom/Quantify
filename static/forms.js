@@ -391,6 +391,7 @@ function quantityRowRenderer(definition, instruments, draft) {
 
   const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
+    const ownInstrument = opIndex == null || !useOperators;
     if (q.is_given) {
       const uField = !hasUncertainty(q)
         ? ""
@@ -421,7 +422,7 @@ function quantityRowRenderer(definition, instruments, draft) {
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
           <legend>${legendHtml(q)}</legend>
-          ${opIndex == null ? instrumentSelectorsHtml(instruments, q, true) : ""}
+          ${ownInstrument ? instrumentSelectorsHtml(instruments, q, true) : ""}
           ${chronoWidgetInnerHtml()}
           <div class="series-debug"></div>
         </fieldset>
@@ -431,7 +432,7 @@ function quantityRowRenderer(definition, instruments, draft) {
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
         <legend>${legendHtml(q)}</legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
-          ${opIndex == null ? `${instrumentSelectorsHtml(instruments, q)}<div class="measure-sep"></div>` : ""}
+          ${ownInstrument ? `${instrumentSelectorsHtml(instruments, q)}<div class="measure-sep"></div>` : ""}
           <div class="measure-right">
             <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
               ${renderReplicaInput(q.unit, q.default_value)}
@@ -474,7 +475,7 @@ function quantityRowRenderer(definition, instruments, draft) {
     return `
       <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}"${labelAttr}>
         <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por ${escapeHtml(per)}</span></h4>
-        ${q.is_given ? sharedU : instrumentSelectorsHtml(instruments, q, chrono.some(Boolean))}
+        ${q.is_given ? sharedU : useOperators ? instrumentSelectorsHtml(instruments, q, chrono.some(Boolean)) : ""}
         ${blocks}
       </div>
     `;
@@ -747,13 +748,15 @@ function collectGroupsAndStandalone() {
     const rows = [...container.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
     );
+    const shared = container.querySelector(":scope > .measure-selectors");
+    const own = rows.map((row) => row.querySelector(".measure-selectors"));
     return {
       quantity_id: container.dataset.quantityId,
-      instrument_id: container.querySelector(".measure-instrument")?.value || null,
-      scale_id: container.querySelector(".measure-scale")?.value || null,
+      ...selectedInstrument(shared),
       values: [],
       given_u: sharedGivenU(container),
       operator_replicas: rows.map(rowSeriesValues),
+      operator_instruments: own.every(Boolean) ? own.map(selectedInstrument) : null,
     };
   });
 
@@ -764,6 +767,13 @@ function collectGroupsAndStandalone() {
     out.push(collectStandaloneRow(row));
   }
   return out;
+}
+
+function selectedInstrument(selectors) {
+  return {
+    instrument_id: selectors?.querySelector(".measure-instrument").value || null,
+    scale_id: selectors?.querySelector(".measure-scale").value || null,
+  };
 }
 
 function sharedGivenU(container) {
@@ -977,12 +987,28 @@ function fillExampleData() {
     if (!select.value && !changedFromRender(select)) continue;
     const instrument = instruments.find((i) => i.id === select.value);
     const scale = select.closest(".measure-selectors").querySelector(".measure-scale").value;
-    chosen.set(select.closest("[data-quantity-id]").dataset.quantityId, {
+    const choice = {
       instrument_id: instrument?.id ?? null,
       scale_id: instrument ? scale || instrument.scales?.[0]?.id || null : null,
-    });
+    };
+    const id = select.closest("[data-quantity-id]").dataset.quantityId;
+    const op = select.closest(".operator-quantity [data-operator-index]")?.dataset.operatorIndex;
+    if (op == null) {
+      chosen.set(id, { ...chosen.get(id), ...choice });
+    } else {
+      const c = chosen.get(id) ?? {};
+      (c.operator_instruments ??= [])[Number(op)] = choice;
+      chosen.set(id, c);
+    }
   }
-  const measurements = exampleMeasurements(definition, { instruments }).map((m) => ({ ...m, ...chosen.get(m.quantity_id) }));
+  const measurements = exampleMeasurements(definition, { instruments }).map((m) => {
+    const c = chosen.get(m.quantity_id);
+    const ops = c?.operator_instruments;
+    if (!ops) return { ...m, ...c };
+    const fallback = { instrument_id: m.instrument_id, scale_id: m.scale_id };
+    const length = m.operator_replicas?.length ?? 0;
+    return { ...m, ...c, operator_instruments: Array.from({ length }, (_, i) => ops[i] ?? fallback) };
+  });
   const draft = { measurements, finalResults: [] };
   draftPreviewRequest++;
   latestResult.classList.add("hidden");
@@ -1107,6 +1133,7 @@ function editPrefillByQuantity() {
       e = {
         points: new Map(),
         operators: new Map(),
+        operatorInstruments: [],
         instrument_id: m.instrument_id,
         scale_id: m.scale_id,
         value_u: m.value_u,
@@ -1117,6 +1144,7 @@ function editPrefillByQuantity() {
     if (!e.points.has(pidx)) e.points.set(pidx, []);
     e.points.get(pidx).push(m.value);
     const oidx = m.operator_index ?? 0;
+    e.operatorInstruments[oidx] = { instrument_id: m.instrument_id, scale_id: m.scale_id };
     if (!e.operators.has(oidx)) e.operators.set(oidx, []);
     e.operators.get(oidx).push(m.value);
     if (m.value_u != null) e.value_u = m.value_u;
@@ -1230,7 +1258,8 @@ function prefillGroups(byQ) {
   measurementFields.querySelectorAll(".operator-quantity").forEach((groupEl) => {
     const e = byQ.get(groupEl.dataset.quantityId);
     if (!e) return;
-    fillInstrument(groupEl, e);
+    const shared = groupEl.querySelector(":scope > .measure-selectors");
+    if (shared) fillInstrument(shared, e);
     const u = groupEl.querySelector(".measure-given-u");
     if (u && e.value_u != null) u.value = e.value_u;
     const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(
@@ -1240,6 +1269,9 @@ function prefillGroups(byQ) {
       const values = e.operatorGroups[i] ?? [];
       if (!values.length && e.operatorGroups.length) row.querySelectorAll(".measure-value").forEach((input) => (input.value = ""));
       fillReplicaRow(row, values);
+      const own = row.querySelector(".measure-selectors");
+      const choice = e.operatorInstruments?.length ? e.operatorInstruments[i] : e;
+      if (own && choice) fillInstrument(own, choice);
     });
   });
 }

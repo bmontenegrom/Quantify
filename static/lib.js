@@ -481,6 +481,7 @@ export function draftMeasurementsByQuantity(measurements) {
     map.set(m.quantity_id, {
       pointGroups: m.point_replicas ?? (m.values ?? []).map((v) => [v]),
       operatorGroups: m.operator_replicas ?? [],
+      operatorInstruments: m.operator_instruments ?? [],
       values: m.values ?? [],
       value_u: m.given_u ?? null,
       instrument_id: m.instrument_id ?? null,

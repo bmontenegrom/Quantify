@@ -464,6 +464,7 @@ test("draftMeasurementsByQuantity: columna de un valor por punto", () => {
   assert.deepEqual(map.get("q1"), {
     pointGroups: [[1], [2], [3]],
     operatorGroups: [],
+    operatorInstruments: [],
     values: [1, 2, 3],
     value_u: null,
     instrument_id: null,
@@ -497,6 +498,23 @@ test("draftMeasurementsByQuantity: magnitud por operador (Motor D)", () => {
     },
   ]);
   assert.deepEqual(map.get("q1").operatorGroups, [[1, 1.1], [2, 2.1, 2.2]]);
+});
+
+test("draftMeasurementsByQuantity: instrumento por determinación", () => {
+  const balanza = { instrument_id: "bal", scale_id: "0.1g" };
+  const none = { instrument_id: null, scale_id: null };
+  const map = draftMeasurementsByQuantity([
+    {
+      quantity_id: "m_8",
+      instrument_id: null,
+      scale_id: null,
+      values: [],
+      given_u: null,
+      operator_replicas: [[0], [2], [0]],
+      operator_instruments: [none, balanza, none],
+    },
+  ]);
+  assert.deepEqual(map.get("m_8").operatorInstruments, [none, balanza, none]);
 });
 
 test("draftMeasurementsByQuantity: fila suelta dada (valor ± U)", () => {

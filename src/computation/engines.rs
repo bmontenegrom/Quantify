@@ -71,6 +71,7 @@ fn compute_quantities(
     let mut computed = Vec::with_capacity(quantities.len());
     for &quantity in quantities {
         let measurement = by_quantity.get(quantity.id.as_str());
+        let instrument = measurement.map_or((None, None), |m| m.instrument_for(operator));
         let values: Vec<f64> = match operator {
             Some(i) => measurement
                 .and_then(|m| m.operator_replicas.as_ref())
@@ -101,7 +102,7 @@ fn compute_quantities(
                     quantity.name, quantity.symbol
                 ));
             }
-            let spec = match measurement.and_then(|m| m.scale_id.as_deref()) {
+            let spec = match instrument.1 {
                 Some(scale_id) => match scales.get(scale_id) {
                     Some(scale) => Some(scale_spec(scale)?),
                     None => anyhow::bail!("la escala seleccionada no existe"),
@@ -118,8 +119,8 @@ fn compute_quantities(
             symbol: quantity.symbol.clone(),
             name: quantity.name.clone(),
             unit: quantity.unit.clone(),
-            instrument_id: measurement.and_then(|m| m.instrument_id.clone()),
-            scale_id: measurement.and_then(|m| m.scale_id.clone()),
+            instrument_id: instrument.0.map(Into::into),
+            scale_id: instrument.1.map(Into::into),
             values,
             result,
         });
@@ -142,6 +143,7 @@ fn compute_quantities(
 /// # let m = |id: &str, values: Vec<f64>, given_u: Option<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u,
 /// #     point_replicas: None, operator_replicas: None,
+/// #     operator_instruments: None,
 /// # };
 /// let g = PracticeResult {
 ///     id: "g".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
@@ -813,6 +815,7 @@ fn point_intermediate(
 /// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,
 /// #     point_replicas: None, operator_replicas: None,
+/// #     operator_instruments: None,
 /// # };
 /// let p = PracticeIntermediate {
 ///     symbol: "P".into(), formula: "I*I*R".into(), show_live: true, ..Default::default()
@@ -871,6 +874,7 @@ pub fn live_values(
 /// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,
 /// #     point_replicas: None, operator_replicas: None,
+/// #     operator_instruments: None,
 /// # };
 /// let analysis = compute_regresion(
 ///     &[q("x"), q("y")], &[], &[], &[], &[], &HashMap::new(), "x", "y",
@@ -1090,6 +1094,7 @@ pub fn compute_regresion(
 /// # let m = |id: &str, values: Vec<f64>| MeasurementInput {
 /// #     quantity_id: id.into(), instrument_id: None, scale_id: None, values, given_u: None,
 /// #     point_replicas: None, operator_replicas: None,
+/// #     operator_instruments: None,
 /// # };
 /// let curve = CurveSpec { x_formula: "R", y_formula: "I*I*R", x_log: false };
 /// let (analysis, _) = compute_curva(
@@ -1319,6 +1324,26 @@ pub async fn analyze_definition(
                 quantity.symbol
             );
         }
+        if measurement.operator_instruments.is_some()
+            && (!quantity.per_determination || quantity.is_given)
+        {
+            anyhow::bail!(
+                "\"{}\" ({}) no lleva un instrumento por determinación",
+                quantity.name,
+                quantity.symbol
+            );
+        }
+        let instruments = measurement
+            .operator_instruments
+            .as_ref()
+            .map_or(0, Vec::len);
+        if instruments > measurement.operator_replicas.as_ref().map_or(0, Vec::len) {
+            anyhow::bail!(
+                "\"{}\" ({}) trae instrumentos para más determinaciones que lecturas",
+                quantity.name,
+                quantity.symbol
+            );
+        }
         if quantity.per_determination {
             if let Some(d) = definition.quantity_determinations(&quantity.symbol) {
                 let groups = measurement.operator_replicas.as_ref().map_or(0, Vec::len);
@@ -1366,14 +1391,12 @@ pub async fn analyze_definition(
 
     let scales = load_scales(pool, measurements).await?;
 
-    for measurement in measurements {
-        if let (Some(instrument_id), Some(scale_id)) =
-            (&measurement.instrument_id, &measurement.scale_id)
+    for (instrument_id, scale_id) in measurements.iter().flat_map(|m| m.all_instruments()) {
+        if let (Some(instrument_id), Some(scale)) =
+            (instrument_id, scale_id.and_then(|s| scales.get(s)))
         {
-            if let Some(scale) = scales.get(scale_id) {
-                if scale.instrument_id != *instrument_id {
-                    anyhow::bail!("la escala elegida no pertenece al instrumento seleccionado");
-                }
+            if scale.instrument_id != instrument_id {
+                anyhow::bail!("la escala elegida no pertenece al instrumento seleccionado");
             }
         }
     }
@@ -1581,10 +1604,11 @@ async fn load_scales(
     measurements: &[MeasurementInput],
 ) -> anyhow::Result<HashMap<String, InstrumentScale>> {
     let mut scales = HashMap::new();
-    for measurement in measurements {
-        let Some(scale_id) = measurement.scale_id.as_deref() else {
-            continue;
-        };
+    for scale_id in measurements
+        .iter()
+        .flat_map(|m| m.all_instruments())
+        .filter_map(|(_, s)| s)
+    {
         if scales.contains_key(scale_id) {
             continue;
         }
