@@ -52,15 +52,13 @@ impl MeasurementInput {
     /// };
     /// assert_eq!(m.instrument_for(Some(0)), (None, None));
     /// assert_eq!(m.instrument_for(Some(1)), (Some("balanza"), Some("balanza")));
-    /// assert_eq!(m.instrument_for(Some(2)), (None, None));
+    /// assert_eq!(m.instrument_for(Some(2)), (Some("comun"), Some("comun")));
     /// assert_eq!(m.instrument_for(None), (Some("comun"), Some("comun")));
     /// ```
     pub fn instrument_for(&self, operator: Option<usize>) -> (Option<&str>, Option<&str>) {
-        match (operator, &self.operator_instruments) {
-            (Some(i), Some(choices)) => choices.get(i).map_or((None, None), |c| {
-                (c.instrument_id.as_deref(), c.scale_id.as_deref())
-            }),
-            _ => (self.instrument_id.as_deref(), self.scale_id.as_deref()),
+        match operator.and_then(|i| self.operator_instruments.as_ref()?.get(i)) {
+            Some(c) => (c.instrument_id.as_deref(), c.scale_id.as_deref()),
+            None => (self.instrument_id.as_deref(), self.scale_id.as_deref()),
         }
     }
 

@@ -91,6 +91,7 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   const timer = await instrumentsOf(T).nth(1).locator("option:not([value=''])").first().getAttribute("value");
   assert(timer, "el curso debía ofrecer un instrumento de tiempo");
   await instrumentsOf(T).nth(1).selectOption(timer);
+  await instrumentsOf(x).nth(0).selectOption(timer);
   await group(x).locator(".measurement-row").nth(0).locator(".measure-value").first().fill("1");
   await group(x).locator(".measurement-row").nth(1).locator(".measure-value").first().fill("");
   await group(x).locator(".measurement-row").nth(2).locator(".measure-value").first().fill("5");
@@ -159,6 +160,8 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   assert((await group(m).locator(".measure-given-u").inputValue()) === "0.5", "la U del dato de cátedra debía volver");
   const restored = await group(T).locator(".measurement-row .measure-instrument").evaluateAll((els) => els.map((e) => e.value));
   assert(restored.join() === `,${timer},`, `al editar, cada medida debía recuperar su instrumento: ${restored}`);
+  const extra = await group(x).locator(".measurement-row .measure-instrument").evaluateAll((els) => els.map((e) => e.value));
+  assert(extra.join() === `${timer},,`, `la medida vacía no debía heredar el instrumento de otra: ${extra}`);
   assert(
     await sPage.locator('[data-final-result][data-symbol="g#3"]').isVisible(),
     "el resultado final de la medida 3 debía verse en su pestaña",

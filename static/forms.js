@@ -1001,10 +1001,14 @@ function fillExampleData() {
       chosen.set(id, c);
     }
   }
-  for (const c of chosen.values()) {
-    if (c.operator_instruments) c.operator_instruments = Array.from(c.operator_instruments, (x) => x ?? { instrument_id: null, scale_id: null });
-  }
-  const measurements = exampleMeasurements(definition, { instruments }).map((m) => ({ ...m, ...chosen.get(m.quantity_id) }));
+  const measurements = exampleMeasurements(definition, { instruments }).map((m) => {
+    const c = chosen.get(m.quantity_id);
+    const ops = c?.operator_instruments;
+    if (!ops) return { ...m, ...c };
+    const fallback = { instrument_id: m.instrument_id, scale_id: m.scale_id };
+    const length = Math.max(ops.length, m.operator_replicas?.length ?? 0);
+    return { ...m, ...c, operator_instruments: Array.from({ length }, (_, i) => ops[i] ?? fallback) };
+  });
   const draft = { measurements, finalResults: [] };
   draftPreviewRequest++;
   latestResult.classList.add("hidden");
@@ -1266,7 +1270,8 @@ function prefillGroups(byQ) {
       if (!values.length && e.operatorGroups.length) row.querySelectorAll(".measure-value").forEach((input) => (input.value = ""));
       fillReplicaRow(row, values);
       const own = row.querySelector(".measure-selectors");
-      if (own) fillInstrument(own, e.operatorInstruments?.[i] ?? e);
+      const choice = e.operatorInstruments?.length ? e.operatorInstruments[i] : e;
+      if (own && choice) fillInstrument(own, choice);
     });
   });
 }
