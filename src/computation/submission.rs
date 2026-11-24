@@ -165,9 +165,9 @@ pub async fn create_form_submission(
         ..
     } = version;
     validate_student_results(&definition, &input.student_results)?;
-    check_determination_groups(&definition, &input.measurements)?;
 
     let analysis = analyze_definition(pool, &definition, &input.measurements).await?;
+    check_determination_groups(&definition, &input.measurements)?;
     let series = series_quantity_ids(&definition);
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match &input.meta {
@@ -414,9 +414,9 @@ pub async fn update_form_submission(
     if let Some(results) = student_results {
         validate_student_results(&definition, results)?;
     }
-    check_determination_groups(&definition, measurements)?;
 
     let analysis = analyze_definition(pool, &definition, measurements).await?;
+    check_determination_groups(&definition, measurements)?;
     let series = series_quantity_ids(&definition);
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match meta {

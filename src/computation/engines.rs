@@ -1307,10 +1307,18 @@ pub async fn analyze_definition(
         .iter()
         .map(|q| (q.id.as_str(), q))
         .collect();
+    let mut seen = std::collections::HashSet::new();
     for measurement in measurements {
         let Some(quantity) = by_id.get(measurement.quantity_id.as_str()) else {
             anyhow::bail!("una de las mediciones no corresponde a una magnitud de esta practica");
         };
+        if !seen.insert(measurement.quantity_id.as_str()) {
+            anyhow::bail!(
+                "\"{}\" ({}) viene más de una vez en la entrega",
+                quantity.name,
+                quantity.symbol
+            );
+        }
         if quantity.per_determination {
             if let Some(d) = definition.quantity_determinations(&quantity.symbol) {
                 let groups = measurement.operator_replicas.as_ref().map_or(0, Vec::len);

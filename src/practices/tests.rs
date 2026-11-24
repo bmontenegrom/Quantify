@@ -4176,6 +4176,17 @@ async fn a_per_determination_quantity_only_accepts_groups() {
     assert!(analyze(vec![], None, Some(vec![vec![2.0], vec![4.0]]))
         .await
         .is_ok());
+    let twice = crate::computation::MeasurementInput {
+        quantity_id: def.quantities[0].id.clone(),
+        instrument_id: None,
+        scale_id: None,
+        values: vec![],
+        given_u: None,
+        point_replicas: None,
+        operator_replicas: Some(vec![vec![2.0], vec![4.0]]),
+    };
+    let repeated = crate::computation::analyze(&pool, &practice.id, &[twice.clone(), twice]).await;
+    assert!(repeated.unwrap_err().to_string().contains("más de una vez"));
     for (values, points, groups) in [
         (vec![2.0], None, None),
         (vec![], Some(vec![vec![2.0], vec![4.0]]), None),

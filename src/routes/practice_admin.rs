@@ -1639,25 +1639,20 @@ fn determination_problems(def: &practices::PracticeDefinition) -> Vec<ElementPro
             });
         }
     }
-    let averaged = crate::computation::per_determination_symbols(&def.quantities, &def.results);
+    let averaged = def.averaged_results();
     let symbols: Vec<&str> = practices::version_symbols(def).collect();
     for r in def.results.iter().filter(|r| averaged.contains(&r.symbol)) {
-        let part = def
-            .result_part(&r.symbol)
-            .and_then(|id| def.parts.iter().find(|p| p.id == id));
-        if def.determinations_in(part).is_some_and(|d| d.average) {
-            let average = format!("{}_medio", r.symbol);
-            if symbols.contains(&average.as_str()) {
-                problems.push(ElementProblem {
-                    check: "el promedio de",
-                    element: format!("el mensurando {}", r.symbol),
-                    message: format!(
-                        "su promedio se llamaría {average}, que ya es otro símbolo de la práctica"
-                    ),
-                    kind: "result",
-                    id: Some(r.id.clone()),
-                });
-            }
+        let average = format!("{}_medio", r.symbol);
+        if symbols.contains(&average.as_str()) {
+            problems.push(ElementProblem {
+                check: "el promedio de",
+                element: format!("el mensurando {}", r.symbol),
+                message: format!(
+                    "su promedio se llamaría {average}, que ya es otro símbolo de la práctica"
+                ),
+                kind: "result",
+                id: Some(r.id.clone()),
+            });
         }
     }
     problems
@@ -2370,8 +2365,7 @@ fn validate_quantity_in(
     validate_quantity(input)?;
     let part = quantity_id
         .and_then(|id| def.quantities.iter().find(|q| q.id == id))
-        .and_then(|q| def.quantity_part(&q.symbol))
-        .and_then(|id| def.parts.iter().find(|p| p.id == id));
+        .and_then(|q| def.part_of_quantity(&q.symbol));
     let point_based = match part {
         Some(part) => practices::is_point_based(Some(def.part_kind(part))),
         None if !def.parts.is_empty() => def.series_part().is_some(),
