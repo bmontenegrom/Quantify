@@ -411,7 +411,7 @@ export function renderPracticesPage() {
         ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes».</p>`
         : renderAnalysisKindForm(practice, def)}
       ${statistical ? renderOperatorCountForm(practice, def) : ""}
-      ${!def?.parts?.length && statistical ? determinationsFormHtml(null, def?.determinations) : ""}
+      ${!def?.parts?.length && statistical ? determinationsFormHtml(def, null, def?.determinations) : ""}
     </section>
 
     ${renderLayoutSection(practice, def)}
@@ -1176,6 +1176,9 @@ function renderRegressionFormulasForm(practice, def) {
 }
 
 function renderOperatorCountForm(practice, def) {
+  if (def?.determinations || def?.parts?.some((p) => p.determinations)) {
+    return `<p class="submission-meta">Operadores: quitá las determinaciones para usarlos.</p>`;
+  }
   const count = def?.operator_count ?? "";
   return `
     <form id="practice-operators-form" class="detail-form detail-form-grid">
@@ -1191,8 +1194,8 @@ function renderOperatorCountForm(practice, def) {
   `;
 }
 
-function determinationsFormHtml(part, d) {
-  if ((state.practiceDefinition?.operator_count ?? 0) >= 2) {
+function determinationsFormHtml(def, part, d) {
+  if ((def?.operator_count ?? 0) >= 2) {
     return `<p class="submission-meta">Determinaciones: quitá los operadores para usarlas.</p>`;
   }
   const partAttr = part ? ` data-part-id="${escapeHtml(part.id)}"` : "";
@@ -1612,6 +1615,7 @@ async function saveDeterminations(event, practiceId) {
   const form = event.currentTarget;
   const raw = Object.fromEntries(new FormData(form).entries());
   const count = Number(raw.count) || 0;
+  if (!count && !form.dataset.hadDeterminations) return;
   const determinations = count
     ? { count, label: raw.label.trim(), average: "average" in raw, display: raw.display }
     : null;
@@ -1622,7 +1626,7 @@ async function saveDeterminations(event, practiceId) {
   await runPracticeAction(async () => {
     await postJson(url, { determinations });
     await reloadDefinition(practiceId);
-  }, count ? "Determinaciones guardadas" : form.dataset.hadDeterminations ? "Determinaciones quitadas" : "Sin determinaciones");
+  }, count ? "Determinaciones guardadas" : "Determinaciones quitadas");
 }
 
 async function savePracticeRegressionFormulas(event) {
@@ -1814,7 +1818,7 @@ function renderLayoutSection(practice, def) {
             `<option value="${k}" ${k === p.effective_kind ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
           ).join("")}
         </select>
-        ${p.effective_kind === "estadistico" ? determinationsFormHtml(p, p.determinations) : ""}
+        ${p.effective_kind === "estadistico" ? determinationsFormHtml(def, p, p.determinations) : ""}
       </td>
       <td class="directory-actions">
         ${moveButtonsHtml("parts", p.id, i, parts.length)}

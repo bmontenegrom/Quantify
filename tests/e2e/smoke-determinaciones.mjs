@@ -30,6 +30,8 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
     saved?.count === 3 && saved.label === "Medida" && saved.average && saved.display === "bloques",
     `determinaciones guardadas desde el editor: ${JSON.stringify(saved)}`,
   );
+  await page.waitForSelector('#practice-workspace :text("quitá las determinaciones para usarlos")');
+  assert((await page.locator("#practice-operators-form").count()) === 0, "con determinaciones no debía ofrecerse el formulario de operadores");
 
   step("docente: marca T como «se repite por determinación» y, al desmarcar otra, vuelve a su rol");
   await openAddForm(page, "#new-quantity-form");

@@ -1179,7 +1179,8 @@ Decisiones:
      promedios: no cambian.
    - El servidor guarda `per_point = false` en una magnitud por determinación; al desmarcarla, el
      editor vuelve a derivar `per_point` del rol, como en una magnitud nueva.
-   **(F9, 3b/5): el servidor manda resueltas partes y determinaciones, y se valida la entrega.**
+4. **`feat(practicas)`: el servidor manda resueltas partes y determinaciones, y se valida la
+   entrega (F9, 3b/5).**
    - El formulario del alumno replica en JS la lógica de partes y determinaciones del servidor
      (`symbolPart`, `perDeterminationSymbols`, `determinationsFor` frente a `part_of`,
      `per_determination_symbols`, `determinations_in`) y ya difieren en detalles. Que la
@@ -1201,12 +1202,12 @@ Decisiones:
      veces por validación; calcularlo una vez y pasarlo si llega a notarse.
      Lo mismo en el cliente: `finalPart` llama a `expandDeterminationResults` por cada resultado
      final; se va con lo anterior cuando el servidor mande la parte de cada símbolo.
-4. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
+5. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).**
    - P1 sin partes, con 3 operadores en pestañas; Hidrostática con 26 magnitudes y 3 medidas en
      bloques con promedio.
    - Golden regenerados, más el test con los números de hoy.
    - Los E2E que usan `p1-estadistica-op1` o los símbolos `m1_3`… se actualizan.
-5. **`refactor(practicas)`: se retira `operator_count` (F9, 5/5).**
+6. **`refactor(practicas)`: se retira `operator_count` (F9, 5/5).**
    - Las determinaciones reemplazan al motor de operadores, su ruta y su editor;
      `smoke-operadores` pasa a determinaciones.
    - Doc: F9 queda marcada como hecha.
