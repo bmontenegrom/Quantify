@@ -155,16 +155,18 @@ impl Unit {
         self.dims == other.dims
     }
 
-    fn times(self, other: Unit, exp: i32) -> Unit {
+    fn times(self, other: Unit, exp: i32) -> Option<Unit> {
+        let exp_dims = i8::try_from(exp).ok()?;
         let mut dims = self.dims;
         for (d, o) in dims.iter_mut().zip(other.dims) {
-            *d += o * exp as i8;
+            *d = d.checked_add(o.checked_mul(exp_dims)?)?;
         }
-        Unit {
-            factor: self.factor * other.factor.powi(exp),
+        let factor = self.factor * other.factor.powi(exp);
+        (factor.is_normal()).then_some(Unit {
+            factor,
             offset: 0.0,
             dims,
-        }
+        })
     }
 }
 
@@ -229,7 +231,7 @@ fn product(text: &str) -> Option<Unit> {
         .filter(|t| !t.is_empty())
         .try_fold(ONE, |acc, token| {
             let (unit, exp) = factor_unit(token)?;
-            Some(acc.times(unit, exp))
+            acc.times(unit, exp)
         })
 }
 
@@ -267,7 +269,7 @@ pub fn parse(text: &str) -> Option<Unit> {
     };
     let unit = product(numerator)?;
     match denominator {
-        Some(d) => Some(unit.times(product(d)?, -1)),
+        Some(d) => unit.times(product(d)?, -1),
         None => Some(unit),
     }
 }
@@ -419,7 +421,9 @@ mod tests {
 
     #[test]
     fn unknown_or_malformed_units_are_not_recognized() {
-        for text in ["div", "m/s/s", "/s", "m/", "xyz", "m3x"] {
+        for text in [
+            "div", "m/s/s", "/s", "m/", "xyz", "m3x", "m256", "J64", "m127.m", "km120",
+        ] {
             assert!(parse(text).is_none(), "{text}");
         }
     }
