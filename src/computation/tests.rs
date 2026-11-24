@@ -431,6 +431,26 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
         "{warnings:?}"
     );
     assert!(type_b_in(&divisions, "div", 1.0).1.is_empty());
+    let empty = compute(
+        &[PracticeQuantity {
+            unit: "mm".into(),
+            ..quantity("x")
+        }],
+        &[],
+        &HashMap::from([("s1".to_string(), divisions)]),
+        &[MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            ..measurement("x", &[])
+        }],
+        None,
+    )
+    .unwrap();
+    assert!(
+        !empty.warnings.iter().any(|w| w.contains("no se convirtió")),
+        "sin lecturas no hay incertidumbre que convertir: {:?}",
+        empty.warnings
+    );
 }
 
 #[test]

@@ -59,39 +59,23 @@ pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
     })
 }
 
-fn scale_to_quantity(scale: &InstrumentScale, unit: &str) -> (f64, f64, Option<String>) {
+fn scale_to_quantity(scale: &InstrumentScale, unit: &str) -> Result<(f64, f64), String> {
     let (from, to) = (scale.unit.trim(), unit.trim());
     if from.is_empty() || to.is_empty() || from == to {
-        return (1.0, 0.0, None);
+        return Ok((1.0, 0.0));
     }
-    let not_converted = |why: String| {
-        let label = &scale.label;
-        Some(format!(
-            "{why}: la incertidumbre de la escala \"{label}\" no se convirtió"
-        ))
-    };
-    match (crate::units::parse(from), crate::units::parse(to)) {
+    let why = match (crate::units::parse(from), crate::units::parse(to)) {
         (Some(f), Some(t)) if f.compatible(&t) => {
-            (f.factor / t.factor, (t.offset - f.offset) / t.factor, None)
+            return Ok((f.factor / t.factor, (t.offset - f.offset) / t.factor))
         }
-        (Some(_), Some(_)) => (
-            1.0,
-            0.0,
-            not_converted(format!(
-                "la escala mide en {from} y la magnitud está en {to}"
-            )),
-        ),
-        (None, _) => (
-            1.0,
-            0.0,
-            not_converted(format!("no se reconoce la unidad {from}")),
-        ),
-        (_, None) => (
-            1.0,
-            0.0,
-            not_converted(format!("no se reconoce la unidad {to}")),
-        ),
-    }
+        (Some(_), Some(_)) => format!("la escala mide en {from} y la magnitud está en {to}"),
+        (None, _) => format!("no se reconoce la unidad {from}"),
+        (_, None) => format!("no se reconoce la unidad {to}"),
+    };
+    Err(format!(
+        "{why}: la incertidumbre de la escala \"{}\" no se convirtió",
+        scale.label
+    ))
 }
 
 fn compute_quantities(
@@ -143,10 +127,16 @@ fn compute_quantities(
                         anyhow::bail!("la escala seleccionada no existe");
                     };
                     let spec = scale_spec(scale)?;
-                    let (factor, shift, warning) = scale_to_quantity(scale, &quantity.unit);
-                    if let Some(w) = warning {
-                        warnings.push(format!("\"{}\" ({}): {w}.", quantity.name, quantity.symbol));
-                    }
+                    let (factor, shift) =
+                        scale_to_quantity(scale, &quantity.unit).unwrap_or_else(|w| {
+                            if !values.is_empty() {
+                                warnings.push(format!(
+                                    "\"{}\" ({}): {w}.",
+                                    quantity.name, quantity.symbol
+                                ));
+                            }
+                            (1.0, 0.0)
+                        });
                     uncertainty::measured_with(&values, |mean| {
                         uncertainty::type_b(&spec, (mean + shift) / factor) * factor
                     })
