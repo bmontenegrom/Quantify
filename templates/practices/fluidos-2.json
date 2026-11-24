@@ -5,7 +5,6 @@
   "analysis_kind": "regresion_lineal",
   "x_formula": "math::sqrt(h_max) - math::sqrt(h)",
   "y_formula": "t",
-  "operator_count": null,
   "parts": [],
   "sections": [],
   "quantities": [

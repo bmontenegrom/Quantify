@@ -981,7 +981,6 @@ async fn seeded_p3_formulas_compute() {
         &Default::default(),
         &m3,
         None,
-        None,
     )
     .unwrap();
     let tau_t = a3
@@ -1933,84 +1932,6 @@ async fn the_series_part_takes_the_practice_kind_and_the_rest_are_statistical() 
         .quantities
         .iter()
         .all(|q| ["R1", "R2", "R3"].contains(&q.symbol.as_str())));
-}
-
-#[tokio::test]
-async fn shared_results_keep_the_operator_shape_of_the_form() {
-    let (pool, _dir) = setup().await;
-    crate::computation::tests::p1_partes(&pool).await;
-    set_operator_count(&pool, "p1-partes", 2).await.unwrap();
-    sqlx::query("UPDATE practice_sections SET part_id = NULL WHERE part_id = 'p1-partes-op1'")
-        .execute(&pool)
-        .await
-        .unwrap();
-    let def = definition(&pool, "p1-partes").await.unwrap().unwrap();
-    assert_eq!(def.result_part("g1"), None);
-    let id = |sym: &str| {
-        def.quantities
-            .iter()
-            .find(|q| q.symbol == sym)
-            .unwrap()
-            .id
-            .clone()
-    };
-    let m = |sym: &str, values: Vec<f64>, given_u: Option<f64>, ops: Option<Vec<Vec<f64>>>| {
-        crate::computation::MeasurementInput {
-            quantity_id: id(sym),
-            instrument_id: None,
-            scale_id: None,
-            values,
-            given_u,
-            point_replicas: None,
-            operator_replicas: ops,
-            operator_instruments: None,
-        }
-    };
-    let measurements = vec![
-        m("L", vec![1.0], Some(0.002), None),
-        m("t_med", vec![2.0], Some(0.0), None),
-        m(
-            "T1",
-            vec![],
-            None,
-            Some(vec![vec![2.0, 2.02, 1.98], vec![2.01, 1.99, 2.0]]),
-        ),
-    ];
-    let analysis = crate::computation::analyze(&pool, "p1-partes", &measurements)
-        .await
-        .unwrap();
-    assert_eq!(analysis.operators.len(), 2);
-    for part in &analysis.parts {
-        for op in &part.analysis.operators {
-            assert!(op
-                .quantities
-                .iter()
-                .all(|q| q.symbol != "T1" && q.symbol != "L"));
-        }
-    }
-    for op in &analysis.operators {
-        let g1 = op.derived.iter().find(|d| d.symbol == "g1").unwrap();
-        assert!(
-            g1.value.is_finite() && (g1.value - 9.87).abs() < 0.1,
-            "{}",
-            g1.value
-        );
-    }
-}
-
-#[tokio::test]
-async fn curve_practices_do_not_inherit_a_leftover_operator_count() {
-    let (pool, _dir) = setup().await;
-    let mut cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
-    cc.operator_count = Some(2);
-    assert_eq!(cc.shared_view().operator_count, None);
-    assert!(cc
-        .parts
-        .iter()
-        .all(|p| cc.part_view(p).operator_count.is_none()));
-    let mut p1 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-    p1.operator_count = Some(2);
-    assert_eq!(p1.shared_view().operator_count, Some(2));
 }
 
 #[tokio::test]
@@ -3900,11 +3821,6 @@ fn check_template_rejects_what_cannot_be_written() {
             "tipo de análisis",
         ),
         (serde_json::json!({"parts": [{"title": " "}]}), "sin título"),
-        (serde_json::json!({"operator_count": 21}), "superar 20"),
-        (
-            serde_json::json!({"parts": [{"title": "A", "determinations": {"count": 2, "label": "M"}}], "operator_count": 2}),
-            "no puede usar operadores",
-        ),
         (
             serde_json::json!({"quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": true, "per_determination": true}]}),
             "parte con determinaciones",

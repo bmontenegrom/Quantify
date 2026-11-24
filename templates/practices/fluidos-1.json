@@ -5,7 +5,6 @@
   "analysis_kind": "regresion_lineal",
   "x_formula": "1/Q",
   "y_formula": "h/(Q*Q)",
-  "operator_count": null,
   "parts": [],
   "sections": [],
   "quantities": [

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 pub const TEMPLATE_VERSION: u32 = 1;
 pub const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
-pub const MAX_OPERATORS: i64 = 20;
+pub const MAX_DETERMINATIONS: i64 = 20;
 const MAX_PART_KEY: usize = 40;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,8 +30,6 @@ pub struct PracticeTemplate {
     pub x_formula: Option<String>,
     #[serde(default)]
     pub y_formula: Option<String>,
-    #[serde(default)]
-    pub operator_count: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub determinations: Option<Determinations>,
     #[serde(default)]
@@ -173,7 +171,6 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
         analysis_kind: def.analysis_kind.clone(),
         x_formula: def.x_formula.clone(),
         y_formula: def.y_formula.clone(),
-        operator_count: def.operator_count,
         determinations: def.determinations.clone(),
         parts: def
             .parts
@@ -402,12 +399,10 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
             ));
         }
     }
-    let all_determinations = std::iter::once(&t.determinations)
+    for d in std::iter::once(&t.determinations)
         .chain(t.parts.iter().map(|p| &p.determinations))
-        .flatten();
-    let mut any_determinations = false;
-    for d in all_determinations {
-        any_determinations = true;
+        .flatten()
+    {
         d.validate()?;
     }
     if t.determinations.is_some() && !t.parts.is_empty() {
@@ -440,14 +435,6 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
                 q.symbol
             ));
         }
-    }
-    if any_determinations && t.operator_count.is_some_and(|n| n > 1) {
-        return Err("Una práctica con determinaciones no puede usar operadores.".into());
-    }
-    if t.operator_count.is_some_and(|n| n > MAX_OPERATORS) {
-        return Err(format!(
-            "La cantidad de operadores no puede superar {MAX_OPERATORS}."
-        ));
     }
     let titles = t
         .parts
@@ -592,8 +579,8 @@ async fn write_template(
     let (kind, part_kinds) = stored_kinds(t);
     sqlx::query(
         "INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula, \
-         operator_count, status, created_by, created_at, config_json) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         status, created_by, created_at, config_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
     .bind(id)
     .bind(t.name.trim())
@@ -601,7 +588,6 @@ async fn write_template(
     .bind(&kind)
     .bind(axis(t.x_formula.as_deref()))
     .bind(axis(t.y_formula.as_deref()))
-    .bind(t.operator_count.filter(|n| *n > 1))
     .bind(status)
     .bind(created_by)
     .bind(chrono::Utc::now())

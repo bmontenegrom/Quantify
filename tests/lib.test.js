@@ -763,15 +763,15 @@ test("validateMeasurements: estadistico reporta mensurando sin lecturas", () => 
   assert.equal(ok, null);
 });
 
-test("validateMeasurements: operadores exigen una serie por operador", () => {
-  const meta = { T: { name: "Periodo", isGiven: false, isChrono: false } };
+test("validateMeasurements: cada determinación exige su serie", () => {
+  const meta = { T: { name: "Periodo", isGiven: false, isChrono: false, groupLabel: "Operador" } };
   const err = validateMeasurements(
     [{ quantity_id: "T", values: [], given_u: null, operator_replicas: [[1, 1.1], []] }],
     "estadistico",
     meta,
   );
   assert.ok(typeof err === "string");
-  assert.ok(err.includes("operador 2"));
+  assert.ok(err.includes("falta cargar Operador 2"));
   const ok = validateMeasurements(
     [{ quantity_id: "T", values: [], given_u: null, operator_replicas: [[1, 1.1], [2, 2.1]] }],
     "estadistico",
@@ -943,17 +943,17 @@ test("formatSymbolHtml no busca en los símbolos a mostrar", () => {
   setDisplaySymbols({});
 });
 
-test("exampleMeasurements: estadística con datos dados, repetidas, únicas y operadores", () => {
+test("exampleMeasurements: estadística con datos dados, repetidas, únicas y determinaciones", () => {
   const definition = {
     analysis_kind: "estadistico",
-    operator_count: 2,
     quantities: [
       { id: "g", is_given: true, default_value: 9.8 },
       { id: "c", is_given: true, has_uncertainty: false },
       { id: "s", is_given: true, slot_count: 4 },
-      { id: "t", repeated: true },
+      { id: "t", symbol: "t", repeated: true, per_determination: true },
       { id: "L", repeated: false },
     ],
+    resolved: { determinations: { t: { count: 2, label: "Operador" } } },
   };
   const [g, c, s, t, L] = exampleMeasurements(definition);
   assert.deepEqual(g.values, [9.8]);
@@ -966,7 +966,7 @@ test("exampleMeasurements: estadística con datos dados, repetidas, únicas y op
   assert.deepEqual(L.values, [1]);
 });
 
-test("exampleMeasurements: sin operadores una repetida da réplicas parecidas", () => {
+test("exampleMeasurements: sin determinaciones una repetida da réplicas parecidas", () => {
   const [t] = exampleMeasurements({ quantities: [{ id: "t", repeated: true }] }, { replicas: 4 });
   assert.equal(t.values.length, 4);
   assert.ok(Math.max(...t.values) / Math.min(...t.values) < 1.05);
@@ -975,7 +975,6 @@ test("exampleMeasurements: sin operadores una repetida da réplicas parecidas", 
 test("exampleMeasurements: regresión con serie simple y con réplicas por punto", () => {
   const definition = {
     analysis_kind: "regresion_lineal",
-    operator_count: 3,
     quantities: [
       { id: "x", per_point: true },
       { id: "y", per_point: true, repeated: true, replicas_per_point: 2 },

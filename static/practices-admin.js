@@ -410,7 +410,6 @@ export function renderPracticesPage() {
       ${def?.parts?.length
         ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes».</p>`
         : renderAnalysisKindForm(practice, def)}
-      ${statistical ? renderOperatorCountForm(practice, def) : ""}
       ${!def?.parts?.length && statistical ? determinationsFormHtml(def, null, def?.determinations) : ""}
     </section>
 
@@ -477,7 +476,6 @@ export function renderPracticesPage() {
   });
   practiceWorkspace.querySelector("#practice-kind-form")?.addEventListener("submit", savePracticeKind);
   practiceWorkspace.querySelector("#practice-regression-form")?.addEventListener("submit", savePracticeRegressionFormulas);
-  practiceWorkspace.querySelector("#practice-operators-form")?.addEventListener("submit", savePracticeOperatorCount);
   practiceWorkspace.querySelectorAll("[data-determinations-form]").forEach((form) => {
     form.addEventListener("submit", (event) => saveDeterminations(event, practice.id));
   });
@@ -1175,29 +1173,7 @@ function renderRegressionFormulasForm(practice, def) {
   `;
 }
 
-function renderOperatorCountForm(practice, def) {
-  if (def?.determinations || def?.parts?.some((p) => p.determinations)) {
-    return `<p class="submission-meta">Operadores: quitá las determinaciones para usarlos.</p>`;
-  }
-  const count = def?.operator_count ?? "";
-  return `
-    <form id="practice-operators-form" class="detail-form detail-form-grid">
-      <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
-      <label>Operadores (estadística)
-        <input name="operator_count" type="number" min="0" step="1" value="${escapeHtml(String(count))}" placeholder="sin operadores" />
-      </label>
-      <p class="submission-meta">Con 2 o más operadores, cada uno carga su propia serie de las magnitudes repetidas (las dadas o de medida única se comparten) y se calculan los mensurandos por operador, sin promediar. 0 o 1 = comportamiento normal.</p>
-      <div class="detail-actions">
-        <button type="submit">Guardar operadores</button>
-      </div>
-    </form>
-  `;
-}
-
 function determinationsFormHtml(def, part, d) {
-  if ((def?.operator_count ?? 0) >= 2) {
-    return `<p class="submission-meta">Determinaciones: quitá los operadores para usarlas.</p>`;
-  }
   const partAttr = part ? ` data-part-id="${escapeHtml(part.id)}"` : "";
   return `
     <details class="add-panel" data-add-panel="determinations-${escapeHtml(part?.id ?? "practice")}">
@@ -1604,16 +1580,6 @@ async function savePracticeKind(event) {
     await reloadDefinition(payload.practice_id);
     state.practices = await fetchJson("/api/practices");
   }, "Tipo de análisis guardado");
-}
-
-async function savePracticeOperatorCount(event) {
-  event.preventDefault();
-  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
-  const count = Number(payload.operator_count) || 0;
-  await runPracticeAction(async () => {
-    await postJson(`/api/practices/${payload.practice_id}/operator-count`, { count });
-    await reloadDefinition(payload.practice_id);
-  }, "Operadores actualizados");
 }
 
 async function saveDeterminations(event, practiceId) {

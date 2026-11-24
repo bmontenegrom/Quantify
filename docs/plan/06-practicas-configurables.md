@@ -1086,7 +1086,7 @@ cada respuesta compara antes de tocar el estado), en un PR aparte, para que los 
 tengan que acordarse; hoy `savePracticeKind` y `deleteLayoutItem` todavía escriben
 `state.practices` sin esa comprobación.
 
-### F9 — Determinaciones repetidas con promedio
+### F9 — Determinaciones repetidas con promedio ✅ HECHA
 
 Generaliza el motor D (operadores) y el patrón de Hidrostática (3 determinaciones independientes,
 derivado por determinación y promedio con propagación):
@@ -1146,7 +1146,7 @@ Decisiones:
 - En P1, `Q = pi*t_med/(T*ln2)` pasa a calcularse por operador (hoy usa solo `T1`): los valores
   de hoy se mantienen y aparecen dos nuevos.
 
-1. **`feat(practicas)`: determinaciones en el motor (F9, 1/5).**
+1. **`feat(practicas)`: determinaciones en el motor (F9, 1/5).** ✅
    - `config_json` en `practices` y `practice_parts`, y `per_determination` en las magnitudes:
      tipos, CRUD, rutas y validación (panel de problemas).
    - `compute` generaliza la rama de operadores a determinaciones de la práctica o de la parte,
@@ -1206,10 +1206,13 @@ Decisiones:
      así que el alumno informa cada medida y el promedio (antes, solo el promedio).
    - Los tests que usaban la forma vieja de P1 (partes y `T1/T2/T3`) siguen con una copia en
      `tests/fixtures/p1-partes.json`.
-6. **`refactor(practicas)`: se retira `operator_count` (F9, 5/5).**
-   - Las determinaciones reemplazan al motor de operadores, su ruta y su editor;
-     `smoke-operadores` pasa a determinaciones.
-   - Doc: F9 queda marcada como hecha.
+6. **`refactor(practicas)`: se retira `operator_count` (F9, 5/5).** ✅
+   - Las determinaciones reemplazan al motor de operadores, su ruta (`/operator-count`) y su
+     editor; se quitan `operator_count` de la definición y de las plantillas, `OperatorComputation`
+     y la vista de análisis por operador. Las bases existentes conservan la columna sin uso.
+   - En #150 (4/5) cada determinación pasó a elegir su instrumento (`operator_instruments`); el
+     formulario ya no tiene selector compartido por grupo.
+   - `smoke-operadores` pasa a determinaciones "Operador" con un instrumento por operador.
 
 ### F10 — Futuro
 

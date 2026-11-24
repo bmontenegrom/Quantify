@@ -17,7 +17,6 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     const isTeacher = canReview(state.user);
     const studentResults = submission.student_results ?? [];
     const sections = submission.analysis ? analysisSections(submission.analysis) : [];
-    const hasOperators = sections.some((s) => (s.analysis.operators?.length ?? 0) > 0);
     let body = "";
     if (submission.analysis) {
       body += formAnalysisMarkup(submission.analysis, pairs);
@@ -30,7 +29,6 @@ export function renderAnalysis(target, submission, includeReview = false, defini
           (definition?.aggregates ?? []).filter((a) => a.is_final).map((a) => a.symbol),
         );
         for (const { title, analysis } of sections) {
-          if (analysis.operators?.length) continue;
           const comparableAggregates = (analysis.aggregates ?? [])
             .filter((a) => finalAggregateSymbols.has(a.symbol))
             .map((a) => ({ ...a, u_expanded: 0, has_uncertainty: false }));
@@ -57,13 +55,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
       body += `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
     }
     body += measurementMetaMarkup(submission, definition);
-    if (hasOperators) {
-      if (!isTeacher) {
-        body += `<p class="submission-meta">Los mensurandos se calculan por operador para comparar las determinaciones; no hay carga de cálculos propios en esta práctica.</p>`;
-      }
-    } else {
-      body += studentResultsFormMarkup(submission, definition, isTeacher);
-    }
+    body += studentResultsFormMarkup(submission, definition, isTeacher);
     target.innerHTML = `
       ${submissionHeader(submission)}
       ${teacherCommentMarkup(submission)}
@@ -292,9 +284,7 @@ export function formAnalysisMarkup(analysis, pairs) {
   const [shared, ...parts] = sections;
   const sharedQuantities = shared.analysis.quantities ?? [];
   const sharedHasData =
-    (shared.analysis.quantities?.length ?? 0) +
-      (shared.analysis.derived?.length ?? 0) +
-      (shared.analysis.operators?.length ?? 0) > 0;
+    (shared.analysis.quantities?.length ?? 0) + (shared.analysis.derived?.length ?? 0) > 0;
   return [...(sharedHasData ? [shared] : []), ...parts]
     .map(
       (s) => `
@@ -343,29 +333,6 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
       ${quantitiesSection}
       ${derivedBlock}
       ${measuredVsTheoreticalMarkup(measured, derived, pairs)}
-      ${renderWarnings(analysis.warnings ?? [])}
-    `;
-  }
-
-  const operators = analysis.operators ?? [];
-  if (operators.length) {
-    const sharedTable = quantities.length
-      ? `<h4>Magnitudes comunes a los operadores</h4>${quantitiesTable}`
-      : "";
-    const opBlocks = operators
-      .map(
-        (op) => `
-        <section class="operator-result panel">
-          <h4>${escapeHtml(op.label)}</h4>
-          ${quantitiesTableMarkup(op.quantities ?? [])}
-          ${derivedBlockMarkup(op.derived ?? [], "")}
-        </section>`,
-      )
-      .join("");
-    return `
-      <h3>Incertidumbres por operador</h3>
-      ${sharedTable}
-      ${opBlocks}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
   }

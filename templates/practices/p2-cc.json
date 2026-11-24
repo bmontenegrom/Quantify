@@ -5,7 +5,6 @@
   "analysis_kind": "curva",
   "x_formula": null,
   "y_formula": null,
-  "operator_count": null,
   "parts": [
     {
       "key": "serie",

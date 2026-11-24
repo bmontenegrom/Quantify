@@ -368,13 +368,7 @@ function applyPartVisibility() {
 }
 
 function quantityRowRenderer(definition, instruments, draft) {
-  const operatorCount =
-    definition.analysis_kind == null || definition.analysis_kind === "estadistico"
-      ? definition.operator_count ?? 0
-      : 0;
-  const useOperators = operatorCount >= 2;
   const groupOf = (q) => {
-    if (useOperators) return q.repeated && !q.is_given ? { count: operatorCount, label: null, scope: null } : null;
     const d = q.per_determination ? determinationsFor(definition, q.symbol) : null;
     return d ? { count: d.count, label: d.label.trim(), scope: d.display === "pestanas" ? d.scope : null } : null;
   };
@@ -391,7 +385,6 @@ function quantityRowRenderer(definition, instruments, draft) {
 
   const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
-    const ownInstrument = opIndex == null || !useOperators;
     if (q.is_given) {
       const uField = !hasUncertainty(q)
         ? ""
@@ -422,7 +415,7 @@ function quantityRowRenderer(definition, instruments, draft) {
         <fieldset class="measurement-row measurement-row--chrono"
                   data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
           <legend>${legendHtml(q)}</legend>
-          ${ownInstrument ? instrumentSelectorsHtml(instruments, q, true) : ""}
+          ${instrumentSelectorsHtml(instruments, q, true)}
           ${chronoWidgetInnerHtml()}
           <div class="series-debug"></div>
         </fieldset>
@@ -432,7 +425,7 @@ function quantityRowRenderer(definition, instruments, draft) {
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
         <legend>${legendHtml(q)}</legend>
         <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
-          ${ownInstrument ? `${instrumentSelectorsHtml(instruments, q)}<div class="measure-sep"></div>` : ""}
+          ${instrumentSelectorsHtml(instruments, q)}<div class="measure-sep"></div>
           <div class="measure-right">
             <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
               ${renderReplicaInput(q.unit, q.default_value)}
@@ -459,7 +452,7 @@ function quantityRowRenderer(definition, instruments, draft) {
     const tab = (i) =>
       group.scope != null ? ` data-det-scope="${escapeHtml(group.scope)}" data-determination="${i}"` : "";
     const blocks = chrono
-      .map((_, i) => `<div class="operator-block"${tab(i)}><h5 class="operator-label">${escapeHtml(group.label ?? "Operador")} ${i + 1}</h5>${row(i)}</div>`)
+      .map((_, i) => `<div class="operator-block"${tab(i)}><h5 class="operator-label">${escapeHtml(group.label)} ${i + 1}</h5>${row(i)}</div>`)
       .join("");
     const sharedU = !hasUncertainty(q)
       ? ""
@@ -470,12 +463,12 @@ function quantityRowRenderer(definition, instruments, draft) {
             <span class="replica-unit">${unitHtml(q.unit)}</span>
           </div>
         </label>`;
-    const per = group.label ? group.label.toLowerCase() : "operador";
-    const labelAttr = group.label ? ` data-group-label="${escapeHtml(group.label)}"` : "";
+    const per = group.label.toLowerCase();
+    const labelAttr = ` data-group-label="${escapeHtml(group.label)}"`;
     return `
       <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}"${labelAttr}>
         <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por ${escapeHtml(per)}</span></h4>
-        ${q.is_given ? sharedU : useOperators ? instrumentSelectorsHtml(instruments, q, chrono.some(Boolean)) : ""}
+        ${q.is_given ? sharedU : ""}
         ${blocks}
       </div>
     `;
@@ -748,11 +741,11 @@ function collectGroupsAndStandalone() {
     const rows = [...container.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
     );
-    const shared = container.querySelector(":scope > .measure-selectors");
     const own = rows.map((row) => row.querySelector(".measure-selectors"));
     return {
       quantity_id: container.dataset.quantityId,
-      ...selectedInstrument(shared),
+      instrument_id: null,
+      scale_id: null,
       values: [],
       given_u: sharedGivenU(container),
       operator_replicas: rows.map(rowSeriesValues),
@@ -771,8 +764,8 @@ function collectGroupsAndStandalone() {
 
 function selectedInstrument(selectors) {
   return {
-    instrument_id: selectors?.querySelector(".measure-instrument").value || null,
-    scale_id: selectors?.querySelector(".measure-scale").value || null,
+    instrument_id: selectors.querySelector(".measure-instrument").value || null,
+    scale_id: selectors.querySelector(".measure-scale").value || null,
   };
 }
 
@@ -1258,8 +1251,6 @@ function prefillGroups(byQ) {
   measurementFields.querySelectorAll(".operator-quantity").forEach((groupEl) => {
     const e = byQ.get(groupEl.dataset.quantityId);
     if (!e) return;
-    const shared = groupEl.querySelector(":scope > .measure-selectors");
-    if (shared) fillInstrument(shared, e);
     const u = groupEl.querySelector(".measure-given-u");
     if (u && e.value_u != null) u.value = e.value_u;
     const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(

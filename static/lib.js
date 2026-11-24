@@ -413,7 +413,6 @@ export function expandDeterminationResults(definition, results) {
 
 export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
   const pointBased = POINT_KINDS.includes(definition?.analysis_kind);
-  const operators = !pointBased && (definition?.operator_count ?? 0) >= 2 ? definition.operator_count : 0;
   const round = (x) => Number(x.toPrecision(6));
   const series = (n, v) => Array.from({ length: n }, (_, k) => round(v * (1 + 0.01 * (k - (n - 1) / 2))));
   const quantities = definition?.quantities ?? [];
@@ -438,9 +437,9 @@ export function exampleMeasurements(definition, { points = 5, replicas = 3, inst
       }
       return { ...m, values: Array.from({ length: points }, (_, p) => round(at(p))) };
     }
-    if (groups || (q.repeated && operators)) {
+    if (groups) {
       const n = q.repeated ? replicas : 1;
-      return { ...m, operator_replicas: Array.from({ length: groups || operators }, (_, o) => series(n, base * (1 + 0.02 * o))) };
+      return { ...m, operator_replicas: Array.from({ length: groups }, (_, o) => series(n, base * (1 + 0.02 * o))) };
     }
     return { ...m, values: q.repeated ? series(replicas, base) : [base] };
   });
@@ -579,9 +578,7 @@ export function groupError(m, meta) {
   const name = meta.name ?? m.quantity_id;
   const empty = m.operator_replicas.length === 0 ? 0 : m.operator_replicas.findIndex((reps) => reps.length === 0);
   if (empty !== -1) {
-    return meta.groupLabel
-      ? `"${name}": falta cargar ${meta.groupLabel} ${empty + 1}.`
-      : `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
+    return `"${name}": falta cargar ${meta.groupLabel} ${empty + 1}.`;
   }
   if (meta.isGiven && meta.hasUncertainty !== false && m.given_u == null) {
     return `El dato "${name}" requiere la incertidumbre U.`;

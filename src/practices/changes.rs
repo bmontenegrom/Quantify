@@ -218,9 +218,6 @@ fn list_changes(
     if (&published.x_formula, &published.y_formula) != (&draft.x_formula, &draft.y_formula) {
         changes.push("Cambian los ejes de la regresión".to_string());
     }
-    if published.operator_count != draft.operator_count {
-        changes.push("Cambia la cantidad de operadores".to_string());
-    }
     let (published, draft) = (
         &without_determination_looks(published),
         &without_determination_looks(draft),
