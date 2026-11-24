@@ -328,3 +328,85 @@ async fn golden_practices_match() {
         failures.join("\n  ")
     );
 }
+
+fn collect_derived(
+    value: &Value,
+    determination: Option<usize>,
+    out: &mut std::collections::HashMap<String, (f64, f64)>,
+) {
+    match value {
+        Value::Object(map) => {
+            for (key, v) in map {
+                match (key.as_str(), v) {
+                    ("determinations", Value::Array(items)) => {
+                        for (i, item) in items.iter().enumerate() {
+                            collect_derived(item, Some(i + 1), out);
+                        }
+                    }
+                    ("derived", Value::Array(items)) => {
+                        for item in items {
+                            let symbol = item["symbol"].as_str().unwrap();
+                            let name = format!(
+                                "{symbol}{}",
+                                determination.map(|k| k.to_string()).unwrap_or_default()
+                            );
+                            let number = |key: &str| item[key].as_f64().unwrap_or(f64::NAN);
+                            out.insert(name, (number("value"), number("u_expanded")));
+                        }
+                    }
+                    _ => collect_derived(v, determination, out),
+                }
+            }
+        }
+        Value::Array(items) => items
+            .iter()
+            .for_each(|v| collect_derived(v, determination, out)),
+        _ => {}
+    }
+}
+
+#[tokio::test]
+async fn determinations_keep_the_numbers_of_the_hand_written_practices() {
+    let (pool, _dir, scales) = golden_setup().await;
+    let mut found = std::collections::HashMap::new();
+    for id in ["p1-estadistica", "hidrostatica"] {
+        let input = read_input(&golden_dir().join(format!("{id}.input.json")));
+        let measurements = golden_measurements(&pool, &input, id, &scales).await;
+        collect_derived(
+            &analysis_value(&pool, id, &measurements).await,
+            None,
+            &mut found,
+        );
+    }
+    let today = [
+        ("gamma", 0.014546635478697698, 0.0),
+        ("Q1", 215.22443645230533, 0.18698322161452516),
+        ("g1", 9.80185493545634, 0.025968686128033363),
+        ("g2", 9.80478603911126, 0.04259724965624894),
+        ("E1", 0.01666, 0.0002786257944588778),
+        ("E2", 0.0165816, 0.00027748016575417225),
+        ("E3", 0.0166992, 0.0002792079909599565),
+        ("E_medio", 0.016646933333333332, 0.0002762012855269959),
+        ("rho1", 7338.235294117647, 458.6085225124983),
+        ("rho2", 7372.931442080379, 460.7965887076958),
+        ("rho3", 7321.0093896713615, 457.52336722666536),
+        ("rho_medio", 7344.058708623129, 458.71304845150377),
+        ("gamma1", 0.019600000000000003, 0.00022632130553941764),
+        ("gamma2", 0.020384000000000003, 0.00022632130550397843),
+        ("gamma3", 0.019208000000000003, 0.00022632130553778247),
+        ("gamma_medio", 0.01973066666666667, 0.00013066666667650308),
+    ];
+    for (symbol, value, u) in today {
+        let (got_value, got_u) = found
+            .get(symbol)
+            .unwrap_or_else(|| panic!("falta {symbol}: {:?}", found.keys()));
+        assert!(
+            close_enough(*got_value, value) && close_enough(*got_u, u),
+            "{symbol}: hoy {value} ± {u}, ahora {got_value} ± {got_u}"
+        );
+    }
+}
+
+fn close_enough(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-9 * b.abs().max(1e-12)
+}

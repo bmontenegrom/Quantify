@@ -122,7 +122,7 @@ archivo.
 
 | id | Nombre | Tipo de análisis |
 |----|--------|------------------|
-| `p1-estadistica` | Tratamiento estadístico de Datos (tres operadores) | estadístico |
+| `p1-estadistica` | Tratamiento estadístico de Datos (péndulo, tres operadores) | estadístico |
 | `p2-cc` | Corriente continua (serie, paralelo y curva de potencia) | curva |
 | `p3-relajacion` | Relajación Exponencial (medida directa y desfasaje, en dos partes) | regresión lineal |
 | `fluidos-1` | Fluidos I | regresión lineal |
@@ -135,17 +135,15 @@ archivo.
 > Una base existente no vuelve a importar la biblioteca. Para empezar de cero en desarrollo, borrá
 > `data/quantify.db` antes de arrancar.
 
-### P1 — Tratamiento estadístico
+### P1 — Tratamiento estadístico (`p1-estadistica`)
 
-Magnitudes medidas (con réplicas):
+Péndulo simple medido por **3 operadores**, cada uno en su pestaña (determinaciones "Operador",
+sin promedio). Datos comunes: `L` (longitud del péndulo, dato de cátedra con U) y `t_med`
+(tiempo de semiamplitud, sin U). Cada operador mide su serie de períodos `T` con el cronómetro;
+ninguno es obligatorio.
 
-| símbolo | nombre | unidad |
-|---------|--------|--------|
-| `l` | Longitud del cordón | m |
-| `a` | Ancho del cordón | m |
-| `b` | Espesor del cordón | m |
-
-Mensurando derivado: `Q = l·a + l·b` (área de la sección transversal, m²).
+Mensurandos: `gamma = 2·ln2/t_med` (común), y por operador `g = 4π²·L/T²` y
+`Q = π·t_med/(T·ln2)`. El alumno informa `g` y `Q` de cada operador (`g#1`, `Q#1`, …).
 
 ### P2 — Corriente continua (`p2-cc`, una sola entrega)
 
@@ -239,9 +237,11 @@ E · b_E = Σ mᵢ · g · bᵢ        ⇒  E = (Σ mᵢ·bᵢ) · g / b_E
 E / P = ρ_f / ρ_goma           ⇒  ρ_goma = ρ_f · m_goma · b_E / (Σ mᵢ·bᵢ)
 ```
 
-El procedimiento se repite **3 veces** con pesas y posiciones distintas (`m1_i`, `m2_i`, `m3_i`):
-son determinaciones independientes, no réplicas. Salida: `E1..E3` y `rho1..rho3` por medida, más
-`E_medio` y `rho_medio` (su U sale por propagación desde las tres, como pide la técnica).
+El procedimiento se repite **3 veces** con pesas y posiciones distintas: son 3 determinaciones
+("Medida 1..3", en bloques), no réplicas. Las masas de las ranuras `m_1..m_9` se cargan en cada
+medida; la goma, el fluido y los brazos son comunes. Salida: `E` y `rho` por medida, más
+`E_medio` y `rho_medio`, que se calculan solos y propagan la U desde las tres medidas con los
+datos comunes una sola vez, como pide la técnica.
 
 Las 9 ranuras se cargan siempre: la que no se usó queda en **masa 0** (el formulario ya la trae en
 0) y sin instrumento, así que no aporta ni valor ni incertidumbre.
@@ -257,7 +257,7 @@ película se sustituye por el de la pesa:
 2·γ·l·d = mw·g·dw        ⇒  γ = mw·g·dw / (2·l·d)
 ```
 
-3 determinaciones (`gamma1..gamma3`) más `gamma_medio`. La técnica indica expresamente que esta
+`mw` y `dw` se cargan en cada una de las 3 medidas: `gamma` por medida más `gamma_medio`. La técnica indica expresamente que esta
 parte **no informa incertidumbre**, así que estos mensurandos se muestran sin ±U.
 
 > Unidades: masas en g y brazos/distancias en cm (como se leen). Las fórmulas de `E` y `γ` llevan

@@ -180,13 +180,15 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
       (k) => k.startsWith("quantify-draft:") && JSON.parse(localStorage.getItem(k)).comment === "borrador",
     );
     const draft = JSON.parse(localStorage.getItem(key));
-    draft.measurements = [{ quantity_id: id, instrument_id: null, scale_id: null, values: [1.5, 1.6], given_u: null }];
+    draft.measurements = [
+      { quantity_id: id, instrument_id: null, scale_id: null, values: [], given_u: null, operator_replicas: [[1.5, 1.6], [], []] },
+    ];
     localStorage.setItem(key, JSON.stringify(draft));
   }, draftedId);
   await page.reload();
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "p1-estadistica");
-  const draftedRow = page.locator(`#measurement-fields .measurement-row[data-quantity-id="${draftedId}"]`);
+  const draftedRow = page.locator(`#measurement-fields .measurement-row[data-quantity-id="${draftedId}"][data-operator-index="0"]`);
   await draftedRow.locator(".measure-value").first().waitFor({ state: "attached" });
   assert(
     !(await draftedRow.evaluate((row) => row.classList.contains("measurement-row--chrono"))),
@@ -203,7 +205,8 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "p1-estadistica");
   const timedRow = page.locator(`#measurement-fields .measurement-row--chrono[data-quantity-id="${draftedId}"]`).first();
-  await timedRow.locator(".measure-instrument").selectOption("");
+  const timedInstrument = page.locator(`#measurement-fields .operator-quantity[data-quantity-id="${draftedId}"] .measure-instrument`);
+  await timedInstrument.selectOption("");
   await timedRow.locator(".chrono-start").click();
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(60);
@@ -223,7 +226,7 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   assert((await timedRow.locator(".chrono-mode").inputValue()) === "consecutivo", "el modo del cronómetro debía conservarse");
   assert((await timedRow.locator(".series-point.discarded").count()) === 1, "la lectura descartada debía seguir descartada");
   assert(JSON.stringify(await savedChrono()) === JSON.stringify(before), "volver a abrir no debía cambiar el cronómetro guardado");
-  assert((await timedRow.locator(".measure-instrument").inputValue()) === "", "el borrador sin instrumento debía seguir sin instrumento");
+  assert((await timedInstrument.inputValue()) === "", "el borrador sin instrumento debía seguir sin instrumento");
 
   await timedRow.locator(".chrono-reset").click();
   await timedRow.locator(".chrono-start").click();

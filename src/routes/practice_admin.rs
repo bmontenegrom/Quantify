@@ -4480,8 +4480,11 @@ mod tests {
         assert_eq!(hidro.status, "publicada");
         let mut after = hidro.clone();
         after.analysis_kind = Some("regresion_lineal".into());
-        let err = guard_change(&hidro, &after, "x").unwrap_err();
-        assert!(format!("{err:?}").contains("ejes"), "{err:?}");
+        let err = format!("{:?}", guard_change(&hidro, &after, "x").unwrap_err());
+        assert!(
+            err.contains("Arquimedes") && err.contains("ya no es estadística"),
+            "{err}"
+        );
     }
 
     #[tokio::test]
@@ -5020,6 +5023,7 @@ mod tests {
     #[tokio::test]
     async fn result_formulas_respect_the_engine_scope() {
         let (pool, _dir) = crate::computation::tests::setup().await;
+        crate::computation::tests::p1_partes(&pool).await;
         let def = |id: &'static str| {
             let pool = pool.clone();
             async move { practices::definition(&pool, id).await.unwrap().unwrap() }
@@ -5027,7 +5031,7 @@ mod tests {
         let check = |def: &practices::PracticeDefinition, formula: &str| {
             computation::check_formula(formula, &result_scope(def)).is_ok()
         };
-        let p1 = def("p1-estadistica").await;
+        let p1 = def("p1-partes").await;
         assert!(check(&p1, "4*pi^2*L/T1^2"));
         assert!(!check(&p1, "slope"));
         assert!(!check(&p1, "L*zzz"));
@@ -5044,6 +5048,7 @@ mod tests {
     #[tokio::test]
     async fn results_can_use_other_results() {
         let (pool, _dir) = crate::computation::tests::setup().await;
+        crate::computation::tests::p1_partes(&pool).await;
         let input = |symbol: &str, formula: &str| ResultInput {
             display_symbol: None,
             compare_with: None,
@@ -5055,7 +5060,7 @@ mod tests {
             is_final: false,
             has_uncertainty: true,
         };
-        let p1 = practices::definition(&pool, "p1-estadistica")
+        let p1 = practices::definition(&pool, "p1-partes")
             .await
             .unwrap()
             .unwrap();
@@ -5072,13 +5077,13 @@ mod tests {
         let crossing = with_new_result(&with_g1, &input("K", "G1 + T2"), None);
         assert!(guard_change(&with_g1, &crossing, "x").is_err());
 
-        let l2 = practices::create_result(&pool, "p1-estadistica", input("L2", "L*2"), None)
+        let l2 = practices::create_result(&pool, "p1-partes", input("L2", "L*2"), None)
             .await
             .unwrap();
-        practices::create_result(&pool, "p1-estadistica", input("G1", "L2 + T1"), None)
+        practices::create_result(&pool, "p1-partes", input("G1", "L2 + T1"), None)
             .await
             .unwrap();
-        let def = practices::definition(&pool, "p1-estadistica")
+        let def = practices::definition(&pool, "p1-partes")
             .await
             .unwrap()
             .unwrap();
@@ -5127,7 +5132,7 @@ mod tests {
             };
         let analysis = computation::analyze(
             &pool,
-            "p1-estadistica",
+            "p1-partes",
             &[
                 measurement("L", vec![1.0], Some(0.002)),
                 measurement("t_med", vec![95.3], None),

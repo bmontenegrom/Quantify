@@ -570,6 +570,17 @@ pub async fn seed_library(pool: &SqlitePool) -> anyhow::Result<bool> {
     Ok(imported)
 }
 
+#[cfg(test)]
+pub(crate) async fn seed_fixture(pool: &SqlitePool, json: &str, id: &str) {
+    let template: PracticeTemplate = serde_json::from_str(json).unwrap();
+    let mut tx = crate::db::begin_write(pool).await.unwrap();
+    write_template(&mut tx, &template, id, "publicada", None)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    super::ensure_versions(pool).await.unwrap();
+}
+
 async fn write_template(
     tx: &mut SqliteConnection,
     t: &PracticeTemplate,

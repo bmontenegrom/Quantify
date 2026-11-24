@@ -12,7 +12,8 @@ async function studentSubmitsP1(page) {
   await page.selectOption("#table-select", "1");
 
   step("estudiante: registra períodos del Operador 1 con el cronómetro");
-  const chronoRow = page.locator('[data-section="p1-estadistica-op1"] .measurement-row--chrono');
+  const chronoRow = page.locator('.measurement-row--chrono[data-operator-index="0"]');
+  assert(await chronoRow.isVisible(), "el cronómetro del Operador 1 debía verse en su pestaña");
   await chronoRow.locator(".chrono-start").click();
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(120);
@@ -57,8 +58,8 @@ async function studentSavesOwnResults(page) {
   await page.click('.tab.student-only[data-view="submissions"]');
   await page.click('.submission-item:has-text("Mesa 1")');
   await page.waitForSelector(".student-results-form");
-  await page.fill('.student-value[data-symbol="g1"]', "9.78");
-  await page.fill('.student-u[data-symbol="g1"]', "0.08");
+  await page.fill('.student-value[data-symbol="g#1"]', "9.78");
+  await page.fill('.student-u[data-symbol="g#1"]', "0.08");
   await page.$eval(".student-results-form", (form) => { form.dataset.e2ePrev = "1"; });
   await page.click('.student-results-form button[type="submit"]');
   await page.waitForSelector(".student-results-form:not([data-e2e-prev])");

@@ -60,7 +60,8 @@ await withE2E({ port: PORT, dbName: "quantify-visual-teacher.db" }, async ({ log
       quantity_id: q.id,
       instrument_id: null,
       scale_id: null,
-      values: [q.default_value ?? 1],
+      values: q.per_determination ? [] : [q.default_value ?? 1],
+      operator_replicas: q.per_determination ? [1, 2, 3].map(() => [q.default_value ?? 1]) : null,
       given_u: q.is_given && q.has_uncertainty ? 0.1 : null,
     }));
     const response = await fetch("/api/submissions/form", {
