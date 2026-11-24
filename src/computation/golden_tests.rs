@@ -173,6 +173,7 @@ async fn golden_measurements(
                 given_u: m.given_u,
                 point_replicas: m.point_replicas.clone(),
                 operator_replicas: m.operator_replicas.clone(),
+                operator_instruments: None,
             }
         })
         .collect()

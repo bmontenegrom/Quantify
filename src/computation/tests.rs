@@ -72,6 +72,7 @@ fn hidrostatica_input(
             operator_replicas: q
                 .per_determination
                 .then(|| (1..=3).map(|k| vec![value(&q.symbol, k)]).collect()),
+            operator_instruments: None,
         })
         .collect()
 }
@@ -282,6 +283,7 @@ fn measurement(symbol: &str, values: &[f64]) -> MeasurementInput {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }
 }
 
@@ -498,6 +500,7 @@ fn compute_with_operators_derives_per_operator() {
             given_u: None,
             point_replicas: None,
             operator_replicas: Some(vec![vec![10.0, 10.0], vec![20.0, 20.0]]),
+            operator_instruments: None,
         },
         measurement("L", &[5.0]),
     ];
@@ -549,6 +552,7 @@ async fn analyze_uses_type_a_with_replicas() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }];
     let analysis = analyze(&pool, "p1-partes", &measurements).await.unwrap();
     let q_t = analysis
@@ -614,6 +618,7 @@ async fn create_form_submission_persists_and_reads_back() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: Some(serde_json::json!({ "q1": { "bins": 8, "discarded": [9.9] } })),
         table_number: None,
@@ -682,6 +687,7 @@ async fn create_form_submission_trims_and_persists_student_comment() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -762,6 +768,7 @@ async fn create_form_submission_persists_optional_student_result() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -832,6 +839,7 @@ async fn create_form_submission_rejects_unknown_student_result_symbol() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -888,6 +896,15 @@ async fn operator_submission_stores_operator_index_per_operator() {
         .unwrap()
         .unwrap();
     assert_eq!(def.operator_count, Some(2));
+    db::seed_academic(&pool).await.unwrap();
+    crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
+        .await
+        .unwrap();
+    let (instrument_id, scale_id): (String, String) =
+        sqlx::query_as("SELECT instrument_id, id FROM instrument_scales LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     let t_id = def
         .quantities
         .iter()
@@ -907,6 +924,13 @@ async fn operator_submission_stores_operator_index_per_operator() {
             given_u: None,
             point_replicas: None,
             operator_replicas: Some(vec![vec![1.0, 1.1], vec![2.0, 2.1, 2.2]]),
+            operator_instruments: Some(vec![
+                Default::default(),
+                crate::computation::InstrumentChoice {
+                    instrument_id: Some(instrument_id.clone()),
+                    scale_id: Some(scale_id.clone()),
+                },
+            ]),
         }],
         meta: None,
         table_number: None,
@@ -930,6 +954,15 @@ async fn operator_submission_stores_operator_index_per_operator() {
             .collect();
         reps.sort_unstable();
         assert_eq!(reps, (0..expected_n as i64).collect::<Vec<_>>());
+    }
+    for m in &t_rows {
+        let expected = (m.operator_index == 1).then_some(scale_id.as_str());
+        assert_eq!(
+            m.scale_id.as_deref(),
+            expected,
+            "operador {}",
+            m.operator_index
+        );
     }
 
     let operators = detail.analysis["operators"].as_array().unwrap();
@@ -1013,6 +1046,7 @@ async fn point_based_submission_stores_point_index_per_point() {
                 given_u: None,
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             },
             MeasurementInput {
                 quantity_id: qid("T3"),
@@ -1022,6 +1056,7 @@ async fn point_based_submission_stores_point_index_per_point() {
                 given_u: None,
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             },
             MeasurementInput {
                 quantity_id: qid("T2"),
@@ -1031,6 +1066,7 @@ async fn point_based_submission_stores_point_index_per_point() {
                 given_u: None,
                 point_replicas: Some(vec![vec![4.0, 4.2], vec![5.0, 5.1], vec![6.0, 5.9]]),
                 operator_replicas: None,
+                operator_instruments: None,
             },
         ],
         meta: None,
@@ -1145,6 +1181,7 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
                 given_u: None,
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             },
             MeasurementInput {
                 quantity_id: qid("T2"),
@@ -1154,6 +1191,7 @@ async fn point_based_submission_stores_variable_replicas_per_point() {
                 given_u: None,
                 point_replicas: Some(vec![vec![4.0], vec![5.0, 5.1, 5.2], vec![6.0, 6.1]]),
                 operator_replicas: None,
+                operator_instruments: None,
             },
         ],
         meta: None,
@@ -1243,6 +1281,7 @@ async fn update_form_submission_replaces_measurements_and_is_editable() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -1333,6 +1372,7 @@ async fn cancel_submission_deletes_and_frees_table() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: Some(1),
@@ -1423,6 +1463,7 @@ async fn update_form_submission_replaces_student_comment() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }];
     let input = FormSubmissionInput {
         course_id: course.id.clone(),
@@ -1470,6 +1511,7 @@ async fn analyze_rejects_foreign_quantity_id() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }];
     assert!(analyze(&pool, "p1-estadistica", &measurements)
         .await
@@ -1509,6 +1551,7 @@ async fn create_form_submission_rejects_unknown_course_and_rolls_back() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -1588,6 +1631,7 @@ fn compute_regresion_uses_per_point_intermediate_averaged_over_replicas() {
         given_u: None,
         point_replicas: Some(groups),
         operator_replicas: None,
+        operator_instruments: None,
     };
     let measurements = vec![
         rep(vec![vec![10.0, 10.0], vec![20.0, 20.0]], "q-V"),
@@ -1608,6 +1652,7 @@ fn point_rep(id: &str, groups: Vec<Vec<f64>>) -> MeasurementInput {
         given_u: None,
         point_replicas: Some(groups),
         operator_replicas: None,
+        operator_instruments: None,
     }
 }
 
@@ -2168,6 +2213,7 @@ fn build_points_averages_per_point_replicas() {
             given_u: None,
             point_replicas: Some(vec![vec![3.0, 5.0], vec![8.0, 10.0, 12.0]]),
             operator_replicas: None,
+            operator_instruments: None,
         },
     ];
     let a = reg(&quantities, &[], &[], "px", "py", &measurements).unwrap();
@@ -2196,6 +2242,7 @@ fn measurement_for(
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     }
 }
 
@@ -2229,6 +2276,7 @@ async fn seeded_fluidos_1_computes_regression_mu_and_reynolds() {
             given_u,
             point_replicas,
             operator_replicas: None,
+            operator_instruments: None,
         }
     };
     let measurements = vec![
@@ -2305,6 +2353,7 @@ async fn seeded_viscosidad_computes_regression_mu_and_reynolds() {
             given_u,
             point_replicas,
             operator_replicas: None,
+            operator_instruments: None,
         }
     };
     let measurements = vec![
@@ -2479,6 +2528,7 @@ async fn analyze_ca_rlc_matches_series_rlc_theory() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         });
     };
     push("R", 100.0);
@@ -2716,17 +2766,37 @@ async fn hidrostatica_un_slot_vacio_no_aporta_incertidumbre_a_su_medida() {
             .u
     };
 
+    let with_m8 = |choices: Vec<Option<(&str, &str)>>| {
+        let mut measurements = input();
+        let m8 = measurements
+            .iter_mut()
+            .find(|m| &m.quantity_id == m8_id)
+            .unwrap();
+        m8.operator_instruments = Some(
+            choices
+                .into_iter()
+                .map(|c| crate::computation::InstrumentChoice {
+                    instrument_id: c.map(|(i, _)| i.into()),
+                    scale_id: c.map(|(_, s)| s.into()),
+                })
+                .collect(),
+        );
+        measurements
+    };
+    let balanza = Some((instrument_id.as_str(), scale_id.as_str()));
     let sin_balanza = analyze(&pool, "hidrostatica", &input()).await.unwrap();
-    let mut measurements = input();
-    let m8 = measurements
-        .iter_mut()
-        .find(|m| &m.quantity_id == m8_id)
+    let con_balanza = analyze(&pool, "hidrostatica", &with_m8(vec![None, balanza, None]))
+        .await
         .unwrap();
-    m8.instrument_id = Some(instrument_id);
-    m8.scale_id = Some(scale_id);
-    let con_balanza = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+    let en_todas = analyze(&pool, "hidrostatica", &with_m8(vec![balanza; 3]))
+        .await
+        .unwrap();
 
     assert!(u_of(&con_balanza, "E", 1) > u_of(&sin_balanza, "E", 1));
+    assert!(
+        u_of(&en_todas, "E", 0) > u_of(&sin_balanza, "E", 0),
+        "una lectura de 0 con instrumento conserva su incertidumbre"
+    );
     for k in [0, 2] {
         assert_eq!(
             u_of(&con_balanza, "E", k),
@@ -2761,6 +2831,7 @@ async fn analyze_rejects_a_slot_outside_the_balance() {
             given_u: None,
             point_replicas: None,
             operator_replicas: Some(vec![vec![4.0], vec![value], vec![4.0]]),
+            operator_instruments: None,
         }]
     };
     for bad in [0.0, 4.5, 10.0] {
@@ -2950,6 +3021,7 @@ async fn curve_results_chain_and_skip_what_depends_on_series_values() {
             given_u: m["given_u"].as_f64(),
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         })
         .collect();
     let a = analyze(&pool, "filtros", &measurements).await.unwrap();
@@ -3037,6 +3109,7 @@ async fn editing_a_published_practice_does_not_change_old_submissions() {
         given_u,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
     let measurements = vec![
         m("L", vec![1.0], Some(0.002)),
@@ -3275,6 +3348,7 @@ async fn a_retired_quantity_stays_in_the_submissions_that_used_it() {
         given_u,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
     let measurements = vec![
         m("L", vec![1.0], Some(0.002)),
@@ -3500,6 +3574,7 @@ fn determinations_match_separate_symbols_and_a_hand_written_average() {
     let measurements = vec![
         MeasurementInput {
             operator_replicas: Some(replicas.clone()),
+            operator_instruments: None,
             ..measurement("T", &[])
         },
         measurement("L", &[1.0, 1.02, 0.98]),
@@ -3639,6 +3714,7 @@ fn determination_warnings_are_grouped_and_the_average_is_not_blamed_on_one() {
     t.per_determination = true;
     let measurements = vec![MeasurementInput {
         operator_replicas: Some(vec![vec![2.0], vec![0.0], vec![4.0]]),
+        operator_instruments: None,
         ..measurement("T", &[])
     }];
     let a = compute(
@@ -3686,6 +3762,7 @@ fn a_quantity_missing_in_every_determination_warns_once() {
         &HashMap::new(),
         &[MeasurementInput {
             operator_replicas: Some(vec![vec![], vec![], vec![]]),
+            operator_instruments: None,
             ..measurement("T", &[])
         }],
         None,
@@ -3711,6 +3788,7 @@ fn a_result_named_like_a_generated_symbol_does_not_crash() {
         &HashMap::new(),
         &[MeasurementInput {
             operator_replicas: Some(vec![vec![2.0], vec![4.0], vec![5.0]]),
+            operator_instruments: None,
             ..measurement("T", &[])
         }],
         None,
@@ -3743,6 +3821,7 @@ fn a_common_result_can_use_an_average() {
     let def = per_determination_definition(true);
     let measurements = vec![MeasurementInput {
         operator_replicas: Some(vec![vec![2.0, 2.1], vec![4.0, 4.2], vec![5.0, 5.1]]),
+        operator_instruments: None,
         ..measurement("T", &[])
     }];
     let a = compute(
@@ -3767,6 +3846,7 @@ fn a_submission_needs_every_determination_of_a_required_quantity() {
     let groups = |g: Vec<Vec<f64>>| {
         vec![MeasurementInput {
             operator_replicas: Some(g),
+            operator_instruments: None,
             ..measurement("T", &[])
         }]
     };
@@ -3848,6 +3928,7 @@ async fn per_determination_measurements_are_checked_against_the_determinations()
     };
     let groups = |n: usize| MeasurementInput {
         operator_replicas: Some(vec![vec![2.0]; n]),
+        operator_instruments: None,
         ..measurement("T", &[])
     };
     assert!(analyze(groups(3)).await.is_ok());

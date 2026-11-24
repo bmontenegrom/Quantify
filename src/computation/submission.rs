@@ -88,6 +88,12 @@ async fn insert_measurements(
                     .collect()
             };
         for (operator_index, point_index, replicate_index, value, value_u) in rows {
+            let (instrument_id, scale_id) = measurement.instrument_for(
+                measurement
+                    .operator_replicas
+                    .as_ref()
+                    .map(|_| operator_index as usize),
+            );
             sqlx::query(
                 "INSERT INTO submission_measurements \
                  (id, submission_id, quantity_id, instrument_id, scale_id, \
@@ -97,8 +103,8 @@ async fn insert_measurements(
             .bind(Uuid::new_v4().to_string())
             .bind(submission_id)
             .bind(&measurement.quantity_id)
-            .bind(measurement.instrument_id.as_deref())
-            .bind(measurement.scale_id.as_deref())
+            .bind(instrument_id)
+            .bind(scale_id)
             .bind(operator_index)
             .bind(point_index)
             .bind(replicate_index)

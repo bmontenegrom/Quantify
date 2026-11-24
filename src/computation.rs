@@ -29,9 +29,50 @@ pub struct MeasurementInput {
     pub point_replicas: Option<Vec<Vec<f64>>>,
     #[serde(default)]
     pub operator_replicas: Option<Vec<Vec<f64>>>,
+    #[serde(default)]
+    pub operator_instruments: Option<Vec<InstrumentChoice>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InstrumentChoice {
+    pub instrument_id: Option<String>,
+    pub scale_id: Option<String>,
 }
 
 impl MeasurementInput {
+    /// Instrumento y escala de una determinación, o los de la magnitud si no se eligieron por determinación.
+    ///
+    /// ```
+    /// use quantify::computation::{InstrumentChoice, MeasurementInput};
+    /// let choice = |s: Option<&str>| InstrumentChoice { instrument_id: s.map(Into::into), scale_id: s.map(Into::into) };
+    /// let m = MeasurementInput {
+    ///     quantity_id: "m".into(), instrument_id: Some("comun".into()), scale_id: Some("comun".into()),
+    ///     values: vec![], given_u: None, point_replicas: None, operator_replicas: None,
+    ///     operator_instruments: Some(vec![choice(None), choice(Some("balanza"))]),
+    /// };
+    /// assert_eq!(m.instrument_for(Some(0)), (None, None));
+    /// assert_eq!(m.instrument_for(Some(1)), (Some("balanza"), Some("balanza")));
+    /// assert_eq!(m.instrument_for(Some(2)), (None, None));
+    /// assert_eq!(m.instrument_for(None), (Some("comun"), Some("comun")));
+    /// ```
+    pub fn instrument_for(&self, operator: Option<usize>) -> (Option<&str>, Option<&str>) {
+        match (operator, &self.operator_instruments) {
+            (Some(i), Some(choices)) => choices.get(i).map_or((None, None), |c| {
+                (c.instrument_id.as_deref(), c.scale_id.as_deref())
+            }),
+            _ => (self.instrument_id.as_deref(), self.scale_id.as_deref()),
+        }
+    }
+
+    fn all_instruments(&self) -> impl Iterator<Item = (Option<&str>, Option<&str>)> {
+        std::iter::once((self.instrument_id.as_deref(), self.scale_id.as_deref())).chain(
+            self.operator_instruments
+                .iter()
+                .flatten()
+                .map(|c| (c.instrument_id.as_deref(), c.scale_id.as_deref())),
+        )
+    }
+
     fn point_values(&self) -> Vec<f64> {
         match &self.point_replicas {
             Some(groups) => groups

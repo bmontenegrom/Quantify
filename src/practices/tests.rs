@@ -831,6 +831,7 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
             given_u,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         };
 
     let (l, t_med) = (1.0_f64, 2.006_f64);
@@ -841,6 +842,7 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
         mk("t_med", vec![t_med], Some(99.0)),
         crate::computation::MeasurementInput {
             operator_replicas: Some(vec![t1_vals, vec![], vec![]]),
+            operator_instruments: None,
             ..mk("T", vec![], None)
         },
     ];
@@ -969,6 +971,7 @@ async fn seeded_p3_formulas_compute() {
                 given_u: if q.is_given { Some(0.0) } else { None },
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             }
         })
         .collect();
@@ -1051,6 +1054,7 @@ async fn seeded_p3_desfasaje_fits_known_tau() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         },
         crate::computation::MeasurementInput {
             quantity_id: id("a"),
@@ -1060,6 +1064,7 @@ async fn seeded_p3_desfasaje_fits_known_tau() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         },
         crate::computation::MeasurementInput {
             quantity_id: id("b"),
@@ -1069,6 +1074,7 @@ async fn seeded_p3_desfasaje_fits_known_tau() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         },
     ];
     let full = crate::computation::analyze(&pool, "p3-relajacion", &measurements)
@@ -1134,6 +1140,7 @@ async fn seeded_fluidos2_populates_and_computes() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
     let scalar = |sym: &str, value: f64| per_point(sym, vec![value]);
     let measurements = vec![
@@ -1268,6 +1275,7 @@ async fn seeded_filtros_populates_and_computes() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
     let measurements = vec![
         pt("f", vec![100.0, 1000.0, 10000.0]),
@@ -1368,6 +1376,7 @@ async fn analyze_p2_cc_derives_results_and_aliases() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
 
     let (r1, r2, r3) = (100.0_f64, 200.0_f64, 200.0_f64);
@@ -1502,6 +1511,7 @@ async fn analyze_filtros_derives_fpasaje_fbloqueo() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
 
     let r = 1000.0_f64;
@@ -1953,6 +1963,7 @@ async fn shared_results_keep_the_operator_shape_of_the_form() {
             given_u,
             point_replicas: None,
             operator_replicas: ops,
+            operator_instruments: None,
         }
     };
     let measurements = vec![
@@ -4110,6 +4121,7 @@ async fn a_part_with_determinations_is_analyzed_and_round_trips() {
         given_u: None,
         point_replicas: None,
         operator_replicas: Some(vec![vec![2.0, 2.0], vec![4.0, 4.0]]),
+        operator_instruments: None,
     }];
     let analysis = crate::computation::analyze(&pool, &practice.id, &measurements)
         .await
@@ -4144,6 +4156,7 @@ async fn a_per_determination_quantity_only_accepts_groups() {
                 given_u: None,
                 point_replicas: points,
                 operator_replicas: groups,
+                operator_instruments: None,
             }];
             let pool = pool.clone();
             let id = practice.id.clone();
@@ -4160,6 +4173,7 @@ async fn a_per_determination_quantity_only_accepts_groups() {
         given_u: None,
         point_replicas: None,
         operator_replicas: Some(vec![vec![2.0], vec![4.0]]),
+        operator_instruments: None,
     };
     let repeated = crate::computation::analyze(&pool, &practice.id, &[twice.clone(), twice]).await;
     assert!(repeated.unwrap_err().to_string().contains("más de una vez"));

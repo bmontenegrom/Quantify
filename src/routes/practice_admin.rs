@@ -5129,6 +5129,7 @@ mod tests {
                 given_u,
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             };
         let analysis = computation::analyze(
             &pool,
