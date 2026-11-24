@@ -84,7 +84,8 @@ La carga es **por formulario**, no por archivo. En la pestaña **Entregas** el e
 2. Aparecen los campos de la práctica según su tipo de análisis:
 
    **Prácticas estadísticas** — un bloque por magnitud. Cada bloque tiene una o más filas de
-   réplica (el alumno agrega las que midió) y un selector de instrumento y escala del catálogo.
+   réplica (el alumno agrega las que midió) y un selector de instrumento y escala del catálogo;
+   una magnitud que se repite por determinación tiene un selector en cada determinación.
    Los campos `is_given` (dato aportado por la cátedra como `valor ± U`) se muestran pre-cargados
    y no requieren instrumento.
 
