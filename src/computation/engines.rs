@@ -1324,6 +1324,15 @@ pub async fn analyze_definition(
                 quantity.symbol
             );
         }
+        if measurement.operator_instruments.is_some()
+            && (!quantity.per_determination || quantity.is_given)
+        {
+            anyhow::bail!(
+                "\"{}\" ({}) no lleva un instrumento por determinación",
+                quantity.name,
+                quantity.symbol
+            );
+        }
         let instruments = measurement
             .operator_instruments
             .as_ref()

@@ -63,10 +63,15 @@ impl MeasurementInput {
     }
 
     fn all_instruments(&self) -> impl Iterator<Item = (Option<&str>, Option<&str>)> {
-        std::iter::once((self.instrument_id.as_deref(), self.scale_id.as_deref())).chain(
-            self.operator_instruments
-                .iter()
-                .flatten()
+        let own = self.operator_instruments.as_deref().unwrap_or_default();
+        let covered = self
+            .operator_replicas
+            .as_ref()
+            .is_some_and(|groups| !own.is_empty() && own.len() >= groups.len());
+        let shared =
+            (!covered).then_some((self.instrument_id.as_deref(), self.scale_id.as_deref()));
+        shared.into_iter().chain(
+            own.iter()
                 .map(|c| (c.instrument_id.as_deref(), c.scale_id.as_deref())),
         )
     }

@@ -918,19 +918,13 @@ async fn operator_submission_stores_operator_index_per_operator() {
         practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: t_id.clone(),
-            instrument_id: None,
-            scale_id: None,
+            instrument_id: Some(instrument_id),
+            scale_id: Some(scale_id.clone()),
             values: vec![],
             given_u: None,
             point_replicas: None,
             operator_replicas: Some(vec![vec![1.0, 1.1], vec![2.0, 2.1, 2.2]]),
-            operator_instruments: Some(vec![
-                Default::default(),
-                crate::computation::InstrumentChoice {
-                    instrument_id: Some(instrument_id.clone()),
-                    scale_id: Some(scale_id.clone()),
-                },
-            ]),
+            operator_instruments: None,
         }],
         meta: None,
         table_number: None,
@@ -956,10 +950,9 @@ async fn operator_submission_stores_operator_index_per_operator() {
         assert_eq!(reps, (0..expected_n as i64).collect::<Vec<_>>());
     }
     for m in &t_rows {
-        let expected = (m.operator_index == 1).then_some(scale_id.as_str());
         assert_eq!(
             m.scale_id.as_deref(),
-            expected,
+            Some(scale_id.as_str()),
             "operador {}",
             m.operator_index
         );
@@ -2844,15 +2837,67 @@ async fn analyze_rejects_a_slot_outside_the_balance() {
     assert!(analyze(&pool, "hidrostatica", &with_value(4.0))
         .await
         .is_ok());
+}
 
-    let mut extra = with_value(4.0);
-    extra[0].operator_instruments = Some(vec![Default::default(); 4]);
-    let err = analyze(&pool, "hidrostatica", &extra)
+#[tokio::test]
+async fn analyze_validates_the_instruments_per_determination() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
         .await
-        .unwrap_err()
-        .to_string();
+        .unwrap()
+        .unwrap();
+    let id_of = |symbol: &str| {
+        def.quantities
+            .iter()
+            .find(|q| q.symbol == symbol)
+            .unwrap()
+            .id
+            .clone()
+    };
+    let m8 = |instruments: usize| {
+        vec![MeasurementInput {
+            quantity_id: id_of("m_8"),
+            instrument_id: None,
+            scale_id: Some("escala-borrada".into()),
+            values: vec![],
+            given_u: None,
+            point_replicas: None,
+            operator_replicas: Some(vec![vec![0.0], vec![2.0], vec![0.0]]),
+            operator_instruments: Some(vec![Default::default(); instruments]),
+        }]
+    };
+    let err_of = |measurements: Vec<MeasurementInput>| {
+        let pool = pool.clone();
+        async move {
+            analyze(&pool, "hidrostatica", &measurements)
+                .await
+                .unwrap_err()
+                .to_string()
+        }
+    };
+
+    assert!(analyze(&pool, "hidrostatica", &m8(3)).await.is_ok());
+    let err = err_of(m8(2)).await;
+    assert!(err.contains("la escala seleccionada no existe"), "{err}");
+    let err = err_of(m8(4)).await;
     assert!(
         err.contains("instrumentos para más determinaciones"),
+        "{err}"
+    );
+
+    let given = vec![MeasurementInput {
+        quantity_id: id_of("b_E"),
+        instrument_id: None,
+        scale_id: None,
+        values: vec![10.0],
+        given_u: None,
+        point_replicas: None,
+        operator_replicas: None,
+        operator_instruments: Some(vec![]),
+    }];
+    let err = err_of(given).await;
+    assert!(
+        err.contains("no lleva un instrumento por determinación"),
         "{err}"
     );
 }
