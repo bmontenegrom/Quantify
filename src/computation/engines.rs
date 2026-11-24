@@ -1324,6 +1324,17 @@ pub async fn analyze_definition(
                 quantity.symbol
             );
         }
+        let instruments = measurement
+            .operator_instruments
+            .as_ref()
+            .map_or(0, Vec::len);
+        if instruments > measurement.operator_replicas.as_ref().map_or(0, Vec::len) {
+            anyhow::bail!(
+                "\"{}\" ({}) trae instrumentos para más determinaciones que lecturas",
+                quantity.name,
+                quantity.symbol
+            );
+        }
         if quantity.per_determination {
             if let Some(d) = definition.quantity_determinations(&quantity.symbol) {
                 let groups = measurement.operator_replicas.as_ref().map_or(0, Vec::len);

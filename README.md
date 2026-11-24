@@ -245,7 +245,9 @@ datos comunes una sola vez, como pide la técnica.
 
 Las 9 ranuras se cargan siempre: la que no se usó queda en **masa 0** (el formulario ya la trae en
 0) y **sin instrumento**: cada medida elige su propio instrumento, así que una ranura vacía no
-aporta ni valor ni incertidumbre aunque otra medida use la balanza en esa misma ranura.
+aporta ni valor ni incertidumbre aunque otra medida use la balanza en esa misma ranura. El
+instrumento se guarda junto con las lecturas: una medida que se entrega vacía no lo conserva, y si
+después se edita la entrega para cargarla hay que volver a elegirlo.
 
 #### Parte 2 — Tensión superficial por el método de Wilhelmy
 

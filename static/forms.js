@@ -1006,7 +1006,7 @@ function fillExampleData() {
     const ops = c?.operator_instruments;
     if (!ops) return { ...m, ...c };
     const fallback = { instrument_id: m.instrument_id, scale_id: m.scale_id };
-    const length = Math.max(ops.length, m.operator_replicas?.length ?? 0);
+    const length = m.operator_replicas?.length ?? 0;
     return { ...m, ...c, operator_instruments: Array.from({ length }, (_, i) => ops[i] ?? fallback) };
   });
   const draft = { measurements, finalResults: [] };

@@ -2844,6 +2844,17 @@ async fn analyze_rejects_a_slot_outside_the_balance() {
     assert!(analyze(&pool, "hidrostatica", &with_value(4.0))
         .await
         .is_ok());
+
+    let mut extra = with_value(4.0);
+    extra[0].operator_instruments = Some(vec![Default::default(); 4]);
+    let err = analyze(&pool, "hidrostatica", &extra)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("instrumentos para más determinaciones"),
+        "{err}"
+    );
 }
 
 #[test]

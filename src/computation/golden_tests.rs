@@ -352,7 +352,12 @@ fn collect_derived(
                                 determination.map(|k| k.to_string()).unwrap_or_default()
                             );
                             let number = |key: &str| item[key].as_f64().unwrap_or(f64::NAN);
-                            out.insert(name, (number("value"), number("u_expanded")));
+                            let previous =
+                                out.insert(name.clone(), (number("value"), number("u_expanded")));
+                            assert!(
+                                previous.is_none(),
+                                "{name} aparece dos veces en el análisis"
+                            );
                         }
                     }
                     _ => collect_derived(v, determination, out),
