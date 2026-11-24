@@ -1297,6 +1297,8 @@ Decisiones:
      de prefijos de `symbol_unit`, e `INPUT_PREFIXES` es una copia a mano de `PREFIXES` (sin
      `u`, `c`, `d` y `h`, con `""`). Unificarlo cuando `input_units` pase a usarse acá, por
      ejemplo con un `symbol_unit` que devuelva el prefijo que encontró.
+     Al unificarlo, que los prefijos tengan en cuenta el exponente y la compuesta: hoy `cm2`
+     ofrece `Mm2`, `Gm2` y `Tm2` (factores de 10¹⁶ a 10²⁸) y `kg.m/s2` ofrece `Mg.m/s2`.
 4. **`feat(editor)`: el docente ve si la unidad se reconoce (F10, 4/4).**
    - Aviso en el panel de problemas para unidades que no se reconocen, y vista previa de las
      unidades de entrada en la magnitud.

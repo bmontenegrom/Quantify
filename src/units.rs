@@ -612,15 +612,9 @@ mod tests {
                 _ => {}
             }
         }
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/practices");
         let mut found = vec![];
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_none_or(|e| e != "json") {
-                continue;
-            }
-            let text = std::fs::read_to_string(path).unwrap();
-            units(&serde_json::from_str(&text).unwrap(), &mut found);
+        for (_, json) in crate::practices::LIBRARY {
+            units(&serde_json::from_str(json).unwrap(), &mut found);
         }
         assert!(found.len() > 50);
         for unit in found.iter().filter(|u| *u != "div") {
