@@ -101,7 +101,12 @@ fn compute_quantities(
                     quantity.name, quantity.symbol
                 ));
             }
-            let spec = match measurement.and_then(|m| m.scale_id.as_deref()) {
+            let unused_slot =
+                operator.is_some() && !values.is_empty() && values.iter().all(|&v| v == 0.0);
+            let spec = match measurement
+                .and_then(|m| m.scale_id.as_deref())
+                .filter(|_| !unused_slot)
+            {
                 Some(scale_id) => match scales.get(scale_id) {
                     Some(scale) => Some(scale_spec(scale)?),
                     None => anyhow::bail!("la escala seleccionada no existe"),

@@ -2560,6 +2560,10 @@ async fn analyze_hidrostatica_torque_cero_avisa_sin_romper_la_serializacion() {
         warnings.iter().any(|w| w.contains("(rho =")),
         "falta la advertencia de valor no finito para rho: {warnings:?}"
     );
+    assert!(
+        warnings.iter().any(|w| w.contains("promedio de rho")),
+        "falta la advertencia de valor no finito para rho_medio: {warnings:?}"
+    );
     assert!(!warnings.iter().any(|w| w.contains("(E =")));
     let found = by_determination(&analysis);
     for symbol in ["rho1", "rho2", "rho3", "rho_medio"] {
@@ -2659,6 +2663,84 @@ async fn analyze_hidrostatica_matches_arquimedes_and_wilhelmy() {
     assert!(close(get("rho_medio"), rho_goma, 1e-12));
     assert!(close(get("gamma_medio"), gamma, 1e-12));
     assert!(rho_goma > rho_f * 1000.0);
+}
+
+#[tokio::test]
+async fn hidrostatica_un_slot_vacio_no_aporta_incertidumbre_a_su_medida() {
+    let (pool, _dir) = setup().await;
+    let def = crate::practices::definition(&pool, "hidrostatica")
+        .await
+        .unwrap()
+        .unwrap();
+    db::seed_academic(&pool).await.unwrap();
+    crate::instruments::seed_instruments(&pool, "fisica-experimental-i-2026")
+        .await
+        .unwrap();
+    let (instrument_id, scale_id): (String, String) = sqlx::query_as(
+        "SELECT instrument_id, id FROM instrument_scales WHERE label = '0.1 g (calibracion 3 %)'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let m8_id = &def
+        .quantities
+        .iter()
+        .find(|q| q.symbol == "m_8")
+        .unwrap()
+        .id;
+    let input = || {
+        hidrostatica_input(&def, |symbol, k| match (symbol, k) {
+            ("m_goma", _) => 12.5,
+            ("rho_f", _) => 0.998,
+            ("g_ac", _) => 9.8,
+            ("b_E", _) => 10.0,
+            ("m_3", _) => 1.0,
+            ("m_7", 1 | 3) => 2.0,
+            ("m_8", 2) => 2.0,
+            ("l", _) => 5.0,
+            ("d", _) => 10.0,
+            ("mw", _) => 0.5,
+            ("dw", _) => 4.0,
+            (b, _) if b.starts_with('b') => b[1..].parse().unwrap(),
+            _ => 0.0,
+        })
+    };
+    let u_of = |analysis: &FormAnalysis, symbol: &str, k: usize| -> f64 {
+        analysis
+            .parts
+            .iter()
+            .flat_map(|p| p.analysis.determinations.get(k))
+            .flat_map(|d| &d.derived)
+            .find(|d| d.symbol == symbol)
+            .unwrap()
+            .u
+    };
+
+    let sin_balanza = analyze(&pool, "hidrostatica", &input()).await.unwrap();
+    let mut measurements = input();
+    let m8 = measurements
+        .iter_mut()
+        .find(|m| &m.quantity_id == m8_id)
+        .unwrap();
+    m8.instrument_id = Some(instrument_id);
+    m8.scale_id = Some(scale_id);
+    let con_balanza = analyze(&pool, "hidrostatica", &measurements).await.unwrap();
+
+    assert!(u_of(&con_balanza, "E", 1) > u_of(&sin_balanza, "E", 1));
+    for k in [0, 2] {
+        assert_eq!(
+            u_of(&con_balanza, "E", k),
+            u_of(&sin_balanza, "E", k),
+            "medida {}",
+            k + 1
+        );
+        assert_eq!(
+            u_of(&con_balanza, "rho", k),
+            u_of(&sin_balanza, "rho", k),
+            "medida {}",
+            k + 1
+        );
+    }
 }
 
 #[tokio::test]

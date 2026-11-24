@@ -372,11 +372,18 @@ async fn determinations_keep_the_numbers_of_the_hand_written_practices() {
     for id in ["p1-estadistica", "hidrostatica"] {
         let input = read_input(&golden_dir().join(format!("{id}.input.json")));
         let measurements = golden_measurements(&pool, &input, id, &scales).await;
+        let mut practice = std::collections::HashMap::new();
         collect_derived(
             &analysis_value(&pool, id, &measurements).await,
             None,
-            &mut found,
+            &mut practice,
         );
+        for (symbol, v) in practice {
+            assert!(
+                found.insert(symbol.clone(), v).is_none(),
+                "{symbol} aparece en las dos prácticas"
+            );
+        }
     }
     let today = [
         ("gamma", 0.014546635478697698, 0.0),

@@ -769,6 +769,7 @@ async fn the_library_loads_hidrostatica() {
     let (pool, _dir) = setup().await;
     let def = definition(&pool, "hidrostatica").await.unwrap().unwrap();
     assert_eq!(def.analysis_kind.as_deref(), Some("estadistico"));
+    assert_eq!(def.parts.len(), 2);
     for part in &def.parts {
         let d = part.determinations.as_ref().unwrap();
         assert_eq!((d.count, d.label.as_str(), d.average), (3, "Medida", true));

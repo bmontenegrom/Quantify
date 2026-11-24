@@ -56,12 +56,13 @@ await withE2E({ port: PORT, dbName: "quantify-visual-teacher.db" }, async ({ log
     const { courses } = await (await fetch("/api/academic/context")).json();
     const course = courses[0];
     const def = await (await fetch("/api/practices/hidrostatica/definition")).json();
+    const count = def.parts.find((p) => p.determinations)?.determinations.count;
     const measurements = def.quantities.map((q) => ({
       quantity_id: q.id,
       instrument_id: null,
       scale_id: null,
       values: q.per_determination ? [] : [q.default_value ?? 1],
-      operator_replicas: q.per_determination ? [1, 2, 3].map(() => [q.default_value ?? 1]) : null,
+      operator_replicas: q.per_determination ? Array.from({ length: count }, () => [q.default_value ?? 1]) : null,
       given_u: q.is_given && q.has_uncertainty ? 0.1 : null,
     }));
     const response = await fetch("/api/submissions/form", {
