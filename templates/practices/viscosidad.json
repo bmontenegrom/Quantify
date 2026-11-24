@@ -114,7 +114,7 @@
       "display_symbol": null,
       "symbol": "Temp",
       "name": "Temperatura de la glicerina (referencia)",
-      "unit": "C",
+      "unit": "°C",
       "repeated": false,
       "quantity": "temperatura",
       "is_given": false,
