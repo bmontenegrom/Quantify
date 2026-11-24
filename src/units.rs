@@ -141,7 +141,7 @@ const CANDIDATES: &[&str] = &[
     "°", "rad", "%", "ppm", "ppb",
 ];
 
-const INPUT_PREFIXES: &[&str] = &["p", "n", "µ", "m", "k", "M", "G", "T"];
+const INPUT_PREFIXES: &[&str] = &["p", "n", "µ", "m", "", "k", "M", "G", "T"];
 
 impl Unit {
     /// Dos unidades son compatibles si miden lo mismo (mismas dimensiones).
@@ -318,9 +318,12 @@ pub fn input_units(declared: &str) -> Vec<InputUnit> {
             out.push(relative(candidate, c, unit));
         }
     }
-    if out.len() == 1 && unprefixed_start(declared) {
+    if let Some(base) = unprefixed(declared).filter(|_| out.len() == 1) {
         for prefix in INPUT_PREFIXES {
-            let label = format!("{prefix}{declared}");
+            let label = format!("{prefix}{base}");
+            if label == declared {
+                continue;
+            }
             if let Some(c) = parse(&label).filter(|c| c.compatible(&unit)) {
                 out.push(relative(&label, c, unit));
             }
@@ -329,13 +332,16 @@ pub fn input_units(declared: &str) -> Vec<InputUnit> {
     out
 }
 
-fn unprefixed_start(declared: &str) -> bool {
-    let first = declared
-        .split(['/', '.', '·', '*', ' '])
-        .next()
-        .unwrap_or_default();
+fn unprefixed(declared: &str) -> Option<&str> {
+    let first = declared.split(['/', '.', '·', '*', ' ']).next()?;
     let symbol = first.trim_end_matches(|c: char| c.is_ascii_digit() || c == '-' || c == '^');
-    matches!(lookup(symbol), Some((_, true)))
+    if matches!(lookup(symbol), Some((_, true))) {
+        return Some(declared);
+    }
+    PREFIXES.iter().find_map(|(prefix, _)| {
+        let rest = symbol.strip_prefix(prefix)?;
+        matches!(lookup(rest), Some((_, true))).then(|| &declared[prefix.len()..])
+    })
 }
 
 /// Factor para pasar un paso o una incertidumbre de `from` a `to`, si las dos se reconocen y son
@@ -455,6 +461,16 @@ mod tests {
             ["N/m", "pN/m", "nN/m", "µN/m", "mN/m", "kN/m", "MN/m", "GN/m", "TN/m"]
         );
         assert!(labels("Pa.s").contains(&"mPa.s".to_string()));
+        assert_eq!(labels("mPa.s")[0], "mPa.s");
+        assert!(labels("mPa.s").contains(&"Pa.s".to_string()));
+        assert!(labels("mm2").contains(&"m2".to_string()));
+        assert!(labels("mm2").contains(&"µm2".to_string()));
+        assert!(!labels("mm2")[1..].contains(&"mm2".to_string()));
+        let pa_s = input_units("mPa.s")
+            .into_iter()
+            .find(|u| u.label == "Pa.s")
+            .unwrap();
+        assert!(close(pa_s.factor, 1e3));
         assert_eq!(
             labels("m/s2"),
             ["m/s2", "pm/s2", "nm/s2", "µm/s2", "mm/s2", "km/s2", "Mm/s2", "Gm/s2", "Tm/s2"]
