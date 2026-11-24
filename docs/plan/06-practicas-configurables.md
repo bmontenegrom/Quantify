@@ -1238,6 +1238,64 @@ probable**, así que lo que la habilita va primero:
 - **Material volumétrico** (bureta, pipeta, matraz) como instrumentos: ya entra en el catálogo con
   `apreciacion` o tolerancia de clase; validar con el primer caso real.
 
+**Plan de PRs: unidades estructuradas** (el primer ítem de química)
+
+Lo que se relevó en el código (2026-11-24):
+- `unit` es texto libre en magnitudes, resultados, intermedios, resultados por punto, agregados,
+  instrumentos y escalas (`unit TEXT NOT NULL`, solo se recorta). Nadie la interpreta: el motor
+  la copia a la salida y la única regla es que "Comparar con" exige el mismo texto
+  (`check_compare`).
+- El formulario ofrece un **prefijo SI** al lado de cada valor que no sabe nada de la unidad
+  ("m" en una magnitud en cm da 10⁻³ cm). Se aplica en 8 lugares al recolectar (lecturas, dato
+  ± U, U compartida, resultado final, celdas de la serie). Todo se guarda en la unidad
+  declarada; el prefijo elegido no se guarda.
+- **El tipo B mezcla unidades.** `step`, `appreciation`, `spec_fixed` y `u_cal_fixed` están en
+  la unidad de la escala y se combinan con medias en la unidad de la magnitud. La regla (mm) en
+  una longitud en cm o m, o el densímetro (g/cm³) en `rho_f` en kg/m³ (Viscosidad), dan una u_B
+  10 a 1000 veces mal. Los golden no lo tocan: en todos los casos que usan, la escala y la
+  magnitud tienen la misma unidad.
+- Unidades en uso: V, ohm, cm, m, mm, g, kg, s, (vacía), Hz, °, m/s2, kg/m3, F, A, W, Pa.s, C
+  (temperatura, que choca con coulomb), div, H, rad/s, rad, m3/s, m3, m/s, g/cm3, N/m, N, 1/s.
+  Notación: exponente pegado (`m3`), `.` como producto (`Pa.s`), `1/x`, `ohm`.
+
+Decisiones:
+- **`unit` sigue siendo texto**, sin cambio de esquema. Un módulo `src/units.rs` la interpreta
+  (factor, desplazamiento y dimensiones sobre m, kg, s, A, K, mol, cd). Lo que no reconoce (p. ej.
+  `div`) queda como hoy, sin conversión.
+- Cada factor de la unidad se busca primero entero en el catálogo y después como prefijo + base:
+  `M` es molar y `MPa` es megapascal; `min`, `cd`, `Pa` y `h` no se confunden con prefijos.
+- Catálogo inicial: m, g, s, A, K, mol, cd, L, Hz, N, Pa, J, W, C (coulomb), V, ohm/Ω, F, H, M
+  (mol/L), min, h, °C, rad, ° (ángulo), %, ppm, ppb, `% m/m`, `% m/v`, `% v/v`. La temperatura
+  lleva desplazamiento solo cuando la unidad es exactamente una temperatura; pasos e
+  incertidumbres se convierten solo por factor.
+- **El tipo B convierte la escala** a la unidad de la magnitud, en su propia PR.
+- **El alumno elige la unidad en un desplegable** de unidades compatibles que reemplaza al de
+  prefijos. El JS no interpreta unidades: el servidor manda en `resolved` las unidades de entrada
+  de cada magnitud y resultado final, con su factor y desplazamiento. Si la dimensión no tiene
+  lista propia, se ofrece la declarada con prefijos SI (lo de hoy); si la unidad no se reconoce,
+  solo la declarada.
+
+1. **`feat(unidades)`: el motor interpreta unidades (F10, 1/4).**
+   - `src/units.rs`: interpretar, compatibilidad, conversión y unidades de entrada, con tests
+     para todas las unidades en uso. Sin cambios de comportamiento.
+   - Las plantillas que usan `C` para temperatura pasan a `°C`.
+2. **`fix(incertidumbres)`: el tipo B convierte la escala a la unidad de la magnitud (F10, 2/4).**
+   - Si las dos unidades se reconocen y son compatibles, se convierten `step`, `appreciation`,
+     `spec_fixed` y `u_cal_fixed` (los términos en % no cambian).
+   - Si se reconocen y no son compatibles (un cronómetro en una masa), el análisis da un error
+     claro. Si alguna no se reconoce, queda como hoy.
+   - Golden idénticos; tests con la regla en cm y en m y el densímetro en kg/m³.
+3. **`feat(formularios)`: el alumno carga en la unidad que elija (F10, 3/4).**
+   - Desplegable de unidades compatibles en lugar del prefijo, en los mismos 8 lugares, también
+     en los resultados finales. Se guarda en la unidad declarada, como hoy.
+4. **`feat(editor)`: el docente ve si la unidad se reconoce (F10, 4/4).**
+   - Aviso en el panel de problemas para unidades que no se reconocen, y vista previa de las
+     unidades de entrada en la magnitud.
+   - "Comparar con" acepta unidades compatibles y la comparación medido vs teórico convierte.
+
+Quedan para después: chequeo dimensional de fórmulas, constantes, interpolación inversa y
+sinónimos de magnitud (`tension`/`voltaje`).
+
 **General**
 
 - Interfaz común de motores (`PartEngine`, 3.10) y primer motor nuevo (ajuste exponencial no
