@@ -9,4 +9,5 @@ pub mod routes;
 pub mod sessions;
 pub mod submissions;
 pub mod uncertainty;
+pub mod units;
 pub mod users;
