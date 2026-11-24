@@ -205,7 +205,7 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "p1-estadistica");
   const timedRow = page.locator(`#measurement-fields .measurement-row--chrono[data-quantity-id="${draftedId}"]`).first();
-  const timedInstrument = page.locator(`#measurement-fields .operator-quantity[data-quantity-id="${draftedId}"] .measure-instrument`);
+  const timedInstrument = timedRow.locator(".measure-instrument");
   await timedInstrument.selectOption("");
   await timedRow.locator(".chrono-start").click();
   for (let i = 0; i < 6; i++) {

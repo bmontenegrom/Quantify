@@ -244,7 +244,8 @@ medida; la goma, el fluido y los brazos son comunes. Salida: `E` y `rho` por med
 datos comunes una sola vez, como pide la técnica.
 
 Las 9 ranuras se cargan siempre: la que no se usó queda en **masa 0** (el formulario ya la trae en
-0): no aporta valor y, aunque otra medida le haya elegido balanza, tampoco incertidumbre.
+0) y **sin instrumento**: cada medida elige su propio instrumento, así que una ranura vacía no
+aporta ni valor ni incertidumbre aunque otra medida use la balanza en esa misma ranura.
 
 #### Parte 2 — Tensión superficial por el método de Wilhelmy
 
