@@ -18,7 +18,7 @@ pub use submission::{
     validate_student_results, FormSubmissionInput,
 };
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct MeasurementInput {
     pub quantity_id: String,
     pub instrument_id: Option<String>,
@@ -31,6 +31,31 @@ pub struct MeasurementInput {
     pub operator_replicas: Option<Vec<Vec<f64>>>,
     #[serde(default)]
     pub operator_instruments: Option<Vec<InstrumentChoice>>,
+}
+
+pub fn with_fixed_values(
+    quantities: &[crate::db::PracticeQuantity],
+    measurements: &[MeasurementInput],
+) -> Vec<MeasurementInput> {
+    let fixed: Vec<_> = quantities
+        .iter()
+        .filter(|q| q.is_given && q.fixed)
+        .filter_map(|q| {
+            Some(MeasurementInput {
+                quantity_id: q.id.clone(),
+                values: vec![q.default_value?],
+                given_u: q.default_u.filter(|_| q.has_uncertainty),
+                ..Default::default()
+            })
+        })
+        .collect();
+    let mut out: Vec<_> = measurements
+        .iter()
+        .filter(|m| !fixed.iter().any(|f| f.quantity_id == m.quantity_id))
+        .cloned()
+        .collect();
+    out.extend(fixed);
+    out
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

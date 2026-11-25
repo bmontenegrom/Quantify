@@ -169,6 +169,10 @@ pub struct PracticeQuantity {
     pub input_widget: String,
     #[sqlx(default)]
     pub per_determination: bool,
+    #[sqlx(default)]
+    pub fixed: bool,
+    #[sqlx(default)]
+    pub default_u: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, FromRow)]

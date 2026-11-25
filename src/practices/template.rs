@@ -221,6 +221,8 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
                 per_determination: q.per_determination,
+                fixed: q.fixed,
+                default_u: q.default_u.map(Some),
             })
             .collect(),
         results: def
@@ -417,6 +419,13 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
             .any(|(p, kind)| p.determinations.is_some() && kind != "estadistico")
     {
         return Err("Las determinaciones son para una práctica o parte estadística.".into());
+    }
+    if let Some((q, problem)) = t
+        .quantities
+        .iter()
+        .find_map(|q| Some((q, q.fixed_problem()?)))
+    {
+        return Err(format!("La magnitud \"{}\": {problem}", q.symbol));
     }
     for q in t.quantities.iter().filter(|q| q.per_determination) {
         let has_determinations = if t.parts.is_empty() {

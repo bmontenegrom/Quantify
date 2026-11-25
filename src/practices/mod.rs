@@ -43,6 +43,14 @@ pub struct QuantityInput {
     pub input_widget: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub per_determination: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fixed: bool,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub default_u: Option<Option<f64>>,
 }
 
 impl QuantityInput {
@@ -54,6 +62,36 @@ impl QuantityInput {
     /// ```
     pub fn stored_per_point(&self) -> bool {
         self.per_point && !self.per_determination
+    }
+
+    /// Por qué el valor fijo (o su U) no se puede guardar, o `None` si se puede.
+    ///
+    /// ```
+    /// let q = quantify::practices::QuantityInput { is_given: true, fixed: true, default_value: Some(Some(9.8)), default_u: Some(Some(0.1)), ..Default::default() };
+    /// assert_eq!(q.fixed_problem(), None);
+    /// assert!(quantify::practices::QuantityInput { is_given: false, ..q.clone() }.fixed_problem().is_some());
+    /// ```
+    pub fn fixed_problem(&self) -> Option<&'static str> {
+        let default_u = self.default_u.flatten();
+        if default_u.is_some_and(|u| !(u.is_finite() && u >= 0.0)) {
+            return Some("La U fija tiene que ser cero o positiva.");
+        }
+        if !self.fixed {
+            return None;
+        }
+        if !self.is_given {
+            return Some("Solo un dato de cátedra o una constante puede tener valor fijo.");
+        }
+        if self.slot_count.is_some() || self.per_determination {
+            return Some("Un valor fijo no puede tener ranuras ni repetirse por determinación.");
+        }
+        if !self.default_value.flatten().is_some_and(f64::is_finite) {
+            return Some("Un dato con valor fijo necesita el valor.");
+        }
+        if self.has_uncertainty && default_u.is_none() {
+            return Some("Un dato de cátedra con valor fijo necesita su U (cero o positiva).");
+        }
+        None
     }
 
     /// La magnitud física tal como se guarda: canónica, y vacía pasa a no declarada.
@@ -96,6 +134,8 @@ impl Default for QuantityInput {
             label_mode: None,
             input_widget: None,
             per_determination: false,
+            fixed: false,
+            default_u: None,
         }
     }
 }
