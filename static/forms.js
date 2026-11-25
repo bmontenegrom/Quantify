@@ -14,7 +14,7 @@ import {
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
-  givenValueInputHtml, fixedGivenHtml, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, toDeclaredUnit, restoreUnitChoices, populateScaleOptions,
+  givenValueInputHtml, fixedGivenHtml, isFixedGiven, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, toDeclaredUnit, restoreUnitChoices, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
   formHelpHtml, partHelpHtml, columnSections, instrumentSelectorsHtml, wireInstrumentSelectors,
   retiredInstrumentNote,
@@ -386,7 +386,7 @@ function quantityRowRenderer(definition, instruments, draft) {
 
   const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
-    if (q.is_given && q.fixed) return fixedGivenHtml(q, legendHtml(q));
+    if (isFixedGiven(q)) return fixedGivenHtml(q, legendHtml(q));
     if (q.is_given) {
       const uField = !hasUncertainty(q)
         ? ""

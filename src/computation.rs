@@ -39,25 +39,26 @@ pub fn with_fixed_values(
 ) -> Vec<MeasurementInput> {
     let fixed: Vec<_> = quantities
         .iter()
-        .filter(|q| q.fixed && q.default_value.is_some())
+        .filter(|q| q.fixed)
+        .filter_map(|q| {
+            Some(MeasurementInput {
+                quantity_id: q.id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values: vec![q.default_value?],
+                given_u: q.default_u.filter(|_| q.has_uncertainty),
+                point_replicas: None,
+                operator_replicas: None,
+                operator_instruments: None,
+            })
+        })
         .collect();
     let mut out: Vec<_> = measurements
         .iter()
-        .filter(|m| !fixed.iter().any(|q| q.id == m.quantity_id))
+        .filter(|m| !fixed.iter().any(|f| f.quantity_id == m.quantity_id))
         .cloned()
         .collect();
-    out.extend(fixed.iter().filter_map(|q| {
-        Some(MeasurementInput {
-            quantity_id: q.id.clone(),
-            instrument_id: None,
-            scale_id: None,
-            values: vec![q.default_value?],
-            given_u: q.default_u.filter(|_| q.has_uncertainty),
-            point_replicas: None,
-            operator_replicas: None,
-            operator_instruments: None,
-        })
-    }));
+    out.extend(fixed);
     out
 }
 

@@ -151,6 +151,10 @@ export function restoreUnitChoices(container, choices) {
   }
 }
 
+export function isFixedGiven(q) {
+  return q.is_given && q.fixed && q.default_value != null;
+}
+
 export function fixedGivenHtml(q, legend) {
   const u = hasUncertainty(q) ? q.default_u : null;
   const text = `${q.default_value}${u != null ? ` ± ${u}` : ""}`;

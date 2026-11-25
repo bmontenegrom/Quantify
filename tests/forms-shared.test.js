@@ -10,6 +10,7 @@ import {
   toDeclaredUnit,
   fromDeclaredUnit,
   restoreUnitChoices,
+  isFixedGiven,
 } from "../static/forms-shared.js";
 import { state } from "../static/state.js";
 
@@ -127,4 +128,10 @@ test("restoreUnitChoices: una U de temperatura en °C vuelve sin el desplazamien
   assert.equal(value.input.value, 20);
   assert.equal(u.input.value, 0.5);
   assert.equal(u.select.selectedIndex, 1);
+});
+
+test("isFixedGiven: un dato fijo sin valor se carga como cualquier dato", () => {
+  assert.equal(isFixedGiven({ is_given: true, fixed: true, default_value: 0 }), true);
+  assert.equal(isFixedGiven({ is_given: true, fixed: true, default_value: null }), false);
+  assert.equal(isFixedGiven({ is_given: true, fixed: false, default_value: 1 }), false);
 });
