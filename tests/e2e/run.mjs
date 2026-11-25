@@ -82,16 +82,17 @@ async function studentSavesOwnResults(page) {
 async function teacherReviews(page) {
   step("docente: abre la entrega de Mesa 1");
   await page.click('.tab.teacher-only[data-view="submissions"]');
-  await page.click(".submission-table-group .submission-item");
+  const opened = page.locator(".submission-table-group .submission-item").first();
+  const submissionId = await opened.getAttribute("data-id");
+  await opened.click();
   await page.waitForSelector(".review-form");
 
   step("docente: L cargada en cm y su U en mm se guardaron en metros");
-  const { mean, u } = await page.evaluate(async () => {
-    const [latest] = await (await fetch("/api/submissions")).json();
-    const detail = await (await fetch(`/api/submissions/${latest.id}`)).json();
+  const { mean, u } = await page.evaluate(async (id) => {
+    const detail = await (await fetch(`/api/submissions/${encodeURIComponent(id)}`)).json();
     const l = detail.analysis.quantities.find((q) => q.symbol === "L");
     return { mean: l.result.mean, u: l.result.u_expanded };
-  });
+  }, submissionId);
   assert(Math.abs(mean - 1) < 1e-12 && Math.abs(u - 0.002) < 1e-12, `L debía quedar 1 ± 0,002 m (vi ${mean} ± ${u})`);
 
   step("docente: ve el análisis automático y la comparación del alumno");

@@ -111,6 +111,18 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
     flow.split("\n").length === 3 && flow.includes("0.5") && flow.includes("0.75"),
     `Q debía mostrar Q_1, Q_2 y su promedio 0.75, mostró "${flow}"`,
   );
+  const repCell = row.locator(".series-cell--replicas:has(.unit-select)").first();
+  assert((await repCell.count()) > 0, "fluidos-1 debía tener una celda con réplicas y desplegable de unidad");
+  {
+    await repCell.locator(".unit-select").selectOption({ index: 1 });
+    const { text, expected } = await repCell.evaluate((cell) => {
+      const raw = [...cell.querySelectorAll(".series-replica")].map((i) => Number(i.value));
+      const unit = cell.querySelector(".unit-select").selectedOptions[0].textContent;
+      return { text: cell.querySelector(".series-mean").textContent, expected: `x̄ ${raw.reduce((a, b) => a + b, 0) / raw.length} ${unit} (n=${raw.length})` };
+    });
+    assert(text === expected, `la media debía verse en la unidad elegida: "${expected}", mostró "${text}"`);
+    await repCell.locator(".unit-select").selectOption({ index: 0 });
+  }
   await row.locator(".series-point-result").first().fill("1234");
   await waitForDraft(page, { result: "Re#0", value: 1234 });
   await page.reload();

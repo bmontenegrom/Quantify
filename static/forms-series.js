@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
 import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, unitText, format, num, canReview, hasUncertainty, analysisSections, determinationsFor, expandDeterminationResults } from "./lib.js";
-import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, unitSelectHtml, instrumentSelectorsHtml, wireInstrumentSelectors, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
+import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, unitSelectHtml, instrumentSelectorsHtml, wireInstrumentSelectors, replicaInputHtml, cellReplicaValues, fromDeclaredUnit, unitConversion } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireMeasurementRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
@@ -339,8 +339,9 @@ export function updateSeriesMeans() {
       meanEl.textContent = "x̄ —";
       return;
     }
-    const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
-    meanEl.textContent = `x̄ ${format(mean)}${meanEl.dataset.unit ? ` ${meanEl.dataset.unit}` : ""} (n=${valid.length})`;
+    const mean = fromDeclaredUnit(valid.reduce((a, b) => a + b, 0) / valid.length, unitConversion(cell));
+    const unit = cell.querySelector(".unit-select")?.selectedOptions[0]?.textContent ?? meanEl.dataset.unit;
+    meanEl.textContent = `x̄ ${format(mean)}${unit ? ` ${unit}` : ""} (n=${valid.length})`;
   });
 }
 
