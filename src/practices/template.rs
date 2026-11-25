@@ -221,6 +221,8 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
                 per_determination: q.per_determination,
+                fixed: q.fixed,
+                default_u: q.default_u.map(Some),
             })
             .collect(),
         results: def

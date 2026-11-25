@@ -43,6 +43,14 @@ pub struct QuantityInput {
     pub input_widget: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub per_determination: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fixed: bool,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub default_u: Option<Option<f64>>,
 }
 
 impl QuantityInput {
@@ -96,6 +104,8 @@ impl Default for QuantityInput {
             label_mode: None,
             input_widget: None,
             per_determination: false,
+            fixed: false,
+            default_u: None,
         }
     }
 }

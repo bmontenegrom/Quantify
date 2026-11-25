@@ -4300,3 +4300,70 @@ async fn a_saved_magnitude_is_stored_canonical() {
     .unwrap();
     assert_eq!(q.quantity.as_deref(), Some("voltaje"));
 }
+
+#[tokio::test]
+async fn a_fixed_given_uses_the_definition_and_ignores_the_client() {
+    let (pool, _dir) = setup().await;
+    let l = definition(&pool, "p1-estadistica")
+        .await
+        .unwrap()
+        .unwrap()
+        .quantities
+        .into_iter()
+        .find(|q| q.symbol == "L")
+        .unwrap();
+    let saved = update_quantity(
+        &pool,
+        &l.id,
+        QuantityInput {
+            symbol: "L".into(),
+            name: l.name.clone(),
+            unit: l.unit.clone(),
+            quantity: l.quantity.clone(),
+            is_given: true,
+            per_point: false,
+            fixed: true,
+            default_value: Some(Some(1.0)),
+            default_u: Some(Some(0.002)),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(saved.fixed);
+    assert_eq!(
+        (saved.default_value, saved.default_u),
+        (Some(1.0), Some(0.002))
+    );
+
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    let sent = crate::computation::MeasurementInput {
+        quantity_id: l.id.clone(),
+        instrument_id: None,
+        scale_id: None,
+        values: vec![5.0],
+        given_u: Some(99.0),
+        point_replicas: None,
+        operator_replicas: None,
+        operator_instruments: None,
+    };
+    for client in [vec![sent], vec![]] {
+        let used = crate::computation::with_fixed_values(&def.quantities, &client);
+        assert_eq!(used.len(), 1);
+        assert_eq!(
+            (used[0].values.clone(), used[0].given_u),
+            (vec![1.0], Some(0.002))
+        );
+    }
+
+    let exported = export_template(&pool, "p1-estadistica", ExportSource::Borrador)
+        .await
+        .unwrap()
+        .unwrap();
+    let copy = import_template(&pool, &exported, "u1").await.unwrap();
+    let copied = definition(&pool, &copy.id).await.unwrap().unwrap();
+    let l = copied.quantities.iter().find(|q| q.symbol == "L").unwrap();
+    assert!(l.fixed);
+    assert_eq!(l.default_u, Some(0.002));
+}

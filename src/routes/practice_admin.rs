@@ -765,7 +765,8 @@ pub(super) async fn analyze_preview(
     Json(body): Json<AnalyzePreviewBody>,
 ) -> Result<Json<computation::FormAnalysis>, AppError> {
     let definition = preview_definition(&state, &headers, &id, &body).await?;
-    let analysis = computation::analyze_definition(&state.pool, &definition, &body.measurements)
+    let measurements = computation::with_fixed_values(&definition.quantities, &body.measurements);
+    let analysis = computation::analyze_definition(&state.pool, &definition, &measurements)
         .await
         .map_err(AppError::from_domain_or_db)?;
     Ok(Json(analysis))
@@ -780,7 +781,8 @@ pub(super) async fn live_values(
     let view = preview_definition(&state, &headers, &id, &body)
         .await?
         .point_view();
-    let rows = computation::live_values(&view.quantities, &view.intermediates, &body.measurements)
+    let measurements = computation::with_fixed_values(&view.quantities, &body.measurements);
+    let rows = computation::live_values(&view.quantities, &view.intermediates, &measurements)
         .map_err(|e| AppError::bad_request(e.to_string()))?;
     Ok(Json(rows))
 }
@@ -968,6 +970,9 @@ fn with_updated_quantity(
     q.slot_count = input.slot_count;
     q.replicas_per_point = input.replicas_per_point;
     q.per_determination = input.per_determination;
+    q.fixed = input.fixed;
+    q.default_value = input.default_value.unwrap_or(q.default_value);
+    q.default_u = input.default_u.unwrap_or(q.default_u);
     if let Some(mode) = &input.label_mode {
         q.label_mode.clone_from(mode);
     }
@@ -1004,6 +1009,10 @@ pub(super) async fn update_quantity(
     let before = load_definition(&state, &practice_id).await?;
     let after = with_updated_quantity(&before, &qid, &input)
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
+    if let Some(q) = after.quantities.iter().find(|q| q.id == qid) {
+        input.default_value = Some(q.default_value);
+        input.default_u = Some(q.default_u);
+    }
     validate_quantity_in(&after, &input, Some(&qid))?;
     guard_symbol(
         &state.pool,
@@ -1588,11 +1597,13 @@ fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem>
                 per_point: q.per_point,
                 has_uncertainty: q.has_uncertainty,
                 optional: q.optional,
-                default_value: None,
+                default_value: Some(q.default_value),
                 slot_count: q.slot_count,
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
                 per_determination: q.per_determination,
+                fixed: q.fixed,
+                default_u: Some(q.default_u),
             };
             let error = validate_quantity(&input).err()?;
             Some(ElementProblem {
@@ -2347,6 +2358,38 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
     {
         return Err(AppError::bad_request(
             "El cronómetro solo aplica a una magnitud física \"tiempo\" que no sea un dato dado.",
+        ));
+    }
+    if input.fixed {
+        validate_fixed(input)?;
+    }
+    Ok(())
+}
+
+fn validate_fixed(input: &QuantityInput) -> Result<(), AppError> {
+    if !input.is_given {
+        return Err(AppError::bad_request(
+            "Solo un dato de cátedra o una constante puede tener valor fijo.",
+        ));
+    }
+    if input.slot_count.is_some() || input.per_determination {
+        return Err(AppError::bad_request(
+            "Un valor fijo no puede tener ranuras ni repetirse por determinación.",
+        ));
+    }
+    if !input.default_value.flatten().is_some_and(f64::is_finite) {
+        return Err(AppError::bad_request(
+            "Un dato con valor fijo necesita el valor.",
+        ));
+    }
+    if input.has_uncertainty
+        && !input
+            .default_u
+            .flatten()
+            .is_some_and(|u| u.is_finite() && u >= 0.0)
+    {
+        return Err(AppError::bad_request(
+            "Un dato de cátedra con valor fijo necesita su U (cero o positiva).",
         ));
     }
     Ok(())
@@ -3130,6 +3173,40 @@ mod tests {
         };
         assert!(validate_quantity(&timed(false, "tiempo", "cronometro")).is_ok());
         assert!(validate_quantity(&timed(false, " Tiempo ", "cronometro")).is_ok());
+        let fixed = |has_uncertainty: bool, default_u: Option<f64>| QuantityInput {
+            symbol: "g".into(),
+            name: "Gravedad".into(),
+            is_given: true,
+            has_uncertainty,
+            fixed: true,
+            default_value: Some(Some(9.8)),
+            default_u: Some(default_u),
+            ..Default::default()
+        };
+        assert!(validate_quantity(&fixed(true, Some(0.1))).is_ok());
+        assert!(validate_quantity(&fixed(false, None)).is_ok());
+        assert!(validate_quantity(&fixed(true, None)).is_err());
+        assert!(validate_quantity(&fixed(true, Some(-0.1))).is_err());
+        assert!(validate_quantity(&QuantityInput {
+            default_value: Some(None),
+            ..fixed(true, Some(0.1))
+        })
+        .is_err());
+        assert!(validate_quantity(&QuantityInput {
+            is_given: false,
+            ..fixed(true, Some(0.1))
+        })
+        .is_err());
+        assert!(validate_quantity(&QuantityInput {
+            slot_count: Some(3),
+            ..fixed(true, Some(0.1))
+        })
+        .is_err());
+        assert!(validate_quantity(&QuantityInput {
+            per_determination: true,
+            ..fixed(true, Some(0.1))
+        })
+        .is_err());
         assert!(validate_quantity(&timed(false, "longitud", "teclado")).is_ok());
         assert!(validate_quantity(&timed(false, "longitud", "cronometro")).is_err());
         assert!(validate_quantity(&timed(true, "tiempo", "cronometro")).is_err());

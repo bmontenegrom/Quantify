@@ -172,8 +172,9 @@ pub async fn create_form_submission(
     } = version;
     validate_student_results(&definition, &input.student_results)?;
 
-    let analysis = analyze_definition(pool, &definition, &input.measurements).await?;
-    check_determination_groups(&definition, &input.measurements)?;
+    let measurements = super::with_fixed_values(&definition.quantities, &input.measurements);
+    let analysis = analyze_definition(pool, &definition, &measurements).await?;
+    check_determination_groups(&definition, &measurements)?;
     let series = series_quantity_ids(&definition);
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match &input.meta {
@@ -273,7 +274,7 @@ pub async fn create_form_submission(
     .execute(&mut *tx)
     .await?;
 
-    insert_measurements(&mut tx, &id, &input.measurements, &series).await?;
+    insert_measurements(&mut tx, &id, &measurements, &series).await?;
     if !input.student_results.is_empty() {
         db::save_student_results_in(&mut tx, &id, &input.student_results).await?;
     }
@@ -421,6 +422,7 @@ pub async fn update_form_submission(
         validate_student_results(&definition, results)?;
     }
 
+    let measurements = &super::with_fixed_values(&definition.quantities, measurements);
     let analysis = analyze_definition(pool, &definition, measurements).await?;
     check_determination_groups(&definition, measurements)?;
     let series = series_quantity_ids(&definition);

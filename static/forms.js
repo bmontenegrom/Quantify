@@ -14,7 +14,7 @@ import {
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
-  givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, toDeclaredUnit, restoreUnitChoices, populateScaleOptions,
+  givenValueInputHtml, fixedGivenHtml, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, toDeclaredUnit, restoreUnitChoices, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
   formHelpHtml, partHelpHtml, columnSections, instrumentSelectorsHtml, wireInstrumentSelectors,
   retiredInstrumentNote,
@@ -386,6 +386,7 @@ function quantityRowRenderer(definition, instruments, draft) {
 
   const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
     const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
+    if (q.is_given && q.fixed) return fixedGivenHtml(q, legendHtml(q));
     if (q.is_given) {
       const uField = !hasUncertainty(q)
         ? ""
@@ -777,6 +778,10 @@ function sharedGivenU(container) {
 }
 
 function collectStandaloneRow(row) {
+  if (row.dataset.fixedValue != null) {
+    const { quantityId, fixedValue, fixedU } = row.dataset;
+    return { quantity_id: quantityId, instrument_id: null, scale_id: null, values: [Number(fixedValue)], given_u: fixedU === "" ? null : Number(fixedU) };
+  }
   if (row.dataset.isGiven === "1") {
     const valInput = row.querySelector(".measure-given-value");
     const uInput = row.querySelector(".measure-given-u");

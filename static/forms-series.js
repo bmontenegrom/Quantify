@@ -2,7 +2,7 @@ import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
 import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, unitText, format, num, canReview, hasUncertainty, analysisSections, determinationsFor, expandDeterminationResults } from "./lib.js";
-import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, unitSelectHtml, instrumentSelectorsHtml, wireInstrumentSelectors, replicaInputHtml, cellReplicaValues, fromDeclaredUnit, unitConversion } from "./forms-shared.js";
+import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, fixedGivenHtml, groupBySections, renderReplicaInput, quantityUnits, unitSelectHtml, instrumentSelectorsHtml, wireInstrumentSelectors, replicaInputHtml, cellReplicaValues, fromDeclaredUnit, unitConversion } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireMeasurementRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
@@ -257,6 +257,7 @@ export function collectSeriesPointResults() {
 }
 
 function sharedRowHtml(q) {
+  if (q.is_given && q.fixed) return fixedGivenHtml(q, quantityNameHtml(q));
   if (q.is_given) {
     const uField = !hasUncertainty(q)
       ? ""

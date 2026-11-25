@@ -70,10 +70,15 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   assert(await shown("slot_count"), "un dato de cátedra admite ranuras");
   await role.selectOption("replicas");
 
-  step("docente: agrega L (dato) y T (réplicas)");
+  step("docente: agrega L (dato con valor fijo) y T (réplicas)");
   await openAddForm(page, "#new-quantity-form");
   await page.locator('#magnitudes-list option[value="voltaje"]').waitFor({ state: "attached" });
-  await fillAndSubmit(page, "#new-quantity-form", { symbol: "L", name: "Largo", unit: "m", quantity: "Distancia", role: "catedra" });
+  await fillAndSubmit(
+    page,
+    "#new-quantity-form",
+    { symbol: "L", name: "Largo", unit: "m", quantity: "Distancia", role: "catedra", default_value: "1", default_u: "0.002" },
+    { fixed: true },
+  );
   await waitForStatus(page, "Magnitud agregada");
   await page.locator('#practice-workspace tr:has(code:text-is("L")) td', { hasText: /^longitud$/ }).waitFor();
   await openAddForm(page, "#new-quantity-form");
@@ -186,8 +191,8 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     (await help("Ayuda de Parte A").isVisible()) && !(await help("Ayuda de Parte B").isVisible()),
     "la parte A debía mostrar solo su ayuda",
   );
-  await given.locator(".measure-given-value").fill("1");
-  await given.locator(".measure-given-u").fill("0.002");
+  assert((await given.locator("input").count()) === 0, "un dato fijo no debía tener campos para cargar");
+  assert((await given.locator(".fixed-given").textContent()).startsWith("1 ± 0.002"), "el dato fijo debía mostrar valor ± U");
   await tabs.nth(1).click();
   assert((await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y también L, que es compartida");
   assert(await help("Ayuda de Seccion B").isVisible(), "la sección B debía mostrar su ayuda");
