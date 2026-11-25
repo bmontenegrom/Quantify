@@ -145,7 +145,7 @@ export function restoreUnitChoices(container, choices) {
     const conversion = unitConversion(wrap);
     wrap.querySelectorAll('input[type="number"]').forEach((input) => {
       if (input.value.trim() === "") return;
-      input.value = fromDeclaredUnit(input.value, conversion, { uncertainty: /-u/.test(input.className) });
+      input.value = fromDeclaredUnit(input.value, conversion, { uncertainty: [...input.classList].some((c) => c.endsWith("-u")) });
     });
     select.dispatchEvent(new Event("input", { bubbles: true }));
   }

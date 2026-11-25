@@ -9,6 +9,7 @@ import {
   unitConversion,
   toDeclaredUnit,
   fromDeclaredUnit,
+  restoreUnitChoices,
 } from "../static/forms-shared.js";
 import { state } from "../static/state.js";
 
@@ -100,4 +101,30 @@ test("fromDeclaredUnit deshace toDeclaredUnit, con la U sin desplazamiento", () 
   assert.equal(fromDeclaredUnit(1, { factor: 0.01, offset: 0 }), 100);
   assert.equal(fromDeclaredUnit(293.15, { factor: 1, offset: 273.15 }), 20);
   assert.equal(fromDeclaredUnit(0.5, { factor: 1, offset: 273.15 }, { uncertainty: true }), 0.5);
+});
+
+test("restoreUnitChoices: una U de temperatura en °C vuelve sin el desplazamiento", () => {
+  const holder = { dataset: { quantityId: "T" } };
+  const field = (cls, value) => {
+    const input = { value, classList: [cls] };
+    const select = {
+      selectedIndex: 0,
+      options: [{ dataset: { factor: "1", offset: "0" } }, { dataset: { factor: "1", offset: "273.15" } }],
+      get selectedOptions() { return [this.options[this.selectedIndex]]; },
+      closest: (sel) => (sel.includes(".replica-input-wrap") ? wrap : holder),
+      dispatchEvent() {},
+    };
+    const wrap = {
+      querySelector: (sel) => (sel === ".unit-select" ? select : sel === '[class$="-u"]' && cls.endsWith("-u") ? input : null),
+      querySelectorAll: () => [input],
+    };
+    return { input, select };
+  };
+  const value = field("measure-given-value", "293.15");
+  const u = field("measure-given-u", "0.5");
+  const container = { querySelectorAll: () => [value.select, u.select] };
+  restoreUnitChoices(container, { "T|v|0": 1, "T|u|0": 1 });
+  assert.equal(value.input.value, 20);
+  assert.equal(u.input.value, 0.5);
+  assert.equal(u.select.selectedIndex, 1);
 });
