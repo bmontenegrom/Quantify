@@ -9,13 +9,6 @@ where
     Option::<T>::deserialize(de).map(Some)
 }
 
-fn canonical_magnitude<'de, D>(de: D) -> Result<Option<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Option::<String>::deserialize(de)?.map(|q| crate::magnitudes::canonical(&q)))
-}
-
 pub const LABEL_MODES: [&str; 3] = [DEFAULT_LABEL_MODE, "simbolo", "nombre_simbolo"];
 pub const INPUT_WIDGETS: [&str; 2] = [DEFAULT_INPUT_WIDGET, "cronometro"];
 const DEFAULT_LABEL_MODE: &str = "nombre";
@@ -29,7 +22,7 @@ pub struct QuantityInput {
     pub name: String,
     pub unit: String,
     pub repeated: bool,
-    #[serde(default, deserialize_with = "canonical_magnitude")]
+    #[serde(default)]
     pub quantity: Option<String>,
     #[serde(default)]
     pub is_given: bool,
@@ -62,6 +55,20 @@ impl QuantityInput {
     /// ```
     pub fn stored_per_point(&self) -> bool {
         self.per_point && !self.per_determination
+    }
+
+    /// La magnitud física tal como se guarda: canónica, y vacía pasa a no declarada.
+    ///
+    /// ```
+    /// let q = |s: &str| quantify::practices::QuantityInput { quantity: Some(s.into()), ..Default::default() };
+    /// assert_eq!(q(" Tiempo ").magnitude().as_deref(), Some("tiempo"));
+    /// assert_eq!(q("  ").magnitude(), None);
+    /// ```
+    pub fn magnitude(&self) -> Option<String> {
+        self.quantity
+            .as_deref()
+            .map(crate::magnitudes::canonical)
+            .filter(|q| !q.is_empty())
     }
 }
 

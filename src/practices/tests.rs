@@ -4299,9 +4299,4 @@ async fn a_saved_magnitude_is_stored_canonical() {
     .await
     .unwrap();
     assert_eq!(q.quantity.as_deref(), Some("voltaje"));
-    let input: QuantityInput = serde_json::from_str(
-        r#"{"symbol": "V", "name": "V", "unit": "V", "repeated": false, "quantity": "Tensión"}"#,
-    )
-    .unwrap();
-    assert_eq!(input.quantity.as_deref(), Some("voltaje"));
 }

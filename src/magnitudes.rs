@@ -30,8 +30,6 @@ pub const MAGNITUDES: &[(&str, &[&str])] = &[
 
 /// El nombre canónico de una magnitud física: minúsculas, sin tildes y con los sinónimos unificados.
 ///
-/// Lo que no está en el catálogo queda normalizado, sin rechazarse.
-///
 /// ```
 /// use quantify::magnitudes::canonical;
 /// assert_eq!(canonical(" Tensión "), "voltaje");

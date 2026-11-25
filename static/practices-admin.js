@@ -1637,7 +1637,7 @@ function syncQuantityForm(form, { initial = false } = {}) {
   const role = elements.role.value;
   const given = roleFlags(role, seriesPractice()).is_given;
   const option = elements.input_widget.querySelector('option[value="cronometro"]');
-  option.disabled = elements.quantity.value !== "tiempo" || given;
+  option.disabled = elements.quantity.value.trim().toLowerCase() !== "tiempo" || given;
   if (option.disabled && option.selected) {
     elements.input_widget.value = "teclado";
     if (initial) {
