@@ -44,6 +44,8 @@ async function tryWithExampleData(page, practiceId) {
   page.once("dialog", (d) => { askedIncomplete = true; return d.accept(); });
   await page.click("#draft-preview-fill");
   assert(askedIncomplete, `${practiceId}: ${seriesRow ? "una fila de serie incompleta" : "un cambio de unidad"} debía pedir confirmación`);
+  const changedUnits = await page.$$eval("#measurement-fields .unit-select", (all) => all.filter((s) => s.selectedIndex !== 0).length);
+  assert(changedUnits === 0, `${practiceId}: los datos de ejemplo están en la unidad declarada; ${changedUnits} desplegables quedaron en otra`);
   const scaleless = await page.$$eval("#measurement-fields .measure-selectors", (all) =>
     all.filter((sel) => sel.querySelector(".measure-instrument").value && !sel.querySelector(".measure-scale").value).length);
   assert(scaleless === 0, `${practiceId}: ${scaleless} medidas quedaron con instrumento y sin escala`);
