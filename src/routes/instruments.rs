@@ -134,6 +134,7 @@ pub(super) async fn import_instruments(
     if request.course_id.trim().is_empty() {
         return Err(AppError::bad_request("course_id requerido"));
     }
+    validate_import(&request.instruments)?;
     instruments::import_course(
         &state.pool,
         &request.course_id,
@@ -154,6 +155,14 @@ fn validate_instrument(kind: &str, name: &str, quantity: &str, unit: &str) -> Re
         || unit.trim().is_empty()
     {
         return Err(AppError::bad_request("datos de instrumento invalidos"));
+    }
+    Ok(())
+}
+
+fn validate_import(items: &[instruments::InstrumentExport]) -> Result<(), AppError> {
+    for item in items {
+        validate_instrument(&item.kind, &item.name, &item.quantity, &item.unit)?;
+        item.scales.iter().try_for_each(validate_scale)?;
     }
     Ok(())
 }
@@ -237,6 +246,22 @@ mod tests {
         assert!(validate_scale(&scale("apreciacion", 0.5)).is_ok());
         assert!(validate_scale(&scale("raro", 1.0)).is_err());
         assert!(validate_scale(&scale("resolucion", 0.0)).is_err());
+    }
+
+    #[test]
+    fn validate_import_checks_every_instrument_and_scale() {
+        let item = |scales| instruments::InstrumentExport {
+            name: "Tester".into(),
+            kind: "digital".into(),
+            quantity: "voltaje".into(),
+            unit: "V".into(),
+            scales,
+        };
+        assert!(validate_import(&[item(vec![scale("resolucion", 0.1)])]).is_ok());
+        assert!(validate_import(&[item(vec![scale("resolucion", 0.0)])]).is_err());
+        let mut nameless = item(vec![]);
+        nameless.quantity = "  ".into();
+        assert!(validate_import(&[item(vec![]), nameless]).is_err());
     }
 
     #[test]
