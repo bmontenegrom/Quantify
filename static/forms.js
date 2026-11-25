@@ -8,13 +8,13 @@ import { fetchJson, postJson, deleteJson } from "./api.js";
 import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
-  prefixFactor, validateMeasurements,
+  validateMeasurements,
   draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements, POINT_KINDS,
   determinationsFor, expandDeterminationResults, cssEscape, symbolPart, groupError,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
-  givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
+  givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, toDeclaredUnit, restoreUnitChoices, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
   formHelpHtml, partHelpHtml, columnSections, instrumentSelectorsHtml, wireInstrumentSelectors,
   retiredInstrumentNote,
@@ -185,6 +185,7 @@ export async function loadSubmissionForm() {
     renderMeasurementFields(draft);
     applyPrefill();
     applyDraftPrefill(draft);
+    restoreUnitChoices(measurementFields, draft?.units);
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
     if (fillButton && previewing) fillButton.disabled = false;
@@ -390,9 +391,8 @@ function quantityRowRenderer(definition, instruments, draft) {
         ? ""
         : `<label>Incertidumbre U (expandida)
               <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
                 <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
-                <span class="replica-unit">${unitHtml(q.unit)}</span>
+                ${unitSelectHtml(quantityUnits(q))}
               </div>
             </label>`;
       return `
@@ -402,7 +402,7 @@ function quantityRowRenderer(definition, instruments, draft) {
             <label>Valor
               <div class="replica-input-wrap">
                 ${givenValueInputHtml(q)}
-                <span class="replica-unit">${unitHtml(q.unit)}</span>
+                ${unitSelectHtml(quantityUnits(q))}
               </div>
             </label>
             ${uField}
@@ -428,7 +428,7 @@ function quantityRowRenderer(definition, instruments, draft) {
           ${instrumentSelectorsHtml(instruments, q)}<div class="measure-sep"></div>
           <div class="measure-right">
             <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
-              ${renderReplicaInput(q.unit, q.default_value)}
+              ${renderReplicaInput(quantityUnits(q), q.default_value)}
             </div>
             ${q.repeated ? `<button type="button" class="add-replica">＋ agregar réplica</button>` : ""}
           </div>
@@ -445,7 +445,7 @@ function quantityRowRenderer(definition, instruments, draft) {
       <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}" data-operator-index="${i}">
         <legend>${quantityNameHtml(q)}</legend>
         <div class="measure-values" data-repeated="0">
-          <div class="replica">${givenValueInputHtml(q, "measure-value")}<span class="replica-unit">${unitHtml(q.unit)}</span></div>
+          <div class="replica">${givenValueInputHtml(q, "measure-value")}${unitSelectHtml(quantityUnits(q))}</div>
         </div>
       </fieldset>`;
     const row = (i) => (q.is_given ? givenRow(i) : measurementRowHtml(q, i, chrono[i]));
@@ -458,9 +458,8 @@ function quantityRowRenderer(definition, instruments, draft) {
       ? ""
       : `<label>Incertidumbre U (expandida, la misma en todas)
           <div class="replica-input-wrap">
-            ${prefixSelectHtml()}
             <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
-            <span class="replica-unit">${unitHtml(q.unit)}</span>
+            ${unitSelectHtml(quantityUnits(q))}
           </div>
         </label>`;
     const per = group.label.toLowerCase();
@@ -590,9 +589,8 @@ export function finalResultRowHtml(r, sectionId) {
     : `
         <label>Incertidumbre U (expandida)
           <div class="replica-input-wrap">
-            ${prefixSelectHtml()}
             <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
-            <span class="replica-unit">${unitHtml(r.unit)}</span>
+            ${unitSelectHtml(inputUnits(r.base ?? r.symbol, r.unit))}
           </div>
         </label>`;
   return `
@@ -601,9 +599,8 @@ export function finalResultRowHtml(r, sectionId) {
       <div class="form-grid">
         <label>Valor
           <div class="replica-input-wrap">
-            ${prefixSelectHtml()}
             <input class="final-result-value" type="number" step="any" placeholder="valor" />
-            <span class="replica-unit">${unitHtml(r.unit)}</span>
+            ${unitSelectHtml(inputUnits(r.base ?? r.symbol, r.unit))}
           </div>
         </label>${uField}
       </div>
@@ -653,13 +650,14 @@ function finalResultSectionHtml(definition, finals, part = null) {
 
 export function collectFinalResults() {
   const scalar = [...measurementFields.querySelectorAll('[data-final-result="1"]')].reduce((acc, row) => {
-    const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
-    const rawVal = row.querySelector(".final-result-value").value.trim();
+    const valInput = row.querySelector(".final-result-value");
+    const uInput = row.querySelector(".final-result-u");
+    const rawVal = valInput.value.trim();
     if (rawVal === "") return acc;
-    const value = Number(rawVal) * prefixFactor(valPrefix);
+    const value = toDeclaredUnit(rawVal, valInput.closest(".replica-input-wrap"));
     if (!Number.isFinite(value)) return acc;
-    const rawU = row.querySelector(".final-result-u")?.value.trim() ?? "";
-    const u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
+    const rawU = uInput?.value.trim() ?? "";
+    const u = rawU === "" ? null : toDeclaredUnit(rawU, uInput.closest(".replica-input-wrap"), { uncertainty: true });
     acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
     return acc;
   }, []);
@@ -668,8 +666,10 @@ export function collectFinalResults() {
 
 export function wireReplicaRow(row) {
   row.querySelector(".add-replica")?.addEventListener("click", () => {
-    const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
-    row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+    const previous = [...row.querySelectorAll(".replica .unit-select")].at(-1);
+    row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(rowUnits(row)));
+    const added = [...row.querySelectorAll(".replica .unit-select")].at(-1);
+    if (previous && added) added.selectedIndex = previous.selectedIndex;
     wireRemoveReplica(row);
   });
   wireRemoveReplica(row);
@@ -716,8 +716,7 @@ export function collectMeasurements() {
         }
         const input = cell.querySelector(".series-value");
         const raw = input.value.trim();
-        const factor = prefixFactor(cell.querySelector(".prefix-select").value);
-        const v = raw === "" ? NaN : Number(raw) * factor;
+        const v = raw === "" ? NaN : toDeclaredUnit(raw, cell);
         return { id: input.dataset.quantityId, value: v, ok: Number.isFinite(v) };
       });
       if (parsed.some((p) => !p.ok)) return;
@@ -773,7 +772,7 @@ function sharedGivenU(container) {
   const input = container.querySelector(".measure-given-u");
   const raw = input?.value.trim() ?? "";
   if (raw === "") return null;
-  const u = Number(raw) * prefixFactor(input.closest(".replica-input-wrap").querySelector(".prefix-select").value);
+  const u = toDeclaredUnit(raw, input.closest(".replica-input-wrap"), { uncertainty: true });
   return Number.isFinite(u) ? u : null;
 }
 
@@ -781,12 +780,10 @@ function collectStandaloneRow(row) {
   if (row.dataset.isGiven === "1") {
     const valInput = row.querySelector(".measure-given-value");
     const uInput = row.querySelector(".measure-given-u");
-    const prefixOf = (input) => input?.closest(".replica-input-wrap")?.querySelector(".prefix-select")?.value;
-    const [valPrefix, uPrefix] = [prefixOf(valInput), prefixOf(uInput)];
     const rawVal = valInput.value.trim();
     const rawU = uInput?.value.trim() ?? "";
-    const value = rawVal === "" ? null : Number(rawVal) * prefixFactor(valPrefix);
-    const given_u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
+    const value = rawVal === "" ? null : toDeclaredUnit(rawVal, valInput.closest(".replica-input-wrap"));
+    const given_u = rawU === "" ? null : toDeclaredUnit(rawU, uInput.closest(".replica-input-wrap"), { uncertainty: true });
     return {
       quantity_id: row.dataset.quantityId,
       instrument_id: null,
@@ -816,8 +813,7 @@ function rowSeriesValues(row) {
   return [...row.querySelectorAll(".replica")].reduce((acc, replica) => {
     const raw = replica.querySelector(".measure-value").value.trim();
     if (raw === "") return acc;
-    const factor = prefixFactor(replica.querySelector(".prefix-select")?.value ?? "");
-    const n = Number(raw) * factor;
+    const n = toDeclaredUnit(raw, replica);
     if (Number.isFinite(n)) acc.push(n);
     return acc;
   }, []);
@@ -1305,12 +1301,17 @@ function fillInstrument(el, e) {
   selectors.addEventListener("change", () => p.remove(), { once: true });
 }
 
+function rowUnits(row) {
+  const id = row.closest("[data-quantity-id]")?.dataset.quantityId;
+  const q = state.practiceForm?.definition?.quantities?.find((quantity) => quantity.id === id);
+  return q ? quantityUnits(q) : [{ label: "", factor: 1, offset: 0 }];
+}
+
 function fillReplicaRow(row, values) {
   const container = row.querySelector(".measure-values");
   if (!container) return;
-  const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
   while (container.querySelectorAll(".replica").length < values.length) {
-    container.insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+    container.insertAdjacentHTML("beforeend", renderReplicaInput(rowUnits(row)));
   }
   wireRemoveReplica(row);
   container.querySelectorAll(".measure-value").forEach((input, i) => {

@@ -264,7 +264,7 @@ await withE2E({ port: PORT, dbName: "quantify-determinaciones.db" }, async ({ lo
   const slots = sGroup.locator(".measure-value");
   assert((await slots.count()) === 3, "la ranura debía pedirse en cada medida");
   assert((await slots.first().getAttribute("max")) === "4", "la ranura por medida debía ir de 1 a 4");
-  assert((await sGroup.locator(".prefix-select").count()) === 0, "la ranura no debía tener prefijo");
+  assert((await sGroup.locator(".unit-select").count()) === 0, "la ranura no debía ofrecer otras unidades");
   const detTabs = sPage.locator("#measurement-fields [data-det-tabs] .part-tab");
   for (const [i, [pv, sv]] of [["2", "1"], ["4", "2"], ["5", "3"]].entries()) {
     await detTabs.nth(i).click();

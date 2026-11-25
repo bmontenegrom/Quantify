@@ -51,6 +51,15 @@ export function unitHtml(value) {
     .replace(/([A-Za-zµΩ]+)(-?\d+)/g, "$1<sup>$2</sup>");
 }
 
+const SUPERSCRIPTS = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
+
+export function unitText(value) {
+  const sup = (digits) => [...digits].map((c) => SUPERSCRIPTS[c]).join("");
+  return String(value ?? "")
+    .replace(/\^(-?\d+)/g, (_, d) => sup(d))
+    .replace(/([A-Za-zµΩ]+)(-?\d+)/g, (_, base, d) => base + sup(d));
+}
+
 export function cssEscape(value) {
   if (typeof window !== "undefined" && window.CSS?.escape) {
     return window.CSS.escape(String(value));
@@ -196,22 +205,6 @@ export function compatibleInstruments(instruments, magnitude) {
   const list = instruments ?? [];
   if (!magnitude) return list;
   return list.filter((instrument) => instrument.quantity === magnitude);
-}
-
-export const SI_PREFIXES = [
-  { label: "T",  factor: 1e12  },
-  { label: "G",  factor: 1e9   },
-  { label: "M",  factor: 1e6   },
-  { label: "k",  factor: 1e3   },
-  { label: "",   factor: 1     },
-  { label: "m",  factor: 1e-3  },
-  { label: "µ",  factor: 1e-6  },
-  { label: "n",  factor: 1e-9  },
-  { label: "p",  factor: 1e-12 },
-];
-
-export function prefixFactor(prefix) {
-  return SI_PREFIXES.find((p) => p.label === prefix)?.factor ?? 1;
 }
 
 export function measureText(value, u) {

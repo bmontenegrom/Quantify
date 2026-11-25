@@ -4049,6 +4049,53 @@ async fn a_part_with_determinations_is_analyzed_and_round_trips() {
     assert!((average.value - 0.375).abs() < 1e-12);
 }
 
+#[test]
+fn resolved_offers_input_units_per_quantity_and_final_result() {
+    let quantity = |symbol: &str, unit: &str, slots: Option<i64>| crate::db::PracticeQuantity {
+        symbol: symbol.into(),
+        unit: unit.into(),
+        slot_count: slots,
+        ..Default::default()
+    };
+    let result = |symbol: &str, unit: &str, is_final: bool| crate::db::PracticeResult {
+        symbol: symbol.into(),
+        unit: unit.into(),
+        formula: "1".into(),
+        is_final,
+        ..Default::default()
+    };
+    let def = PracticeDefinition {
+        quantities: vec![
+            quantity("L", "cm", None),
+            quantity("T", "K", None),
+            quantity("d", "cm", Some(9)),
+        ],
+        results: vec![
+            result("dT", "K", true),
+            result("A", "m2", true),
+            result("x", "cm", false),
+        ],
+        ..Default::default()
+    };
+    let units = def.resolved().input_units;
+    let labels = |s: &str| -> Vec<String> { units[s].iter().map(|u| u.label.clone()).collect() };
+    assert!(labels("L").contains(&"mm".to_string()) && labels("L").contains(&"m".to_string()));
+    assert!(
+        labels("T").contains(&"°C".to_string()),
+        "una temperatura cargada ofrece °C"
+    );
+    assert_eq!(labels("d"), ["cm"], "una ranura no se convierte");
+    assert!(
+        !labels("dT").contains(&"°C".to_string()),
+        "un resultado no ofrece otro desplazamiento"
+    );
+    assert!(labels("A").contains(&"cm2".to_string()));
+    assert!(
+        !units.contains_key("x"),
+        "un resultado no final no se informa"
+    );
+}
+
 #[tokio::test]
 async fn a_per_determination_quantity_only_accepts_groups() {
     let (pool, _dir) = crate::computation::tests::setup().await;

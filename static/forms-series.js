@@ -1,8 +1,8 @@
 import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, canReview, hasUncertainty, analysisSections, determinationsFor, expandDeterminationResults } from "./lib.js";
-import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, instrumentSelectorsHtml, wireInstrumentSelectors, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, unitText, format, num, canReview, hasUncertainty, analysisSections, determinationsFor, expandDeterminationResults } from "./lib.js";
+import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, unitSelectHtml, instrumentSelectorsHtml, wireInstrumentSelectors, replicaInputHtml, cellReplicaValues, fromDeclaredUnit, unitConversion } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireMeasurementRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
 
@@ -83,7 +83,12 @@ export function renderSeriesTable(definition, quantityRowHtml) {
   measurementFields.querySelectorAll(".shared-quantities .measurement-row:not([data-final-result])").forEach(wireMeasurementRow);
   wireInstrumentSelectors(measurementFields);
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
-    measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
+    const tbody = measurementFields.querySelector(".series-table tbody");
+    const previous = [...(tbody.lastElementChild?.querySelectorAll(".unit-select") ?? [])];
+    tbody.insertAdjacentHTML("beforeend", seriesRowHtml(cols));
+    tbody.lastElementChild.querySelectorAll(".unit-select").forEach((sel, i) => {
+      if (previous[i]) sel.selectedIndex = previous[i].selectedIndex;
+    });
     wireSeriesRemove();
     updateSeriesLive();
     schedulePreview();
@@ -99,7 +104,7 @@ export function renderSeriesTable(definition, quantityRowHtml) {
     if (
       e.target.classList.contains("series-value") ||
       e.target.classList.contains("series-replica") ||
-      e.target.classList.contains("prefix-select")
+      e.target.classList.contains("unit-select")
     ) {
       updateSeriesMeans();
       updateSeriesLive();
@@ -202,9 +207,9 @@ export function seriesRowHtml(cols) {
       const n = q.repeated ? Number(q.replicas_per_point) || 0 : 0;
       if (n > 0) {
         const inputs = Array.from({ length: n }, (_, k) => replicaInputHtml(q.id, k)).join("");
-        return `<td class="series-cell series-cell--replicas" style="--replicas: ${n}"><div class="series-input-wrap">${prefixSelectHtml()}<div class="series-replica-group">${inputs}</div></div><span class="series-mean submission-meta">x̄ —</span></td>`;
+        return `<td class="series-cell series-cell--replicas" style="--replicas: ${n}"><div class="series-input-wrap"><div class="series-replica-group">${inputs}</div>${unitSelectHtml(quantityUnits(q), { text: false })}</div><span class="series-mean submission-meta" data-unit="${escapeHtml(unitText(quantityUnits(q)[0]?.label))}">x̄ —</span></td>`;
       }
-      return `<td class="series-cell"><div class="series-input-wrap">${prefixSelectHtml()}<input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" /></div></td>`;
+      return `<td class="series-cell"><div class="series-input-wrap"><input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" />${unitSelectHtml(quantityUnits(q), { text: false })}</div></td>`;
     })
     .join("");
   const liveCells = liveIntermediates()
@@ -256,14 +261,14 @@ function sharedRowHtml(q) {
     const uField = !hasUncertainty(q)
       ? ""
       : `<label>Incertidumbre U (expandida)
-            <div class="replica-input-wrap">${prefixSelectHtml()}<input class="measure-given-u" type="number" step="any" min="0" placeholder="U" /><span class="replica-unit">${unitHtml(q.unit)}</span></div>
+            <div class="replica-input-wrap"><input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />${unitSelectHtml(quantityUnits(q))}</div>
           </label>`;
     return `
       <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
         <legend>${quantityNameHtml(q)}</legend>
         <div class="form-grid">
           <label>Valor
-            <div class="replica-input-wrap">${givenValueInputHtml(q)}<span class="replica-unit">${unitHtml(q.unit)}</span></div>
+            <div class="replica-input-wrap">${givenValueInputHtml(q)}${unitSelectHtml(quantityUnits(q))}</div>
           </label>
           ${uField}
         </div>
@@ -276,7 +281,7 @@ function sharedRowHtml(q) {
         ${instrumentSelectorsHtml(state.practiceForm?.instruments ?? [], q)}
         <div class="measure-sep"></div>
         <div class="measure-right">
-          <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">${renderReplicaInput(q.unit, q.default_value)}</div>
+          <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">${renderReplicaInput(quantityUnits(q), q.default_value)}</div>
           ${q.repeated ? `<button type="button" class="add-replica">＋ agregar réplica</button>` : ""}
         </div>
       </div>
@@ -334,8 +339,9 @@ export function updateSeriesMeans() {
       meanEl.textContent = "x̄ —";
       return;
     }
-    const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
-    meanEl.textContent = `x̄ ${format(mean)} (n=${valid.length})`;
+    const mean = fromDeclaredUnit(valid.reduce((a, b) => a + b, 0) / valid.length, unitConversion(cell));
+    const unit = cell.querySelector(".unit-select")?.selectedOptions[0]?.textContent ?? meanEl.dataset.unit;
+    meanEl.textContent = `x̄ ${format(mean)}${unit ? ` ${unit}` : ""} (n=${valid.length})`;
   });
 }
 

@@ -25,8 +25,22 @@ async function studentSubmitsP1(page) {
 
   step("estudiante: completa L (dato de cátedra) y t_med (sin incertidumbre, sin instrumento)");
   const lRow = page.locator('.measurement-row--given:has-text("Longitud")');
-  await lRow.locator(".measure-given-value").fill("1");
-  await lRow.locator(".measure-given-u").fill("0.002");
+  const [lUnit, uUnit] = [lRow.locator(".unit-select").nth(0), lRow.locator(".unit-select").nth(1)];
+  await lUnit.selectOption({ label: "cm" });
+  await uUnit.selectOption({ label: "mm" });
+  await lRow.locator(".measure-given-value").fill("100");
+  await lRow.locator(".measure-given-u").fill("2");
+
+  step("estudiante: al recargar, el borrador conserva la unidad elegida y lo tipeado");
+  await page.waitForTimeout(600);
+  await page.reload();
+  await page.click('#practice-nav-children .nav-child:has-text("Tratamiento estad")');
+  await page.waitForSelector(".measurement-row--chrono");
+  await page.selectOption("#table-select", "1");
+  await lRow.locator(".measure-given-value").waitFor();
+  const restored = await lRow.evaluate((row) => [...row.querySelectorAll(".replica-input-wrap")].map((w) =>
+    `${w.querySelector("input").value} ${w.querySelector(".unit-select").selectedOptions[0].textContent}`));
+  assert(restored.join(" / ") === "100 cm / 2 mm", `el borrador debía volver como 100 cm / 2 mm (vi: ${restored.join(" / ")})`);
   const tMedRow = page.locator('.measurement-row--given:has-text("semiamplitud")');
   await tMedRow.locator(".measure-given-value").fill("12.5");
   assert(
@@ -68,8 +82,18 @@ async function studentSavesOwnResults(page) {
 async function teacherReviews(page) {
   step("docente: abre la entrega de Mesa 1");
   await page.click('.tab.teacher-only[data-view="submissions"]');
-  await page.click(".submission-table-group .submission-item");
+  const opened = page.locator(".submission-table-group .submission-item").first();
+  const submissionId = await opened.getAttribute("data-id");
+  await opened.click();
   await page.waitForSelector(".review-form");
+
+  step("docente: L cargada en cm y su U en mm se guardaron en metros");
+  const { mean, u } = await page.evaluate(async (id) => {
+    const detail = await (await fetch(`/api/submissions/${encodeURIComponent(id)}`)).json();
+    const l = detail.analysis.quantities.find((q) => q.symbol === "L");
+    return { mean: l.result.mean, u: l.result.u_expanded };
+  }, submissionId);
+  assert(Math.abs(mean - 1) < 1e-12 && Math.abs(u - 0.002) < 1e-12, `L debía quedar 1 ± 0,002 m (vi ${mean} ± ${u})`);
 
   step("docente: ve el análisis automático y la comparación del alumno");
   const detail = await page.locator("#submission-detail-body").textContent();
