@@ -1,8 +1,8 @@
 [
   { "symbol": "N_A", "name": "Constante de Avogadro", "unit": "mol-1", "quantity": null, "value": 6.02214076e23, "u": null, "source": "SI 2019 (exacta)" },
   { "symbol": "k_B", "name": "Constante de Boltzmann", "unit": "J/K", "quantity": null, "value": 1.380649e-23, "u": null, "source": "SI 2019 (exacta)" },
-  { "symbol": "R", "name": "Constante de los gases", "unit": "J/(mol.K)", "quantity": null, "value": 8.314462618, "u": null, "source": "SI 2019 (exacta)" },
-  { "symbol": "F", "name": "Constante de Faraday", "unit": "A.s/mol", "quantity": null, "value": 96485.33212, "u": null, "source": "SI 2019 (exacta)" },
+  { "symbol": "R", "name": "Constante de los gases", "unit": "J/(mol.K)", "quantity": null, "value": 8.31446261815324, "u": null, "source": "SI 2019 (exacta, N_A·k_B)" },
+  { "symbol": "F", "name": "Constante de Faraday", "unit": "A.s/mol", "quantity": null, "value": 96485.3321233100184, "u": null, "source": "SI 2019 (exacta, N_A·e)" },
   { "symbol": "e", "name": "Carga elemental", "unit": "A.s", "quantity": null, "value": 1.602176634e-19, "u": null, "source": "SI 2019 (exacta)" },
   { "symbol": "g_n", "name": "Gravedad estándar", "unit": "m/s2", "quantity": "aceleracion", "value": 9.80665, "u": null, "source": "CGPM 1901 (exacta)" },
   { "symbol": "M_H", "name": "Masa molar del hidrógeno", "unit": "g/mol", "quantity": "masa molar", "value": 1.008, "u": 0.0002, "source": "IUPAC/CIAAW 2021" },

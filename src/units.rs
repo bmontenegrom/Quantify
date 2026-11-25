@@ -717,6 +717,16 @@ mod tests {
             );
             assert!(!c["source"].as_str().unwrap().trim().is_empty(), "{c}");
         }
+        let value = |symbol: &str| {
+            catalog
+                .iter()
+                .find(|c| c["symbol"] == symbol)
+                .and_then(|c| c["value"].as_f64())
+                .unwrap()
+        };
+        let exact = |derived: f64, product: f64| ((derived - product) / product).abs() < 1e-15;
+        assert!(exact(value("R"), value("N_A") * value("k_B")));
+        assert!(exact(value("F"), value("N_A") * value("e")));
     }
 
     #[tokio::test]
