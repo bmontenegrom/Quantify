@@ -114,7 +114,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   step("docente: N_A desde el catálogo queda como constante fija");
   await openAddForm(page, "#new-quantity-form");
   const picker = page.locator("#new-quantity-form [data-constant-picker]");
-  await picker.locator("option", { hasText: "N_A" }).waitFor({ state: "attached" });
+  await picker.locator("option", { hasText: /^N_A —/ }).waitFor({ state: "attached" });
   await picker.selectOption({ index: 1 });
   await page.locator('#new-quantity-form button[type="submit"]').click();
   await page.locator(`${row("N_A")} td`, { hasText: "Constante · fijo" }).waitFor();

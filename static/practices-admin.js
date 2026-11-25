@@ -563,7 +563,10 @@ export function renderPracticesPage() {
     form.addEventListener("input", () => syncQuantityForm(form));
   });
   practiceWorkspace.querySelectorAll("[data-constant-picker]").forEach((select) => {
-    select.addEventListener("change", () => applyConstant(select.form, select.value));
+    select.addEventListener("change", () => {
+      applyConstant(select.form, select.value);
+      select.value = "";
+    });
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
     btn.addEventListener("click", () => toggleEditing("result", btn.dataset.rid));

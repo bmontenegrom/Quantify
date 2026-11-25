@@ -708,7 +708,12 @@ mod tests {
             let unit = c["unit"].as_str().unwrap();
             assert!(parse(unit).is_some(), "no reconoce {unit:?}");
             if let Some(q) = c["quantity"].as_str() {
-                assert_eq!(crate::magnitudes::canonical(q), q);
+                assert!(
+                    crate::magnitudes::MAGNITUDES
+                        .iter()
+                        .any(|(name, _)| *name == q),
+                    "{q:?} no está en el catálogo de magnitudes"
+                );
             }
             assert!(c["value"].as_f64().is_some_and(f64::is_finite), "{c}");
             assert!(
@@ -726,7 +731,7 @@ mod tests {
         };
         let exact = |derived: f64, product: f64| ((derived - product) / product).abs() < 1e-15;
         assert!(exact(value("R"), value("N_A") * value("k_B")));
-        assert!(exact(value("F"), value("N_A") * value("e")));
+        assert!(exact(value("F"), value("N_A") * value("q_e")));
     }
 
     #[tokio::test]

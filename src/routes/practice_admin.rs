@@ -5286,6 +5286,17 @@ mod tests {
     }
 
     #[test]
+    fn every_symbol_of_the_constants_catalog_can_be_saved() {
+        let catalog: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../static/constants.json")).unwrap();
+        for c in &catalog {
+            let symbol = c["symbol"].as_str().unwrap();
+            assert!(validate_symbol_format(symbol).is_ok(), "{symbol}");
+            assert!(validate_symbol_not_reserved(symbol).is_ok(), "{symbol}");
+        }
+    }
+
+    #[test]
     fn validate_symbol_not_reserved_rejects_reserved_symbols() {
         assert!(validate_symbol_not_reserved("pi").is_err());
         assert!(validate_symbol_not_reserved("e").is_err());
