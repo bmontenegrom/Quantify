@@ -566,7 +566,7 @@ test("compareMeasuredVsTheoretical empareja cada resultado con su compare_with y
     { symbol: "VR1_s_t", name: "Teorica R1", unit: "V", value: 1.6, u_expanded: 0.08 },
     { symbol: "I_s", name: "Corriente", unit: "A", value: 0.015, u_expanded: 0.001 },
   ];
-  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["VR1_s_t", "VR1_s"]]));
+  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["VR1_s_t", { with: "VR1_s", factor: 1 }]]));
   assert.equal(rows.length, 1);
   const [row] = rows;
   assert.equal(row.symbol, "VR1_s");
@@ -584,7 +584,7 @@ test("compareMeasuredVsTheoretical: deltas null con teórico 0 o U faltante", ()
     { symbol: "X", name: "X", unit: "u", result: { mean: 2, u_expanded: null } },
   ];
   const derived = [{ symbol: "X_t", name: "X teorica", unit: "u", value: 0, u_expanded: 0.1 }];
-  const [row] = compareMeasuredVsTheoretical(quantities, derived, new Map([["X_t", "X"]]));
+  const [row] = compareMeasuredVsTheoretical(quantities, derived, new Map([["X_t", { with: "X", factor: 1 }]]));
   assert.ok(Math.abs(row.dValue - 2) < 1e-9);
   assert.equal(row.dValuePct, null);
   assert.equal(row.dU, null);
@@ -601,20 +601,22 @@ test("compareMeasuredVsTheoretical ya no empareja por el sufijo _t sino por los 
     { symbol: "Y_calc", name: "Y calculada", unit: "u", value: 3.2, u_expanded: 0.1 },
   ];
   assert.deepEqual(compareMeasuredVsTheoretical(quantities, derived).map((r) => r.symbol), []);
-  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["Y_calc", "Y"]]));
+  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["Y_calc", { with: "Y", factor: 1 }]]));
   assert.deepEqual(rows.map((r) => [r.symbol, r.theoreticalSymbol]), [["Y", "Y_calc"]]);
 });
 
-test("comparisonPairs arma los pares desde los resultados con compare_with", () => {
-  const definition = {
-    results: [
-      { symbol: "VR1_s_t", compare_with: "VR1_s" },
-      { symbol: "I_s", compare_with: "" },
-      { symbol: "P_max_t" },
-    ],
-  };
-  assert.deepEqual([...comparisonPairs(definition)], [["VR1_s_t", "VR1_s"]]);
+test("comparisonPairs toma los pares que resuelve el servidor", () => {
+  const pair = { with: "VR1_s", factor: 1000 };
+  const definition = { results: [{ symbol: "VR1_s_t", compare_with: "VR1_s" }], resolved: { comparisons: { VR1_s_t: pair } } };
+  assert.deepEqual([...comparisonPairs(definition)], [["VR1_s_t", pair]]);
   assert.equal(comparisonPairs(null).size, 0);
+});
+
+test("compareMeasuredVsTheoretical pasa lo medido a la unidad del mensurando", () => {
+  const quantities = [{ symbol: "V", name: "V", unit: "V", result: { mean: 1.5, u_expanded: 0.1 } }];
+  const derived = [{ symbol: "V_t", name: "V teórica", unit: "mV", value: 1600, u_expanded: 80 }];
+  const [v] = compareMeasuredVsTheoretical(quantities, derived, new Map([["V_t", { with: "V", factor: 1000 }]]));
+  assert.deepEqual([v.unit, v.exp.value, v.exp.u, v.dValue], ["mV", 1500, 100, -100]);
 });
 
 test("seriesStats: n=0 devuelve NaN; n=1 std=0; n>1 calcula bien", () => {

@@ -279,6 +279,17 @@ pub fn parse(text: &str) -> Option<Unit> {
 
 const NOT_UNITS: &[&str] = &["pH", "% m/m", "% v/v"];
 
+/// Si la unidad es conocida: se interpreta, o se sabe a propósito que no se convierte (pH, % m/m).
+///
+/// ```
+/// use quantify::units::known;
+/// assert!(known("cm") && known("") && known("pH") && known("% m/m"));
+/// assert!(!known("div"));
+/// ```
+pub fn known(text: &str) -> bool {
+    NOT_UNITS.contains(&normalize(text).trim()) || parse(text).is_some()
+}
+
 fn normalize(text: &str) -> String {
     text.chars()
         .map(|c| match c {

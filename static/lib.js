@@ -541,21 +541,25 @@ export function formulaHelpHtml(symbols, functions = [], known = null) {
 }
 
 export function comparisonPairs(definition) {
-  return new Map((definition?.results ?? []).filter((r) => r.compare_with).map((r) => [r.symbol, r.compare_with]));
+  return new Map(Object.entries(definition?.resolved?.comparisons ?? {}));
 }
 
 export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Map()) {
   const byQuantity = new Map((quantities ?? []).map((q) => [q.symbol, q]));
   return (derived ?? []).reduce((rows, d) => {
-    const q = byQuantity.get(pairs.get(d.symbol));
+    const pair = pairs.get(d.symbol);
+    const q = byQuantity.get(pair?.with);
     if (!q) return rows;
-    const ev = q.result?.mean ?? null;
-    const eu = q.result?.u_expanded ?? null;
+    const { factor = 1 } = pair;
+    const mean = q.result?.mean;
+    const u = q.result?.u_expanded;
+    const ev = mean == null ? null : mean * factor;
+    const eu = u == null ? null : u * factor;
     rows.push({
       symbol: q.symbol,
       theoreticalSymbol: d.symbol,
       name: q.name,
-      unit: q.unit,
+      unit: d.unit ?? q.unit,
       exp: { value: ev, u: eu },
       teo: { value: d.value, u: d.u_expanded },
       dValue: ev == null || !Number.isFinite(ev) ? null : ev - d.value,

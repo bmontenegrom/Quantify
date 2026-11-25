@@ -84,8 +84,13 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   const row = (symbol) => `#practice-workspace tr:has(code:text-is("${symbol}"))`;
   await page.waitForSelector(row("T"));
   await openAddForm(page, "#new-quantity-form");
-  await fillAndSubmit(page, "#new-quantity-form", { symbol: "D", display_symbol: "D_x", name: "Prueba", unit: "m" });
+  await fillAndSubmit(page, "#new-quantity-form", { symbol: "D", display_symbol: "D_x", name: "Prueba", unit: "div" });
   await page.waitForSelector(row("D"));
+  await page.locator(".practice-warnings [data-problem]", { hasText: 'la magnitud D: la unidad "div" no se reconoce' }).waitFor();
+  const hints = await page.evaluate(() =>
+    Object.fromEntries([...document.querySelectorAll("#practice-workspace tr")].map((tr) =>
+      [tr.querySelector("code")?.textContent, tr.querySelector(".input-units-hint")?.textContent ?? ""])));
+  assert(hints.L?.includes("cm") && hints.D === "", `L debía mostrar sus unidades de carga y D ninguna: ${JSON.stringify(hints)}`);
   const displaySymbols = () =>
     page.evaluate(async (id) => (await (await fetch(`/api/practices/${id}/definition`)).json()).display_symbols, ID);
   const created = await displaySymbols();
@@ -97,6 +102,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   assert(!afterRename.D && !afterRename.E, `el símbolo a mostrar debía borrarse: ${JSON.stringify(afterRename)}`);
   await page.locator(`${row("E")} [data-delete-quantity]`).click();
   await page.waitForSelector(row("E"), { state: "detached" });
+  await page.locator(".practice-warnings").waitFor({ state: "detached" });
 
   step("docente: dos partes con sus secciones; L sin sección (compartida) y T en la segunda");
   for (const title of ["Parte A", "Parte B"]) {

@@ -148,19 +148,14 @@ pub async fn submission_display_symbols(
 pub async fn submission_comparisons(
     pool: &SqlitePool,
     submission_id: &str,
-) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT CAST(json_extract(r.value, '$.symbol') AS TEXT), \
-                CAST(json_extract(r.value, '$.compare_with') AS TEXT) \
-         FROM submissions s JOIN practices p ON p.id = s.practice_id \
-         JOIN practice_versions v ON v.id = COALESCE(s.practice_version_id, p.current_version_id), \
-         json_each(v.definition_json, '$.results') r \
-         WHERE s.id = ?1 AND COALESCE(json_extract(r.value, '$.compare_with'), '') <> ''",
-    )
-    .bind(submission_id)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows.into_iter().collect())
+) -> anyhow::Result<std::collections::BTreeMap<String, super::Comparison>> {
+    match submission_definition(pool, submission_id).await {
+        Ok(def) => Ok(def.map(|def| def.comparisons()).unwrap_or_default()),
+        Err(error) => {
+            tracing::warn!(%submission_id, %error, "la versión de la entrega es ilegible: sin comparaciones");
+            Ok(Default::default())
+        }
+    }
 }
 
 fn snapshot(definition: &PracticeDefinition) -> anyhow::Result<String> {

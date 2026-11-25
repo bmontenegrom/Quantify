@@ -308,6 +308,34 @@ pub(super) struct Problem {
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    warning: bool,
+}
+
+fn unit_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
+    let quantities = def
+        .quantities
+        .iter()
+        .map(|q| ("la magnitud", &q.symbol, &q.unit, "quantity", &q.id));
+    let results = def
+        .results
+        .iter()
+        .filter(|r| r.is_final || !r.compare_with.is_empty())
+        .map(|r| ("el mensurando", &r.symbol, &r.unit, "result", &r.id));
+    quantities
+        .chain(results)
+        .filter(|(_, _, unit, _, _)| !crate::units::known(unit))
+        .map(|(what, symbol, unit, kind, id)| Problem {
+            message: format!(
+                "{what} {symbol}: la unidad \"{}\" no se reconoce, así que no se ofrecen \
+                 otras unidades ni se convierte.",
+                unit.trim()
+            ),
+            kind,
+            id: Some(id.clone()),
+            warning: true,
+        })
+        .collect()
 }
 
 struct ElementProblem {
@@ -325,6 +353,7 @@ fn draft_problems(def: &practices::PracticeDefinition) -> Vec<Problem> {
             message,
             kind,
             id: None,
+            warning: false,
         });
     let mut seen = Vec::new();
     let elements = element_problems(def)
@@ -339,6 +368,7 @@ fn draft_problems(def: &practices::PracticeDefinition) -> Vec<Problem> {
             message: format!("{}: {}", p.element, p.message),
             kind: p.kind,
             id: p.id,
+            warning: false,
         });
     structure.chain(elements).collect()
 }
@@ -350,7 +380,9 @@ pub(super) async fn practice_problems(
 ) -> Result<Json<Vec<Problem>>, AppError> {
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &id).await?;
-    Ok(Json(draft_problems(&def)))
+    let mut problems = draft_problems(&def);
+    problems.extend(unit_warnings(&def));
+    Ok(Json(problems))
 }
 
 fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
@@ -2372,10 +2404,10 @@ fn check_compare(
                  de la misma parte que el mensurando o de los datos compartidos.",
             )
         })?;
-    let (unit, target_unit) = (result.unit.trim(), quantity.unit.trim());
-    if unit != target_unit {
+    if practices::comparison_conversion(&quantity.unit, &result.unit).is_none() {
+        let (unit, target_unit) = (result.unit.trim(), quantity.unit.trim());
         return Err(AppError::bad_request(format!(
-            "\"Comparar con\" necesita la misma unidad: el mensurando está en \"{unit}\" \
+            "\"Comparar con\" necesita unidades compatibles: el mensurando está en \"{unit}\" \
              y {target} en \"{target_unit}\"."
         )));
     }
@@ -3513,6 +3545,78 @@ mod tests {
     }
 
     #[test]
+    fn unit_warnings_flag_only_unrecognized_units_and_do_not_block_publishing() {
+        let quantity = |symbol: &str, unit: &str| db::PracticeQuantity {
+            id: format!("id-{symbol}"),
+            symbol: symbol.into(),
+            unit: unit.into(),
+            ..Default::default()
+        };
+        let def = practices::PracticeDefinition {
+            quantities: vec![
+                quantity("a", "div"),
+                quantity("b", "cm"),
+                quantity("c", ""),
+                quantity("d", "pH"),
+                quantity("e", "% m/m"),
+            ],
+            results: vec![
+                db::PracticeResult {
+                    id: "id-r".into(),
+                    symbol: "r".into(),
+                    unit: "cuentas/s".into(),
+                    is_final: true,
+                    ..Default::default()
+                },
+                db::PracticeResult {
+                    id: "id-paso".into(),
+                    symbol: "paso".into(),
+                    unit: "cuentas/s".into(),
+                    ..Default::default()
+                },
+            ],
+            intermediates: vec![practices::PracticeIntermediate {
+                id: "id-i".into(),
+                symbol: "i".into(),
+                unit: "div".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let warnings = unit_warnings(&def);
+        let flagged: Vec<_> = warnings.iter().map(|w| w.id.as_deref()).collect();
+        assert_eq!(flagged, [Some("id-a"), Some("id-r")]);
+        assert!(warnings.iter().all(|w| w.warning));
+        assert!(
+            warnings[0].message.contains("\"div\""),
+            "{}",
+            warnings[0].message
+        );
+        assert!(!publish_problems(&def)
+            .iter()
+            .any(|p| p.contains("no se reconoce")));
+    }
+
+    #[tokio::test]
+    async fn seeded_practices_only_warn_about_div() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        for practice in db::practices(&pool).await.unwrap() {
+            let def = practices::definition(&pool, &practice.id)
+                .await
+                .unwrap()
+                .unwrap();
+            for w in unit_warnings(&def) {
+                assert!(
+                    w.message.contains("\"div\""),
+                    "{}: {}",
+                    practice.id,
+                    w.message
+                );
+            }
+        }
+    }
+
+    #[test]
     fn check_compare_needs_a_quantity_of_the_view_with_the_same_unit() {
         let def = practices::PracticeDefinition {
             quantities: vec![db::PracticeQuantity {
@@ -3531,9 +3635,20 @@ mod tests {
         assert!(check_compare(&def, &r("", "V")).is_ok());
         assert!(check_compare(&def, &r("V", " V ")).is_ok());
         assert!(check_compare(&def, &r("W", "V")).is_err());
-        let error = check_compare(&def, &r("V", "mV")).unwrap_err();
+        assert!(check_compare(&def, &r("V", "mV")).is_ok());
+        let celsius = practices::PracticeDefinition {
+            quantities: vec![db::PracticeQuantity {
+                symbol: "T".into(),
+                unit: "°C".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(check_compare(&celsius, &r("T", "K")).is_err());
+        assert!(check_compare(&def, &r("V", "")).is_err());
+        let error = check_compare(&def, &r("V", "g")).unwrap_err();
         assert!(
-            error.message().contains("misma unidad"),
+            error.message().contains("unidades compatibles"),
             "{}",
             error.message()
         );
@@ -4378,15 +4493,15 @@ mod tests {
         let broken_r = broken.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
         broken_r.unwrap().formula = "no_existe * 2".into();
         let vr1_s = cc.quantities.iter().find(|q| q.symbol == "VR1_s").unwrap();
-        let in_mv = QuantityInput {
+        let in_amperes = QuantityInput {
             symbol: "VR1_s".into(),
             name: vr1_s.name.clone(),
-            unit: "mV".into(),
+            unit: "A".into(),
             per_point: vr1_s.per_point,
             is_given: vr1_s.is_given,
             ..Default::default()
         };
-        let after = with_updated_quantity(&broken, &vr1_s.id, &in_mv).unwrap();
+        let after = with_updated_quantity(&broken, &vr1_s.id, &in_amperes).unwrap();
         let error = guard_change(&broken, &after, "guardar la magnitud").unwrap_err();
         assert!(
             error.message().contains("la comparación de VR1_s_t"),
@@ -4408,9 +4523,10 @@ mod tests {
             guard_change(&cc, &after, "guardar la magnitud")
         };
         assert!(edit(" V ").is_ok());
-        let error = edit("mV").unwrap_err();
+        assert!(edit("mV").is_ok(), "mV es compatible con V");
+        let error = edit("A").unwrap_err();
         assert!(
-            error.message().contains("misma unidad"),
+            error.message().contains("unidades compatibles"),
             "{}",
             error.message()
         );
@@ -4418,13 +4534,13 @@ mod tests {
         let vr1_s_t = cc.results.iter().find(|r| r.symbol == "VR1_s_t").unwrap();
         let only_unit = ResultInput {
             compare_with: None,
-            unit: "mV".into(),
+            unit: "A".into(),
             ..input("VR1_s_t", &vr1_s_t.formula, "")
         };
         let after = with_updated_result(&cc, &vr1_s_t.id, &only_unit).unwrap();
         let error = guard_change(&cc, &after, "guardar el mensurando").unwrap_err();
         assert!(
-            error.message().contains("misma unidad"),
+            error.message().contains("unidades compatibles"),
             "{}",
             error.message()
         );

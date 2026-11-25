@@ -7,6 +7,7 @@ import {
   setDisplaySymbols,
   inlineMathHtml,
   unitHtml,
+  unitText,
   analysisKindLabel,
   formatDate,
   compareOptionGroups,
@@ -1031,17 +1032,24 @@ async function renderProblems(practiceId) {
 }
 
 function paintProblems(box, problems) {
-  if (!problems.length) {
-    box.innerHTML = `<p class="submission-meta practice-problems-ok">Sin problemas: la definición está completa.</p>`;
-    return;
-  }
-  box.innerHTML = `
+  const items = (warning) =>
+    problems.map((p, k) => [p, k]).filter(([p]) => Boolean(p.warning) === warning).map(([p, k]) => problemItemHtml(p, k));
+  const [blocking, warnings] = [items(false), items(true)];
+  const warningsHtml = warnings.length
+    ? `<div class="submission-meta practice-problems practice-warnings" role="status">
+        <strong>Avisos (${warnings.length})</strong>
+        <ul>${warnings.join("")}</ul>
+      </div>`
+    : "";
+  box.innerHTML = blocking.length
+    ? `
     <div class="edit-banner practice-problems" role="status">
       <div>
-        <strong>Para publicar falta resolver (${problems.length})</strong>
-        <ul>${problems.map(problemItemHtml).join("")}</ul>
+        <strong>Para publicar falta resolver (${blocking.length})</strong>
+        <ul>${blocking.join("")}</ul>
       </div>
-    </div>`;
+    </div>${warningsHtml}`
+    : `<p class="submission-meta practice-problems-ok">Sin problemas: la definición está completa.</p>${warningsHtml}`;
   box.querySelectorAll("[data-problem]").forEach((btn) => {
     btn.addEventListener("click", () => goToProblem(problems[Number(btn.dataset.problem)]));
   });
@@ -1396,6 +1404,12 @@ function renderQuantityForm(qty, practiceId) {
   `;
 }
 
+function inputUnitsHint(def, symbol) {
+  const others = (def?.resolved?.input_units?.[symbol] ?? []).slice(1);
+  if (!others.length) return "";
+  return `<div class="submission-meta input-units-hint">el alumno también puede cargar en ${escapeHtml(others.map((u) => unitText(u.label)).join(", "))}</div>`;
+}
+
 function renderQuantitiesList(def, practiceId) {
   const quantities = def?.quantities ?? [];
   if (quantities.length === 0) return `<p class="submission-meta">Sin magnitudes. Agregá una con «Nueva magnitud».</p>`;
@@ -1406,7 +1420,7 @@ function renderQuantitiesList(def, practiceId) {
       <tr>
         <td class="directory-primary">${adminSymbolHtml(q.symbol)}</td>
         <td>${inlineMathHtml(q.name)}</td>
-        <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
+        <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}${inputUnitsHint(def, q.symbol)}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
         <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedFor(q))).short}${q.per_determination ? " · por determinación" : ""}</td>
         <td>${sectionSelectHtml(def, "quantities", q)}</td>
@@ -1505,7 +1519,7 @@ function renderResultsList(def, practiceId) {
       <tr>
         <td class="directory-primary">${adminSymbolHtml(r.symbol)}</td>
         <td>${inlineMathHtml(r.name)}</td>
-        <td>${r.unit ? unitHtml(r.unit) : '<span class="submission-meta">adimensional</span>'}</td>
+        <td>${r.unit ? unitHtml(r.unit) : '<span class="submission-meta">adimensional</span>'}${inputUnitsHint(def, r.symbol)}</td>
         <td><code>${escapeHtml(r.formula)}</code></td>
         <td>${tolLabel}</td>
         <td>${finalLabel}</td>
