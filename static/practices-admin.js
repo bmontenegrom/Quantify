@@ -1369,6 +1369,10 @@ function renderQuantityForm(qty, practiceId) {
         <input type="checkbox" name="per_determination" ${qty?.per_determination ? "checked" : ""} />
         Se repite por determinación
       </label>` : ""}
+      <label class="detail-form-checkbox" data-for-temperature>
+        <input type="checkbox" name="temperature_difference" ${qty?.temperature_difference ? "checked" : ""} />
+        Es una diferencia de temperatura (sin el desplazamiento de 273,15 entre K y °C)
+      </label>
       <label class="detail-form-checkbox">
         <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />
         Opcional (puede quedar sin lecturas sin bloquear la entrega)
@@ -1634,6 +1638,9 @@ function syncQuantityForm(form, { initial = false } = {}) {
     label.hidden = !applies;
     label.querySelector("input").disabled = !applies;
   });
+  const temperature = form.querySelector("[data-for-temperature]");
+  temperature.hidden = elements.quantity.value.trim() !== "temperatura";
+  temperature.querySelector("input").disabled = temperature.hidden;
 }
 
 function quantityPayloadFromForm(form) {
@@ -1658,6 +1665,7 @@ function quantityPayloadFromForm(form) {
     replicas_per_point: raw.replicas_per_point && replicas > 0 ? replicas : null,
     optional: "optional" in raw,
     per_determination: "per_determination" in raw,
+    temperature_difference: "temperature_difference" in raw,
     slot_count: slots,
     display_symbol: raw.display_symbol,
     label_mode: raw.label_mode,

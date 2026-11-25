@@ -69,6 +69,10 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await role.selectOption("catedra");
   assert(await shown("slot_count"), "un dato de cátedra admite ranuras");
   await role.selectOption("replicas");
+  assert(!(await shown("temperature_difference")), "sin magnitud física temperatura no se pregunta si es una diferencia");
+  await quantityForm.locator('[name="quantity"]').fill("temperatura");
+  assert(await shown("temperature_difference"), "una temperatura pregunta si es una diferencia");
+  await quantityForm.locator('[name="quantity"]').fill("");
 
   step("docente: agrega L (dato) y T (réplicas)");
   await openAddForm(page, "#new-quantity-form");
@@ -97,6 +101,26 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   assert(!afterRename.D && !afterRename.E, `el símbolo a mostrar debía borrarse: ${JSON.stringify(afterRename)}`);
   await page.locator(`${row("E")} [data-delete-quantity]`).click();
   await page.waitForSelector(row("E"), { state: "detached" });
+
+  step("docente: una temperatura puede marcarse como diferencia");
+  await openAddForm(page, "#new-quantity-form");
+  await fillAndSubmit(
+    page,
+    "#new-quantity-form",
+    { symbol: "dT", name: "Salto", unit: "K", quantity: "temperatura" },
+    { temperature_difference: true },
+  );
+  await page.waitForSelector(row("dT"));
+  const quantities = await page.evaluate(
+    async (id) => (await (await fetch(`/api/practices/${id}/definition`)).json()).quantities,
+    ID,
+  );
+  assert(
+    quantities.find((q) => q.symbol === "dT")?.temperature_difference === true,
+    "dT debía quedar marcada como diferencia de temperatura",
+  );
+  await page.locator(`${row("dT")} [data-delete-quantity]`).click();
+  await page.waitForSelector(row("dT"), { state: "detached" });
 
   step("docente: dos partes con sus secciones; L sin sección (compartida) y T en la segunda");
   for (const title of ["Parte A", "Parte B"]) {

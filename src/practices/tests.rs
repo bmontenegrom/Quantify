@@ -4050,6 +4050,38 @@ async fn a_part_with_determinations_is_analyzed_and_round_trips() {
 }
 
 #[tokio::test]
+async fn a_temperature_difference_survives_export_and_import() {
+    let (pool, _dir) = setup().await;
+    let template: PracticeTemplate = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "name": "Calor", "analysis_kind": "estadistico",
+        "quantities": [
+            {"symbol": "dT", "name": "Salto", "unit": "K", "quantity": "temperatura",
+             "repeated": true, "temperature_difference": true},
+            {"symbol": "T", "name": "Temperatura", "unit": "K", "quantity": "temperatura",
+             "repeated": true}
+        ],
+        "results": [{"symbol": "r", "name": "r", "unit": "", "formula": "dT/T"}]
+    }))
+    .unwrap();
+    let practice = import_template(&pool, &template, "u1").await.unwrap();
+    let def = definition(&pool, &practice.id).await.unwrap().unwrap();
+    let flag = |s: &str| {
+        def.quantities
+            .iter()
+            .find(|q| q.symbol == s)
+            .unwrap()
+            .temperature_difference
+    };
+    assert!(flag("dT") && !flag("T"));
+    let exported = export_template(&pool, &practice.id, ExportSource::Borrador)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(exported.quantities[0].temperature_difference);
+    assert!(!exported.quantities[1].temperature_difference);
+}
+
+#[tokio::test]
 async fn a_per_determination_quantity_only_accepts_groups() {
     let (pool, _dir) = crate::computation::tests::setup().await;
     let template: PracticeTemplate = serde_json::from_value(serde_json::json!({

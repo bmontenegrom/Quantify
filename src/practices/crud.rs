@@ -720,7 +720,7 @@ pub async fn update_quantity(
              label_mode = COALESCE(?16, label_mode), \
              input_widget = CASE WHEN ?6 = 'tiempo' AND NOT ?7 \
                  THEN COALESCE(?17, input_widget) ELSE 'teclado' END, \
-             per_determination = ?18 \
+             per_determination = ?18, temperature_difference = ?19 \
          WHERE id = ?1 AND removed = 0",
     )
     .bind(quantity_id)
@@ -741,6 +741,7 @@ pub async fn update_quantity(
     .bind(input.label_mode.as_deref())
     .bind(input.input_widget.as_deref())
     .bind(input.per_determination)
+    .bind(input.temperature_difference)
     .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
@@ -978,7 +979,7 @@ async fn quantities_for(
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-         label_mode, input_widget, per_determination \
+         label_mode, input_widget, per_determination, temperature_difference \
          FROM practice_quantities WHERE practice_id = ?1 AND removed = 0 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -1003,7 +1004,7 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-         label_mode, input_widget, per_determination \
+         label_mode, input_widget, per_determination, temperature_difference \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -1032,8 +1033,8 @@ pub(super) async fn insert_quantity(
         "INSERT INTO practice_quantities \
          (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
           replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-          display_symbol, label_mode, input_widget, per_determination) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+          display_symbol, label_mode, input_widget, per_determination, temperature_difference) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -1054,6 +1055,7 @@ pub(super) async fn insert_quantity(
     .bind(label_mode(input))
     .bind(input_widget(input))
     .bind(input.per_determination)
+    .bind(input.temperature_difference)
     .execute(&mut *conn)
     .await?;
     Ok(id)

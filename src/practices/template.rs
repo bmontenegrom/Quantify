@@ -221,6 +221,7 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
                 per_determination: q.per_determination,
+                temperature_difference: q.temperature_difference,
             })
             .collect(),
         results: def

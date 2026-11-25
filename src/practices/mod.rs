@@ -43,6 +43,8 @@ pub struct QuantityInput {
     pub input_widget: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub per_determination: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub temperature_difference: bool,
 }
 
 impl QuantityInput {
@@ -82,6 +84,7 @@ impl Default for QuantityInput {
             label_mode: None,
             input_widget: None,
             per_determination: false,
+            temperature_difference: false,
         }
     }
 }

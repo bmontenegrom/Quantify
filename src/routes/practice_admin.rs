@@ -936,6 +936,7 @@ fn with_updated_quantity(
     q.slot_count = input.slot_count;
     q.replicas_per_point = input.replicas_per_point;
     q.per_determination = input.per_determination;
+    q.temperature_difference = input.temperature_difference;
     if let Some(mode) = &input.label_mode {
         q.label_mode.clone_from(mode);
     }
@@ -1561,6 +1562,7 @@ fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem>
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
                 per_determination: q.per_determination,
+                temperature_difference: q.temperature_difference,
             };
             let error = validate_quantity(&input).err()?;
             Some(ElementProblem {

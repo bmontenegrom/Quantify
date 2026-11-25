@@ -137,6 +137,11 @@ fn compute_quantities(
                             (1.0, 0.0)
                         });
                     uncertainty::measured_with(&values, |mean| {
+                        let offset = if quantity.temperature_difference {
+                            0.0
+                        } else {
+                            offset
+                        };
                         uncertainty::type_b(&spec, (mean - offset) / factor) * factor
                     })
                 }

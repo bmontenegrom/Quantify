@@ -169,6 +169,8 @@ pub struct PracticeQuantity {
     pub input_widget: String,
     #[sqlx(default)]
     pub per_determination: bool,
+    #[sqlx(default)]
+    pub temperature_difference: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, FromRow)]

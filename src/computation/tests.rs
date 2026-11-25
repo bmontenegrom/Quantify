@@ -454,6 +454,41 @@ fn the_type_b_is_converted_to_the_unit_of_the_quantity() {
 }
 
 #[test]
+fn a_temperature_difference_converts_without_the_offset() {
+    let thermometer = InstrumentScale {
+        b_model: "fabricante".into(),
+        step: 0.1,
+        spec_pct_reading: Some(1.0),
+        spec_step_coeff: Some(0.0),
+        spec_fixed: Some(0.0),
+        unit: "°C".into(),
+        ..fab_scale()
+    };
+    let u_b = |unit: &str, difference: bool| {
+        let q = PracticeQuantity {
+            unit: unit.into(),
+            temperature_difference: difference,
+            ..quantity("dT")
+        };
+        let m = MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            ..measurement("dT", &[5.0])
+        };
+        let scales = HashMap::from([("s1".to_string(), thermometer.clone())]);
+        compute(&[q], &[], &scales, &[m], None).unwrap().quantities[0]
+            .result
+            .u_b
+    };
+    let in_celsius = u_b("°C", false);
+    assert!(close(u_b("K", true), in_celsius, 1e-12));
+    assert!(
+        u_b("K", false) > 10.0 * in_celsius,
+        "sin la marca, 5 K se lee como −268,15 °C"
+    );
+}
+
+#[test]
 fn scale_spec_maps_models_and_options() {
     let spec = scale_spec(&fab_scale()).unwrap();
     assert_eq!(spec.b_model, BModel::Fabricante);
