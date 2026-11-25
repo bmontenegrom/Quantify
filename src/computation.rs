@@ -39,7 +39,7 @@ pub fn with_fixed_values(
 ) -> Vec<MeasurementInput> {
     let fixed: Vec<_> = quantities
         .iter()
-        .filter(|q| q.fixed)
+        .filter(|q| q.is_given && q.fixed)
         .filter_map(|q| {
             Some(MeasurementInput {
                 quantity_id: q.id.clone(),

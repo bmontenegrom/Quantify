@@ -3847,6 +3847,14 @@ fn check_template_rejects_what_cannot_be_written() {
             "parte estadística",
         ),
         (
+            serde_json::json!({"quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": false, "fixed": true, "default_value": 1.0}]}),
+            "La magnitud \"x\": Solo un dato de cátedra",
+        ),
+        (
+            serde_json::json!({"quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": false, "is_given": true, "default_u": -1.0}]}),
+            "cero o positiva",
+        ),
+        (
             serde_json::json!({
                 "parts": [{"title": "A", "determinations": {"count": 2, "label": "M"}}, {"title": "B"}],
                 "quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": true, "per_determination": true}],

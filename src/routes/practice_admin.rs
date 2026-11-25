@@ -2360,41 +2360,8 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
             "El cronómetro solo aplica a una magnitud física \"tiempo\" que no sea un dato dado.",
         ));
     }
-    if input
-        .default_u
-        .flatten()
-        .is_some_and(|u| !(u.is_finite() && u >= 0.0))
-    {
-        return Err(AppError::bad_request(
-            "La U fija tiene que ser cero o positiva.",
-        ));
-    }
-    if input.fixed {
-        validate_fixed(input)?;
-    }
-    Ok(())
-}
-
-fn validate_fixed(input: &QuantityInput) -> Result<(), AppError> {
-    if !input.is_given {
-        return Err(AppError::bad_request(
-            "Solo un dato de cátedra o una constante puede tener valor fijo.",
-        ));
-    }
-    if input.slot_count.is_some() || input.per_determination {
-        return Err(AppError::bad_request(
-            "Un valor fijo no puede tener ranuras ni repetirse por determinación.",
-        ));
-    }
-    if !input.default_value.flatten().is_some_and(f64::is_finite) {
-        return Err(AppError::bad_request(
-            "Un dato con valor fijo necesita el valor.",
-        ));
-    }
-    if input.has_uncertainty && input.default_u.flatten().is_none() {
-        return Err(AppError::bad_request(
-            "Un dato de cátedra con valor fijo necesita su U (cero o positiva).",
-        ));
+    if let Some(problem) = input.fixed_problem() {
+        return Err(AppError::bad_request(problem));
     }
     Ok(())
 }

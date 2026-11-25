@@ -420,6 +420,13 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
     {
         return Err("Las determinaciones son para una práctica o parte estadística.".into());
     }
+    if let Some((q, problem)) = t
+        .quantities
+        .iter()
+        .find_map(|q| Some((q, q.fixed_problem()?)))
+    {
+        return Err(format!("La magnitud \"{}\": {problem}", q.symbol));
+    }
     for q in t.quantities.iter().filter(|q| q.per_determination) {
         let has_determinations = if t.parts.is_empty() {
             t.determinations.is_some()
