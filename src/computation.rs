@@ -37,7 +37,10 @@ pub fn with_fixed_values(
     quantities: &[crate::db::PracticeQuantity],
     measurements: &[MeasurementInput],
 ) -> Vec<MeasurementInput> {
-    let fixed: Vec<_> = quantities.iter().filter(|q| q.fixed).collect();
+    let fixed: Vec<_> = quantities
+        .iter()
+        .filter(|q| q.fixed && q.default_value.is_some())
+        .collect();
     let mut out: Vec<_> = measurements
         .iter()
         .filter(|m| !fixed.iter().any(|q| q.id == m.quantity_id))

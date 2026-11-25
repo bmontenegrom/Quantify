@@ -2360,6 +2360,15 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
             "El cronómetro solo aplica a una magnitud física \"tiempo\" que no sea un dato dado.",
         ));
     }
+    if input
+        .default_u
+        .flatten()
+        .is_some_and(|u| !(u.is_finite() && u >= 0.0))
+    {
+        return Err(AppError::bad_request(
+            "La U fija tiene que ser cero o positiva.",
+        ));
+    }
     if input.fixed {
         validate_fixed(input)?;
     }
@@ -2382,12 +2391,7 @@ fn validate_fixed(input: &QuantityInput) -> Result<(), AppError> {
             "Un dato con valor fijo necesita el valor.",
         ));
     }
-    if input.has_uncertainty
-        && !input
-            .default_u
-            .flatten()
-            .is_some_and(|u| u.is_finite() && u >= 0.0)
-    {
+    if input.has_uncertainty && input.default_u.flatten().is_none() {
         return Err(AppError::bad_request(
             "Un dato de cátedra con valor fijo necesita su U (cero o positiva).",
         ));
@@ -3187,6 +3191,11 @@ mod tests {
         assert!(validate_quantity(&fixed(false, None)).is_ok());
         assert!(validate_quantity(&fixed(true, None)).is_err());
         assert!(validate_quantity(&fixed(true, Some(-0.1))).is_err());
+        assert!(validate_quantity(&QuantityInput {
+            fixed: false,
+            ..fixed(true, Some(-0.1))
+        })
+        .is_err());
         assert!(validate_quantity(&QuantityInput {
             default_value: Some(None),
             ..fixed(true, Some(0.1))

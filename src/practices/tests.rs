@@ -4348,6 +4348,10 @@ async fn a_fixed_given_uses_the_definition_and_ignores_the_client() {
         operator_replicas: None,
         operator_instruments: None,
     };
+    let mut unset = def.quantities.clone();
+    unset.iter_mut().for_each(|q| q.default_value = None);
+    let kept = crate::computation::with_fixed_values(&unset, std::slice::from_ref(&sent));
+    assert_eq!(kept[0].values, vec![5.0]);
     for client in [vec![sent], vec![]] {
         let used = crate::computation::with_fixed_values(&def.quantities, &client);
         assert_eq!(used.len(), 1);
