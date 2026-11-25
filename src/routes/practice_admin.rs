@@ -960,7 +960,7 @@ fn with_updated_quantity(
     q.name = input.name.trim().to_string();
     q.unit = input.unit.trim().to_string();
     q.repeated = input.repeated;
-    q.quantity.clone_from(&input.quantity);
+    q.quantity = input.magnitude();
     q.per_point = input.per_point;
     q.is_given = input.is_given;
     q.has_uncertainty = input.has_uncertainty;

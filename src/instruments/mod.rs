@@ -392,7 +392,7 @@ mod tests {
             UpdateInstrument {
                 name: "Tester nuevo".into(),
                 kind: "digital".into(),
-                quantity: " Tensión ".into(),
+                quantity: " Tensión eléctrica ".into(),
                 unit: "V".into(),
             },
         )
