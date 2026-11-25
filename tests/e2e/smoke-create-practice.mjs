@@ -202,7 +202,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     "la parte A debía mostrar solo su ayuda",
   );
   assert((await given.locator("input").count()) === 0, "un dato fijo no debía tener campos para cargar");
-  assert((await given.locator(".fixed-given").textContent()).startsWith("1 ± 0,002"), "el dato fijo debía mostrar valor ± U");
+  assert((await given.locator(".fixed-given").textContent()).startsWith("1,000 ± 0,002"), "el dato fijo debía mostrar valor ± U");
   await tabs.nth(1).click();
   assert((await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y también L, que es compartida");
   assert(await help("Ayuda de Seccion B").isVisible(), "la sección B debía mostrar su ayuda");

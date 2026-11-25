@@ -157,7 +157,9 @@ export function isFixedGiven(q) {
 
 export function fixedGivenHtml(q, legend) {
   const u = hasUncertainty(q) ? q.default_u : null;
-  const text = `${exactNumber(q.default_value)}${u != null ? ` ± ${exactNumber(u)}` : ""}`;
+  const uText = u != null ? String(u) : "";
+  const places = /e/.test(uText) ? 0 : (uText.split(".")[1] ?? "").length;
+  const text = `${exactNumber(q.default_value, places)}${u != null ? ` ± ${exactNumber(u)}` : ""}`;
   return `
     <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1"
       data-fixed-value="${escapeHtml(String(q.default_value))}" data-fixed-u="${u ?? ""}">

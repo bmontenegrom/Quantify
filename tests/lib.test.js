@@ -1136,4 +1136,8 @@ test("exactNumber: todos los dígitos, coma decimal y potencia de 10 si es muy g
   assert.equal(exactNumber(0.00002), "2 × 10⁻⁵");
   assert.equal(exactNumber(6.02214076e23), "6,02214076 × 10²³");
   assert.equal(exactNumber(1.380649e-23), "1,380649 × 10⁻²³");
+  assert.equal(exactNumber(22.99, 3), "22,990");
+  assert.equal(exactNumber(1.008, 4), "1,0080");
+  assert.equal(exactNumber(8.5, 1), "8,5");
+  assert.equal(exactNumber(6.02214076e23, 4), "6,02214076 × 10²³");
 });

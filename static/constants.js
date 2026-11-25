@@ -27,6 +27,7 @@ export function applyConstant(form, index) {
   if (!c) return;
   const set = (name, value) => {
     const el = form.elements[name];
+    if (!el) return;
     if (el.type === "checkbox") el.checked = value;
     else el.value = value;
     for (const type of ["input", "change"]) el.dispatchEvent(new Event(type, { bubbles: true }));
@@ -34,6 +35,8 @@ export function applyConstant(form, index) {
   set("role", c.u == null ? "constante" : "catedra");
   set("display_symbol", "");
   set("slot_count", "");
+  set("optional", false);
+  set("per_determination", false);
   set("symbol", c.symbol);
   set("name", c.name);
   set("unit", c.unit);

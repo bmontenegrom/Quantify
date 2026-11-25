@@ -1361,7 +1361,7 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
    - Ninguna práctica de la biblioteca usa valor fijo todavía: los golden no cambian.
 3. **`feat(editor)`: catálogo de constantes.** ✅
    - `static/constants.json`, servido como archivo estático (sin ruta: son datos públicos y el
-     servidor no los usa). Exactas del SI 2019 como constantes sin U (N_A, k_B, R, F, e) y la
+     servidor no los usa). Exactas del SI 2019 como constantes sin U (N_A, k_B, R, F, q_e; `e` es el número de Euler) y la
      gravedad estándar; masas molares de 12 elementos comunes (IUPAC/CIAAW 2021) como dato de
      cátedra con la incertidumbre de la tabla como U. Cada entrada anota su edición (`source`);
      no se consulta ninguna fuente en vivo, el archivo se actualiza a mano en un PR.
