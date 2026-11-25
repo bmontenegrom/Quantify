@@ -550,10 +550,10 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
     const pair = pairs.get(d.symbol);
     const q = byQuantity.get(pair?.with);
     if (!q) return rows;
-    const { factor = 1, offset = 0 } = pair;
+    const { factor = 1 } = pair;
     const mean = q.result?.mean;
     const u = q.result?.u_expanded;
-    const ev = mean == null ? null : mean * factor + offset;
+    const ev = mean == null ? null : mean * factor;
     const eu = u == null ? null : u * factor;
     rows.push({
       symbol: q.symbol,

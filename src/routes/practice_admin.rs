@@ -320,30 +320,11 @@ fn unit_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
     let results = def
         .results
         .iter()
+        .filter(|r| r.is_final || !r.compare_with.is_empty())
         .map(|r| ("el mensurando", &r.symbol, &r.unit, "result", &r.id));
-    let intermediates = def
-        .intermediates
-        .iter()
-        .map(|i| ("la intermedia", &i.symbol, &i.unit, "intermediate", &i.id));
-    let point_results = def.point_results.iter().map(|p| {
-        (
-            "la derivada por punto",
-            &p.symbol,
-            &p.unit,
-            "pointResult",
-            &p.id,
-        )
-    });
-    let aggregates = def
-        .aggregates
-        .iter()
-        .map(|a| ("el agregado", &a.symbol, &a.unit, "aggregate", &a.id));
     quantities
         .chain(results)
-        .chain(intermediates)
-        .chain(point_results)
-        .chain(aggregates)
-        .filter(|(_, _, unit, _, _)| crate::units::parse(unit).is_none())
+        .filter(|(_, _, unit, _, _)| !crate::units::known(unit))
         .map(|(what, symbol, unit, kind, id)| Problem {
             message: format!(
                 "{what} {symbol}: la unidad \"{}\" no se reconoce, así que no se ofrecen \
@@ -3572,11 +3553,32 @@ mod tests {
             ..Default::default()
         };
         let def = practices::PracticeDefinition {
-            quantities: vec![quantity("a", "div"), quantity("b", "cm"), quantity("c", "")],
-            results: vec![db::PracticeResult {
-                id: "id-r".into(),
-                symbol: "r".into(),
-                unit: "cuentas/s".into(),
+            quantities: vec![
+                quantity("a", "div"),
+                quantity("b", "cm"),
+                quantity("c", ""),
+                quantity("d", "pH"),
+                quantity("e", "% m/m"),
+            ],
+            results: vec![
+                db::PracticeResult {
+                    id: "id-r".into(),
+                    symbol: "r".into(),
+                    unit: "cuentas/s".into(),
+                    is_final: true,
+                    ..Default::default()
+                },
+                db::PracticeResult {
+                    id: "id-paso".into(),
+                    symbol: "paso".into(),
+                    unit: "cuentas/s".into(),
+                    ..Default::default()
+                },
+            ],
+            intermediates: vec![practices::PracticeIntermediate {
+                id: "id-i".into(),
+                symbol: "i".into(),
+                unit: "div".into(),
                 ..Default::default()
             }],
             ..Default::default()
@@ -3634,6 +3636,15 @@ mod tests {
         assert!(check_compare(&def, &r("V", " V ")).is_ok());
         assert!(check_compare(&def, &r("W", "V")).is_err());
         assert!(check_compare(&def, &r("V", "mV")).is_ok());
+        let celsius = practices::PracticeDefinition {
+            quantities: vec![db::PracticeQuantity {
+                symbol: "T".into(),
+                unit: "°C".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(check_compare(&celsius, &r("T", "K")).is_err());
         assert!(check_compare(&def, &r("V", "")).is_err());
         let error = check_compare(&def, &r("V", "g")).unwrap_err();
         assert!(
@@ -4482,7 +4493,7 @@ mod tests {
         let broken_r = broken.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
         broken_r.unwrap().formula = "no_existe * 2".into();
         let vr1_s = cc.quantities.iter().find(|q| q.symbol == "VR1_s").unwrap();
-        let in_mv = QuantityInput {
+        let in_amperes = QuantityInput {
             symbol: "VR1_s".into(),
             name: vr1_s.name.clone(),
             unit: "A".into(),
@@ -4490,7 +4501,7 @@ mod tests {
             is_given: vr1_s.is_given,
             ..Default::default()
         };
-        let after = with_updated_quantity(&broken, &vr1_s.id, &in_mv).unwrap();
+        let after = with_updated_quantity(&broken, &vr1_s.id, &in_amperes).unwrap();
         let error = guard_change(&broken, &after, "guardar la magnitud").unwrap_err();
         assert!(
             error.message().contains("la comparación de VR1_s_t"),

@@ -37,29 +37,34 @@ pub struct Resolved {
 pub struct Comparison {
     pub with: String,
     pub factor: f64,
-    pub offset: f64,
 }
 
-/// Cómo pasar lo medido (en `quantity_unit`) a la unidad del mensurando, como `valor·factor + offset`.
+/// Cuánto multiplica lo medido (en `quantity_unit`) para pasarlo a la unidad del mensurando.
+///
+/// Sin desplazamiento: °C contra K no se compara (en un ΔT sumaría 273,15).
 ///
 /// ```
 /// use quantify::practices::comparison_conversion;
-/// assert_eq!(comparison_conversion("V", " V "), Some((1.0, 0.0)));
-/// assert_eq!(comparison_conversion("div", "div"), Some((1.0, 0.0)));
-/// assert_eq!(comparison_conversion("V", "mV").map(|(f, _)| f.round()), Some(1000.0));
+/// assert_eq!(comparison_conversion("V", " V "), Some(1.0));
+/// assert_eq!(comparison_conversion("div", "div"), Some(1.0));
+/// assert_eq!(comparison_conversion("V", "mV").map(f64::round), Some(1000.0));
+/// assert_eq!(comparison_conversion("°C", "K"), None);
 /// assert_eq!(comparison_conversion("s", "g"), None);
 /// assert_eq!(comparison_conversion("", "%"), None);
 /// assert_eq!(comparison_conversion("div", "cm"), None);
 /// ```
-pub fn comparison_conversion(quantity_unit: &str, result_unit: &str) -> Option<(f64, f64)> {
+pub fn comparison_conversion(quantity_unit: &str, result_unit: &str) -> Option<f64> {
     let (from, to) = (quantity_unit.trim(), result_unit.trim());
     if from == to {
-        return Some((1.0, 0.0));
+        return Some(1.0);
     }
     if from.is_empty() || to.is_empty() {
         return None;
     }
-    crate::units::conversion(from, to).ok()
+    match crate::units::conversion(from, to) {
+        Ok((factor, 0.0)) => Some(factor),
+        _ => None,
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -375,24 +380,23 @@ impl PracticeDefinition {
         }
     }
 
-    /// Cada mensurando con "Comparar con", con la conversión de lo medido a su unidad.
+    /// Cada mensurando con "Comparar con", con el factor que pasa lo medido a su unidad.
     ///
     /// ```
     /// use quantify::db::{PracticeQuantity, PracticeResult};
     /// use quantify::practices::PracticeDefinition;
     /// let def = PracticeDefinition {
-    ///     quantities: vec![PracticeQuantity { symbol: "T".into(), unit: "°C".into(), ..Default::default() }],
+    ///     quantities: vec![PracticeQuantity { symbol: "V".into(), unit: "V".into(), ..Default::default() }],
     ///     results: vec![
-    ///         PracticeResult { symbol: "T_t".into(), unit: "K".into(), compare_with: "T".into(), ..Default::default() },
-    ///         PracticeResult { symbol: "x".into(), unit: "K".into(), ..Default::default() },
+    ///         PracticeResult { symbol: "V_t".into(), unit: "mV".into(), compare_with: "V".into(), ..Default::default() },
+    ///         PracticeResult { symbol: "x".into(), unit: "mV".into(), ..Default::default() },
     ///     ],
     ///     ..Default::default()
     /// };
     /// let comparisons = def.comparisons();
     /// assert_eq!(comparisons.len(), 1);
-    /// let t = &comparisons["T_t"];
-    /// assert_eq!((t.with.as_str(), t.factor), ("T", 1.0));
-    /// assert!((t.offset - 273.15).abs() < 1e-9);
+    /// let v = &comparisons["V_t"];
+    /// assert_eq!((v.with.as_str(), v.factor.round()), ("V", 1000.0));
     /// ```
     pub fn comparisons(&self) -> std::collections::BTreeMap<String, Comparison> {
         self.results
@@ -403,14 +407,11 @@ impl PracticeDefinition {
                     .quantities
                     .iter()
                     .find(|q| q.symbol == r.compare_with)?;
-                let (factor, offset) =
-                    comparison_conversion(&q.unit, &r.unit).unwrap_or((1.0, 0.0));
                 Some((
                     r.symbol.clone(),
                     Comparison {
                         with: r.compare_with.clone(),
-                        factor,
-                        offset,
+                        factor: comparison_conversion(&q.unit, &r.unit).unwrap_or(1.0),
                     },
                 ))
             })
