@@ -26,8 +26,8 @@ async function studentSubmitsP1(page) {
   step("estudiante: completa L (dato de cátedra) y t_med (sin incertidumbre, sin instrumento)");
   const lRow = page.locator('.measurement-row--given:has-text("Longitud")');
   const [lUnit, uUnit] = [lRow.locator(".unit-select").nth(0), lRow.locator(".unit-select").nth(1)];
-  await lUnit.selectOption("cm");
-  await uUnit.selectOption("mm");
+  await lUnit.selectOption({ label: "cm" });
+  await uUnit.selectOption({ label: "mm" });
   await lRow.locator(".measure-given-value").fill("100");
   await lRow.locator(".measure-given-u").fill("2");
   const tMedRow = page.locator('.measurement-row--given:has-text("semiamplitud")');
