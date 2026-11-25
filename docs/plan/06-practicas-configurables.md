@@ -1298,10 +1298,10 @@ Decisiones:
    - Los prefijos ofrecidos son razonables, contando desde la unidad declarada: en una unidad
      simple, hasta 12 órdenes de magnitud contando el exponente (`cm2` → `mm2`, `km2`, no `Mm2`);
      en una compuesta, hasta 3 (`µm/s` → `nm/s`, `mm/s`; `kg.m/s2` → `g.m/s2`, `Mg.m/s2`).
-   - `units::conversion(from, to)` es la única conversión entre unidades (`valor·factor +
-     offset`) y la única regla de "sin unidad"; la usa el tipo B (`scale_to_quantity`).
-     `input_units` comparte con ella el cálculo afín (`affine`). Se quitó `scale_factor`, que
-     nadie usaba.
+   - `units::conversion(from, to)` convierte entre dos unidades (`valor·factor + offset`); la usa
+     el tipo B (`scale_to_quantity`). `input_units` comparte con ella el cálculo afín (`affine`)
+     y la misma regla de "sin unidad" (vacía tras normalizar), escrita aparte. Se quitó
+     `scale_factor`, que nadie usaba.
 4. **`feat(formularios)`: el alumno carga en la unidad que elija (F10, 3b/4).**
    - Desplegable de unidades compatibles en lugar del prefijo, en los mismos 8 lugares, también
      en los resultados finales. Se guarda en la unidad declarada, como hoy.
@@ -1309,6 +1309,9 @@ Decisiones:
      magnitud, editor, plantillas y servidor). Con la marca, ni el desplegable ni el tipo B
      aplican el desplazamiento de 273,15 entre K y °C; sin la marca se toma como temperatura
      absoluta, como hoy. (La unidad sola no distingue una temperatura de una diferencia.)
+   - Los prefijos de entrada son solo los de potencia múltiplo de 3, así que `m2` no ofrece
+     `cm2` (en volumen no pasa: `cm3` está en las candidatas). Decidir si las áreas suman `cm2`
+     (y `dm`, `cm` en general) al armar el desplegable.
 5. **`feat(editor)`: el docente ve si la unidad se reconoce (F10, 4/4).**
    - Aviso en el panel de problemas para unidades que no se reconocen, y vista previa de las
      unidades de entrada en la magnitud.

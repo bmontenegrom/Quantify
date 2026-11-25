@@ -514,6 +514,13 @@ mod tests {
     }
 
     #[test]
+    fn every_prefix_factor_matches_its_power() {
+        for (prefix, power, factor) in PREFIXES {
+            assert!(close(*factor, 10f64.powi(*power)), "{prefix}");
+        }
+    }
+
+    #[test]
     fn hs_is_hours_not_hectoseconds() {
         assert!(close(si("hs").factor, 3600.0));
         let min = input_units("hs")
