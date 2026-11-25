@@ -4,7 +4,12 @@ pub const MAGNITUDES: &[(&str, &[&str])] = &[
     ("tiempo", &[]),
     (
         "voltaje",
-        &["tension electrica", "diferencia de potencial", "ddp"],
+        &[
+            "tension",
+            "tension electrica",
+            "diferencia de potencial",
+            "ddp",
+        ],
     ),
     ("corriente", &["corriente electrica"]),
     ("resistencia", &["resistencia electrica"]),
@@ -28,7 +33,7 @@ pub const MAGNITUDES: &[(&str, &[&str])] = &[
 /// ```
 /// use quantify::magnitudes::canonical;
 /// assert_eq!(canonical(" Tensión  Eléctrica "), "voltaje");
-/// assert_eq!(canonical("Tensio\u{301}n"), "tension");
+/// assert_eq!(canonical("Tensio\u{301}n"), "voltaje");
 /// assert_eq!(canonical("Taman\u{303}o"), canonical("tamaño"));
 /// assert_eq!(canonical("Diferencia  de potencial"), "voltaje");
 /// assert_eq!(canonical("Aceleración"), "aceleracion");

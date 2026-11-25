@@ -15,9 +15,6 @@ export function ensureMagnitudesList() {
         `<datalist id="${MAGNITUDES_LIST}">${names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("")}</datalist>`,
       );
     })
-    .catch(() => {})
-    .finally(() => {
-      loading = null;
-    });
+    .catch(() => {});
   return loading;
 }
