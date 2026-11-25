@@ -4,6 +4,7 @@ pub mod courses;
 pub mod db;
 pub mod error;
 pub mod instruments;
+pub mod magnitudes;
 pub mod practices;
 pub mod routes;
 pub mod sessions;

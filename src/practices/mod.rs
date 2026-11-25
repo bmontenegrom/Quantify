@@ -55,6 +55,20 @@ impl QuantityInput {
     pub fn stored_per_point(&self) -> bool {
         self.per_point && !self.per_determination
     }
+
+    /// La magnitud física tal como se guarda: canónica, y vacía pasa a no declarada.
+    ///
+    /// ```
+    /// let q = |s: &str| quantify::practices::QuantityInput { quantity: Some(s.into()), ..Default::default() };
+    /// assert_eq!(q(" Tiempo ").magnitude().as_deref(), Some("tiempo"));
+    /// assert_eq!(q("  ").magnitude(), None);
+    /// ```
+    pub fn magnitude(&self) -> Option<String> {
+        self.quantity
+            .as_deref()
+            .map(crate::magnitudes::canonical)
+            .filter(|q| !q.is_empty())
+    }
 }
 
 impl Default for QuantityInput {
