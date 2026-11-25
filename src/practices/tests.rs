@@ -3663,8 +3663,12 @@ async fn a_submission_brings_the_comparisons_of_its_version() {
     .unwrap();
 
     let pairs = submission_comparisons(&pool, "s").await.unwrap();
-    assert_eq!(pairs["VR1_s_t"], "VR1_s");
-    assert_eq!(pairs["VR2_p_t"], "VR2_p");
+    assert_eq!(pairs["VR1_s_t"].with, "VR1_s");
+    assert_eq!(pairs["VR2_p_t"].with, "VR2_p");
+    assert_eq!(
+        (pairs["VR1_s_t"].factor, pairs["VR1_s_t"].offset),
+        (1.0, 0.0)
+    );
     assert!(!pairs.contains_key("P_max_t"));
     assert!(submission_comparisons(&pool, "no-existe")
         .await

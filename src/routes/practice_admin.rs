@@ -2372,10 +2372,10 @@ fn check_compare(
                  de la misma parte que el mensurando o de los datos compartidos.",
             )
         })?;
-    let (unit, target_unit) = (result.unit.trim(), quantity.unit.trim());
-    if unit != target_unit {
+    if practices::comparison_conversion(&quantity.unit, &result.unit).is_none() {
+        let (unit, target_unit) = (result.unit.trim(), quantity.unit.trim());
         return Err(AppError::bad_request(format!(
-            "\"Comparar con\" necesita la misma unidad: el mensurando está en \"{unit}\" \
+            "\"Comparar con\" necesita unidades compatibles: el mensurando está en \"{unit}\" \
              y {target} en \"{target_unit}\"."
         )));
     }
@@ -3531,9 +3531,11 @@ mod tests {
         assert!(check_compare(&def, &r("", "V")).is_ok());
         assert!(check_compare(&def, &r("V", " V ")).is_ok());
         assert!(check_compare(&def, &r("W", "V")).is_err());
-        let error = check_compare(&def, &r("V", "mV")).unwrap_err();
+        assert!(check_compare(&def, &r("V", "mV")).is_ok());
+        assert!(check_compare(&def, &r("V", "")).is_err());
+        let error = check_compare(&def, &r("V", "g")).unwrap_err();
         assert!(
-            error.message().contains("misma unidad"),
+            error.message().contains("unidades compatibles"),
             "{}",
             error.message()
         );
@@ -4381,7 +4383,7 @@ mod tests {
         let in_mv = QuantityInput {
             symbol: "VR1_s".into(),
             name: vr1_s.name.clone(),
-            unit: "mV".into(),
+            unit: "A".into(),
             per_point: vr1_s.per_point,
             is_given: vr1_s.is_given,
             ..Default::default()
@@ -4408,9 +4410,10 @@ mod tests {
             guard_change(&cc, &after, "guardar la magnitud")
         };
         assert!(edit(" V ").is_ok());
-        let error = edit("mV").unwrap_err();
+        assert!(edit("mV").is_ok(), "mV es compatible con V");
+        let error = edit("A").unwrap_err();
         assert!(
-            error.message().contains("misma unidad"),
+            error.message().contains("unidades compatibles"),
             "{}",
             error.message()
         );
@@ -4418,13 +4421,13 @@ mod tests {
         let vr1_s_t = cc.results.iter().find(|r| r.symbol == "VR1_s_t").unwrap();
         let only_unit = ResultInput {
             compare_with: None,
-            unit: "mV".into(),
+            unit: "A".into(),
             ..input("VR1_s_t", &vr1_s_t.formula, "")
         };
         let after = with_updated_result(&cc, &vr1_s_t.id, &only_unit).unwrap();
         let error = guard_change(&cc, &after, "guardar el mensurando").unwrap_err();
         assert!(
-            error.message().contains("misma unidad"),
+            error.message().contains("unidades compatibles"),
             "{}",
             error.message()
         );

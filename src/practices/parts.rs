@@ -30,6 +30,36 @@ pub struct Resolved {
     pub symbol_parts: std::collections::BTreeMap<String, String>,
     pub determinations: std::collections::BTreeMap<String, ScopedDeterminations>,
     pub input_units: std::collections::BTreeMap<String, Vec<crate::units::InputUnit>>,
+    pub comparisons: std::collections::BTreeMap<String, Comparison>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Comparison {
+    pub with: String,
+    pub factor: f64,
+    pub offset: f64,
+}
+
+/// Cómo pasar lo medido (en `quantity_unit`) a la unidad del mensurando, como `valor·factor + offset`.
+///
+/// ```
+/// use quantify::practices::comparison_conversion;
+/// assert_eq!(comparison_conversion("V", " V "), Some((1.0, 0.0)));
+/// assert_eq!(comparison_conversion("div", "div"), Some((1.0, 0.0)));
+/// assert_eq!(comparison_conversion("V", "mV").map(|(f, _)| f.round()), Some(1000.0));
+/// assert_eq!(comparison_conversion("s", "g"), None);
+/// assert_eq!(comparison_conversion("", "%"), None);
+/// assert_eq!(comparison_conversion("div", "cm"), None);
+/// ```
+pub fn comparison_conversion(quantity_unit: &str, result_unit: &str) -> Option<(f64, f64)> {
+    let (from, to) = (quantity_unit.trim(), result_unit.trim());
+    if from == to {
+        return Some((1.0, 0.0));
+    }
+    if from.is_empty() || to.is_empty() {
+        return None;
+    }
+    crate::units::conversion(from, to).ok()
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -341,7 +371,50 @@ impl PracticeDefinition {
             symbol_parts,
             determinations,
             input_units: quantity_units.chain(result_units).collect(),
+            comparisons: self.comparisons(),
         }
+    }
+
+    /// Cada mensurando con "Comparar con", con la conversión de lo medido a su unidad.
+    ///
+    /// ```
+    /// use quantify::db::{PracticeQuantity, PracticeResult};
+    /// use quantify::practices::PracticeDefinition;
+    /// let def = PracticeDefinition {
+    ///     quantities: vec![PracticeQuantity { symbol: "T".into(), unit: "°C".into(), ..Default::default() }],
+    ///     results: vec![
+    ///         PracticeResult { symbol: "T_t".into(), unit: "K".into(), compare_with: "T".into(), ..Default::default() },
+    ///         PracticeResult { symbol: "x".into(), unit: "K".into(), ..Default::default() },
+    ///     ],
+    ///     ..Default::default()
+    /// };
+    /// let comparisons = def.comparisons();
+    /// assert_eq!(comparisons.len(), 1);
+    /// let t = &comparisons["T_t"];
+    /// assert_eq!((t.with.as_str(), t.factor), ("T", 1.0));
+    /// assert!((t.offset - 273.15).abs() < 1e-9);
+    /// ```
+    pub fn comparisons(&self) -> std::collections::BTreeMap<String, Comparison> {
+        self.results
+            .iter()
+            .filter(|r| !r.compare_with.is_empty())
+            .filter_map(|r| {
+                let q = self
+                    .quantities
+                    .iter()
+                    .find(|q| q.symbol == r.compare_with)?;
+                let (factor, offset) =
+                    comparison_conversion(&q.unit, &r.unit).unwrap_or((1.0, 0.0));
+                Some((
+                    r.symbol.clone(),
+                    Comparison {
+                        with: r.compare_with.clone(),
+                        factor,
+                        offset,
+                    },
+                ))
+            })
+            .collect()
     }
 
     pub fn part_of_quantity(&self, symbol: &str) -> Option<&PracticePart> {
