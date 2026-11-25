@@ -3671,6 +3671,22 @@ async fn a_submission_brings_the_comparisons_of_its_version() {
         .await
         .unwrap()
         .is_empty());
+
+    sqlx::query(
+        "INSERT INTO practice_versions (id, practice_id, number, definition_json, published_at) \
+         VALUES ('rota', 'p2-cc', 999, '{\"results\": 1}', '2026-10-01T00:00:00Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE submissions SET practice_version_id = 'rota' WHERE id = 's'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        submission_comparisons(&pool, "s").await.unwrap().is_empty(),
+        "una versión ilegible no rompe el detalle de la entrega"
+    );
 }
 
 async fn live_symbols(pool: &SqlitePool, practice: &str, in_version: bool) -> Vec<String> {

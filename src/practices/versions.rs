@@ -149,10 +149,13 @@ pub async fn submission_comparisons(
     pool: &SqlitePool,
     submission_id: &str,
 ) -> anyhow::Result<std::collections::BTreeMap<String, super::Comparison>> {
-    Ok(submission_definition(pool, submission_id)
-        .await?
-        .map(|def| def.comparisons())
-        .unwrap_or_default())
+    match submission_definition(pool, submission_id).await {
+        Ok(def) => Ok(def.map(|def| def.comparisons()).unwrap_or_default()),
+        Err(error) => {
+            tracing::warn!(%submission_id, %error, "la versión de la entrega es ilegible: sin comparaciones");
+            Ok(Default::default())
+        }
+    }
 }
 
 fn snapshot(definition: &PracticeDefinition) -> anyhow::Result<String> {
