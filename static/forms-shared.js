@@ -110,6 +110,47 @@ export function toDeclaredUnit(raw, wrap, { uncertainty = false } = {}) {
   return Number((Number(raw) * factor + (uncertainty ? 0 : offset)).toPrecision(15));
 }
 
+export function fromDeclaredUnit(value, { factor, offset }, { uncertainty = false } = {}) {
+  return Number(((Number(value) - (uncertainty ? 0 : offset)) / factor).toPrecision(15));
+}
+
+const UNIT_WRAPS = ".replica-input-wrap, .replica, .series-cell";
+
+function keyedUnitSelects(container) {
+  const seen = new Map();
+  return [...container.querySelectorAll(".unit-select")].map((select) => {
+    const wrap = select.closest(UNIT_WRAPS);
+    const holder = select.closest("[data-quantity-id], [data-symbol]") ?? wrap?.querySelector("[data-quantity-id]");
+    const id = `${holder?.dataset.quantityId ?? holder?.dataset.symbol ?? ""}|${wrap?.querySelector('[class$="-u"]') ? "u" : "v"}`;
+    const n = seen.get(id) ?? 0;
+    seen.set(id, n + 1);
+    return { key: `${id}|${n}`, select, wrap };
+  });
+}
+
+export function unitChoices(container) {
+  return Object.fromEntries(
+    keyedUnitSelects(container)
+      .filter(({ select }) => select.selectedIndex > 0)
+      .map(({ key, select }) => [key, select.selectedIndex]),
+  );
+}
+
+export function restoreUnitChoices(container, choices) {
+  if (!choices || typeof choices !== "object") return;
+  for (const { key, select, wrap } of keyedUnitSelects(container)) {
+    const index = choices[key];
+    if (!(Number.isInteger(index) && index > 0 && index < select.options.length) || !wrap) continue;
+    select.selectedIndex = index;
+    const conversion = unitConversion(wrap);
+    wrap.querySelectorAll('input[type="number"]').forEach((input) => {
+      if (input.value.trim() === "") return;
+      input.value = fromDeclaredUnit(input.value, conversion, { uncertainty: /-u/.test(input.className) });
+    });
+    select.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
 export function givenValueInputHtml(q, inputClass = "measure-given-value") {
   const n = Number(q.slot_count);
   const attrs = q.slot_count ? `min="1" max="${n}" step="1"` : `step="any"`;

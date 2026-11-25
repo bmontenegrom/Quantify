@@ -30,6 +30,17 @@ async function studentSubmitsP1(page) {
   await uUnit.selectOption({ label: "mm" });
   await lRow.locator(".measure-given-value").fill("100");
   await lRow.locator(".measure-given-u").fill("2");
+
+  step("estudiante: al recargar, el borrador conserva la unidad elegida y lo tipeado");
+  await page.waitForTimeout(600);
+  await page.reload();
+  await page.click('#practice-nav-children .nav-child:has-text("Tratamiento estad")');
+  await page.waitForSelector(".measurement-row--chrono");
+  await page.selectOption("#table-select", "1");
+  await lRow.locator(".measure-given-value").waitFor();
+  const restored = await lRow.evaluate((row) => [...row.querySelectorAll(".replica-input-wrap")].map((w) =>
+    `${w.querySelector("input").value} ${w.querySelector(".unit-select").selectedOptions[0].textContent}`));
+  assert(restored.join(" / ") === "100 cm / 2 mm", `el borrador debía volver como 100 cm / 2 mm (vi: ${restored.join(" / ")})`);
   const tMedRow = page.locator('.measurement-row--given:has-text("semiamplitud")');
   await tMedRow.locator(".measure-given-value").fill("12.5");
   assert(

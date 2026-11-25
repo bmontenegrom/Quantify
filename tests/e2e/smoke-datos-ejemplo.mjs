@@ -36,20 +36,28 @@ async function tryWithExampleData(page, practiceId) {
   page.removeAllListeners("dialog");
   await page.click("#draft-preview-back");
   await openPreview(page, practiceId);
-  let askedIncomplete = false;
   const incomplete = page.locator("#measurement-fields .series-value:visible").first();
-  const seriesRow = (await incomplete.count()) > 0;
   const unitSelect = page.locator("#measurement-fields .unit-select:visible").first();
-  if (seriesRow) await incomplete.fill("12345");
-  else if ((await unitSelect.count()) > 0) await unitSelect.selectOption({ index: 1 });
-  else {
-    const value = page.locator("#measurement-fields :is(.measure-value, .measure-given-value):visible").first();
-    if ((await value.count()) > 0) await value.fill("12345");
-    else askedIncomplete = true;
+  const value = page.locator("#measurement-fields :is(.measure-value, .measure-given-value):visible").first();
+  let edited = null;
+  if ((await incomplete.count()) > 0) {
+    await incomplete.fill("12345");
+    edited = "una fila de serie incompleta";
+  } else if ((await unitSelect.count()) > 0) {
+    await unitSelect.selectOption({ index: 1 });
+    edited = "un cambio de unidad";
+  } else if ((await value.count()) > 0) {
+    await value.fill("12345");
+    edited = "un valor ya cargado";
   }
-  page.once("dialog", (d) => { askedIncomplete = true; return d.accept(); });
-  await page.click("#draft-preview-fill");
-  assert(askedIncomplete, `${practiceId}: ${seriesRow ? "una fila de serie incompleta" : "un cambio de unidad"} debía pedir confirmación`);
+  if (edited) {
+    let asked = false;
+    page.once("dialog", (d) => { asked = true; return d.accept(); });
+    await page.click("#draft-preview-fill");
+    assert(asked, `${practiceId}: ${edited} debía pedir confirmación`);
+  } else {
+    await page.click("#draft-preview-fill");
+  }
   const changedUnits = await page.$$eval("#measurement-fields .unit-select", (all) => all.filter((s) => s.selectedIndex !== 0).length);
   assert(changedUnits === 0, `${practiceId}: los datos de ejemplo están en la unidad declarada; ${changedUnits} desplegables quedaron en otra`);
   const scaleless = await page.$$eval("#measurement-fields .measure-selectors", (all) =>

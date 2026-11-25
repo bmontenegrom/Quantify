@@ -8,6 +8,7 @@ import {
   unitSelectHtml,
   unitConversion,
   toDeclaredUnit,
+  fromDeclaredUnit,
 } from "../static/forms-shared.js";
 import { state } from "../static/state.js";
 
@@ -93,4 +94,10 @@ test("toDeclaredUnit: convierte sin ruido de coma flotante y la U ignora el desp
   assert.equal(toDeclaredUnit("20", wrap("1", "273.15")), 293.15);
   assert.equal(toDeclaredUnit("0.5", wrap("1", "273.15"), { uncertainty: true }), 0.5);
   assert.ok(Number.isNaN(toDeclaredUnit("abc", wrap("1", "0"))));
+});
+
+test("fromDeclaredUnit deshace toDeclaredUnit, con la U sin desplazamiento", () => {
+  assert.equal(fromDeclaredUnit(1, { factor: 0.01, offset: 0 }), 100);
+  assert.equal(fromDeclaredUnit(293.15, { factor: 1, offset: 273.15 }), 20);
+  assert.equal(fromDeclaredUnit(0.5, { factor: 1, offset: 273.15 }, { uncertainty: true }), 0.5);
 });

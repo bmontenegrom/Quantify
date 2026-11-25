@@ -14,7 +14,7 @@ import {
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
-  givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, toDeclaredUnit, populateScaleOptions,
+  givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, toDeclaredUnit, restoreUnitChoices, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
   formHelpHtml, partHelpHtml, columnSections, instrumentSelectorsHtml, wireInstrumentSelectors,
   retiredInstrumentNote,
@@ -185,6 +185,7 @@ export async function loadSubmissionForm() {
     renderMeasurementFields(draft);
     applyPrefill();
     applyDraftPrefill(draft);
+    restoreUnitChoices(measurementFields, draft?.units);
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
     if (fillButton && previewing) fillButton.disabled = false;
