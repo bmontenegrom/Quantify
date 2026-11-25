@@ -1293,8 +1293,8 @@ Decisiones:
      en °C sobre una magnitud en K.
 3. **`refactor(unidades)`: una sola lógica de prefijos y de conversión (F10, 3a/4).** ✅
    - `split_prefix` da el prefijo y la base de un símbolo; lo usan `symbol_unit` y `unprefixed`.
-     `PREFIXES` guarda la potencia de 10 de cada prefijo, y los prefijos de entrada se derivan de
-     ahí (los de potencia múltiplo de 3).
+     `PREFIXES` guarda la potencia de 10 y el factor exacto de cada prefijo, y los prefijos de
+     entrada se derivan de ahí (los de potencia múltiplo de 3).
    - Los prefijos ofrecidos son razonables, contando desde la unidad declarada: en una unidad
      simple, hasta 12 órdenes de magnitud contando el exponente (`cm2` → `mm2`, `km2`, no `Mm2`);
      en una compuesta, hasta 3 (`µm/s` → `nm/s`, `mm/s`; `kg.m/s2` → `g.m/s2`, `Mg.m/s2`).

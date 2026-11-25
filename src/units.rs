@@ -63,19 +63,19 @@ const BASES: &[Base] = &[
     ),
 ];
 
-const PREFIXES: &[(&str, i32)] = &[
-    ("p", -12),
-    ("n", -9),
-    ("µ", -6),
-    ("u", -6),
-    ("m", -3),
-    ("c", -2),
-    ("d", -1),
-    ("h", 2),
-    ("k", 3),
-    ("M", 6),
-    ("G", 9),
-    ("T", 12),
+const PREFIXES: &[(&str, i32, f64)] = &[
+    ("p", -12, 1e-12),
+    ("n", -9, 1e-9),
+    ("µ", -6, 1e-6),
+    ("u", -6, 1e-6),
+    ("m", -3, 1e-3),
+    ("c", -2, 1e-2),
+    ("d", -1, 1e-1),
+    ("h", 2, 1e2),
+    ("k", 3, 1e3),
+    ("M", 6, 1e6),
+    ("G", 9, 1e9),
+    ("T", 12, 1e12),
 ];
 
 const SEPARATORS: [char; 5] = ['/', '.', '·', '*', ' '];
@@ -83,7 +83,7 @@ const SEPARATORS: [char; 5] = ['/', '.', '·', '*', ' '];
 static INPUT_PREFIXES: std::sync::LazyLock<Vec<(&str, i32)>> = std::sync::LazyLock::new(|| {
     let mut prefixes: Vec<(&str, i32)> = PREFIXES
         .iter()
-        .copied()
+        .map(|&(prefix, power, _)| (prefix, power))
         .filter(|(prefix, power)| *prefix != "u" && power % 3 == 0)
         .chain([("", 0)])
         .collect();
@@ -156,21 +156,21 @@ fn lookup(symbol: &str) -> Option<(Unit, bool)> {
     })
 }
 
-fn split_prefix(symbol: &str) -> Option<(&'static str, i32, Unit)> {
-    PREFIXES.iter().find_map(
-        |(prefix, power)| match lookup(symbol.strip_prefix(prefix)?) {
-            Some((unit, true)) => Some((*prefix, *power, unit)),
+fn split_prefix(symbol: &str) -> Option<(&'static str, i32, f64, Unit)> {
+    PREFIXES.iter().find_map(|&(prefix, power, factor)| {
+        match lookup(symbol.strip_prefix(prefix)?) {
+            Some((unit, true)) => Some((prefix, power, factor, unit)),
             _ => None,
-        },
-    )
+        }
+    })
 }
 
 fn symbol_unit(symbol: &str) -> Option<Unit> {
     if let Some((unit, _)) = lookup(symbol) {
         return Some(unit);
     }
-    split_prefix(symbol).map(|(_, power, unit)| Unit {
-        factor: unit.factor * 10f64.powi(power),
+    split_prefix(symbol).map(|(_, _, factor, unit)| Unit {
+        factor: unit.factor * factor,
         ..unit
     })
 }
@@ -391,7 +391,7 @@ fn unprefixed(declared: &str) -> Option<(&str, i32, i32)> {
         Some((_, true)) => Some((declared, exponent, 0)),
         Some((_, false)) => None,
         None => split_prefix(symbol)
-            .map(|(prefix, power, _)| (&declared[prefix.len()..], exponent, power)),
+            .map(|(prefix, power, _, _)| (&declared[prefix.len()..], exponent, power)),
     }
 }
 
