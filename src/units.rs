@@ -699,6 +699,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn every_constant_of_the_catalog_is_usable() {
+        let catalog: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../static/constants.json")).unwrap();
+        assert!(catalog.len() >= 18);
+        for c in &catalog {
+            let unit = c["unit"].as_str().unwrap();
+            assert!(parse(unit).is_some(), "no reconoce {unit:?}");
+            if let Some(q) = c["quantity"].as_str() {
+                assert_eq!(crate::magnitudes::canonical(q), q);
+            }
+            assert!(c["value"].as_f64().is_some_and(f64::is_finite), "{c}");
+            assert!(
+                c["u"].is_null() || c["u"].as_f64().is_some_and(|u| u >= 0.0),
+                "{c}"
+            );
+            assert!(!c["source"].as_str().unwrap().trim().is_empty(), "{c}");
+        }
+    }
+
     #[tokio::test]
     async fn every_unit_of_the_seeded_instruments_is_recognized() {
         let (pool, _dir) = crate::computation::tests::setup().await;

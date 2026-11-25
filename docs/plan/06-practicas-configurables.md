@@ -1359,9 +1359,16 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
      también es el valor fijo.
    - El alumno ve `valor ± U unidad` como texto, sin campos ni desplegable de unidades.
    - Ninguna práctica de la biblioteca usa valor fijo todavía: los golden no cambian.
-3. **`feat(editor)`: catálogo de constantes.** `templates/constants.json` (CODATA / IUPAC: R,
-   N_A, F, k_B, g estándar, masas molares), `GET /api/constants` y "Desde el catálogo…" en
-   "Nueva magnitud", que precarga una constante fija.
+3. **`feat(editor)`: catálogo de constantes.** ✅
+   - `static/constants.json`, servido como archivo estático (sin ruta: son datos públicos y el
+     servidor no los usa). Exactas del SI 2019 como constantes sin U (N_A, k_B, R, F, e) y la
+     gravedad estándar; masas molares de 12 elementos comunes (IUPAC/CIAAW 2021) como dato de
+     cátedra con la incertidumbre de la tabla como U. Cada entrada anota su edición (`source`);
+     no se consulta ninguna fuente en vivo, el archivo se actualiza a mano en un PR.
+   - "Desde el catálogo" en el alta de magnitud precarga la constante como valor fijo; el
+     docente la revisa y la guarda.
+   - El alumno ve el valor fijo con todos sus dígitos, coma decimal y `× 10ⁿ` para lo muy grande
+     o muy chico (`exactNumber`).
 4. **`feat(editor)`: chequeo dimensional de fórmulas.** Infiere las dimensiones recorriendo el
    árbol de la fórmula y avisa si no dan la unidad declarada. Solo dimensiones, no escala; lo que
    no se reconoce no avisa; radianes cuentan como adimensionales.

@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, unitHtml, unitText, compatibleInstruments, POINT_KINDS, seriesPart, hasUncertainty } from "./lib.js";
+import { escapeHtml, unitHtml, unitText, compatibleInstruments, POINT_KINDS, seriesPart, hasUncertainty, exactNumber } from "./lib.js";
 
 export function formPracticeVersion(practiceId) {
   const definition = state.practiceForm?.definition;
@@ -157,7 +157,7 @@ export function isFixedGiven(q) {
 
 export function fixedGivenHtml(q, legend) {
   const u = hasUncertainty(q) ? q.default_u : null;
-  const text = `${q.default_value}${u != null ? ` ± ${u}` : ""}`;
+  const text = `${exactNumber(q.default_value)}${u != null ? ` ± ${exactNumber(u)}` : ""}`;
   return `
     <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1"
       data-fixed-value="${escapeHtml(String(q.default_value))}" data-fixed-u="${u ?? ""}">

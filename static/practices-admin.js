@@ -2,6 +2,7 @@ import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
 import { MAGNITUDES_LIST, ensureMagnitudesList } from "./magnitudes.js";
+import { constantPickerHtml, ensureConstants, applyConstant } from "./constants.js";
 import {
   escapeHtml,
   symbolHtml,
@@ -336,6 +337,7 @@ async function deleteSymbolFormulaRow(kind, id, practiceId) {
 
 export function renderPracticesPage() {
   ensureMagnitudesList();
+  ensureConstants();
   const discarded = dropped;
   dropped = new Set();
   renderPracticeDirectory();
@@ -559,6 +561,9 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("#new-quantity-form, [data-edit-quantity-form]").forEach((form) => {
     syncQuantityForm(form, { initial: true });
     form.addEventListener("input", () => syncQuantityForm(form));
+  });
+  practiceWorkspace.querySelectorAll("[data-constant-picker]").forEach((select) => {
+    select.addEventListener("change", () => applyConstant(select.form, select.value));
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
     btn.addEventListener("click", () => toggleEditing("result", btn.dataset.rid));
@@ -1365,7 +1370,7 @@ function renderQuantityForm(qty, practiceId) {
   return `
     <form id="${formId}" class="detail-form detail-form-grid" ${formAttr} ${kept}>
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
-      ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : ""}
+      ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : constantPickerHtml()}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="l" /></label>
       ${displaySymbolFieldHtml(qty)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Longitud del cordón" /></label>

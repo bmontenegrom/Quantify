@@ -53,8 +53,9 @@ export function unitHtml(value) {
 
 const SUPERSCRIPTS = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
 
+const sup = (digits) => [...digits].map((c) => SUPERSCRIPTS[c]).join("");
+
 export function unitText(value) {
-  const sup = (digits) => [...digits].map((c) => SUPERSCRIPTS[c]).join("");
   return String(value ?? "")
     .replace(/\^(-?\d+)/g, (_, d) => sup(d))
     .replace(/([A-Za-zµΩ]+)(-?\d+)/g, (_, base, d) => base + sup(d));
@@ -65,6 +66,15 @@ export function cssEscape(value) {
     return window.CSS.escape(String(value));
   }
   return String(value).replaceAll('"', '\\"');
+}
+
+export function exactNumber(value) {
+  const v = Number(value);
+  if (v !== 0 && (Math.abs(v) >= 1e6 || Math.abs(v) < 1e-4)) {
+    const [mantissa, exponent] = v.toExponential().split("e");
+    return `${mantissa.replace(".", ",")} × 10${sup(String(Number(exponent)))}`;
+  }
+  return String(v).replace(".", ",");
 }
 
 export function format(value) {

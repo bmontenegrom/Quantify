@@ -17,6 +17,7 @@ import {
   unitText,
   cssEscape,
   format,
+  exactNumber,
   formatDate,
   groupBy,
   renderGroupType,
@@ -1123,4 +1124,16 @@ test("validateMeasurements: en una práctica de series las determinaciones se va
   assert.equal(validateMeasurements([x, T([[1], [2]])], "regresion_lineal", meta), null);
   assert.match(validateMeasurements([x, T([[1], []])], "regresion_lineal", meta), /falta cargar Medida 2/);
   assert.match(validateMeasurements([x, T([])], "regresion_lineal", meta), /falta cargar Medida 1/);
+});
+
+test("exactNumber: todos los dígitos, coma decimal y potencia de 10 si es muy grande o muy chico", () => {
+  assert.equal(exactNumber(8.314462618), "8,314462618");
+  assert.equal(exactNumber(96485.33212), "96485,33212");
+  assert.equal(exactNumber(1), "1");
+  assert.equal(exactNumber(0), "0");
+  assert.equal(exactNumber(-0.002), "-0,002");
+  assert.equal(exactNumber(0.0002), "0,0002");
+  assert.equal(exactNumber(0.00002), "2 × 10⁻⁵");
+  assert.equal(exactNumber(6.02214076e23), "6,02214076 × 10²³");
+  assert.equal(exactNumber(1.380649e-23), "1,380649 × 10⁻²³");
 });

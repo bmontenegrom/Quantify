@@ -1,0 +1,20 @@
+[
+  { "symbol": "N_A", "name": "Constante de Avogadro", "unit": "mol-1", "quantity": null, "value": 6.02214076e23, "u": null, "source": "SI 2019 (exacta)" },
+  { "symbol": "k_B", "name": "Constante de Boltzmann", "unit": "J/K", "quantity": null, "value": 1.380649e-23, "u": null, "source": "SI 2019 (exacta)" },
+  { "symbol": "R", "name": "Constante de los gases", "unit": "J/(mol.K)", "quantity": null, "value": 8.314462618, "u": null, "source": "SI 2019 (exacta)" },
+  { "symbol": "F", "name": "Constante de Faraday", "unit": "A.s/mol", "quantity": null, "value": 96485.33212, "u": null, "source": "SI 2019 (exacta)" },
+  { "symbol": "e", "name": "Carga elemental", "unit": "A.s", "quantity": null, "value": 1.602176634e-19, "u": null, "source": "SI 2019 (exacta)" },
+  { "symbol": "g_n", "name": "Gravedad estándar", "unit": "m/s2", "quantity": "aceleracion", "value": 9.80665, "u": null, "source": "CGPM 1901 (exacta)" },
+  { "symbol": "M_H", "name": "Masa molar del hidrógeno", "unit": "g/mol", "quantity": "masa molar", "value": 1.008, "u": 0.0002, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_C", "name": "Masa molar del carbono", "unit": "g/mol", "quantity": "masa molar", "value": 12.011, "u": 0.002, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_N", "name": "Masa molar del nitrógeno", "unit": "g/mol", "quantity": "masa molar", "value": 14.007, "u": 0.001, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_O", "name": "Masa molar del oxígeno", "unit": "g/mol", "quantity": "masa molar", "value": 15.999, "u": 0.001, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_Na", "name": "Masa molar del sodio", "unit": "g/mol", "quantity": "masa molar", "value": 22.990, "u": 0.001, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_Mg", "name": "Masa molar del magnesio", "unit": "g/mol", "quantity": "masa molar", "value": 24.305, "u": 0.002, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_S", "name": "Masa molar del azufre", "unit": "g/mol", "quantity": "masa molar", "value": 32.06, "u": 0.02, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_Cl", "name": "Masa molar del cloro", "unit": "g/mol", "quantity": "masa molar", "value": 35.45, "u": 0.01, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_K", "name": "Masa molar del potasio", "unit": "g/mol", "quantity": "masa molar", "value": 39.098, "u": 0.001, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_Ca", "name": "Masa molar del calcio", "unit": "g/mol", "quantity": "masa molar", "value": 40.078, "u": 0.004, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_Fe", "name": "Masa molar del hierro", "unit": "g/mol", "quantity": "masa molar", "value": 55.845, "u": 0.002, "source": "IUPAC/CIAAW 2021" },
+  { "symbol": "M_Cu", "name": "Masa molar del cobre", "unit": "g/mol", "quantity": "masa molar", "value": 63.546, "u": 0.003, "source": "IUPAC/CIAAW 2021" }
+]
