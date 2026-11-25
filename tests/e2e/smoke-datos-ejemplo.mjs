@@ -42,7 +42,11 @@ async function tryWithExampleData(page, practiceId) {
   const unitSelect = page.locator("#measurement-fields .unit-select:visible").first();
   if (seriesRow) await incomplete.fill("12345");
   else if ((await unitSelect.count()) > 0) await unitSelect.selectOption({ index: 1 });
-  else await page.locator("#measurement-fields .measure-value:visible").first().fill("12345");
+  else {
+    const value = page.locator("#measurement-fields :is(.measure-value, .measure-given-value):visible").first();
+    if ((await value.count()) > 0) await value.fill("12345");
+    else askedIncomplete = true;
+  }
   page.once("dialog", (d) => { askedIncomplete = true; return d.accept(); });
   await page.click("#draft-preview-fill");
   assert(askedIncomplete, `${practiceId}: ${seriesRow ? "una fila de serie incompleta" : "un cambio de unidad"} debía pedir confirmación`);

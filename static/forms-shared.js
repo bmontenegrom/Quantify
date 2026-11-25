@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, unitHtml, compatibleInstruments, POINT_KINDS, seriesPart } from "./lib.js";
+import { escapeHtml, unitHtml, unitText, compatibleInstruments, POINT_KINDS, seriesPart } from "./lib.js";
 
 export function formPracticeVersion(practiceId) {
   const definition = state.practiceForm?.definition;
@@ -92,7 +92,7 @@ export function unitSelectHtml(units, { text = true } = {}) {
   const options = units
     .map(
       (u, i) =>
-        `<option value="${i}" data-factor="${u.factor}" data-offset="${u.offset}"${i === 0 ? " selected" : ""}>${escapeHtml(u.label)}</option>`,
+        `<option value="${i}" data-factor="${u.factor}" data-offset="${u.offset}"${i === 0 ? " selected" : ""}>${escapeHtml(unitText(u.label))}</option>`,
     )
     .join("");
   return `<select class="unit-select" title="Unidad">${options}</select>`;

@@ -51,6 +51,15 @@ export function unitHtml(value) {
     .replace(/([A-Za-zµΩ]+)(-?\d+)/g, "$1<sup>$2</sup>");
 }
 
+const SUPERSCRIPTS = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
+
+export function unitText(value) {
+  const sup = (digits) => [...digits].map((c) => SUPERSCRIPTS[c]).join("");
+  return String(value ?? "")
+    .replace(/\^(-?\d+)/g, (_, d) => sup(d))
+    .replace(/([A-Za-zµΩ]+)(-?\d+)/g, (_, base, d) => base + sup(d));
+}
+
 export function cssEscape(value) {
   if (typeof window !== "undefined" && window.CSS?.escape) {
     return window.CSS.escape(String(value));

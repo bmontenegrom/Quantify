@@ -14,6 +14,7 @@ import {
   setDisplaySymbols,
   inlineMathHtml,
   unitHtml,
+  unitText,
   cssEscape,
   format,
   formatDate,
@@ -177,6 +178,10 @@ test("inlineMathHtml y unitHtml formatean subíndices y superíndices visibles",
   assert.equal(unitHtml("kg/m3"), "kg/m<sup>3</sup>");
   assert.equal(unitHtml("m/s2"), "m/s<sup>2</sup>");
   assert.equal(unitHtml("R^2"), "R<sup>2</sup>");
+  assert.equal(unitText("cm3"), "cm³");
+  assert.equal(unitText("kg/m3"), "kg/m³");
+  assert.equal(unitText("m.s-2"), "m.s⁻²");
+  assert.equal(unitText("mol/L"), "mol/L");
 });
 
 test("cssEscape cae al escape de comillas sin window (Node)", () => {

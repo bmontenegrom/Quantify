@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, format, num, canReview, hasUncertainty, analysisSections, determinationsFor, expandDeterminationResults } from "./lib.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, unitHtml, unitText, format, num, canReview, hasUncertainty, analysisSections, determinationsFor, expandDeterminationResults } from "./lib.js";
 import { columnSections, definitionParts, definitionSections, formHelpHtml, partHelpHtml, formPracticeVersion, givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, unitSelectHtml, instrumentSelectorsHtml, wireInstrumentSelectors, replicaInputHtml, cellReplicaValues } from "./forms-shared.js";
 import { chronoHelperSectionHtml, wireChronoHelpers } from "./forms-chrono.js";
 import { quantityNameHtml, wireMeasurementRow, collectMeasurements, finalResultRowHtml } from "./forms.js";
@@ -207,7 +207,7 @@ export function seriesRowHtml(cols) {
       const n = q.repeated ? Number(q.replicas_per_point) || 0 : 0;
       if (n > 0) {
         const inputs = Array.from({ length: n }, (_, k) => replicaInputHtml(q.id, k)).join("");
-        return `<td class="series-cell series-cell--replicas" style="--replicas: ${n}"><div class="series-input-wrap"><div class="series-replica-group">${inputs}</div>${unitSelectHtml(quantityUnits(q), { text: false })}</div><span class="series-mean submission-meta" data-unit="${escapeHtml(quantityUnits(q)[0]?.label ?? "")}">x̄ —</span></td>`;
+        return `<td class="series-cell series-cell--replicas" style="--replicas: ${n}"><div class="series-input-wrap"><div class="series-replica-group">${inputs}</div>${unitSelectHtml(quantityUnits(q), { text: false })}</div><span class="series-mean submission-meta" data-unit="${escapeHtml(unitText(quantityUnits(q)[0]?.label))}">x̄ —</span></td>`;
       }
       return `<td class="series-cell"><div class="series-input-wrap"><input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" />${unitSelectHtml(quantityUnits(q), { text: false })}</div></td>`;
     })
