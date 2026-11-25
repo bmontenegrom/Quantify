@@ -1316,10 +1316,15 @@ Decisiones:
      distinto** (un `dT` en K no se informa en °C).
    - `mm2`, `cm2` y `m2` se suman a las candidatas (los prefijos de entrada son solo los de
      potencia múltiplo de 3, así que `m2` no ofrecía `cm2`).
-5. **`feat(editor)`: el docente ve si la unidad se reconoce (F10, 4/4).**
-   - Aviso en el panel de problemas para unidades que no se reconocen, y vista previa de las
-     unidades de entrada en la magnitud.
-   - "Comparar con" acepta unidades compatibles y la comparación medido vs teórico convierte.
+5. **`feat(editor)`: el docente ve si la unidad se reconoce (F10, 4/4).** ✅
+   - Aviso en el panel de problemas para unidades que no se reconocen (magnitudes, mensurandos,
+     intermedias, derivadas por punto y agregados), en un bloque "Avisos" aparte: **no bloquea
+     publicar** (`div` es legítima). En la lista de magnitudes y mensurandos se ven las otras
+     unidades en que el alumno puede cargar (solo lo guardado, no mientras se tipea).
+   - "Comparar con" acepta unidades compatibles (igual texto, o las dos reconocidas y
+     compatibles; vacía solo con vacía). El servidor manda la conversión de cada par
+     (`resolved.comparisons` y `comparisons` de la entrega, `{ with, factor, offset }`) y la
+     tabla medido vs teórico pasa lo medido a la unidad del mensurando.
 
 Quedan para después: chequeo dimensional de fórmulas, constantes, interpolación inversa y
 sinónimos de magnitud (`tension`/`voltaje`).
