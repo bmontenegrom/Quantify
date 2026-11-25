@@ -14,7 +14,7 @@ import {
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
-  givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, unitConversion, populateScaleOptions,
+  givenValueInputHtml, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, toDeclaredUnit, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
   formHelpHtml, partHelpHtml, columnSections, instrumentSelectorsHtml, wireInstrumentSelectors,
   retiredInstrumentNote,
@@ -653,11 +653,10 @@ export function collectFinalResults() {
     const uInput = row.querySelector(".final-result-u");
     const rawVal = valInput.value.trim();
     if (rawVal === "") return acc;
-    const conversion = unitConversion(valInput.closest(".replica-input-wrap"));
-    const value = Number(rawVal) * conversion.factor + conversion.offset;
+    const value = toDeclaredUnit(rawVal, valInput.closest(".replica-input-wrap"));
     if (!Number.isFinite(value)) return acc;
     const rawU = uInput?.value.trim() ?? "";
-    const u = rawU === "" ? null : Number(rawU) * unitConversion(uInput.closest(".replica-input-wrap")).factor;
+    const u = rawU === "" ? null : toDeclaredUnit(rawU, uInput.closest(".replica-input-wrap"), { uncertainty: true });
     acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
     return acc;
   }, []);
@@ -666,7 +665,10 @@ export function collectFinalResults() {
 
 export function wireReplicaRow(row) {
   row.querySelector(".add-replica")?.addEventListener("click", () => {
+    const previous = [...row.querySelectorAll(".replica .unit-select")].at(-1);
     row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(rowUnits(row)));
+    const added = [...row.querySelectorAll(".replica .unit-select")].at(-1);
+    if (previous && added) added.selectedIndex = previous.selectedIndex;
     wireRemoveReplica(row);
   });
   wireRemoveReplica(row);
@@ -713,8 +715,7 @@ export function collectMeasurements() {
         }
         const input = cell.querySelector(".series-value");
         const raw = input.value.trim();
-        const { factor, offset } = unitConversion(cell);
-        const v = raw === "" ? NaN : Number(raw) * factor + offset;
+        const v = raw === "" ? NaN : toDeclaredUnit(raw, cell);
         return { id: input.dataset.quantityId, value: v, ok: Number.isFinite(v) };
       });
       if (parsed.some((p) => !p.ok)) return;
@@ -770,7 +771,7 @@ function sharedGivenU(container) {
   const input = container.querySelector(".measure-given-u");
   const raw = input?.value.trim() ?? "";
   if (raw === "") return null;
-  const u = Number(raw) * unitConversion(input.closest(".replica-input-wrap")).factor;
+  const u = toDeclaredUnit(raw, input.closest(".replica-input-wrap"), { uncertainty: true });
   return Number.isFinite(u) ? u : null;
 }
 
@@ -778,12 +779,10 @@ function collectStandaloneRow(row) {
   if (row.dataset.isGiven === "1") {
     const valInput = row.querySelector(".measure-given-value");
     const uInput = row.querySelector(".measure-given-u");
-    const conversionOf = (input) => unitConversion(input?.closest(".replica-input-wrap"));
     const rawVal = valInput.value.trim();
     const rawU = uInput?.value.trim() ?? "";
-    const { factor, offset } = conversionOf(valInput);
-    const value = rawVal === "" ? null : Number(rawVal) * factor + offset;
-    const given_u = rawU === "" ? null : Number(rawU) * conversionOf(uInput).factor;
+    const value = rawVal === "" ? null : toDeclaredUnit(rawVal, valInput.closest(".replica-input-wrap"));
+    const given_u = rawU === "" ? null : toDeclaredUnit(rawU, uInput.closest(".replica-input-wrap"), { uncertainty: true });
     return {
       quantity_id: row.dataset.quantityId,
       instrument_id: null,
@@ -813,8 +812,7 @@ function rowSeriesValues(row) {
   return [...row.querySelectorAll(".replica")].reduce((acc, replica) => {
     const raw = replica.querySelector(".measure-value").value.trim();
     if (raw === "") return acc;
-    const { factor, offset } = unitConversion(replica);
-    const n = Number(raw) * factor + offset;
+    const n = toDeclaredUnit(raw, replica);
     if (Number.isFinite(n)) acc.push(n);
     return acc;
   }, []);

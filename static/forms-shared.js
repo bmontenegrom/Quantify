@@ -105,6 +105,11 @@ export function unitConversion(wrap) {
     : { factor: 1, offset: 0 };
 }
 
+export function toDeclaredUnit(raw, wrap, { uncertainty = false } = {}) {
+  const { factor, offset } = unitConversion(wrap);
+  return Number((Number(raw) * factor + (uncertainty ? 0 : offset)).toPrecision(15));
+}
+
 export function givenValueInputHtml(q, inputClass = "measure-given-value") {
   const n = Number(q.slot_count);
   const attrs = q.slot_count ? `min="1" max="${n}" step="1"` : `step="any"`;
@@ -179,9 +184,8 @@ export function replicaInputHtml(quantityId, k) {
 }
 
 export function cellReplicaValues(cell) {
-  const { factor, offset } = unitConversion(cell);
   return [...cell.querySelectorAll(".series-replica")]
     .map((input) => input.value.trim())
     .filter((raw) => raw !== "")
-    .map((raw) => Number(raw) * factor + offset);
+    .map((raw) => toDeclaredUnit(raw, cell));
 }

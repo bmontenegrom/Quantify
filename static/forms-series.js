@@ -83,7 +83,12 @@ export function renderSeriesTable(definition, quantityRowHtml) {
   measurementFields.querySelectorAll(".shared-quantities .measurement-row:not([data-final-result])").forEach(wireMeasurementRow);
   wireInstrumentSelectors(measurementFields);
   measurementFields.querySelector(".add-series-row").addEventListener("click", () => {
-    measurementFields.querySelector(".series-table tbody").insertAdjacentHTML("beforeend", seriesRowHtml(cols));
+    const tbody = measurementFields.querySelector(".series-table tbody");
+    const previous = [...(tbody.lastElementChild?.querySelectorAll(".unit-select") ?? [])];
+    tbody.insertAdjacentHTML("beforeend", seriesRowHtml(cols));
+    tbody.lastElementChild.querySelectorAll(".unit-select").forEach((sel, i) => {
+      if (previous[i]) sel.selectedIndex = previous[i].selectedIndex;
+    });
     wireSeriesRemove();
     updateSeriesLive();
     schedulePreview();
@@ -202,7 +207,7 @@ export function seriesRowHtml(cols) {
       const n = q.repeated ? Number(q.replicas_per_point) || 0 : 0;
       if (n > 0) {
         const inputs = Array.from({ length: n }, (_, k) => replicaInputHtml(q.id, k)).join("");
-        return `<td class="series-cell series-cell--replicas" style="--replicas: ${n}"><div class="series-input-wrap"><div class="series-replica-group">${inputs}</div>${unitSelectHtml(quantityUnits(q), { text: false })}</div><span class="series-mean submission-meta">x̄ —</span></td>`;
+        return `<td class="series-cell series-cell--replicas" style="--replicas: ${n}"><div class="series-input-wrap"><div class="series-replica-group">${inputs}</div>${unitSelectHtml(quantityUnits(q), { text: false })}</div><span class="series-mean submission-meta" data-unit="${escapeHtml(quantityUnits(q)[0]?.label ?? "")}">x̄ —</span></td>`;
       }
       return `<td class="series-cell"><div class="series-input-wrap"><input class="series-value" type="number" step="any" data-quantity-id="${escapeHtml(q.id)}" placeholder="valor" />${unitSelectHtml(quantityUnits(q), { text: false })}</div></td>`;
     })
@@ -335,7 +340,7 @@ export function updateSeriesMeans() {
       return;
     }
     const mean = valid.reduce((a, b) => a + b, 0) / valid.length;
-    meanEl.textContent = `x̄ ${format(mean)} (n=${valid.length})`;
+    meanEl.textContent = `x̄ ${format(mean)}${meanEl.dataset.unit ? ` ${meanEl.dataset.unit}` : ""} (n=${valid.length})`;
   });
 }
 

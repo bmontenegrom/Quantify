@@ -573,6 +573,11 @@ mod tests {
         assert_eq!(labels("cm2"), ["cm2", "mm2", "m2"]);
         let volume = labels("m3");
         assert!(volume.contains(&"L".to_string()) && !volume.contains(&"Mm3".to_string()));
+        let quartic = labels("m4");
+        assert!(quartic.contains(&"km4".to_string()), "{quartic:?}");
+        assert!(quartic.contains(&"mm4".to_string()), "{quartic:?}");
+        assert!(!quartic.contains(&"Mm4".to_string()), "{quartic:?}");
+        assert!(!quartic.contains(&"µm4".to_string()), "{quartic:?}");
         let force = labels("kg.m/s2");
         assert!(force.contains(&"g.m/s2".to_string()), "{force:?}");
         assert!(!force.contains(&"mg.m/s2".to_string()), "{force:?}");

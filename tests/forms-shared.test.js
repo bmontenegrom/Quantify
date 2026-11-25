@@ -7,6 +7,7 @@ import {
   inputUnits,
   unitSelectHtml,
   unitConversion,
+  toDeclaredUnit,
 } from "../static/forms-shared.js";
 import { state } from "../static/state.js";
 
@@ -84,4 +85,12 @@ test("unitConversion: factor y desplazamiento de la unidad elegida, o ninguno", 
   assert.deepEqual(unitConversion(wrap({ factor: "1", offset: "273.15" })), { factor: 1, offset: 273.15 });
   assert.deepEqual(unitConversion(wrap(null)), { factor: 1, offset: 0 });
   assert.deepEqual(unitConversion(null), { factor: 1, offset: 0 });
+});
+
+test("toDeclaredUnit: convierte sin ruido de coma flotante y la U ignora el desplazamiento", () => {
+  const wrap = (factor, offset) => ({ querySelector: () => ({ selectedOptions: [{ dataset: { factor, offset } }] }) });
+  assert.equal(toDeclaredUnit("3", wrap("0.1", "0")), 0.3);
+  assert.equal(toDeclaredUnit("20", wrap("1", "273.15")), 293.15);
+  assert.equal(toDeclaredUnit("0.5", wrap("1", "273.15"), { uncertainty: true }), 0.5);
+  assert.ok(Number.isNaN(toDeclaredUnit("abc", wrap("1", "0"))));
 });
