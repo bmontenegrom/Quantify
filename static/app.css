@@ -425,8 +425,9 @@ label {
   gap: 7px;
 }
 
-label[hidden] {
-  display: none !important;
+label[hidden],
+.detail-form-checkbox[hidden] {
+  display: none;
 }
 
 input,

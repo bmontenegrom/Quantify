@@ -1639,7 +1639,9 @@ function syncQuantityForm(form, { initial = false } = {}) {
     label.querySelector("input").disabled = !applies;
   });
   const temperature = form.querySelector("[data-for-temperature]");
-  temperature.hidden = elements.quantity.value.trim() !== "temperatura";
+  temperature.hidden =
+    elements.quantity.value.trim().toLowerCase() !== "temperatura" &&
+    !elements.temperature_difference.checked;
   temperature.querySelector("input").disabled = temperature.hidden;
 }
 

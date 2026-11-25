@@ -70,7 +70,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   assert(await shown("slot_count"), "un dato de cátedra admite ranuras");
   await role.selectOption("replicas");
   assert(!(await shown("temperature_difference")), "sin magnitud física temperatura no se pregunta si es una diferencia");
-  await quantityForm.locator('[name="quantity"]').fill("temperatura");
+  await quantityForm.locator('[name="quantity"]').fill(" Temperatura ");
   assert(await shown("temperature_difference"), "una temperatura pregunta si es una diferencia");
   await quantityForm.locator('[name="quantity"]').fill("");
 
@@ -118,6 +118,17 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   assert(
     quantities.find((q) => q.symbol === "dT")?.temperature_difference === true,
     "dT debía quedar marcada como diferencia de temperatura",
+  );
+  await page.locator(`${row("dT")} [data-edit-quantity]`).click();
+  await fillAndSubmit(page, "#edit-quantity-form", { quantity: "", name: "Salto térmico" });
+  await page.waitForSelector(`${row("dT")}:has-text("Salto térmico")`);
+  const edited = await page.evaluate(
+    async (id) => (await (await fetch(`/api/practices/${id}/definition`)).json()).quantities,
+    ID,
+  );
+  assert(
+    edited.find((q) => q.symbol === "dT")?.temperature_difference === true,
+    "editar otra cosa no debía borrar la marca de diferencia",
   );
   await page.locator(`${row("dT")} [data-delete-quantity]`).click();
   await page.waitForSelector(row("dT"), { state: "detached" });
