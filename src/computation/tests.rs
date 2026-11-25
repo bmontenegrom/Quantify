@@ -4066,3 +4066,90 @@ async fn per_determination_measurements_are_checked_against_the_determinations()
         .to_string();
     assert!(flat.contains("Medida 1"), "{flat}");
 }
+
+#[tokio::test]
+async fn a_submission_stores_and_computes_the_fixed_value_not_the_sent_one() {
+    let (pool, _dir) = setup().await;
+    p1_partes(&pool).await;
+    sqlx::query(
+        "UPDATE practice_quantities SET fixed = 1, default_value = 1.0, default_u = 0.002          WHERE practice_id = 'p1-partes' AND symbol = 'L'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    crate::practices::publish_version(&pool, "p1-partes", None)
+        .await
+        .unwrap()
+        .unwrap();
+    let course = db::create_course(
+        &pool,
+        db::CreateCourse {
+            name: "Curso".into(),
+            term: "2026".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let group = db::create_group(
+        &pool,
+        &course.id,
+        db::CreateGroup {
+            name: "Grupo 1".into(),
+            table_count: Some(4),
+            group_type: None,
+        },
+    )
+    .await
+    .unwrap();
+    let user = db::users(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|u| u.email == "docente@quantify.local")
+        .unwrap();
+    let def = crate::practices::definition(&pool, "p1-partes")
+        .await
+        .unwrap()
+        .unwrap();
+    let l_id = def
+        .quantities
+        .iter()
+        .find(|q| q.symbol == "L")
+        .unwrap()
+        .id
+        .clone();
+    let input = FormSubmissionInput {
+        course_id: course.id.clone(),
+        group_id: group.id.clone(),
+        practice_id: "p1-partes".into(),
+        measurements: vec![MeasurementInput {
+            quantity_id: l_id.clone(),
+            values: vec![5.0],
+            given_u: Some(99.0),
+            ..Default::default()
+        }],
+        meta: None,
+        table_number: None,
+        student_results: vec![],
+        student_comment: None,
+        practice_version: None,
+    };
+    let detail = create_form_submission(&pool, &user, input).await.unwrap();
+    let l = detail.analysis["quantities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|q| q["symbol"] == "L")
+        .unwrap();
+    assert_eq!(l["result"]["mean"], 1.0);
+    assert_eq!(l["result"]["u_c"], 0.002 / crate::uncertainty::EXPANSION_K);
+    let stored: (f64, Option<f64>) = sqlx::query_as(
+        "SELECT value, value_u FROM submission_measurements WHERE submission_id = ?1 AND quantity_id = ?2",
+    )
+    .bind(&detail.id)
+    .bind(&l_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, (1.0, Some(0.002)));
+}

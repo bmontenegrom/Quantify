@@ -1384,10 +1384,17 @@ function renderQuantityForm(qty, practiceId) {
         Opcional (puede quedar sin lecturas sin bloquear la entrega)
       </label>
       <label>Valor inicial
-        <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" title="Se precarga en el formulario del alumno" />
+        <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" title="Se precarga en el formulario del alumno; con valor fijo, es el valor" />
       </label>
       <label data-for-roles="catedra constante">Ranuras
         <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" title="El valor es un entero de 1 a N, en la unidad de la magnitud" />
+      </label>
+      <label class="detail-form-checkbox" data-for-roles="catedra constante">
+        <input type="checkbox" name="fixed" ${qty?.fixed ? "checked" : ""} />
+        Valor fijo (el alumno lo ve y no lo carga)
+      </label>
+      <label data-for-roles="catedra">U fija
+        <input name="default_u" type="number" min="0" step="any" value="${v("default_u")}" placeholder="solo con valor fijo" />
       </label>
       ${selectFieldHtml("Rótulo en el formulario", "label_mode", [
         ["nombre", "Nombre"],
@@ -1424,7 +1431,7 @@ function renderQuantitiesList(def, practiceId) {
         <td>${inlineMathHtml(q.name)}</td>
         <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}${inputUnitsHint(def, q.symbol)}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
-        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedFor(q))).short}${q.per_determination ? " · por determinación" : ""}</td>
+        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedFor(q))).short}${q.per_determination ? " · por determinación" : ""}${q.fixed ? " · fijo" : ""}</td>
         <td>${sectionSelectHtml(def, "quantities", q)}</td>
         <td class="directory-actions">
           ${moveButtonsHtml("quantities", q.id, i, quantities.length)}
@@ -1679,6 +1686,8 @@ function quantityPayloadFromForm(form) {
     label_mode: raw.label_mode,
     input_widget: raw.input_widget,
     default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
+    fixed: "fixed" in raw,
+    default_u: "default_u" in raw ? (raw.default_u === "" ? null : Number(raw.default_u)) : undefined,
   };
 }
 
