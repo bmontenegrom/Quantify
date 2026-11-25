@@ -9,6 +9,13 @@ where
     Option::<T>::deserialize(de).map(Some)
 }
 
+fn canonical_magnitude<'de, D>(de: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(de)?.map(|q| crate::magnitudes::canonical(&q)))
+}
+
 pub const LABEL_MODES: [&str; 3] = [DEFAULT_LABEL_MODE, "simbolo", "nombre_simbolo"];
 pub const INPUT_WIDGETS: [&str; 2] = [DEFAULT_INPUT_WIDGET, "cronometro"];
 const DEFAULT_LABEL_MODE: &str = "nombre";
@@ -22,6 +29,7 @@ pub struct QuantityInput {
     pub name: String,
     pub unit: String,
     pub repeated: bool,
+    #[serde(default, deserialize_with = "canonical_magnitude")]
     pub quantity: Option<String>,
     #[serde(default)]
     pub is_given: bool,
