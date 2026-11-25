@@ -149,7 +149,10 @@ fn validate_instrument(kind: &str, name: &str, quantity: &str, unit: &str) -> Re
     if !matches!(kind.trim(), "analogico" | "digital") {
         return Err(AppError::bad_request("kind debe ser analogico o digital"));
     }
-    if name.trim().is_empty() || quantity.trim().is_empty() || unit.trim().is_empty() {
+    if name.trim().is_empty()
+        || crate::magnitudes::canonical(quantity).is_empty()
+        || unit.trim().is_empty()
+    {
         return Err(AppError::bad_request("datos de instrumento invalidos"));
     }
     Ok(())
@@ -225,6 +228,7 @@ mod tests {
         assert!(validate_instrument("analogico", "Regla", "longitud", "mm").is_ok());
         assert!(validate_instrument("otro", "X", "q", "u").is_err());
         assert!(validate_instrument("digital", "  ", "q", "u").is_err());
+        assert!(validate_instrument("digital", "X", "\u{301}", "u").is_err());
     }
 
     #[test]

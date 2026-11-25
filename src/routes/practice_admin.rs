@@ -971,7 +971,7 @@ fn with_updated_quantity(
     if let Some(mode) = &input.label_mode {
         q.label_mode.clone_from(mode);
     }
-    let timed = input.magnitude().as_deref() == Some("tiempo") && !input.is_given;
+    let timed = q.quantity.as_deref() == Some("tiempo") && !input.is_given;
     q.input_widget = match &input.input_widget {
         Some(widget) if timed => widget.clone(),
         _ if timed => q.input_widget.clone(),

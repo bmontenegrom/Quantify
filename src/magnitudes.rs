@@ -29,6 +29,7 @@ pub const MAGNITUDES: &[(&str, &[&str])] = &[
 /// use quantify::magnitudes::canonical;
 /// assert_eq!(canonical(" Tensión  Eléctrica "), "voltaje");
 /// assert_eq!(canonical("Tensio\u{301}n"), "tension");
+/// assert_eq!(canonical("Taman\u{303}o"), canonical("tamaño"));
 /// assert_eq!(canonical("Diferencia  de potencial"), "voltaje");
 /// assert_eq!(canonical("Aceleración"), "aceleracion");
 /// assert_eq!(canonical("Caudal"), "caudal");
@@ -37,6 +38,7 @@ pub const MAGNITUDES: &[(&str, &[&str])] = &[
 pub fn canonical(text: &str) -> String {
     let plain: String = text
         .to_lowercase()
+        .replace("n\u{303}", "ñ")
         .chars()
         .filter(|c| !('\u{300}'..='\u{36f}').contains(c))
         .map(|c| match c {

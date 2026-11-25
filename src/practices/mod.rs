@@ -22,7 +22,6 @@ pub struct QuantityInput {
     pub name: String,
     pub unit: String,
     pub repeated: bool,
-    #[serde(default)]
     pub quantity: Option<String>,
     #[serde(default)]
     pub is_given: bool,
