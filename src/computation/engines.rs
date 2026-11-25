@@ -60,22 +60,23 @@ pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
 }
 
 fn scale_to_quantity(scale: &InstrumentScale, unit: &str) -> Result<(f64, f64), String> {
-    let (from, to) = (scale.unit.trim(), unit.trim());
-    if from.is_empty() || to.is_empty() || from == to {
-        return Ok((1.0, 0.0));
-    }
-    let why = match (crate::units::parse(from), crate::units::parse(to)) {
-        (Some(f), Some(t)) if f.compatible(&t) => {
-            return Ok((f.factor / t.factor, (t.offset - f.offset) / t.factor))
-        }
-        (Some(_), Some(_)) => format!("la escala mide en {from} y la magnitud está en {to}"),
-        (None, _) => format!("no se reconoce la unidad {from}"),
-        (_, None) => format!("no se reconoce la unidad {to}"),
-    };
-    Err(format!(
-        "{why}: la incertidumbre de la escala \"{}\" no se convirtió",
-        scale.label
-    ))
+    use crate::units::Mismatch;
+    crate::units::conversion(&scale.unit, unit)
+        .map(|(factor, offset)| (factor, -offset))
+        .map_err(|mismatch| {
+            let why = match mismatch {
+                Mismatch::Incompatible => format!(
+                    "la escala mide en {} y la magnitud está en {}",
+                    scale.unit.trim(),
+                    unit.trim()
+                ),
+                Mismatch::Unknown(u) => format!("no se reconoce la unidad {u}"),
+            };
+            format!(
+                "{why}: la incertidumbre de la escala \"{}\" no se convirtió",
+                scale.label
+            )
+        })
 }
 
 fn compute_quantities(

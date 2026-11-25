@@ -97,8 +97,6 @@ const CANDIDATES: &[&str] = &[
     "MPa", "°", "rad", "°/s", "rad/s", "%", "ppm", "ppb",
 ];
 
-const INPUT_PREFIXES: &[&str] = &["p", "n", "µ", "m", "", "k", "M", "G", "T"];
-
 impl Unit {
     /// Dos unidades son compatibles si miden lo mismo (mismas dimensiones).
     ///
@@ -145,19 +143,22 @@ fn lookup(symbol: &str) -> Option<(Unit, bool)> {
     })
 }
 
+fn split_prefix(symbol: &str) -> Option<(&'static str, f64, Unit)> {
+    PREFIXES.iter().find_map(
+        |(prefix, value)| match lookup(symbol.strip_prefix(prefix)?) {
+            Some((unit, true)) => Some((*prefix, *value, unit)),
+            _ => None,
+        },
+    )
+}
+
 fn symbol_unit(symbol: &str) -> Option<Unit> {
     if let Some((unit, _)) = lookup(symbol) {
         return Some(unit);
     }
-    PREFIXES.iter().find_map(|(prefix, value)| {
-        let rest = symbol.strip_prefix(prefix)?;
-        match lookup(rest) {
-            Some((unit, true)) => Some(Unit {
-                factor: unit.factor * value,
-                ..unit
-            }),
-            _ => None,
-        }
+    split_prefix(symbol).map(|(_, value, unit)| Unit {
+        factor: unit.factor * value,
+        ..unit
     })
 }
 
@@ -294,11 +295,19 @@ pub struct InputUnit {
     pub offset: f64,
 }
 
+fn affine(from: Unit, to: Unit) -> (f64, f64) {
+    (
+        from.factor / to.factor,
+        (from.offset - to.offset) / to.factor,
+    )
+}
+
 fn relative(label: &str, unit: Unit, declared: Unit) -> InputUnit {
+    let (factor, offset) = affine(unit, declared);
     InputUnit {
         label: label.to_string(),
-        factor: unit.factor / declared.factor,
-        offset: (unit.offset - declared.offset) / declared.factor,
+        factor,
+        offset,
     }
 }
 
@@ -331,8 +340,16 @@ pub fn input_units(declared: &str) -> Vec<InputUnit> {
             push_new(&mut out, relative(candidate, c, unit));
         }
     }
-    if let Some(base) = unprefixed(declared).filter(|_| out.len() == 1) {
-        for prefix in INPUT_PREFIXES {
+    if let Some((base, exponent, own)) = unprefixed(declared).filter(|_| out.len() == 1) {
+        let compound = declared.contains(['/', '.', '·', '*', ' ']);
+        let reasonable = |decades: i32| {
+            if compound {
+                decades.abs() <= 3
+            } else {
+                ((decades - own) * exponent).abs() <= 12
+            }
+        };
+        for (prefix, _) in input_prefixes().filter(|(_, d)| reasonable(*d)) {
             let label = format!("{prefix}{base}");
             if let Some(c) = parse(&label).filter(|c| c.compatible(&unit)) {
                 push_new(&mut out, relative(&label, c, unit));
@@ -353,18 +370,62 @@ fn push_new(out: &mut Vec<InputUnit>, input: InputUnit) {
     }
 }
 
-fn unprefixed(declared: &str) -> Option<&str> {
+fn input_prefixes() -> impl Iterator<Item = (&'static str, i32)> {
+    let mut prefixes: Vec<(&str, i32)> = PREFIXES
+        .iter()
+        .filter(|(prefix, _)| *prefix != "u")
+        .map(|(prefix, value)| (*prefix, value.log10().round() as i32))
+        .filter(|(_, decades)| decades % 3 == 0)
+        .chain([("", 0)])
+        .collect();
+    prefixes.sort_by_key(|(_, decades)| *decades);
+    prefixes.into_iter()
+}
+
+fn unprefixed(declared: &str) -> Option<(&str, i32, i32)> {
     let first = declared.split(['/', '.', '·', '*', ' ']).next()?;
-    let symbol = first.trim_end_matches(|c: char| c.is_ascii_digit() || c == '-' || c == '^');
+    let (_, exponent, symbol) = factor_unit(first)?;
     match lookup(symbol) {
-        Some((_, true)) => return Some(declared),
-        Some((_, false)) => return None,
-        None => {}
+        Some((_, true)) => Some((declared, exponent, 0)),
+        Some((_, false)) => None,
+        None => split_prefix(symbol).map(|(prefix, value, _)| {
+            (
+                &declared[prefix.len()..],
+                exponent,
+                value.log10().round() as i32,
+            )
+        }),
     }
-    PREFIXES.iter().find_map(|(prefix, _)| {
-        let rest = symbol.strip_prefix(prefix)?;
-        matches!(lookup(rest), Some((_, true))).then(|| &declared[prefix.len()..])
-    })
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Mismatch {
+    Incompatible,
+    Unknown(String),
+}
+
+/// Pasa de `from` a `to` como `valor·factor + offset`: vacía o igual no convierte.
+///
+/// ```
+/// use quantify::units::{conversion, Mismatch};
+/// assert_eq!(conversion("mm", "cm").map(|(f, _)| (f * 10.0).round()), Ok(1.0));
+/// assert_eq!(conversion("°C", "K"), Ok((1.0, 273.15)));
+/// assert_eq!(conversion("", "%"), Ok((1.0, 0.0)));
+/// assert_eq!(conversion("s", "g"), Err(Mismatch::Incompatible));
+/// assert_eq!(conversion("div", "mm"), Err(Mismatch::Unknown("div".into())));
+/// ```
+pub fn conversion(from: &str, to: &str) -> Result<(f64, f64), Mismatch> {
+    let (from, to) = (normalize(from), normalize(to));
+    let (from, to) = (from.trim(), to.trim());
+    if from.is_empty() || to.is_empty() || from == to {
+        return Ok((1.0, 0.0));
+    }
+    match (parse(from), parse(to)) {
+        (Some(f), Some(t)) if f.compatible(&t) => Ok(affine(f, t)),
+        (Some(_), Some(_)) => Err(Mismatch::Incompatible),
+        (None, _) => Err(Mismatch::Unknown(from.to_string())),
+        (_, None) => Err(Mismatch::Unknown(to.to_string())),
+    }
 }
 
 /// Factor para pasar un paso o una incertidumbre de `from` a `to`, si son unidades compatibles.
@@ -518,8 +579,19 @@ mod tests {
         assert!(labels("kg/m3").contains(&"g/cm3".to_string()));
         assert!(!labels("kg/m3").contains(&"g/mL".to_string()));
         assert!(labels("Pa").contains(&"MPa".to_string()));
-        let tiny = labels("TN/m");
-        assert!(tiny.contains(&"nN/m".to_string()), "{tiny:?}");
+        let area = labels("cm2");
+        for offered in ["mm2", "m2", "km2"] {
+            assert!(area.contains(&offered.to_string()), "{area:?}");
+        }
+        for absurd in ["Mm2", "Gm2", "Tm2"] {
+            assert!(!area.contains(&absurd.to_string()), "{area:?}");
+        }
+        let force = labels("kg.m/s2");
+        assert!(force.contains(&"g.m/s2".to_string()), "{force:?}");
+        assert!(!force.contains(&"Mg.m/s2".to_string()), "{force:?}");
+        let tiny = labels("N");
+        assert!(tiny.contains(&"pN".to_string()), "{tiny:?}");
+        assert!(tiny.contains(&"nN".to_string()), "{tiny:?}");
         let angular = labels("rad/s");
         assert!(angular.contains(&"°/s".to_string()), "{angular:?}");
         assert!(!angular.contains(&"Grad/s".to_string()), "{angular:?}");
@@ -554,10 +626,7 @@ mod tests {
             .find(|u| u.label == "g/cm3")
             .unwrap();
         assert!(close(g_cm3.factor, 1000.0));
-        assert_eq!(
-            labels("N/m"),
-            ["N/m", "pN/m", "nN/m", "µN/m", "mN/m", "kN/m", "MN/m", "GN/m", "TN/m"]
-        );
+        assert_eq!(labels("N/m"), ["N/m", "mN/m", "kN/m"]);
         assert!(labels("Pa.s").contains(&"mPa.s".to_string()));
         assert_eq!(labels("mPa.s")[0], "mPa.s");
         assert!(labels("mPa.s").contains(&"Pa.s".to_string()));
@@ -569,10 +638,7 @@ mod tests {
             .find(|u| u.label == "Pa.s")
             .unwrap();
         assert!(close(pa_s.factor, 1e3));
-        assert_eq!(
-            labels("m/s2"),
-            ["m/s2", "pm/s2", "nm/s2", "µm/s2", "mm/s2", "km/s2", "Mm/s2", "Gm/s2", "Tm/s2"]
-        );
+        assert_eq!(labels("m/s2"), ["m/s2", "mm/s2", "km/s2"]);
         assert_eq!(labels("div"), ["div"]);
         assert_eq!(labels("*"), ["*"]);
         assert_eq!(labels(""), [""]);
