@@ -308,6 +308,53 @@ pub(super) struct Problem {
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    warning: bool,
+}
+
+fn unit_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
+    let quantities = def
+        .quantities
+        .iter()
+        .map(|q| ("la magnitud", &q.symbol, &q.unit, "quantity", &q.id));
+    let results = def
+        .results
+        .iter()
+        .map(|r| ("el mensurando", &r.symbol, &r.unit, "result", &r.id));
+    let intermediates = def
+        .intermediates
+        .iter()
+        .map(|i| ("la intermedia", &i.symbol, &i.unit, "intermediate", &i.id));
+    let point_results = def.point_results.iter().map(|p| {
+        (
+            "la derivada por punto",
+            &p.symbol,
+            &p.unit,
+            "pointResult",
+            &p.id,
+        )
+    });
+    let aggregates = def
+        .aggregates
+        .iter()
+        .map(|a| ("el agregado", &a.symbol, &a.unit, "aggregate", &a.id));
+    quantities
+        .chain(results)
+        .chain(intermediates)
+        .chain(point_results)
+        .chain(aggregates)
+        .filter(|(_, _, unit, _, _)| crate::units::parse(unit).is_none())
+        .map(|(what, symbol, unit, kind, id)| Problem {
+            message: format!(
+                "{what} {symbol}: la unidad \"{}\" no se reconoce, así que no se ofrecen \
+                 otras unidades ni se convierte.",
+                unit.trim()
+            ),
+            kind,
+            id: Some(id.clone()),
+            warning: true,
+        })
+        .collect()
 }
 
 struct ElementProblem {
@@ -325,6 +372,7 @@ fn draft_problems(def: &practices::PracticeDefinition) -> Vec<Problem> {
             message,
             kind,
             id: None,
+            warning: false,
         });
     let mut seen = Vec::new();
     let elements = element_problems(def)
@@ -339,6 +387,7 @@ fn draft_problems(def: &practices::PracticeDefinition) -> Vec<Problem> {
             message: format!("{}: {}", p.element, p.message),
             kind: p.kind,
             id: p.id,
+            warning: false,
         });
     structure.chain(elements).collect()
 }
@@ -350,7 +399,9 @@ pub(super) async fn practice_problems(
 ) -> Result<Json<Vec<Problem>>, AppError> {
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &id).await?;
-    Ok(Json(draft_problems(&def)))
+    let mut problems = draft_problems(&def);
+    problems.extend(unit_warnings(&def));
+    Ok(Json(problems))
 }
 
 fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
@@ -3510,6 +3561,57 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn unit_warnings_flag_only_unrecognized_units_and_do_not_block_publishing() {
+        let quantity = |symbol: &str, unit: &str| db::PracticeQuantity {
+            id: format!("id-{symbol}"),
+            symbol: symbol.into(),
+            unit: unit.into(),
+            ..Default::default()
+        };
+        let def = practices::PracticeDefinition {
+            quantities: vec![quantity("a", "div"), quantity("b", "cm"), quantity("c", "")],
+            results: vec![db::PracticeResult {
+                id: "id-r".into(),
+                symbol: "r".into(),
+                unit: "cuentas/s".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let warnings = unit_warnings(&def);
+        let flagged: Vec<_> = warnings.iter().map(|w| w.id.as_deref()).collect();
+        assert_eq!(flagged, [Some("id-a"), Some("id-r")]);
+        assert!(warnings.iter().all(|w| w.warning));
+        assert!(
+            warnings[0].message.contains("\"div\""),
+            "{}",
+            warnings[0].message
+        );
+        assert!(!publish_problems(&def)
+            .iter()
+            .any(|p| p.contains("no se reconoce")));
+    }
+
+    #[tokio::test]
+    async fn seeded_practices_only_warn_about_div() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        for practice in db::practices(&pool).await.unwrap() {
+            let def = practices::definition(&pool, &practice.id)
+                .await
+                .unwrap()
+                .unwrap();
+            for w in unit_warnings(&def) {
+                assert!(
+                    w.message.contains("\"div\""),
+                    "{}: {}",
+                    practice.id,
+                    w.message
+                );
+            }
+        }
     }
 
     #[test]
