@@ -4124,13 +4124,9 @@ async fn a_submission_stores_and_computes_the_fixed_value_not_the_sent_one() {
         practice_id: "p1-partes".into(),
         measurements: vec![MeasurementInput {
             quantity_id: l_id.clone(),
-            instrument_id: None,
-            scale_id: None,
             values: vec![5.0],
             given_u: Some(99.0),
-            point_replicas: None,
-            operator_replicas: None,
-            operator_instruments: None,
+            ..Default::default()
         }],
         meta: None,
         table_number: None,

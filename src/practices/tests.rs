@@ -4348,13 +4348,9 @@ async fn a_fixed_given_uses_the_definition_and_ignores_the_client() {
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
     let sent = crate::computation::MeasurementInput {
         quantity_id: l.id.clone(),
-        instrument_id: None,
-        scale_id: None,
         values: vec![5.0],
         given_u: Some(99.0),
-        point_replicas: None,
-        operator_replicas: None,
-        operator_instruments: None,
+        ..Default::default()
     };
     let mut unset = def.quantities.clone();
     unset.iter_mut().for_each(|q| q.default_value = None);

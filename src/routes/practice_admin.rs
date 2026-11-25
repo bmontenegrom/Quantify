@@ -1007,12 +1007,12 @@ pub(super) async fn update_quantity(
     require_teacher(&state, &headers).await?;
     input.per_point = input.stored_per_point();
     let before = load_definition(&state, &practice_id).await?;
+    if let Some(saved) = before.quantities.iter().find(|q| q.id == qid) {
+        input.default_value.get_or_insert(saved.default_value);
+        input.default_u.get_or_insert(saved.default_u);
+    }
     let after = with_updated_quantity(&before, &qid, &input)
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
-    if let Some(q) = after.quantities.iter().find(|q| q.id == qid) {
-        input.default_value = Some(q.default_value);
-        input.default_u = Some(q.default_u);
-    }
     validate_quantity_in(&after, &input, Some(&qid))?;
     guard_symbol(
         &state.pool,

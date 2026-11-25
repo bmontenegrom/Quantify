@@ -18,7 +18,7 @@ pub use submission::{
     validate_student_results, FormSubmissionInput,
 };
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct MeasurementInput {
     pub quantity_id: String,
     pub instrument_id: Option<String>,
@@ -43,13 +43,9 @@ pub fn with_fixed_values(
         .filter_map(|q| {
             Some(MeasurementInput {
                 quantity_id: q.id.clone(),
-                instrument_id: None,
-                scale_id: None,
                 values: vec![q.default_value?],
                 given_u: q.default_u.filter(|_| q.has_uncertainty),
-                point_replicas: None,
-                operator_replicas: None,
-                operator_instruments: None,
+                ..Default::default()
             })
         })
         .collect();
