@@ -1293,12 +1293,15 @@ Decisiones:
      en °C sobre una magnitud en K.
 3. **`refactor(unidades)`: una sola lógica de prefijos y de conversión (F10, 3a/4).** ✅
    - `split_prefix` da el prefijo y la base de un símbolo; lo usan `symbol_unit` y `unprefixed`.
-     Los prefijos de entrada se derivan de `PREFIXES` (potencias múltiplo de 3).
-   - Los prefijos ofrecidos son razonables: en una unidad simple, hasta 12 décadas desde la
-     declarada contando el exponente (`cm2` → `mm2`, `km2`, no `Mm2`); en una compuesta, solo
-     prefijos de hasta ±3 décadas (`kg.m/s2` → `g.m/s2`, no `Mg.m/s2`; `m2/s` → `mm2/s`).
-   - `units::conversion(from, to)` es la única conversión afín (`valor·factor + offset`) y la
-     única regla de "sin unidad"; la usan `input_units` y el tipo B (`scale_to_quantity`).
+     `PREFIXES` guarda la potencia de 10 de cada prefijo, y los prefijos de entrada se derivan de
+     ahí (los de potencia múltiplo de 3).
+   - Los prefijos ofrecidos son razonables, contando desde la unidad declarada: en una unidad
+     simple, hasta 12 órdenes de magnitud contando el exponente (`cm2` → `mm2`, `km2`, no `Mm2`);
+     en una compuesta, hasta 3 (`µm/s` → `nm/s`, `mm/s`; `kg.m/s2` → `g.m/s2`, `Mg.m/s2`).
+   - `units::conversion(from, to)` es la única conversión entre unidades (`valor·factor +
+     offset`) y la única regla de "sin unidad"; la usa el tipo B (`scale_to_quantity`).
+     `input_units` comparte con ella el cálculo afín (`affine`). Se quitó `scale_factor`, que
+     nadie usaba.
 4. **`feat(formularios)`: el alumno carga en la unidad que elija (F10, 3b/4).**
    - Desplegable de unidades compatibles en lugar del prefijo, en los mismos 8 lugares, también
      en los resultados finales. Se guarda en la unidad declarada, como hoy.
