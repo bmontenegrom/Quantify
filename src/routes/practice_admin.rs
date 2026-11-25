@@ -960,7 +960,7 @@ fn with_updated_quantity(
     q.name = input.name.trim().to_string();
     q.unit = input.unit.trim().to_string();
     q.repeated = input.repeated;
-    q.quantity.clone_from(&input.quantity);
+    q.quantity = input.magnitude();
     q.per_point = input.per_point;
     q.is_given = input.is_given;
     q.has_uncertainty = input.has_uncertainty;
@@ -971,7 +971,7 @@ fn with_updated_quantity(
     if let Some(mode) = &input.label_mode {
         q.label_mode.clone_from(mode);
     }
-    let timed = input.quantity.as_deref() == Some("tiempo") && !input.is_given;
+    let timed = q.quantity.as_deref() == Some("tiempo") && !input.is_given;
     q.input_widget = match &input.input_widget {
         Some(widget) if timed => widget.clone(),
         _ if timed => q.input_widget.clone(),
@@ -2343,7 +2343,7 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
         ));
     }
     if input.input_widget.as_deref() == Some("cronometro")
-        && (input.is_given || input.quantity.as_deref() != Some("tiempo"))
+        && (input.is_given || input.magnitude().as_deref() != Some("tiempo"))
     {
         return Err(AppError::bad_request(
             "El cronómetro solo aplica a una magnitud física \"tiempo\" que no sea un dato dado.",
@@ -3129,6 +3129,7 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_quantity(&timed(false, "tiempo", "cronometro")).is_ok());
+        assert!(validate_quantity(&timed(false, " Tiempo ", "cronometro")).is_ok());
         assert!(validate_quantity(&timed(false, "longitud", "teclado")).is_ok());
         assert!(validate_quantity(&timed(false, "longitud", "cronometro")).is_err());
         assert!(validate_quantity(&timed(true, "tiempo", "cronometro")).is_err());

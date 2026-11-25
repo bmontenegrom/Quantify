@@ -72,8 +72,10 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
 
   step("docente: agrega L (dato) y T (réplicas)");
   await openAddForm(page, "#new-quantity-form");
-  await fillAndSubmit(page, "#new-quantity-form", { symbol: "L", name: "Largo", unit: "m", role: "catedra" });
+  await page.locator('#magnitudes-list option[value="voltaje"]').waitFor({ state: "attached" });
+  await fillAndSubmit(page, "#new-quantity-form", { symbol: "L", name: "Largo", unit: "m", quantity: "Distancia", role: "catedra" });
   await waitForStatus(page, "Magnitud agregada");
+  await page.locator('#practice-workspace tr:has(code:text-is("L")) td', { hasText: /^longitud$/ }).waitFor();
   await openAddForm(page, "#new-quantity-form");
   await fillAndSubmit(page, "#new-quantity-form", { symbol: "T", name: "Periodo", unit: "s" });
   await waitForStatus(page, "Magnitud agregada");

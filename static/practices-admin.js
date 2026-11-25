@@ -1,6 +1,7 @@
 import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
+import { MAGNITUDES_LIST, ensureMagnitudesList } from "./magnitudes.js";
 import {
   escapeHtml,
   symbolHtml,
@@ -334,6 +335,7 @@ async function deleteSymbolFormulaRow(kind, id, practiceId) {
 }
 
 export function renderPracticesPage() {
+  ensureMagnitudesList();
   const discarded = dropped;
   dropped = new Set();
   renderPracticeDirectory();
@@ -1368,7 +1370,7 @@ function renderQuantityForm(qty, practiceId) {
       ${displaySymbolFieldHtml(qty)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Longitud del cordón" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm (vacío = adimensional)" /></label>
-      <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" /></label>
+      <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" list="${MAGNITUDES_LIST}" /></label>
       ${roleSelectHtml(qty)}
       <label data-for-roles="serie_replicas">Réplicas por punto
         <input name="replicas_per_point" type="number" min="1" step="1" required value="${v("replicas_per_point")}" placeholder="cantidad" />
@@ -1635,7 +1637,7 @@ function syncQuantityForm(form, { initial = false } = {}) {
   const role = elements.role.value;
   const given = roleFlags(role, seriesPractice()).is_given;
   const option = elements.input_widget.querySelector('option[value="cronometro"]');
-  option.disabled = elements.quantity.value !== "tiempo" || given;
+  option.disabled = elements.quantity.value.trim().toLowerCase() !== "tiempo" || given;
   if (option.disabled && option.selected) {
     elements.input_widget.value = "teclado";
     if (initial) {

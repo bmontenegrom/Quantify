@@ -144,7 +144,7 @@ pub(super) async fn insert_instrument(
     .bind(input.course_id.trim())
     .bind(input.name.trim())
     .bind(input.kind.trim())
-    .bind(input.quantity.trim())
+    .bind(crate::magnitudes::canonical(&input.quantity))
     .bind(input.unit.trim())
     .bind(Utc::now())
     .execute(&mut *conn)
@@ -209,7 +209,7 @@ pub async fn update_instrument(
     .bind(id)
     .bind(input.name.trim())
     .bind(input.kind.trim())
-    .bind(input.quantity.trim())
+    .bind(crate::magnitudes::canonical(&input.quantity))
     .bind(input.unit.trim())
     .execute(pool)
     .await?;
@@ -392,7 +392,7 @@ mod tests {
             UpdateInstrument {
                 name: "Tester nuevo".into(),
                 kind: "digital".into(),
-                quantity: "voltaje".into(),
+                quantity: " Tensión eléctrica ".into(),
                 unit: "V".into(),
             },
         )

@@ -4268,3 +4268,35 @@ fn a_symbol_named_medio_belongs_to_its_base_only_when_it_is_an_undefined_average
     assert_eq!(resolved.determinations["T"].scope, "stat");
     assert!(!resolved.determinations.contains_key("k"));
 }
+
+#[tokio::test]
+async fn seeded_magnitudes_are_already_canonical() {
+    let (pool, _dir) = setup().await;
+    let used: Vec<(String,)> = sqlx::query_as(
+        "SELECT quantity FROM practice_quantities WHERE quantity IS NOT NULL \
+         UNION SELECT quantity FROM instruments",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(used.iter().any(|(q,)| q == "voltaje"));
+    for (q,) in used {
+        assert_eq!(crate::magnitudes::canonical(&q), q);
+    }
+}
+
+#[tokio::test]
+async fn a_saved_magnitude_is_stored_canonical() {
+    let (pool, _dir) = setup().await;
+    let q = create_quantity(
+        &pool,
+        "p1-estadistica",
+        QuantityInput {
+            quantity: Some("Diferencia de Potencial".into()),
+            ..sample_quantity()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(q.quantity.as_deref(), Some("voltaje"));
+}
