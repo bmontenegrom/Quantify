@@ -60,22 +60,21 @@ pub fn scale_spec(scale: &InstrumentScale) -> anyhow::Result<ScaleSpec> {
 }
 
 fn scale_to_quantity(scale: &InstrumentScale, unit: &str) -> Result<(f64, f64), String> {
-    let (from, to) = (scale.unit.trim(), unit.trim());
-    if from.is_empty() || to.is_empty() || from == to {
-        return Ok((1.0, 0.0));
-    }
-    let why = match (crate::units::parse(from), crate::units::parse(to)) {
-        (Some(f), Some(t)) if f.compatible(&t) => {
-            return Ok((f.factor / t.factor, (t.offset - f.offset) / t.factor))
-        }
-        (Some(_), Some(_)) => format!("la escala mide en {from} y la magnitud está en {to}"),
-        (None, _) => format!("no se reconoce la unidad {from}"),
-        (_, None) => format!("no se reconoce la unidad {to}"),
-    };
-    Err(format!(
-        "{why}: la incertidumbre de la escala \"{}\" no se convirtió",
-        scale.label
-    ))
+    use crate::units::Mismatch;
+    crate::units::conversion(&scale.unit, unit).map_err(|mismatch| {
+        let why = match mismatch {
+            Mismatch::Incompatible => format!(
+                "la escala mide en {} y la magnitud está en {}",
+                scale.unit.trim(),
+                unit.trim()
+            ),
+            Mismatch::Unknown(u) => format!("no se reconoce la unidad {u}"),
+        };
+        format!(
+            "{why}: la incertidumbre de la escala \"{}\" no se convirtió",
+            scale.label
+        )
+    })
 }
 
 fn compute_quantities(
@@ -127,7 +126,7 @@ fn compute_quantities(
                         anyhow::bail!("la escala seleccionada no existe");
                     };
                     let spec = scale_spec(scale)?;
-                    let (factor, shift) =
+                    let (factor, offset) =
                         scale_to_quantity(scale, &quantity.unit).unwrap_or_else(|w| {
                             if !values.is_empty() {
                                 warnings.push(format!(
@@ -138,7 +137,7 @@ fn compute_quantities(
                             (1.0, 0.0)
                         });
                     uncertainty::measured_with(&values, |mean| {
-                        uncertainty::type_b(&spec, (mean + shift) / factor) * factor
+                        uncertainty::type_b(&spec, (mean - offset) / factor) * factor
                     })
                 }
                 None => uncertainty::measured_quantity(&values, None),

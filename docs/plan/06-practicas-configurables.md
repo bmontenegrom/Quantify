@@ -1291,25 +1291,28 @@ Decisiones:
      vacía, queda como antes.
    - Golden idénticos; tests con la regla en cm y en m, el densímetro en kg/m³ y un termómetro
      en °C sobre una magnitud en K.
-3. **`feat(formularios)`: el alumno carga en la unidad que elija (F10, 3/4).**
+3. **`refactor(unidades)`: una sola lógica de prefijos y de conversión (F10, 3a/4).** ✅
+   - `split_prefix` da el prefijo y la base de un símbolo; lo usan `symbol_unit` y `unprefixed`.
+     `PREFIXES` guarda la potencia de 10 y el factor exacto de cada prefijo, y los prefijos de
+     entrada se derivan de ahí (los de potencia múltiplo de 3).
+   - Los prefijos ofrecidos son razonables, contando desde la unidad declarada: en una unidad
+     simple, hasta 12 órdenes de magnitud contando el exponente (`cm2` → `mm2`, `km2`, no `Mm2`);
+     en una compuesta, hasta 3 (`µm/s` → `nm/s`, `mm/s`; `kg.m/s2` → `g.m/s2`, `Mg.m/s2`).
+   - `units::conversion(from, to)` convierte entre dos unidades (`valor·factor + offset`); la usa
+     el tipo B (`scale_to_quantity`). `input_units` comparte con ella el cálculo afín (`affine`)
+     y la misma regla de "sin unidad" (vacía tras normalizar), escrita aparte. Se quitó
+     `scale_factor`, que nadie usaba.
+4. **`feat(formularios)`: el alumno carga en la unidad que elija (F10, 3b/4).**
    - Desplegable de unidades compatibles en lugar del prefijo, en los mismos 8 lugares, también
      en los resultados finales. Se guarda en la unidad declarada, como hoy.
-   - Decidir qué pasa con las diferencias de temperatura: `input_units` aplica el desplazamiento
-     de 273,15 entre K y °C, que está bien para una temperatura pero no para una diferencia
-     (un ΔT declarado en K, cargado en °C, se guardaría con 273,15 de más). Lo mismo en el tipo
-     B: pasar la media a la unidad de la escala suma el desplazamiento e infla el término en %
-     de lectura si un ΔT en K se mide con una escala en °C. La unidad sola no lo distingue: o no se ofrecen ni se
-     aplican conversiones con desplazamiento, o la magnitud dice si es una diferencia.
-   - En `src/units.rs`, la lógica de prefijos está dos veces: `unprefixed` repite el recorrido
-     de prefijos de `symbol_unit`, e `INPUT_PREFIXES` es una copia a mano de `PREFIXES` (sin
-     `u`, `c`, `d` y `h`, con `""`). Unificarlo cuando `input_units` pase a usarse acá, por
-     ejemplo con un `symbol_unit` que devuelva el prefijo que encontró. También está dos veces
-     la conversión afín entre unidades (`relative` en `units.rs` y `scale_to_quantity` en
-     `engines.rs`) y qué cuenta como "sin unidad" (`input_units` mira después de `normalize`,
-     `scale_to_quantity` con `trim`): sacarlas a una función de `units.rs`.
-     Al unificarlo, que los prefijos tengan en cuenta el exponente y la compuesta: hoy `cm2`
-     ofrece `Mm2`, `Gm2` y `Tm2` (factores de 10¹⁶ a 10²⁸) y `kg.m/s2` ofrece `Mg.m/s2`.
-4. **`feat(editor)`: el docente ve si la unidad se reconoce (F10, 4/4).**
+   - Decidido: **la magnitud puede marcar que es una diferencia de temperatura** (campo nuevo en
+     magnitud, editor, plantillas y servidor). Con la marca, ni el desplegable ni el tipo B
+     aplican el desplazamiento de 273,15 entre K y °C; sin la marca se toma como temperatura
+     absoluta, como hoy. (La unidad sola no distingue una temperatura de una diferencia.)
+   - Los prefijos de entrada son solo los de potencia múltiplo de 3, así que `m2` no ofrece
+     `cm2` (en volumen no pasa: `cm3` está en las candidatas). Decidir si las áreas suman `cm2`
+     (y `dm`, `cm` en general) al armar el desplegable.
+5. **`feat(editor)`: el docente ve si la unidad se reconoce (F10, 4/4).**
    - Aviso en el panel de problemas para unidades que no se reconocen, y vista previa de las
      unidades de entrada en la magnitud.
    - "Comparar con" acepta unidades compatibles y la comparación medido vs teórico convierte.
