@@ -40,10 +40,10 @@ async function tryWithExampleData(page, practiceId) {
   const incomplete = page.locator("#measurement-fields .series-value:visible").first();
   const seriesRow = (await incomplete.count()) > 0;
   if (seriesRow) await incomplete.fill("12345");
-  else await page.locator("#measurement-fields .prefix-select:visible").first().selectOption("m");
+  else await page.locator("#measurement-fields .unit-select:visible").first().selectOption({ index: 1 });
   page.once("dialog", (d) => { askedIncomplete = true; return d.accept(); });
   await page.click("#draft-preview-fill");
-  assert(askedIncomplete, `${practiceId}: ${seriesRow ? "una fila de serie incompleta" : "un cambio de prefijo"} debía pedir confirmación`);
+  assert(askedIncomplete, `${practiceId}: ${seriesRow ? "una fila de serie incompleta" : "un cambio de unidad"} debía pedir confirmación`);
   const scaleless = await page.$$eval("#measurement-fields .measure-selectors", (all) =>
     all.filter((sel) => sel.querySelector(".measure-instrument").value && !sel.querySelector(".measure-scale").value).length);
   assert(scaleless === 0, `${practiceId}: ${scaleless} medidas quedaron con instrumento y sin escala`);

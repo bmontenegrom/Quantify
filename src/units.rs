@@ -103,12 +103,19 @@ const WHOLE: &[(&str, Unit)] = &[(
 )];
 
 const CANDIDATES: &[&str] = &[
-    "nm", "µm", "mm", "cm", "m", "km", "µL", "mL", "L", "cm3", "m3", "µg", "mg", "g", "kg", "µs",
-    "ms", "s", "min", "h", "°C", "K", "µmol", "mmol", "mol", "µM", "mM", "M", "mmol/L", "mol/L",
-    "mg/L", "g/L", "g/cm3", "g/mL", "kg/m3", "µV", "mV", "V", "kV", "µA", "mA", "A", "ohm", "kohm",
-    "Mohm", "pF", "nF", "µF", "mF", "F", "µH", "mH", "H", "Hz", "kHz", "MHz", "Pa", "hPa", "kPa",
-    "MPa", "°", "rad", "°/s", "rad/s", "%", "ppm", "ppb",
+    "nm", "µm", "mm", "cm", "m", "km", "mm2", "cm2", "m2", "µL", "mL", "L", "cm3", "m3", "µg",
+    "mg", "g", "kg", "µs", "ms", "s", "min", "h", "°C", "K", "µmol", "mmol", "mol", "µM", "mM",
+    "M", "mmol/L", "mol/L", "mg/L", "g/L", "g/cm3", "g/mL", "kg/m3", "µV", "mV", "V", "kV", "µA",
+    "mA", "A", "ohm", "kohm", "Mohm", "pF", "nF", "µF", "mF", "F", "µH", "mH", "H", "Hz", "kHz",
+    "MHz", "Pa", "hPa", "kPa", "MPa", "°", "rad", "°/s", "rad/s", "%", "ppm", "ppb",
 ];
+
+static PARSED_CANDIDATES: std::sync::LazyLock<Vec<(&str, Unit)>> = std::sync::LazyLock::new(|| {
+    CANDIDATES
+        .iter()
+        .filter_map(|c| Some((*c, parse(c)?)))
+        .collect()
+});
 
 impl Unit {
     /// Dos unidades son compatibles si miden lo mismo (mismas dimensiones).
@@ -301,7 +308,7 @@ fn normalize(text: &str) -> String {
         .replace("%m/v", "% m/v")
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct InputUnit {
     pub label: String,
     pub factor: f64,
@@ -348,10 +355,11 @@ pub fn input_units(declared: &str) -> Vec<InputUnit> {
     let Some(unit) = parse(declared).filter(|_| !declared.is_empty()) else {
         return out;
     };
-    for candidate in CANDIDATES {
-        if let Some(c) = parse(candidate).filter(|c| c.compatible(&unit)) {
-            push_new(&mut out, relative(candidate, c, unit));
-        }
+    for (candidate, c) in PARSED_CANDIDATES
+        .iter()
+        .filter(|(_, c)| c.compatible(&unit))
+    {
+        push_new(&mut out, relative(candidate, *c, unit));
     }
     if let Some((base, exponent, own)) = unprefixed(declared).filter(|_| out.len() == 1) {
         let compound = declared.contains(SEPARATORS);
@@ -561,13 +569,10 @@ mod tests {
         assert!(labels("kg/m3").contains(&"g/cm3".to_string()));
         assert!(!labels("kg/m3").contains(&"g/mL".to_string()));
         assert!(labels("Pa").contains(&"MPa".to_string()));
-        let area = labels("cm2");
-        for offered in ["mm2", "m2", "km2"] {
-            assert!(area.contains(&offered.to_string()), "{area:?}");
-        }
-        for absurd in ["Mm2", "Gm2", "Tm2"] {
-            assert!(!area.contains(&absurd.to_string()), "{area:?}");
-        }
+        assert_eq!(labels("m2"), ["m2", "mm2", "cm2"]);
+        assert_eq!(labels("cm2"), ["cm2", "mm2", "m2"]);
+        let volume = labels("m3");
+        assert!(volume.contains(&"L".to_string()) && !volume.contains(&"Mm3".to_string()));
         let force = labels("kg.m/s2");
         assert!(force.contains(&"g.m/s2".to_string()), "{force:?}");
         assert!(!force.contains(&"mg.m/s2".to_string()), "{force:?}");
@@ -615,8 +620,7 @@ mod tests {
         assert!(labels("Pa.s").contains(&"mPa.s".to_string()));
         assert_eq!(labels("mPa.s")[0], "mPa.s");
         assert!(labels("mPa.s").contains(&"Pa.s".to_string()));
-        assert!(labels("mm2").contains(&"m2".to_string()));
-        assert!(labels("mm2").contains(&"µm2".to_string()));
+        assert!(labels("mm2").contains(&"cm2".to_string()));
         assert!(!labels("mm2")[1..].contains(&"mm2".to_string()));
         let pa_s = input_units("mPa.s")
             .into_iter()

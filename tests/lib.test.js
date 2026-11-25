@@ -40,8 +40,6 @@ import {
   compareOptionGroups,
   draftMeasurementsByQuantity,
   draftedQuantityIds,
-  SI_PREFIXES,
-  prefixFactor,
   seriesStats,
   histogram,
   normalCurve,
@@ -612,21 +610,6 @@ test("comparisonPairs arma los pares desde los resultados con compare_with", () 
   };
   assert.deepEqual([...comparisonPairs(definition)], [["VR1_s_t", "VR1_s"]]);
   assert.equal(comparisonPairs(null).size, 0);
-});
-
-test("SI_PREFIXES es un array con entradas para 'm', 'k' y ''", () => {
-  assert.ok(Array.isArray(SI_PREFIXES));
-  assert.ok(SI_PREFIXES.some((p) => p.label === "m" && Math.abs(p.factor - 1e-3) < 1e-15));
-  assert.ok(SI_PREFIXES.some((p) => p.label === "k" && Math.abs(p.factor - 1e3) < 1e-9));
-  assert.ok(SI_PREFIXES.some((p) => p.label === "" && p.factor === 1));
-});
-
-test("prefixFactor devuelve el factor correcto o 1 para desconocidos", () => {
-  assert.equal(prefixFactor("m"), 1e-3);
-  assert.equal(prefixFactor("k"), 1e3);
-  assert.equal(prefixFactor(""), 1);
-  assert.equal(prefixFactor("?"), 1);
-  assert.equal(prefixFactor(undefined), 1);
 });
 
 test("seriesStats: n=0 devuelve NaN; n=1 std=0; n>1 calcula bien", () => {

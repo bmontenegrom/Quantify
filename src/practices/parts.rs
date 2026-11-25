@@ -29,6 +29,7 @@ pub struct Resolved {
     pub practice_determinations: Option<super::Determinations>,
     pub symbol_parts: std::collections::BTreeMap<String, String>,
     pub determinations: std::collections::BTreeMap<String, ScopedDeterminations>,
+    pub input_units: std::collections::BTreeMap<String, Vec<crate::units::InputUnit>>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -323,10 +324,23 @@ impl PracticeDefinition {
             let entry = scoped(&symbol, &d);
             determinations.insert(symbol, entry);
         }
+        let quantity_units = self.quantities.iter().map(|q| {
+            let mut units = crate::units::input_units(&q.unit);
+            if q.slot_count.is_some() {
+                units.truncate(1);
+            }
+            (q.symbol.clone(), units)
+        });
+        let result_units = self.results.iter().filter(|r| r.is_final).map(|r| {
+            let mut units = crate::units::input_units(&r.unit);
+            units.retain(|u| u.offset == 0.0);
+            (r.symbol.clone(), units)
+        });
         Resolved {
             practice_determinations: self.determinations_in(None).cloned(),
             symbol_parts,
             determinations,
+            input_units: quantity_units.chain(result_units).collect(),
         }
     }
 

@@ -25,8 +25,11 @@ async function studentSubmitsP1(page) {
 
   step("estudiante: completa L (dato de cátedra) y t_med (sin incertidumbre, sin instrumento)");
   const lRow = page.locator('.measurement-row--given:has-text("Longitud")');
-  await lRow.locator(".measure-given-value").fill("1");
-  await lRow.locator(".measure-given-u").fill("0.002");
+  const [lUnit, uUnit] = [lRow.locator(".unit-select").nth(0), lRow.locator(".unit-select").nth(1)];
+  await lUnit.selectOption("cm");
+  await uUnit.selectOption("mm");
+  await lRow.locator(".measure-given-value").fill("100");
+  await lRow.locator(".measure-given-u").fill("2");
   const tMedRow = page.locator('.measurement-row--given:has-text("semiamplitud")');
   await tMedRow.locator(".measure-given-value").fill("12.5");
   assert(
@@ -70,6 +73,15 @@ async function teacherReviews(page) {
   await page.click('.tab.teacher-only[data-view="submissions"]');
   await page.click(".submission-table-group .submission-item");
   await page.waitForSelector(".review-form");
+
+  step("docente: L cargada en cm y su U en mm se guardaron en metros");
+  const { mean, u } = await page.evaluate(async () => {
+    const [latest] = await (await fetch("/api/submissions")).json();
+    const detail = await (await fetch(`/api/submissions/${latest.id}`)).json();
+    const l = detail.analysis.quantities.find((q) => q.symbol === "L");
+    return { mean: l.result.mean, u: l.result.u_expanded };
+  });
+  assert(Math.abs(mean - 1) < 1e-12 && Math.abs(u - 0.002) < 1e-12, `L debía quedar 1 ± 0,002 m (vi ${mean} ± ${u})`);
 
   step("docente: ve el análisis automático y la comparación del alumno");
   const detail = await page.locator("#submission-detail-body").textContent();

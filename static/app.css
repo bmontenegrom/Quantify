@@ -770,7 +770,7 @@ textarea {
   align-items: center;
   display: grid;
   gap: 4px;
-  grid-template-columns: 52px minmax(140px, 220px) minmax(22px, max-content) 30px;
+  grid-template-columns: minmax(140px, 220px) minmax(22px, max-content) 30px;
   justify-content: start;
 }
 
@@ -778,21 +778,19 @@ textarea {
   align-items: center;
   display: grid;
   gap: 4px;
-  grid-template-columns: 52px minmax(140px, 220px) minmax(22px, max-content);
+  grid-template-columns: minmax(140px, 220px) minmax(22px, max-content);
 }
 
 .measurement-row--given .form-grid {
   grid-template-columns: repeat(auto-fit, minmax(260px, max-content));
 }
 
-.prefix-select {
+.unit-select {
   font-size: 0.82rem;
-  padding: 5px 2px;
   height: 32px;
-  max-width: 52px;
-  min-width: 52px;
-  text-align: center;
-  width: 52px;
+  max-width: 120px;
+  padding: 5px 4px;
+  width: auto;
 }
 
 .replica .measure-value,
@@ -1580,11 +1578,11 @@ button.back-link {
 
   .replica,
   .replica-input-wrap {
-    grid-template-columns: 52px minmax(0, 1fr) minmax(22px, max-content) 30px;
+    grid-template-columns: minmax(0, 1fr) minmax(22px, max-content) 30px;
   }
 
   .replica-input-wrap {
-    grid-template-columns: 52px minmax(0, 1fr) minmax(22px, max-content);
+    grid-template-columns: minmax(0, 1fr) minmax(22px, max-content);
   }
 }
 
@@ -1640,12 +1638,12 @@ button.back-link {
   align-items: start;
   display: grid;
   gap: 4px;
-  grid-template-columns: 52px minmax(92px, 220px);
+  grid-template-columns: minmax(92px, 220px) max-content;
   justify-content: start;
 }
 
 .series-cell--replicas .series-input-wrap {
-  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) max-content;
 }
 
 .series-table input.series-value {

@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { columnSections, instrumentSelectorsHtml, retiredInstrumentNote } from "../static/forms-shared.js";
+import {
+  columnSections,
+  instrumentSelectorsHtml,
+  retiredInstrumentNote,
+  inputUnits,
+  unitSelectHtml,
+  unitConversion,
+} from "../static/forms-shared.js";
+import { state } from "../static/state.js";
 
 test("columnSections: solo las secciones con columnas de la serie y sin magnitudes compartidas", () => {
   const definition = {
@@ -47,4 +55,33 @@ test("retiredInstrumentNote: avisa si el instrumento o la escala guardados ya no
   assert.match(retiredInstrumentNote(twoScales, { instrument_id: "regla", scale_id: "cm" }), /Elegí otra/);
   const noScales = [{ id: "regla", scales: [] }];
   assert.match(retiredInstrumentNote(noScales, { instrument_id: "regla", scale_id: "cm" }), /ya no tiene escalas/);
+});
+
+test("unidades de entrada: las del servidor, o la declarada sola", () => {
+  state.practiceForm = {
+    definition: { resolved: { input_units: { L: [{ label: "cm", factor: 1, offset: 0 }, { label: "mm", factor: 0.1, offset: 0 }] } } },
+  };
+  assert.deepEqual(inputUnits("L", "cm").map((u) => u.label), ["cm", "mm"]);
+  assert.deepEqual(inputUnits("x", "s"), [{ label: "s", factor: 1, offset: 0 }]);
+  state.practiceForm = null;
+});
+
+test("unitSelectHtml: desplegable con 2 o más unidades, texto con una", () => {
+  const select = unitSelectHtml([
+    { label: "cm", factor: 1, offset: 0 },
+    { label: "mm", factor: 0.1, offset: 0 },
+  ]);
+  assert.match(select, /<select class="unit-select"/);
+  assert.match(select, /<option value="0" data-factor="1" data-offset="0" selected>cm<\/option>/);
+  assert.match(select, /data-factor="0.1"/);
+  assert.match(unitSelectHtml([{ label: "s", factor: 1, offset: 0 }]), /<span class="replica-unit">/);
+  assert.equal(unitSelectHtml([{ label: "s", factor: 1, offset: 0 }], { text: false }), "");
+});
+
+test("unitConversion: factor y desplazamiento de la unidad elegida, o ninguno", () => {
+  const wrap = (dataset) => ({ querySelector: () => (dataset ? { selectedOptions: [{ dataset }] } : null) });
+  assert.deepEqual(unitConversion(wrap({ factor: "0.1", offset: "0" })), { factor: 0.1, offset: 0 });
+  assert.deepEqual(unitConversion(wrap({ factor: "1", offset: "273.15" })), { factor: 1, offset: 273.15 });
+  assert.deepEqual(unitConversion(wrap(null)), { factor: 1, offset: 0 });
+  assert.deepEqual(unitConversion(null), { factor: 1, offset: 0 });
 });

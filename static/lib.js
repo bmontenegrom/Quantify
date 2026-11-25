@@ -198,22 +198,6 @@ export function compatibleInstruments(instruments, magnitude) {
   return list.filter((instrument) => instrument.quantity === magnitude);
 }
 
-export const SI_PREFIXES = [
-  { label: "T",  factor: 1e12  },
-  { label: "G",  factor: 1e9   },
-  { label: "M",  factor: 1e6   },
-  { label: "k",  factor: 1e3   },
-  { label: "",   factor: 1     },
-  { label: "m",  factor: 1e-3  },
-  { label: "µ",  factor: 1e-6  },
-  { label: "n",  factor: 1e-9  },
-  { label: "p",  factor: 1e-12 },
-];
-
-export function prefixFactor(prefix) {
-  return SI_PREFIXES.find((p) => p.label === prefix)?.factor ?? 1;
-}
-
 export function measureText(value, u) {
   const base = format(value);
   if (u == null || !Number.isFinite(u) || u <= 0) return base;

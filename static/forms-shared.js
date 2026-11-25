@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, unitHtml, SI_PREFIXES, prefixFactor, compatibleInstruments, POINT_KINDS, seriesPart } from "./lib.js";
+import { escapeHtml, unitHtml, compatibleInstruments, POINT_KINDS, seriesPart } from "./lib.js";
 
 export function formPracticeVersion(practiceId) {
   const definition = state.practiceForm?.definition;
@@ -78,11 +78,31 @@ export function groupBySections(items, sections) {
   return { grouped, rest };
 }
 
-export function prefixSelectHtml() {
-  const opts = SI_PREFIXES.map(
-    (p) => `<option value="${escapeHtml(p.label)}" ${p.label === "" ? "selected" : ""}>${p.label || "—"}</option>`
-  ).join("");
-  return `<select class="prefix-select" title="Prefijo SI">${opts}</select>`;
+export function inputUnits(symbol, unit) {
+  const units = state.practiceForm?.definition?.resolved?.input_units?.[symbol];
+  return units?.length ? units : [{ label: unit ?? "", factor: 1, offset: 0 }];
+}
+
+export function quantityUnits(q) {
+  return inputUnits(q.symbol, q.unit);
+}
+
+export function unitSelectHtml(units, { text = true } = {}) {
+  if (units.length <= 1) return text ? `<span class="replica-unit">${unitHtml(units[0]?.label ?? "")}</span>` : "";
+  const options = units
+    .map(
+      (u, i) =>
+        `<option value="${i}" data-factor="${u.factor}" data-offset="${u.offset}"${i === 0 ? " selected" : ""}>${escapeHtml(u.label)}</option>`,
+    )
+    .join("");
+  return `<select class="unit-select" title="Unidad">${options}</select>`;
+}
+
+export function unitConversion(wrap) {
+  const option = wrap?.querySelector(".unit-select")?.selectedOptions[0];
+  return option
+    ? { factor: Number(option.dataset.factor), offset: Number(option.dataset.offset) }
+    : { factor: 1, offset: 0 };
 }
 
 export function givenValueInputHtml(q, inputClass = "measure-given-value") {
@@ -90,16 +110,15 @@ export function givenValueInputHtml(q, inputClass = "measure-given-value") {
   const attrs = q.slot_count ? `min="1" max="${n}" step="1"` : `step="any"`;
   const placeholder = q.slot_count ? `ranura 1 a ${n}` : "valor";
   const value = q.default_value != null ? ` value="${escapeHtml(String(q.default_value))}"` : "";
-  return `${q.slot_count ? `<span class="prefix-placeholder" aria-hidden="true"></span>` : prefixSelectHtml()}<input class="${inputClass}" type="number" ${attrs} placeholder="${placeholder}"${value} />`;
+  return `<input class="${inputClass}" type="number" ${attrs} placeholder="${placeholder}"${value} />`;
 }
 
-export function renderReplicaInput(unit, defaultValue = null) {
+export function renderReplicaInput(units, defaultValue = null) {
   const value = defaultValue != null ? ` value="${escapeHtml(String(defaultValue))}"` : "";
   return `
     <div class="replica">
-      ${prefixSelectHtml()}
-      <input class="measure-value" type="number" step="any" placeholder="valor"${value} data-unit="${escapeHtml(unit)}" />
-      <span class="replica-unit">${unitHtml(unit)}</span>
+      <input class="measure-value" type="number" step="any" placeholder="valor"${value} />
+      ${unitSelectHtml(units)}
       <button type="button" class="remove-replica" title="Quitar">✕</button>
     </div>
   `;
@@ -160,9 +179,9 @@ export function replicaInputHtml(quantityId, k) {
 }
 
 export function cellReplicaValues(cell) {
-  const factor = prefixFactor(cell.querySelector(".prefix-select").value);
+  const { factor, offset } = unitConversion(cell);
   return [...cell.querySelectorAll(".series-replica")]
     .map((input) => input.value.trim())
     .filter((raw) => raw !== "")
-    .map((raw) => Number(raw) * factor);
+    .map((raw) => Number(raw) * factor + offset);
 }
