@@ -184,6 +184,19 @@ fn validate_scale(input: &ScaleInput) -> Result<(), AppError> {
     Ok(())
 }
 
+pub(super) async fn list_magnitudes(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<&'static str>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    Ok(Json(
+        crate::magnitudes::MAGNITUDES
+            .iter()
+            .map(|(name, _)| *name)
+            .collect(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

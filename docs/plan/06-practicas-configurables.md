@@ -1328,8 +1328,38 @@ Decisiones:
      (`resolved.comparisons` y `comparisons` de la entrega, `{ with, factor }`) y la tabla
      medido vs teórico pasa lo medido a la unidad del mensurando.
 
-Quedan para después: chequeo dimensional de fórmulas, constantes, interpolación inversa y
-sinónimos de magnitud (`tension`/`voltaje`).
+**Plan de PRs: química, segunda tanda** (relevado 2026-11-25)
+
+Lo que se relevó:
+- La magnitud física (`quantity`) es texto libre en magnitudes e instrumentos y el cliente la
+  compara exacta (`compatibleInstruments`). Filtros usaba `tension` y ningún instrumento sembrado,
+  así que no ofrecía voltímetros.
+- Un dato de cátedra no tiene U fija: el alumno siempre la escribe; `default_value` solo precarga.
+- Las fórmulas se compilan con `evalexpr` a un árbol recorrible; `units::Unit` tiene dimensiones
+  (m, kg, s, A, K, mol, cd, rad). La regresión da `slope`, `intercept` y sus u, sin covarianza, y
+  `uncertainty::propagate` supone entradas independientes.
+
+Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del catálogo quedan
+**fijas** para el alumno; la interpolación inversa entra en esta tanda.
+
+1. **`feat(magnitudes)`: sinónimos de magnitud física.**
+   - `src/magnitudes.rs`: catálogo de canónicas con sus sinónimos y `canonical` (minúsculas, sin
+     tildes, espacios simples, sinónimo → canónica; lo desconocido queda normalizado).
+   - Se aplica al guardar magnitudes (también al leer `QuantityInput`, así el chequeo de
+     `tiempo` del cronómetro ve la canónica) e instrumentos. `filtros.json`: `tension` → `voltaje`.
+   - El editor sugiere las canónicas (`GET /api/magnitudes`, `<datalist>`).
+2. **`feat(practicas)`: dato de cátedra con valor fijo.** Columnas `default_u` y `fixed`; el
+   motor usa el valor y la U de la definición e ignora lo que mande el cliente; el alumno los ve
+   como texto.
+3. **`feat(editor)`: catálogo de constantes.** `templates/constants.json` (CODATA / IUPAC: R,
+   N_A, F, k_B, g estándar, masas molares), `GET /api/constants` y "Desde el catálogo…" en
+   "Nueva magnitud", que precarga una constante fija.
+4. **`feat(editor)`: chequeo dimensional de fórmulas.** Infiere las dimensiones recorriendo el
+   árbol de la fórmula y avisa si no dan la unidad declarada. Solo dimensiones, no escala; lo que
+   no se reconoce no avisa; radianes cuentan como adimensionales.
+5. **`feat(regresion)`: interpolación inversa.** Covarianza pendiente-ordenada en la regresión y
+   propagación con covarianzas; la interpolación es un mensurando común
+   (`(A_m - intercept)/slope`), verificado contra la fórmula de libro.
 
 **General**
 

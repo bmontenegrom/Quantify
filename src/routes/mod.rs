@@ -161,6 +161,7 @@ pub fn api_router(state: SharedState) -> Router {
             "/instruments",
             get(list_instruments).post(create_instrument),
         )
+        .route("/magnitudes", get(list_magnitudes))
         .route("/instruments/export", get(export_instruments))
         .route("/instruments/import", post(import_instruments))
         .route(
