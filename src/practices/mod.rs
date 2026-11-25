@@ -64,13 +64,6 @@ impl QuantityInput {
         self.per_point && !self.per_determination
     }
 
-    /// La magnitud física tal como se guarda: canónica, y vacía pasa a no declarada.
-    ///
-    /// ```
-    /// let q = |s: &str| quantify::practices::QuantityInput { quantity: Some(s.into()), ..Default::default() };
-    /// assert_eq!(q(" Tiempo ").magnitude().as_deref(), Some("tiempo"));
-    /// assert_eq!(q("  ").magnitude(), None);
-    /// ```
     /// Por qué el valor fijo (o su U) no se puede guardar, o `None` si se puede.
     ///
     /// ```
@@ -101,6 +94,13 @@ impl QuantityInput {
         None
     }
 
+    /// La magnitud física tal como se guarda: canónica, y vacía pasa a no declarada.
+    ///
+    /// ```
+    /// let q = |s: &str| quantify::practices::QuantityInput { quantity: Some(s.into()), ..Default::default() };
+    /// assert_eq!(q(" Tiempo ").magnitude().as_deref(), Some("tiempo"));
+    /// assert_eq!(q("  ").magnitude(), None);
+    /// ```
     pub fn magnitude(&self) -> Option<String> {
         self.quantity
             .as_deref()
