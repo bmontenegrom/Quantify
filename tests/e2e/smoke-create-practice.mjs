@@ -111,6 +111,16 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
   await page.waitForSelector(row("E"), { state: "detached" });
   await page.locator(".practice-warnings").waitFor({ state: "detached" });
 
+  step("docente: N_A desde el catálogo queda como constante fija");
+  await openAddForm(page, "#new-quantity-form");
+  const picker = page.locator("#new-quantity-form [data-constant-picker]");
+  await picker.locator("option", { hasText: /^N_A —/ }).waitFor({ state: "attached" });
+  await picker.selectOption({ index: 1 });
+  await page.locator('#new-quantity-form button[type="submit"]').click();
+  await page.locator(`${row("N_A")} td`, { hasText: "Constante · fijo" }).waitFor();
+  await page.locator(`${row("N_A")} [data-delete-quantity]`).click();
+  await page.waitForSelector(row("N_A"), { state: "detached" });
+
   step("docente: dos partes con sus secciones; L sin sección (compartida) y T en la segunda");
   for (const title of ["Parte A", "Parte B"]) {
     await openAddForm(page, "#new-part-form");
@@ -192,7 +202,7 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     "la parte A debía mostrar solo su ayuda",
   );
   assert((await given.locator("input").count()) === 0, "un dato fijo no debía tener campos para cargar");
-  assert((await given.locator(".fixed-given").textContent()).startsWith("1 ± 0.002"), "el dato fijo debía mostrar valor ± U");
+  assert((await given.locator(".fixed-given").textContent()).startsWith("1,000 ± 0,002"), "el dato fijo debía mostrar valor ± U");
   await tabs.nth(1).click();
   assert((await given.isVisible()) && (await measured.isVisible()), "la parte B debía mostrar T y también L, que es compartida");
   assert(await help("Ayuda de Seccion B").isVisible(), "la sección B debía mostrar su ayuda");
