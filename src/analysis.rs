@@ -25,6 +25,8 @@ pub struct LinearRegression {
     pub u_slope: f64,
     #[serde(default)]
     pub u_intercept: f64,
+    #[serde(default)]
+    pub cov_slope_intercept: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,12 +229,16 @@ pub fn linear_regression(
         1.0 - ss_res / ss_tot
     };
 
-    let (u_slope, u_intercept) = if n >= 3 {
+    let (u_slope, u_intercept, cov_slope_intercept) = if n >= 3 {
         let s2 = ss_res / (n_f - 2.0);
         let sum_x2 = points.iter().map(|(x, _)| x * x).sum::<f64>();
-        ((s2 / ss_xx).sqrt(), (s2 * sum_x2 / (n_f * ss_xx)).sqrt())
+        (
+            (s2 / ss_xx).sqrt(),
+            (s2 * sum_x2 / (n_f * ss_xx)).sqrt(),
+            -mean_x * s2 / ss_xx,
+        )
     } else {
-        (0.0, 0.0)
+        (0.0, 0.0, 0.0)
     };
 
     Some(LinearRegression {
@@ -243,6 +249,7 @@ pub fn linear_regression(
         r_squared,
         u_slope,
         u_intercept,
+        cov_slope_intercept,
     })
 }
 
@@ -274,7 +281,30 @@ pub fn relaxation_tau(points: &[(f64, f64)]) -> Option<(f64, f64)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{analyze_csv, relaxation_tau};
+    use super::{analyze_csv, linear_regression, relaxation_tau};
+
+    #[test]
+    fn slope_intercept_covariance_matches_textbook() {
+        let points = [(1.0, 1.1), (2.0, 1.9), (3.0, 3.2), (4.0, 3.9)];
+        let fit = linear_regression("x", "y", &points).unwrap();
+        let mean_x = 2.5;
+        let s2 = points
+            .iter()
+            .map(|(x, y)| (y - fit.slope * x - fit.intercept).powi(2))
+            .sum::<f64>()
+            / 2.0;
+        let ss_xx = 5.0;
+        assert!((fit.cov_slope_intercept + mean_x * s2 / ss_xx).abs() < 1e-12);
+        assert!(fit.cov_slope_intercept < 0.0);
+        let rho = fit.cov_slope_intercept / (fit.u_slope * fit.u_intercept);
+        assert!(rho > -1.0 && rho < -0.8);
+    }
+
+    #[test]
+    fn two_points_have_no_covariance() {
+        let fit = linear_regression("x", "y", &[(0.0, 1.0), (1.0, 3.0)]).unwrap();
+        assert_eq!(fit.cov_slope_intercept, 0.0);
+    }
 
     #[test]
     fn computes_basic_stats_and_regression() {

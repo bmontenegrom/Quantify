@@ -229,7 +229,7 @@ pub fn compute(
         &mut us,
         &mut warnings,
     )?;
-    let derived = derive_results(results, &symbols, &means, &us, &mut warnings)?;
+    let derived = derive_results(results, &symbols, &means, &us, &[], &mut warnings)?;
     Ok(FormAnalysis {
         quantities: computed,
         regression: None,
@@ -419,7 +419,7 @@ fn compute_determinations(
     }
 
     let mut derive_warnings = Vec::new();
-    let mut derived = derive_results(&expanded, &allowed, &means, &us, &mut derive_warnings)?;
+    let mut derived = derive_results(&expanded, &allowed, &means, &us, &[], &mut derive_warnings)?;
     for mut w in derive_warnings {
         for (formula, text) in &average_texts {
             w = w.replace(formula, text);
@@ -902,7 +902,14 @@ pub fn compute_regresion(
     let mut allowed: Vec<String> = shared.iter().map(|q| q.symbol.clone()).collect();
     allowed.push("slope".into());
     allowed.push("intercept".into());
-    let derived = derive_results(results, &allowed, &means, &us, &mut warnings)?;
+    let derived = derive_results(
+        results,
+        &allowed,
+        &means,
+        &us,
+        &[("slope", "intercept", fit.cov_slope_intercept)],
+        &mut warnings,
+    )?;
 
     let mut extras: HashMap<&str, f64> = HashMap::new();
     extras.insert("slope", fit.slope);
@@ -1134,6 +1141,7 @@ fn derive_results(
     allowed: &[String],
     means_by_symbol: &HashMap<String, f64>,
     u_by_symbol: &HashMap<String, f64>,
+    covariances: &[(&str, &str, f64)],
     warnings: &mut Vec<String>,
 ) -> anyhow::Result<Vec<DerivedComputation>> {
     let mut scope = allowed.to_vec();
@@ -1217,7 +1225,12 @@ fn derive_results(
             .iter()
             .map(|v| *u_by_symbol.get(v).unwrap_or(&0.0))
             .collect();
-        let (value, u) = uncertainty::propagate(
+        let position = |symbol: &str| vars.iter().position(|v| v == symbol);
+        let pairs: Vec<(usize, usize, f64)> = covariances
+            .iter()
+            .filter_map(|&(a, b, cov)| Some((position(a)?, position(b)?, cov)))
+            .collect();
+        let (value, u) = uncertainty::propagate_correlated(
             |x: &[f64]| {
                 let mut bound: HashMap<&str, f64> = vars
                     .iter()
@@ -1234,6 +1247,7 @@ fn derive_results(
             },
             &means,
             &us,
+            &pairs,
         );
         if !value.is_finite() || !u.is_finite() {
             warnings.push(format!(
@@ -1555,6 +1569,7 @@ fn run_kind_raw(
             &symbols,
             &means,
             &us,
+            &[],
             &mut analysis.warnings,
         )?;
         return Ok(analysis);

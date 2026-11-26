@@ -204,15 +204,33 @@ pub fn propagate<F>(f: F, means: &[f64], us: &[f64]) -> (f64, f64)
 where
     F: Fn(&[f64]) -> f64,
 {
+    propagate_correlated(f, means, us, &[])
+}
+
+/// Como [`propagate`], con covarianzas `(i, j, cov)` entre entradas: suma `2·∂f/∂x_i·∂f/∂x_j·cov`.
+///
+/// ```
+/// // Q = x - y con u = 1 en ambas y covarianza 0.5: u_Q² = 1 + 1 - 2·0.5 = 1.
+/// let (_, u_q) =
+///     quantify::uncertainty::propagate_correlated(|x| x[0] - x[1], &[3.0, 1.0], &[1.0, 1.0], &[(0, 1, 0.5)]);
+/// assert!((u_q - 1.0).abs() < 1e-6);
+/// ```
+pub fn propagate_correlated<F>(
+    f: F,
+    means: &[f64],
+    us: &[f64],
+    covariances: &[(usize, usize, f64)],
+) -> (f64, f64)
+where
+    F: Fn(&[f64]) -> f64,
+{
     let value = f(means);
     let mut variance = 0.0;
+    let mut derivatives = vec![0.0; means.len()];
     let mut x = means.to_vec();
     for i in 0..means.len() {
-        let h = if means[i] == 0.0 {
-            1e-6
-        } else {
-            means[i].abs() * 1e-6
-        };
+        let scale = means[i].abs().max(us[i]);
+        let h = if scale == 0.0 { 1e-6 } else { scale * 1e-6 };
         let original = x[i];
         x[i] = original + h;
         let f_plus = f(&x);
@@ -220,8 +238,13 @@ where
         let f_minus = f(&x);
         x[i] = original;
         let derivative = (f_plus - f_minus) / (2.0 * h);
+        derivatives[i] = derivative;
         variance += (derivative * us[i]).powi(2);
     }
+    for &(i, j, cov) in covariances {
+        variance += 2.0 * derivatives[i] * derivatives[j] * cov;
+    }
+    let variance = if variance < 0.0 { 0.0 } else { variance };
     (value, variance.sqrt())
 }
 
@@ -358,6 +381,12 @@ mod tests {
         let (value, u_q) = propagate(f, &means, &us);
         assert!(close(value, 14.0, 1e-9));
         assert!(close(u_q, 0.9, 1e-6));
+    }
+
+    #[test]
+    fn propagate_handles_a_mean_that_is_almost_zero() {
+        let (_, u_q) = propagate(|x| x[0] + x[1], &[1e-17, 1.0], &[0.3, 0.4]);
+        assert!(close(u_q, 0.5, 1e-9));
     }
 
     #[test]

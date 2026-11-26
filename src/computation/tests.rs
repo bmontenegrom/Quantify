@@ -1632,6 +1632,56 @@ fn result(symbol: &str, formula: &str) -> PracticeResult {
 }
 
 #[test]
+fn inverse_interpolation_matches_textbook_uncertainty() {
+    let mut sample = quantity("A_m");
+    sample.per_point = false;
+    let quantities = vec![quantity("c"), quantity("A"), sample];
+    let results = vec![
+        result("c_m", "(A_m - intercept)/slope"),
+        result("y0", "A_m"),
+    ];
+    let xs = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let ys = [0.21, 0.39, 0.62, 0.79, 1.02];
+    let measurements = vec![
+        measurement("c", &xs),
+        measurement("A", &ys),
+        measurement("A_m", &[0.55, 0.57, 0.56]),
+    ];
+    let a = reg(&quantities, &[], &results, "c", "A", &measurements).unwrap();
+    let fit = a.regression.unwrap();
+    let u_sample = a.derived.iter().find(|d| d.symbol == "y0").unwrap().u;
+    assert!(close(u_sample, 0.01 / 3.0_f64.sqrt(), 1e-9));
+    let c_m = a.derived.iter().find(|d| d.symbol == "c_m").unwrap();
+
+    let n = xs.len() as f64;
+    let mean_y = ys.iter().sum::<f64>() / n;
+    let ss_xx = 10.0;
+    let s2 = xs
+        .iter()
+        .zip(ys)
+        .map(|(x, y)| (y - fit.slope * x - fit.intercept).powi(2))
+        .sum::<f64>()
+        / (n - 2.0);
+    let m = fit.slope;
+    let y0 = 0.56;
+    let textbook = ((u_sample / m).powi(2)
+        + s2 / m.powi(2) * (1.0 / n + (y0 - mean_y).powi(2) / (m * m * ss_xx)))
+        .sqrt();
+    let independent = ((u_sample / m).powi(2)
+        + (fit.u_intercept / m).powi(2)
+        + ((y0 - fit.intercept) / (m * m) * fit.u_slope).powi(2))
+    .sqrt();
+
+    assert!(close(c_m.value, (y0 - fit.intercept) / m, 1e-9));
+    assert!(
+        close(c_m.u, textbook, 1e-6 * textbook),
+        "{} vs {textbook} (indep {independent})",
+        c_m.u
+    );
+    assert!((independent - textbook).abs() > 0.1 * textbook);
+}
+
+#[test]
 fn compute_regresion_fits_known_line() {
     let quantities = vec![quantity("px"), quantity("py")];
     let results = vec![result("m", "slope"), result("b0", "intercept")];
