@@ -207,26 +207,31 @@ where
     propagate_correlated(f, means, us, &[])
 }
 
-/// Como [`propagate`], con covarianzas `(i, j, cov)` entre entradas: suma `2·∂f/∂x_i·∂f/∂x_j·cov`.
+/// Como [`propagate`], con fuentes compartidas: cada factor es una fuente independiente de
+/// desviación 1 que mueve varias entradas a la vez, `x_i += carga_i·z`. Suma el cuadrado de la
+/// derivada direccional de cada factor: sin restas entre términos, no pierde lo que queda cuando
+/// las correlaciones casi se cancelan.
 ///
 /// ```
-/// // Q = x - y con u = 1 en ambas y covarianza 0.5: u_Q² = 1 + 1 - 2·0.5 = 1.
-/// let (_, u_q) =
-///     quantify::uncertainty::propagate_correlated(|x| x[0] - x[1], &[3.0, 1.0], &[1.0, 1.0], &[(0, 1, 0.5)]);
-/// assert!((u_q - 1.0).abs() < 1e-6);
+/// // x e y comparten una fuente de u = 1: x - y no la ve, x + y la ve dos veces.
+/// use quantify::uncertainty::propagate_correlated;
+/// let shared = [vec![(0, 1.0), (1, 1.0)]];
+/// let (_, u_diff) = propagate_correlated(|x| x[0] - x[1], &[3.0, 1.0], &[0.0, 0.0], &shared);
+/// let (_, u_sum) = propagate_correlated(|x| x[0] + x[1], &[3.0, 1.0], &[0.0, 0.0], &shared);
+/// assert!(u_diff.abs() < 1e-9);
+/// assert!((u_sum - 2.0).abs() < 1e-6);
 /// ```
 pub fn propagate_correlated<F>(
     f: F,
     means: &[f64],
     us: &[f64],
-    covariances: &[(usize, usize, f64)],
+    factors: &[Vec<(usize, f64)>],
 ) -> (f64, f64)
 where
     F: Fn(&[f64]) -> f64,
 {
     let value = f(means);
     let mut variance = 0.0;
-    let mut derivatives = vec![0.0; means.len()];
     let mut x = means.to_vec();
     for i in 0..means.len() {
         let scale = means[i].abs().max(us[i]);
@@ -238,13 +243,26 @@ where
         let f_minus = f(&x);
         x[i] = original;
         let derivative = (f_plus - f_minus) / (2.0 * h);
-        derivatives[i] = derivative;
         variance += (derivative * us[i]).powi(2);
     }
-    for &(i, j, cov) in covariances {
-        variance += 2.0 * derivatives[i] * derivatives[j] * cov;
+    for factor in factors {
+        let loads: Vec<(usize, f64)> = factor.iter().copied().filter(|&(_, l)| l != 0.0).collect();
+        let Some(t) = loads
+            .iter()
+            .map(|&(i, l)| 1e-6 * means[i].abs().max(l.abs()) / l.abs())
+            .reduce(f64::max)
+        else {
+            continue;
+        };
+        let shifted = |sign: f64| {
+            let mut x = means.to_vec();
+            for &(i, l) in &loads {
+                x[i] += sign * t * l;
+            }
+            f(&x)
+        };
+        variance += ((shifted(1.0) - shifted(-1.0)) / (2.0 * t)).powi(2);
     }
-    let variance = if variance < 0.0 { 0.0 } else { variance };
     (value, variance.sqrt())
 }
 

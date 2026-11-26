@@ -1382,10 +1382,12 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
      `_max`, `_at_…_max`, `_medio`) la de su base; `slope` = dim(y)/dim(x) e `intercept` =
      dim(y) de los ejes. Ninguna práctica de la biblioteca da avisos.
 5. **`feat(regresion)`: interpolación inversa.** ✅
-   - `linear_regression` da `cov_slope_intercept = -x̄·s²/Sxx` (0 con 2 puntos);
-     `uncertainty::propagate_correlated` suma `2·∂f/∂xi·∂f/∂xj·cov` y `propagate` la llama sin
-     covarianzas. Los mensurandos de la regresión la usan cuando la fórmula (o su cadena) toma
-     `slope` e `intercept`.
+   - La covarianza pendiente-ordenada no se suma como término `2·∂f/∂b·∂f/∂m·cov`: con x lejos
+     del origen (x̄ ≫ dispersión) los términos casi se cancelan y el redondeo se come lo que queda.
+     La recta se describe con dos fuentes independientes: la pendiente (`u_slope`) y la altura
+     media (`u_mean_y = s/√n`), con `intercept = ȳ - m·x̄`. `uncertainty::propagate_correlated`
+     recibe esos factores (cargas sobre `slope` e `intercept`) y suma el cuadrado de la derivada
+     direccional de cada uno: nunca resta.
    - La interpolación es un mensurando común (`(A_m - intercept)/slope`, `A_m` magnitud
      compartida); su U coincide con `s/|m|·√(1/k + 1/n + (y0-ȳ)²/(m²·Sxx))`. Ayuda en el editor.
    - El paso de la derivada numérica escala con `max(|x|, u)`: con una ordenada ~1e-17 (recta por

@@ -907,7 +907,13 @@ pub fn compute_regresion(
         &allowed,
         &means,
         &us,
-        &[("slope", "intercept", fit.cov_slope_intercept)],
+        &[
+            vec![
+                ("slope", fit.u_slope),
+                ("intercept", -fit.mean_x * fit.u_slope),
+            ],
+            vec![("intercept", fit.u_mean_y)],
+        ],
         &mut warnings,
     )?;
 
@@ -1141,7 +1147,7 @@ fn derive_results(
     allowed: &[String],
     means_by_symbol: &HashMap<String, f64>,
     u_by_symbol: &HashMap<String, f64>,
-    covariances: &[(&str, &str, f64)],
+    factors: &[Vec<(&str, f64)>],
     warnings: &mut Vec<String>,
 ) -> anyhow::Result<Vec<DerivedComputation>> {
     let mut scope = allowed.to_vec();
@@ -1221,14 +1227,26 @@ fn derive_results(
             .iter()
             .map(|v| *means_by_symbol.get(v).unwrap_or(&0.0))
             .collect();
+        let in_factor = |v: &str| factors.iter().flatten().any(|(s, _)| *s == v);
         let us: Vec<f64> = vars
             .iter()
-            .map(|v| *u_by_symbol.get(v).unwrap_or(&0.0))
+            .map(|v| {
+                if in_factor(v) {
+                    0.0
+                } else {
+                    *u_by_symbol.get(v).unwrap_or(&0.0)
+                }
+            })
             .collect();
         let position = |symbol: &str| vars.iter().position(|v| v == symbol);
-        let pairs: Vec<(usize, usize, f64)> = covariances
+        let factor_loads: Vec<Vec<(usize, f64)>> = factors
             .iter()
-            .filter_map(|&(a, b, cov)| Some((position(a)?, position(b)?, cov)))
+            .map(|factor| {
+                factor
+                    .iter()
+                    .filter_map(|&(s, load)| Some((position(s)?, load)))
+                    .collect()
+            })
             .collect();
         let (value, u) = uncertainty::propagate_correlated(
             |x: &[f64]| {
@@ -1247,7 +1265,7 @@ fn derive_results(
             },
             &means,
             &us,
-            &pairs,
+            &factor_loads,
         );
         if !value.is_finite() || !u.is_finite() {
             warnings.push(format!(
