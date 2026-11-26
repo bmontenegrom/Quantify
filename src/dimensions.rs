@@ -108,6 +108,7 @@ fn walk(node: &Node, dims_of: &dyn Fn(&str) -> Dim, out: &mut Inference) -> Dim 
         Operator::Div => combine(child(0, out), child(1, out), -1),
         Operator::Exp => {
             let base = child(0, out);
+            child(1, out);
             power(base, children.get(1).and_then(constant))
         }
         Operator::Const {
@@ -147,6 +148,7 @@ fn function(name: &str, args: &[&Node], dims_of: &dyn Fn(&str) -> Dim, out: &mut
         "math::cbrt" => power(arg(0, out), Some(1.0 / 3.0)),
         "math::pow" => {
             let base = arg(0, out);
+            arg(1, out);
             power(base, args.get(1).and_then(|n| constant(n)))
         }
         "math::abs" => arg(0, out),
@@ -166,9 +168,11 @@ fn function(name: &str, args: &[&Node], dims_of: &dyn Fn(&str) -> Dim, out: &mut
         | "math::sin" | "math::cos" | "math::tan" | "math::asin" | "math::acos" | "math::atan"
         | "math::sinh" | "math::cosh" | "math::tanh" | "math::asinh" | "math::acosh"
         | "math::atanh" => {
-            if let Dim::Known(d) = arg(0, out) {
-                if d != NONE && out.argument.is_none() {
-                    out.argument = Some((name.trim_start_matches("math::").to_string(), d));
+            for i in 0..args.len() {
+                if let Dim::Known(d) = arg(i, out) {
+                    if d != NONE && out.argument.is_none() {
+                        out.argument = Some((name.trim_start_matches("math::").to_string(), d));
+                    }
                 }
             }
             Dim::Known(NONE)
@@ -301,6 +305,17 @@ mod tests {
         assert_eq!(ln.dim, of_unit(""));
         assert_eq!(ln.argument.map(|(name, _)| name), Some("ln".into()));
         assert_eq!(infer("math::atan2(L, L)", &dims).dim, of_unit(""));
+        assert!(infer("math::log(10, L)", &dims).argument.is_some());
+        assert!(infer("math::log(L/L, 10)", &dims).argument.is_none());
+    }
+
+    #[test]
+    fn exponents_are_walked_even_when_the_power_cannot_be_inferred() {
+        let sum = infer("2^(L + T)", &dims);
+        assert_eq!(sum.dim, Dim::Number);
+        assert!(sum.mixed.is_some());
+        assert!(infer("math::pow(2, math::ln(L))", &dims).argument.is_some());
+        assert!(infer("L^(math::ln(K))", &dims).argument.is_some());
     }
 
     #[test]
