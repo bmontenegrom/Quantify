@@ -104,6 +104,9 @@ pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -
             let (a, b) = (child(0), child(1));
             mix(&a, 1.0, &b, -(a.v / b.v).trunc(), a.v % b.v)
         }
+        Operator::Chain => children
+            .last()
+            .map_or_else(|| Dual::nan(n), |c| eval_dual(c, bindings, n)),
         Operator::Exp => power(&child(0), &child(1)),
         Operator::Const {
             value: Value::Float(v),
@@ -145,6 +148,22 @@ fn arguments(children: &[Node]) -> Vec<&Node> {
     }
 }
 
+fn extreme(winner: &Dual, args: &[Dual]) -> Dual {
+    let tied: Vec<&Dual> = args.iter().filter(|a| a.v == winner.v).collect();
+    Dual {
+        v: winner.v,
+        d: (0..winner.d.len())
+            .map(|k| {
+                if tied.iter().all(|a| a.d[k] == winner.d[k]) {
+                    winner.d[k]
+                } else {
+                    f64::NAN
+                }
+            })
+            .collect(),
+    }
+}
+
 fn function(name: &str, args: &[Dual], n: usize) -> Dual {
     let one = |f: fn(f64) -> f64, df: fn(f64) -> f64| match args {
         [a] => a.chain(f(a.v), df(a.v)),
@@ -158,7 +177,7 @@ fn function(name: &str, args: &[Dual], n: usize) -> Dual {
         ("math::log2", _) => one(f64::log2, |x| 1.0 / (x * std::f64::consts::LN_2)),
         ("math::exp", _) => one(f64::exp, f64::exp),
         ("math::exp2", _) => one(f64::exp2, |x| x.exp2() * std::f64::consts::LN_2),
-        ("math::abs", _) => one(f64::abs, |x| if x == 0.0 { 0.0 } else { x.signum() }),
+        ("math::abs", _) => one(f64::abs, |x| if x == 0.0 { f64::NAN } else { x.signum() }),
         ("math::sin", _) => one(f64::sin, f64::cos),
         ("math::cos", _) => one(f64::cos, |x| -x.sin()),
         ("math::tan", _) => one(f64::tan, |x| 1.0 / x.cos().powi(2)),
@@ -188,14 +207,16 @@ fn function(name: &str, args: &[Dual], n: usize) -> Dual {
             }
             mix(x, 1.0 / (x.v * ln_base), base, -v / (base.v * ln_base), v)
         }
-        ("min", [first, rest @ ..]) => rest
-            .iter()
-            .fold(first, |best, a| if a.v < best.v { a } else { best })
-            .clone(),
-        ("max", [first, rest @ ..]) => rest
-            .iter()
-            .fold(first, |best, a| if a.v > best.v { a } else { best })
-            .clone(),
+        ("min", [first, rest @ ..]) => extreme(
+            rest.iter()
+                .fold(first, |best, a| if a.v < best.v { a } else { best }),
+            args,
+        ),
+        ("max", [first, rest @ ..]) => extreme(
+            rest.iter()
+                .fold(first, |best, a| if a.v > best.v { a } else { best }),
+            args,
+        ),
         _ => Dual::nan(n),
     }
 }
@@ -338,6 +359,25 @@ mod tests {
     fn a_constant_exponent_does_not_need_the_log_of_the_base() {
         let (dual, _, _) = at("a^2", &[("a", -1.5)]);
         assert_eq!(dual.d, vec![-3.0]);
+    }
+
+    #[test]
+    fn kinks_have_no_derivative() {
+        let (dual, _, _) = at("math::abs(a - b)", &[("a", 1.0), ("b", 1.0)]);
+        assert!(dual.d.iter().all(|x| x.is_nan()));
+        let (dual, _, _) = at("max(0, a)", &[("a", 0.0)]);
+        assert!(dual.d[0].is_nan());
+        let (dual, _, _) = at("min(a, a)", &[("a", 2.0)]);
+        assert_eq!(dual.d, vec![1.0]);
+        let (dual, _, _) = at("max(a, b)", &[("a", 2.0), ("b", 1.0)]);
+        assert_eq!(dual.d, vec![1.0, 0.0]);
+    }
+
+    #[test]
+    fn a_chain_is_worth_its_last_expression() {
+        let (dual, value, _) = at("a; 4*a^2", &[("a", 1.5)]);
+        assert_eq!(dual.v, value);
+        assert_eq!(dual.d, vec![12.0]);
     }
 
     #[test]

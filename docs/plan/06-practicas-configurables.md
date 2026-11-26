@@ -1394,8 +1394,9 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
      Sin paso que elegir, desaparecen los casos borde de la diferencia finita (medias ~0, U ≫
      media, singularidades, desplazamientos grandes).
    - La interpolación es un mensurando común (`(A_m - intercept)/slope`, `A_m` magnitud
-     compartida); su U coincide con `s/|m|·√(1/k + 1/n + (y0-ȳ)²/(m²·Sxx))`, también con x
-     desplazado 1e8. Ayuda en el editor.
+     compartida); su U es `√((u(A_m)/m)² + (s/m)²·(1/n + (y0-ȳ)²/(m²·Sxx)))`, con u(A_m) la U
+     propia de la muestra (tipo A + tipo B de su escala). Con u(A_m) = s/√k es la fórmula de
+     libro `s/|m|·√(1/k + 1/n + …)`. Verificado también con x desplazado 1e8. Ayuda en el editor.
    - Los golden no cambian.
 
 **Pasaje a analítico del resto** (pendiente, después de la #164)

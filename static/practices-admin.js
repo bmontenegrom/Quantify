@@ -441,7 +441,7 @@ export function renderPracticesPage() {
       title: "Mensurandos derivados",
       count: def?.results?.length ?? 0,
       help: kind === "regresion_lineal"
-        ? "La fórmula puede usar <code>slope</code> e <code>intercept</code>; la incertidumbre tiene en cuenta su covarianza. Interpolación inversa: <code>(A_m - intercept)/slope</code>, con <code>A_m</code> una magnitud compartida (la muestra)."
+        ? "La fórmula puede usar <code>slope</code> e <code>intercept</code>; la incertidumbre tiene en cuenta la covarianza entre pendiente y ordenada. Interpolación inversa: <code>(A_m - intercept)/slope</code>, con <code>A_m</code> una magnitud compartida (la muestra). Una magnitud compartida que también entra en los ejes se toma como independiente de la recta."
         : "",
       list: renderResultsList(def, practice.id),
       addLabel: "Nuevo mensurando",
