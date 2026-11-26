@@ -58,11 +58,16 @@ fn mix(a: &Dual, wa: f64, b: &Dual, wb: f64, v: f64) -> Dual {
 
 fn power(base: &Dual, exponent: &Dual) -> Dual {
     let v = base.v.powf(exponent.v);
-    let by_base = exponent.v * base.v.powf(exponent.v - 1.0);
+    let by_base = if exponent.v == 0.0 {
+        0.0
+    } else {
+        exponent.v * base.v.powf(exponent.v - 1.0)
+    };
     if exponent.is_constant() {
         return base.chain(v, by_base);
     }
-    mix(base, by_base, exponent, base.v.ln() * v, v)
+    let by_exponent = if v == 0.0 { 0.0 } else { base.v.ln() * v };
+    mix(base, by_base, exponent, by_exponent, v)
 }
 
 pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -> Dual {
@@ -327,6 +332,20 @@ mod tests {
     fn a_constant_exponent_does_not_need_the_log_of_the_base() {
         let (dual, _, _) = at("a^2", &[("a", -1.5)]);
         assert_eq!(dual.d, vec![-3.0]);
+    }
+
+    #[test]
+    fn powers_at_a_zero_base_take_their_limits() {
+        for formula in ["a^0", "math::pow(a, 0)"] {
+            let (dual, _, _) = at(formula, &[("a", 0.0)]);
+            assert_eq!(dual.d, vec![0.0], "{formula}");
+        }
+        for formula in ["a^b", "math::pow(a, b)"] {
+            let (dual, _, _) = at(formula, &[("a", 0.0), ("b", 2.0)]);
+            assert_eq!(dual.d, vec![0.0, 0.0], "{formula}");
+            let (dual, _, _) = at(formula, &[("a", 3.0), ("b", 0.0)]);
+            assert_eq!(dual.d, vec![0.0, 3.0_f64.ln()], "{formula}");
+        }
     }
 
     #[test]
