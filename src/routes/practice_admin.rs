@@ -338,6 +338,168 @@ fn unit_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
         .collect()
 }
 
+fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
+    use crate::dimensions::{divide, infer, of_unit, text, Dim, Inference};
+    use std::collections::HashMap;
+    let elements: Vec<(&str, &str, &str, &str, &'static str, &String)> = def
+        .results
+        .iter()
+        .map(|r| {
+            (
+                "el mensurando",
+                r.symbol.as_str(),
+                r.unit.as_str(),
+                r.formula.as_str(),
+                "result",
+                &r.id,
+            )
+        })
+        .chain(def.intermediates.iter().map(|i| {
+            (
+                "la intermedia",
+                i.symbol.as_str(),
+                i.unit.as_str(),
+                i.formula.as_str(),
+                "intermediate",
+                &i.id,
+            )
+        }))
+        .chain(def.point_results.iter().map(|p| {
+            (
+                "la derivada por punto",
+                p.symbol.as_str(),
+                p.unit.as_str(),
+                p.formula.as_str(),
+                "pointResult",
+                &p.id,
+            )
+        }))
+        .chain(def.aggregates.iter().map(|g| {
+            (
+                "el agregado",
+                g.symbol.as_str(),
+                g.unit.as_str(),
+                g.formula.as_str(),
+                "aggregate",
+                &g.id,
+            )
+        }))
+        .collect();
+    let declared: HashMap<&str, Dim> = def
+        .quantities
+        .iter()
+        .map(|q| (q.symbol.as_str(), q.unit.as_str()))
+        .chain(elements.iter().map(|e| (e.1, e.2)))
+        .map(|(symbol, unit)| (symbol, of_unit(unit)))
+        .collect();
+    let base = |name: &str| -> Dim {
+        if let Some(dim) = declared.get(name) {
+            return *dim;
+        }
+        let suffixed = ENDPOINT_SUFFIXES
+            .iter()
+            .chain(&["_medio", "_max"])
+            .find_map(|suffix| name.strip_suffix(suffix))
+            .and_then(|s| declared.get(s));
+        let at = || {
+            name.rmatch_indices("_at_")
+                .find_map(|(i, _)| declared.get(&name[..i]))
+        };
+        suffixed.or_else(at).copied().unwrap_or(Dim::Unknown)
+    };
+    let kinds = if def.parts.is_empty() {
+        vec![def.analysis_kind.clone().unwrap_or_default()]
+    } else {
+        def.part_kinds()
+    };
+    let regression = kinds.iter().any(|k| k == "regresion_lineal");
+    let curve = kinds.iter().any(|k| k == "curva");
+    let checked = |kind: &str| match kind {
+        "intermediate" => regression || curve,
+        "pointResult" | "aggregate" => regression,
+        _ => true,
+    };
+    let problems = |what: &str, symbol: &str, unit: Option<&str>, inferred: &Inference| {
+        let mut messages = Vec::new();
+        if let Some((a, b)) = inferred.mixed {
+            messages.push(format!(
+                "la fórmula suma o resta términos con dimensiones distintas ({} y {}).",
+                text(a),
+                text(b)
+            ));
+        }
+        if let Some((argument, d)) = &inferred.argument {
+            messages.push(format!("{argument} no es adimensional ({}).", text(*d)));
+        }
+        if let (Some(unit), Dim::Known(got)) = (unit, inferred.dim) {
+            if let Dim::Known(want) = of_unit(unit) {
+                if got != want {
+                    let shown = if unit.trim().is_empty() {
+                        "vacía"
+                    } else {
+                        unit.trim()
+                    };
+                    messages.push(format!(
+                        "la fórmula da {} y la unidad declarada ({shown}) es {}.",
+                        text(got),
+                        text(want)
+                    ));
+                }
+            }
+        }
+        messages
+            .into_iter()
+            .map(|m| format!("{what} {symbol}: {m}"))
+            .collect::<Vec<_>>()
+    };
+    let warning = |message: String, kind: &'static str, id: Option<&String>| Problem {
+        message,
+        kind,
+        id: id.cloned(),
+        warning: true,
+    };
+    let axis = |formula: &Option<String>| {
+        formula
+            .as_deref()
+            .filter(|_| regression)
+            .map(|f| infer(f, &base))
+    };
+    let (x, y) = (axis(&def.x_formula), axis(&def.y_formula));
+    let mut warnings: Vec<Problem> = [("lineal (eje x)", &x), ("lineal (eje y)", &y)]
+        .into_iter()
+        .filter_map(|(symbol, inferred)| inferred.as_ref().map(|i| (symbol, i)))
+        .flat_map(|(symbol, inferred)| problems("el ajuste", symbol, None, inferred))
+        .map(|m| warning(m, "axes", None))
+        .collect();
+    for c in def.curves.iter().filter(|_| curve) {
+        for (axis, formula) in [("eje x", &c.x_formula), ("eje y", &c.y_formula)] {
+            let label = format!("{} vs {} ({axis})", c.y_formula, c.x_formula);
+            warnings.extend(
+                problems("la curva", &label, None, &infer(formula, &base))
+                    .into_iter()
+                    .map(|m| warning(m, "curve", Some(&c.id))),
+            );
+        }
+    }
+    let dim_of = |a: &Option<Inference>| a.as_ref().map_or(Dim::Unknown, |a| a.dim);
+    let (x, y) = (dim_of(&x), dim_of(&y));
+    let slope = divide(y, x);
+    let lookup = |name: &str| match name {
+        "slope" => slope,
+        "intercept" => y,
+        _ => base(name),
+    };
+    for &(what, symbol, unit, formula, kind, id) in elements.iter().filter(|e| checked(e.4)) {
+        let inferred = infer(formula, &lookup);
+        warnings.extend(
+            problems(what, symbol, Some(unit), &inferred)
+                .into_iter()
+                .map(|m| warning(m, kind, Some(id))),
+        );
+    }
+    warnings
+}
+
 struct ElementProblem {
     check: &'static str,
     element: String,
@@ -382,6 +544,7 @@ pub(super) async fn practice_problems(
     let def = load_definition(&state, &id).await?;
     let mut problems = draft_problems(&def);
     problems.extend(unit_warnings(&def));
+    problems.extend(dimension_warnings(&def));
     Ok(Json(problems))
 }
 
@@ -3651,6 +3814,124 @@ mod tests {
             .any(|p| p.contains("no se reconoce")));
     }
 
+    #[test]
+    fn dimension_warnings_compare_with_the_declared_unit_and_do_not_block_publishing() {
+        let quantity = |symbol: &str, unit: &str| db::PracticeQuantity {
+            id: format!("id-{symbol}"),
+            symbol: symbol.into(),
+            unit: unit.into(),
+            ..Default::default()
+        };
+        let result = |symbol: &str, unit: &str, formula: &str| db::PracticeResult {
+            id: format!("id-{symbol}"),
+            symbol: symbol.into(),
+            unit: unit.into(),
+            formula: formula.into(),
+            ..Default::default()
+        };
+        let def = practices::PracticeDefinition {
+            analysis_kind: Some("estadistico".into()),
+            quantities: vec![
+                quantity("L", "cm"),
+                quantity("T", "s"),
+                quantity("c", "div"),
+                quantity("v_at_0", "m"),
+            ],
+            results: vec![
+                result("g", "m/s2", "4*pi^2*L/T^2"),
+                result("Lm", "s", "L_at_T_max + L_first"),
+                result("v", "m/s2", "L/T"),
+                result("s", "m", "L + T"),
+                result("k", "", "math::ln(T)"),
+                result("n", "", "c/L"),
+                result("g0", "m/s2", "9.81"),
+                result("p", "", "2^L"),
+                result("Vm", "s", "v_at_0_at_T_max"),
+                result("Vf", "m", "v_at_0_first"),
+            ],
+            y_formula: Some("math::ln(T)".into()),
+            ..Default::default()
+        };
+        assert!(dimension_warnings(&def).iter().all(|w| w.kind != "axes"));
+        let def = practices::PracticeDefinition {
+            analysis_kind: Some("regresion_lineal".into()),
+            ..def
+        };
+        let warnings = dimension_warnings(&def);
+        assert_eq!(
+            (
+                warnings[0].kind,
+                warnings[0].id.as_deref(),
+                warnings[0].message.as_str()
+            ),
+            (
+                "axes",
+                None,
+                "el ajuste lineal (eje y): el argumento de ln no es adimensional (s)."
+            )
+        );
+        let warnings = &warnings[1..];
+        let by: Vec<_> = warnings
+            .iter()
+            .map(|w| (w.id.as_deref().unwrap(), w.message.as_str()))
+            .collect();
+        assert_eq!(
+            by,
+            [
+                (
+                    "id-Lm",
+                    "el mensurando Lm: la fórmula da m y la unidad declarada (s) es s."
+                ),
+                (
+                    "id-v",
+                    "el mensurando v: la fórmula da m·s⁻¹ y la unidad declarada (m/s2) es m·s⁻²."
+                ),
+                (
+                    "id-s",
+                    "el mensurando s: la fórmula suma o resta términos con dimensiones distintas (m y s)."
+                ),
+                (
+                    "id-k",
+                    "el mensurando k: el argumento de ln no es adimensional (s)."
+                ),
+                ("id-p", "el mensurando p: el exponente no es adimensional (m)."),
+                (
+                    "id-Vm",
+                    "el mensurando Vm: la fórmula da m y la unidad declarada (s) es s."
+                ),
+            ]
+        );
+        assert!(warnings.iter().all(|w| w.warning && w.kind == "result"));
+        let curve = practices::PracticeDefinition {
+            analysis_kind: Some("curva".into()),
+            curves: vec![practices::PracticeCurve {
+                id: "id-c".into(),
+                x_formula: "L".into(),
+                y_formula: "L + T".into(),
+                ..Default::default()
+            }],
+            ..def.clone()
+        };
+        let on_curve: Vec<_> = dimension_warnings(&curve)
+            .into_iter()
+            .filter(|w| w.kind == "curve")
+            .map(|w| (w.id, w.message))
+            .collect();
+        assert_eq!(
+            on_curve,
+            [(
+                Some("id-c".to_string()),
+                "la curva L + T vs L (eje y): la fórmula suma o resta términos con dimensiones distintas (m y s)."
+                    .to_string()
+            )]
+        );
+        assert!(!publish_problems(&def)
+            .iter()
+            .any(|p| p.contains("la fórmula da")
+                || p.contains("suma o resta")
+                || p.contains("argumento de")));
+    }
+
     #[tokio::test]
     async fn seeded_practices_only_warn_about_div() {
         let (pool, _dir) = crate::computation::tests::setup().await;
@@ -3667,6 +3948,25 @@ mod tests {
                     w.message
                 );
             }
+            let dimensional: Vec<_> = dimension_warnings(&def)
+                .into_iter()
+                .map(|w| w.message)
+                .collect();
+            assert!(dimensional.is_empty(), "{}: {dimensional:?}", practice.id);
+        }
+        for (practice, symbol) in [("p1-estadistica", "g"), ("fluidos-1", "mu")] {
+            let mut def = practices::definition(&pool, practice)
+                .await
+                .unwrap()
+                .unwrap();
+            let r = def.results.iter_mut().find(|r| r.symbol == symbol).unwrap();
+            r.unit = "s".into();
+            let warnings = dimension_warnings(&def);
+            assert!(
+                warnings.iter().any(|w| w.message.contains("la fórmula da")),
+                "{practice}: {:?}",
+                warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+            );
         }
     }
 
