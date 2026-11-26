@@ -26,6 +26,13 @@ export async function fetchJson(url) {
   return readJson(response);
 }
 
+const once = new Map();
+
+export function fetchJsonOnce(url) {
+  if (!once.has(url)) once.set(url, fetchJson(url).catch(() => null));
+  return once.get(url);
+}
+
 export async function postJson(url, payload) {
   const headers = { "content-type": "application/json" };
   if (csrfToken) headers["x-csrf-token"] = csrfToken;

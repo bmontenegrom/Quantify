@@ -5286,6 +5286,43 @@ mod tests {
     }
 
     #[test]
+    fn every_constant_of_the_catalog_can_be_saved() {
+        let catalog: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../static/constants.json")).unwrap();
+        for c in &catalog {
+            let symbol = c["symbol"].as_str().unwrap();
+            assert!(validate_symbol_format(symbol).is_ok(), "{symbol}");
+            assert!(validate_symbol_not_reserved(symbol).is_ok(), "{symbol}");
+            let unit = c["unit"].as_str().unwrap();
+            assert!(crate::units::parse(unit).is_some(), "no reconoce {unit:?}");
+            if let Some(q) = c["quantity"].as_str() {
+                assert!(
+                    crate::magnitudes::MAGNITUDES
+                        .iter()
+                        .any(|(name, _)| *name == q),
+                    "{q:?} no está en el catálogo de magnitudes"
+                );
+            }
+            assert!(c["value"].as_f64().is_some_and(f64::is_finite), "{c}");
+            assert!(
+                c["u"].is_null() || c["u"].as_f64().is_some_and(|u| u >= 0.0),
+                "{c}"
+            );
+            assert!(!c["source"].as_str().unwrap().trim().is_empty(), "{c}");
+        }
+        let value = |symbol: &str| {
+            catalog
+                .iter()
+                .find(|c| c["symbol"] == symbol)
+                .and_then(|c| c["value"].as_f64())
+                .unwrap()
+        };
+        let exact = |derived: f64, product: f64| ((derived - product) / product).abs() < 1e-15;
+        assert!(exact(value("R"), value("N_A") * value("k_B")));
+        assert!(exact(value("F"), value("N_A") * value("q_e")));
+    }
+
+    #[test]
     fn validate_symbol_not_reserved_rejects_reserved_symbols() {
         assert!(validate_symbol_not_reserved("pi").is_err());
         assert!(validate_symbol_not_reserved("e").is_err());
