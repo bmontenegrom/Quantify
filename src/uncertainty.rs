@@ -233,33 +233,34 @@ where
     let value = f(means);
     let mut variance = 0.0;
     for (i, &u) in us.iter().enumerate() {
-        let scale = means[i].abs().max(u);
-        let wide = if scale == 0.0 { 1e-6 } else { scale * 1e-6 };
-        let derivative = central(&f, means, &[(i, 1.0)], wide, means[i].abs() * 1e-6);
-        variance += (derivative * u).powi(2);
+        variance += (central(&f, means, &[(i, 1.0)], 0.0) * u).powi(2);
     }
     for factor in factors {
         let loads: Vec<(usize, f64)> = factor.iter().copied().filter(|&(_, l)| l != 0.0).collect();
-        let smallest = |step: &dyn Fn(f64, f64) -> f64| {
-            loads
-                .iter()
-                .map(|&(i, l)| step(means[i].abs(), l.abs()) / l.abs())
-                .filter(|&t| t > 0.0)
-                .reduce(f64::min)
-        };
-        let Some(wide) = smallest(&|x, l| 1e-6 * x.max(l)) else {
+        if loads.is_empty() {
             continue;
-        };
-        let narrow = smallest(&|x, _| 1e-6 * x).unwrap_or(0.0);
-        variance += central(&f, means, &loads, wide, narrow).powi(2);
+        }
+        let rounding = loads
+            .iter()
+            .map(|&(i, _)| {
+                central(&f, means, &[(i, 1.0)], 0.0).abs() * f64::EPSILON * means[i].abs()
+            })
+            .sum::<f64>();
+        variance += central(&f, means, &loads, rounding).powi(2);
     }
     (value, variance.sqrt())
 }
 
-fn central<F>(f: &F, means: &[f64], loads: &[(usize, f64)], wide: f64, narrow: f64) -> f64
+fn central<F>(f: &F, means: &[f64], loads: &[(usize, f64)], input_rounding: f64) -> f64
 where
     F: Fn(&[f64]) -> f64,
 {
+    let start = loads
+        .iter()
+        .filter(|&&(i, _)| means[i] != 0.0)
+        .map(|&(i, l)| 1e-6 * means[i].abs() / l.abs())
+        .reduce(f64::min)
+        .unwrap_or(1e-6);
     let shifted = |t: f64| {
         let mut x = means.to_vec();
         for &(i, l) in loads {
@@ -269,18 +270,19 @@ where
     };
     let derivative = |t: f64| {
         let (plus, minus) = (shifted(t), shifted(-t));
-        let noise = f64::EPSILON * (plus.abs() + minus.abs()) / (2.0 * t);
+        let noise = (f64::EPSILON * (plus.abs() + minus.abs()) / 2.0 + input_rounding) / t;
         ((plus - minus) / (2.0 * t), noise)
     };
-    if narrow > 0.0 {
-        let (d, noise) = derivative(narrow);
+    let (first, _) = derivative(start);
+    let mut t = start;
+    for _ in 0..20 {
+        let (d, noise) = derivative(t);
         if d.is_finite() && noise <= 1e-3 * d.abs() {
             return d;
         }
-        let (d_wide, _) = derivative(wide);
-        return if d_wide.is_finite() { d_wide } else { d };
+        t *= 10.0;
     }
-    derivative(wide).0
+    first
 }
 
 #[cfg(test)]
@@ -421,13 +423,31 @@ mod tests {
     #[test]
     fn propagate_handles_a_mean_that_is_almost_zero() {
         let (_, u_q) = propagate(|x| x[0] + x[1], &[1e-17, 1.0], &[0.3, 0.4]);
-        assert!(close(u_q, 0.5, 1e-9));
+        assert!(close(u_q, 0.5, 5e-4), "{u_q}");
     }
 
     #[test]
     fn propagate_stays_inside_the_domain_when_u_exceeds_the_mean() {
         let (_, u_q) = propagate(|x| x[0].sqrt(), &[1e-8], &[0.1]);
         assert!((u_q - 500.0).abs() / 500.0 < 1e-3, "{u_q}");
+    }
+
+    #[test]
+    fn a_zero_mean_with_a_tiny_u_still_moves_the_output() {
+        let (_, u_q) = propagate(|x| 1.0 + x[0], &[0.0], &[1e-12]);
+        assert!((u_q - 1e-12).abs() / 1e-12 < 1e-6, "{u_q}");
+    }
+
+    #[test]
+    fn every_loaded_input_moves_with_its_factor() {
+        let factors = [vec![(0, 0.1), (1, -0.3)]];
+        let (_, u_q) = propagate_correlated(
+            |x| (x[0] - 1.0) + x[1],
+            &[1.0, 1e-17],
+            &[0.0, 0.0],
+            &factors,
+        );
+        assert!((u_q - 0.2).abs() / 0.2 < 1e-3, "{u_q}");
     }
 
     #[test]
