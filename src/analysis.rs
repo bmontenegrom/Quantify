@@ -220,10 +220,7 @@ pub fn linear_regression(
         .sum::<f64>();
     let ss_res = points
         .iter()
-        .map(|(x, y)| {
-            let predicted = slope * x + intercept;
-            (y - predicted).powi(2)
-        })
+        .map(|(x, y)| (y - mean_y - slope * (x - mean_x)).powi(2))
         .sum::<f64>();
     let r_squared = if ss_tot == 0.0 {
         1.0
@@ -299,6 +296,19 @@ mod tests {
         assert!((fit.u_mean_y - (s2 / 4.0).sqrt()).abs() < 1e-12);
         let rebuilt = fit.u_mean_y.powi(2) + (fit.mean_x * fit.u_slope).powi(2);
         assert!((rebuilt - fit.u_intercept.powi(2)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn residuals_survive_a_large_x_offset() {
+        let ys = [0.21, 0.39, 0.62, 0.79, 1.02];
+        let near: Vec<(f64, f64)> = ys.iter().enumerate().map(|(i, &y)| (i as f64, y)).collect();
+        let far: Vec<(f64, f64)> = near.iter().map(|&(x, y)| (x + 1e12, y)).collect();
+        let (a, b) = (
+            linear_regression("x", "y", &near).unwrap(),
+            linear_regression("x", "y", &far).unwrap(),
+        );
+        assert!((a.u_mean_y - b.u_mean_y).abs() < 1e-9 * a.u_mean_y);
+        assert!((a.u_slope - b.u_slope).abs() < 1e-9 * a.u_slope);
     }
 
     #[test]

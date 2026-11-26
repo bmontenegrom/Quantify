@@ -102,7 +102,13 @@ pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -
         }
         Operator::Mod => {
             let (a, b) = (child(0), child(1));
-            mix(&a, 1.0, &b, -(a.v / b.v).trunc(), a.v % b.v)
+            let ratio = a.v / b.v;
+            let (wa, wb) = if ratio.fract() == 0.0 {
+                (f64::NAN, f64::NAN)
+            } else {
+                (1.0, -ratio.trunc())
+            };
+            mix(&a, wa, &b, wb, a.v % b.v)
         }
         Operator::Chain => children
             .last()
@@ -371,6 +377,12 @@ mod tests {
         assert_eq!(dual.d, vec![1.0]);
         let (dual, _, _) = at("max(a, b)", &[("a", 2.0), ("b", 1.0)]);
         assert_eq!(dual.d, vec![1.0, 0.0]);
+    }
+
+    #[test]
+    fn a_remainder_on_its_jump_has_no_derivative() {
+        let (dual, _, _) = at("a % b", &[("a", 6.0), ("b", 2.0)]);
+        assert!(dual.d.iter().all(|x| x.is_nan()));
     }
 
     #[test]
