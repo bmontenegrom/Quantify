@@ -175,9 +175,9 @@ fn extreme(winner: &Dual, args: &[Dual], weigh: Weigh) -> Dual {
         v: winner.v,
         d: chosen.d.clone(),
         kink: winner.kink
-            || tied
-                .iter()
-                .any(|a| a.kink || (!same_gradient(&a.d, &winner.d) && u(a) != u(winner))),
+            || tied.iter().any(|a| {
+                a.kink || (!same_gradient(&a.d, &winner.d) && (u(a).1 > 0.0 || u(winner).1 > 0.0))
+            }),
     }
 }
 
@@ -401,7 +401,11 @@ mod tests {
         let (dual, _, _) = at("max(0, a)", &[("a", 0.0)]);
         assert_eq!((dual.d, dual.kink), (vec![1.0], true));
         let (dual, _, _) = at("max(a, b)", &[("a", 12.5), ("b", 12.5)]);
-        assert_eq!((dual.d, dual.kink), (vec![1.0, 0.0], false));
+        assert_eq!((dual.d, dual.kink), (vec![1.0, 0.0], true));
+        for formula in ["max(a, b) + a", "max(b, a) + a"] {
+            let (dual, _, _) = at(formula, &[("a", 2.0), ("b", 2.0)]);
+            assert!(dual.kink, "{formula}");
+        }
         let (dual, _, _) = at("max(a, 2*b)", &[("a", 2.0), ("b", 1.0)]);
         assert_eq!((dual.d, dual.kink), (vec![0.0, 2.0], true));
         let (dual, _, _) = at("2*max(2*a, b)", &[("a", 6.25), ("b", 12.5)]);

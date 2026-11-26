@@ -1279,7 +1279,7 @@ fn derive_results(
             ));
         } else if result.has_uncertainty && outcome.kink && u > 0.0 {
             warnings.push(format!(
-                "El mensurando \"{}\" ({} = {}) cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor derivada), así que puede no ser exacta.",
+                "El mensurando \"{}\" ({} = {}) cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta.",
                 result.name, result.symbol, result.formula
             ));
         }

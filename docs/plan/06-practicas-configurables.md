@@ -1401,9 +1401,11 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
      media, singularidades, desplazamientos grandes).
    - **Quiebres**: en `abs` en 0 y en un `min`/`max` empatado (lecturas redondeadas a la
      resolución empatan seguido) se usa el gradiente completo de una sola rama, la de mayor U
-     (con las u y las fuentes compartidas del mensurando; una rama con NaN pierde), sin importar el
-     orden de los argumentos. El alumno ve un aviso de que puede no ser exacta solo si las ramas
-     dan U distintas (o, en `abs`, si su argumento aporta U). En el salto de `%` (cociente entero distinto de 0) no hay derivada: U no
+     (con las u y las fuentes compartidas del mensurando; una rama con NaN pierde). El alumno ve un
+     aviso de que puede no ser exacta siempre que las ramas empatadas difieran y alguna aporte U
+     (o, en `abs`, si su argumento aporta U). Con ramas de igual U dentro de una fórmula más grande
+     (`max(a, b) + a`), la U final puede depender del orden de los argumentos; por eso el aviso se
+     mantiene. En el salto de `%` (cociente entero distinto de 0) no hay derivada: U no
      calculable, con su aviso.
    - **Limitaciones conocidas**: (1) en un quiebre la rama se elige por la U de esa parte de la
      fórmula, no del mensurando completo: si lo que rodea al `min`/`max` se correlaciona con él,
