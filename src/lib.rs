@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod computation;
 pub mod courses;
 pub mod db;
+pub mod dimensions;
 pub mod error;
 pub mod instruments;
 pub mod magnitudes;

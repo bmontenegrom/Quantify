@@ -1369,9 +1369,18 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
      docente la revisa y la guarda.
    - El alumno ve el valor fijo con todos sus dígitos, coma decimal y `× 10ⁿ` para lo muy grande
      o muy chico (`exactNumber`).
-4. **`feat(editor)`: chequeo dimensional de fórmulas.** Infiere las dimensiones recorriendo el
-   árbol de la fórmula y avisa si no dan la unidad declarada. Solo dimensiones, no escala; lo que
-   no se reconoce no avisa; radianes cuentan como adimensionales.
+4. **`feat(editor)`: chequeo dimensional de fórmulas.** ✅
+   - `src/dimensions.rs` infiere las dimensiones recorriendo el árbol de la fórmula, con los
+     exponentes de `units::Unit` sin los radianes. Solo dimensiones, no escala; lo que no se puede
+     inferir (unidad no reconocida, exponente no entero como `sqrt` de m, exponente no literal)
+     no avisa. Un número suelto se adapta (`T + 273.15` no avisa).
+   - Avisa, en el bloque "Avisos" y sin bloquear publicar, en mensurandos, intermedias, derivadas
+     por punto y agregados: si la fórmula no da la unidad declarada, si suma o resta dimensiones
+     distintas (también en `min`, `max`, `hypot`), y si ln, log, exp o una trigonométrica reciben
+     algo con dimensiones.
+   - Cada símbolo toma la unidad declarada de su elemento; los generados (`_first`, `_last`,
+     `_max`, `_at_…_max`, `_medio`) la de su base; `slope` = dim(y)/dim(x) e `intercept` =
+     dim(y) de los ejes. Ninguna práctica de la biblioteca da avisos.
 5. **`feat(regresion)`: interpolación inversa.** Covarianza pendiente-ordenada en la regresión y
    propagación con covarianzas; la interpolación es un mensurando común
    (`(A_m - intercept)/slope`), verificado contra la fórmula de libro.

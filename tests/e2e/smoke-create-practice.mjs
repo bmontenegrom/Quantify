@@ -159,6 +159,15 @@ await withE2E({ port: PORT, dbName: "quantify-create-practice.db" }, async ({ lo
     await waitForStatus(page, "Mensurando agregado");
     await page.waitForSelector(`#practice-workspace tr:has(code:text-is("${symbol}")) [data-section-select="results"]`);
   }
+
+  step("docente: una fórmula que no da su unidad avisa, pero no impide publicar");
+  await openAddForm(page, "#new-result-form");
+  await page.locator('#new-result-form [name="section_id"]').selectOption({ label: "Parte A — Seccion A" });
+  await fillAndSubmit(page, "#new-result-form", { symbol: "Lw", name: "Largo mal", unit: "s", formula: "L" });
+  await waitForStatus(page, "Mensurando agregado");
+  await page
+    .locator(".practice-warnings [data-problem]", { hasText: "el mensurando Lw: la fórmula da m y la unidad declarada (s) es s." })
+    .waitFor();
   await page.click('[data-practice-status="publicada"]');
   await page.waitForSelector("#practice-workspace .practice-state--publicada");
   await page.waitForSelector('#practice-workspace .practice-lifecycle:has-text("Versión 1")');
