@@ -396,29 +396,26 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
         if let Some(dim) = declared.get(name) {
             return *dim;
         }
-        let at = name
-            .match_indices("_at_")
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .find_map(|(i, _)| declared.get(&name[..i]));
-        let suffixed = || {
-            ENDPOINT_SUFFIXES
-                .iter()
-                .chain(&["_medio", "_max"])
-                .find_map(|suffix| name.strip_suffix(suffix))
-                .and_then(|s| declared.get(s))
+        let suffixed = ENDPOINT_SUFFIXES
+            .iter()
+            .chain(&["_medio", "_max"])
+            .find_map(|suffix| name.strip_suffix(suffix))
+            .and_then(|s| declared.get(s));
+        let at = || {
+            name.rmatch_indices("_at_")
+                .find_map(|(i, _)| declared.get(&name[..i]))
         };
-        at.or_else(suffixed).copied().unwrap_or(Dim::Unknown)
+        suffixed.or_else(at).copied().unwrap_or(Dim::Unknown)
     };
-    let series = if def.parts.is_empty() || def.series_part().is_some() {
-        def.analysis_kind.as_deref()
+    let kinds = if def.parts.is_empty() {
+        vec![def.analysis_kind.clone().unwrap_or_default()]
     } else {
-        None
+        def.part_kinds()
     };
-    let regression = series == Some("regresion_lineal");
+    let regression = kinds.iter().any(|k| k == "regresion_lineal");
+    let curve = kinds.iter().any(|k| k == "curva");
     let checked = |kind: &str| match kind {
-        "intermediate" => regression || series == Some("curva"),
+        "intermediate" => regression || curve,
         "pointResult" | "aggregate" => regression,
         _ => true,
     };
@@ -435,7 +432,7 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
             messages.push(format!("{argument} no es adimensional ({}).", text(*d)));
         }
         if let (Some(unit), Dim::Known(got)) = (unit, inferred.dim) {
-            if let Some(Dim::Known(want)) = declared.get(symbol).copied() {
+            if let Dim::Known(want) = of_unit(unit) {
                 if got != want {
                     let shown = if unit.trim().is_empty() {
                         "vacía"
@@ -468,12 +465,22 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
             .map(|f| infer(f, &base))
     };
     let (x, y) = (axis(&def.x_formula), axis(&def.y_formula));
-    let mut warnings: Vec<Problem> = x
-        .iter()
-        .chain(&y)
-        .flat_map(|inferred| problems("el ajuste", "lineal", None, inferred))
+    let mut warnings: Vec<Problem> = [("lineal (eje x)", &x), ("lineal (eje y)", &y)]
+        .into_iter()
+        .filter_map(|(symbol, inferred)| inferred.as_ref().map(|i| (symbol, i)))
+        .flat_map(|(symbol, inferred)| problems("el ajuste", symbol, None, inferred))
         .map(|m| warning(m, "axes", None))
         .collect();
+    for c in def.curves.iter().filter(|_| curve) {
+        for (axis, formula) in [("eje x", &c.x_formula), ("eje y", &c.y_formula)] {
+            let label = format!("{} ({axis})", c.y_formula);
+            warnings.extend(
+                problems("la curva", &label, None, &infer(formula, &base))
+                    .into_iter()
+                    .map(|m| warning(m, "curve", Some(&c.id))),
+            );
+        }
+    }
     let dim_of = |a: &Option<Inference>| a.as_ref().map_or(Dim::Unknown, |a| a.dim);
     let (x, y) = (dim_of(&x), dim_of(&y));
     let slope = divide(y, x);
@@ -3840,6 +3847,7 @@ mod tests {
                 result("g0", "m/s2", "9.81"),
                 result("p", "", "2^L"),
                 result("Vm", "s", "v_at_0_at_T_max"),
+                result("Vf", "m", "v_at_0_first"),
             ],
             y_formula: Some("math::ln(T)".into()),
             ..Default::default()
@@ -3859,7 +3867,7 @@ mod tests {
             (
                 "axes",
                 None,
-                "el ajuste lineal: el argumento de ln no es adimensional (s)."
+                "el ajuste lineal (eje y): el argumento de ln no es adimensional (s)."
             )
         );
         let warnings = &warnings[1..];
@@ -3894,6 +3902,29 @@ mod tests {
             ]
         );
         assert!(warnings.iter().all(|w| w.warning && w.kind == "result"));
+        let curve = practices::PracticeDefinition {
+            analysis_kind: Some("curva".into()),
+            curves: vec![practices::PracticeCurve {
+                id: "id-c".into(),
+                x_formula: "L".into(),
+                y_formula: "L + T".into(),
+                ..Default::default()
+            }],
+            ..def.clone()
+        };
+        let on_curve: Vec<_> = dimension_warnings(&curve)
+            .into_iter()
+            .filter(|w| w.kind == "curve")
+            .map(|w| (w.id, w.message))
+            .collect();
+        assert_eq!(
+            on_curve,
+            [(
+                Some("id-c".to_string()),
+                "la curva L + T (eje y): la fórmula suma o resta términos con dimensiones distintas (m y s)."
+                    .to_string()
+            )]
+        );
         assert!(!publish_problems(&def)
             .iter()
             .any(|p| p.contains("la fórmula da")
