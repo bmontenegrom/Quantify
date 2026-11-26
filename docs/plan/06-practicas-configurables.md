@@ -1398,6 +1398,25 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
      desplazado 1e8. Ayuda en el editor.
    - Los golden no cambian.
 
+**Pasaje a analítico del resto** (pendiente, después de la #164)
+
+Con los duales, la U de los mensurandos ya sale con derivadas exactas. Lo que todavía se
+calcula sin incertidumbre puede usar el mismo evaluador (`eval_dual` + `propagated_u`):
+
+1. **Derivadas por punto** (`point_results`, hoy "Sin incertidumbre"): U por corrida, con el
+   gradiente respecto de las magnitudes y las intermedias del punto, `slope`/`intercept` (con las
+   fuentes de la recta) y los mensurandos que use.
+2. **Agregados** (hoy "Sin incertidumbre"): U con el gradiente respecto de los escalares
+   compartidos, la recta, los mensurandos y los extremos de cada magnitud por punto (`x_first`,
+   `x_last`, …). Ojo con la correlación: un agregado que usa un mensurando y las mismas entradas
+   las ve dos veces; hay que propagar contra las entradas, como ya hace la cadena de mensurandos.
+3. **Intermedias por punto**: U por réplica o sobre los promedios, para que lleguen a los ejes.
+4. **Ejes del ajuste**: U de x e y en cada punto (barras de error en el gráfico) a partir de las
+   intermedias. Es la base de una regresión ponderada (ítem de "General").
+
+Cada uno en su PR, con su test contra una fórmula de libro y los golden revisados (hoy esos
+campos no tienen U: el golden gana campos, no cambia números).
+
 **General**
 
 - Interfaz común de motores (`PartEngine`, 3.10) y primer motor nuevo (ajuste exponencial no
