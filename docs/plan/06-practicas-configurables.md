@@ -1400,7 +1400,7 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
    - **Quiebres**: en `abs` en 0 y en un `min`/`max` empatado (lecturas redondeadas a la
      resolución empatan seguido) se toma, por entrada, la derivada más grande de las ramas: la U
      sale finita y, sin fuentes compartidas, si se equivoca es hacia arriba; el alumno ve un aviso
-     de que puede estar sobreestimada (no si la U da 0). En el salto de `%` no hay derivada: U no
+     de que puede no ser exacta (no si la U da 0). En el salto de `%` (cociente entero distinto de 0) no hay derivada: U no
      calculable, con su aviso.
    - **Limitaciones conocidas**: (1) en un quiebre con la pendiente o la ordenada, las cargas de la
      fuente compartida de la rama mezclada se pueden cancelar y la U quedar por debajo de la de la

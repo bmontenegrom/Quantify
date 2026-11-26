@@ -104,7 +104,7 @@ pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -
         Operator::Mod => {
             let (a, b) = (child(0), child(1));
             let ratio = a.v / b.v;
-            let (wa, wb) = if ratio.fract() == 0.0 {
+            let (wa, wb) = if ratio.fract() == 0.0 && ratio != 0.0 {
                 (f64::NAN, f64::NAN)
             } else {
                 (1.0, -ratio.trunc())
@@ -116,9 +116,6 @@ pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -
         Operator::Const {
             value: Value::Float(v),
         } => Dual::constant(*v, n),
-        Operator::Const {
-            value: Value::Int(v),
-        } => Dual::constant(*v as f64, n),
         Operator::VariableIdentifierRead { identifier } => {
             match CONSTANTS.iter().find(|(name, _)| name == identifier) {
                 Some(&(_, v)) => Dual::constant(v, n),
@@ -434,6 +431,8 @@ mod tests {
     fn a_remainder_on_its_jump_has_no_derivative() {
         let (dual, _, _) = at("a % b", &[("a", 6.0), ("b", 2.0)]);
         assert!(dual.d.iter().all(|x| x.is_nan()));
+        let (dual, _, _) = at("a % b", &[("a", 0.0), ("b", 360.0)]);
+        assert_eq!(dual.d, vec![1.0, 0.0]);
     }
 
     #[test]
