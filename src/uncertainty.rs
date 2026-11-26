@@ -232,8 +232,9 @@ where
 {
     let value = f(means);
     let mut variance = 0.0;
+    let reach = |i: usize, scale: f64| 1e-3 * means[i].abs().max(scale.abs());
     for (i, &u) in us.iter().enumerate() {
-        variance += (central(&f, means, &[(i, 1.0)], 0.0) * u).powi(2);
+        variance += (central(&f, means, &[(i, 1.0)], 0.0, reach(i, u)) * u).powi(2);
     }
     for factor in factors {
         let loads: Vec<(usize, f64)> = factor.iter().copied().filter(|&(_, l)| l != 0.0).collect();
@@ -242,16 +243,27 @@ where
         }
         let rounding = loads
             .iter()
-            .map(|&(i, _)| {
-                central(&f, means, &[(i, 1.0)], 0.0).abs() * f64::EPSILON * means[i].abs()
+            .map(|&(i, l)| {
+                let partial = central(&f, means, &[(i, 1.0)], 0.0, reach(i, l));
+                partial.abs() * f64::EPSILON * means[i].abs()
             })
             .sum::<f64>();
-        variance += central(&f, means, &loads, rounding).powi(2);
+        let max_step = loads
+            .iter()
+            .map(|&(i, l)| reach(i, l) / l.abs())
+            .fold(f64::INFINITY, f64::min);
+        variance += central(&f, means, &loads, rounding, max_step).powi(2);
     }
     (value, variance.sqrt())
 }
 
-fn central<F>(f: &F, means: &[f64], loads: &[(usize, f64)], input_rounding: f64) -> f64
+fn central<F>(
+    f: &F,
+    means: &[f64],
+    loads: &[(usize, f64)],
+    input_rounding: f64,
+    max_step: f64,
+) -> f64
 where
     F: Fn(&[f64]) -> f64,
 {
@@ -275,10 +287,13 @@ where
     };
     let (first, _) = derivative(start);
     let mut t = start;
-    for _ in 0..20 {
+    while t <= max_step.max(start) {
         let (d, noise) = derivative(t);
         if d.is_finite() && noise <= 1e-3 * d.abs() {
-            return d;
+            let (d_wider, _) = derivative(2.0 * t);
+            if (d_wider - d).abs() <= 1e-2 * d.abs() {
+                return d;
+            }
         }
         t *= 10.0;
     }
@@ -430,6 +445,12 @@ mod tests {
     fn propagate_stays_inside_the_domain_when_u_exceeds_the_mean() {
         let (_, u_q) = propagate(|x| x[0].sqrt(), &[1e-8], &[0.1]);
         assert!((u_q - 500.0).abs() / 500.0 < 1e-3, "{u_q}");
+    }
+
+    #[test]
+    fn curvature_far_away_is_not_taken_for_a_slope() {
+        let (_, u_q) = propagate(|x| 1e12 + (x[0] - 1.0).powi(3), &[1.0], &[0.01]);
+        assert_eq!(u_q, 0.0);
     }
 
     #[test]
