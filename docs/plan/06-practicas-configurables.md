@@ -1400,8 +1400,14 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
 
 **Pasaje a analítico del resto** (pendiente, después de la #164)
 
+**Regla:** toda incertidumbre que se propaga a través de una fórmula sale de `eval_dual` +
+`propagated_u`: sin diferencias finitas ni derivadas escritas a mano. Las correlaciones entran
+como fuentes compartidas (cargas), nunca como términos de covarianza que se restan. Quedan
+fuera las U que no son propagación sino definición (tipo A, tipo B de la escala, su
+combinación, y `u_slope`/`u_intercept`/`u_mean_y` de la regresión).
+
 Con los duales, la U de los mensurandos ya sale con derivadas exactas. Lo que todavía se
-calcula sin incertidumbre puede usar el mismo evaluador (`eval_dual` + `propagated_u`):
+calcula sin incertidumbre usa el mismo evaluador:
 
 1. **Derivadas por punto** (`point_results`, hoy "Sin incertidumbre"): U por corrida, con el
    gradiente respecto de las magnitudes y las intermedias del punto, `slope`/`intercept` (con las
