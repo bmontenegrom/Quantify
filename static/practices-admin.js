@@ -440,6 +440,9 @@ export function renderPracticesPage() {
       id: "result",
       title: "Mensurandos derivados",
       count: def?.results?.length ?? 0,
+      help: kind === "regresion_lineal"
+        ? "La fórmula puede usar <code>slope</code> e <code>intercept</code>; la incertidumbre tiene en cuenta su covarianza. Interpolación inversa: <code>(A_m - intercept)/slope</code>, con <code>A_m</code> una magnitud compartida (la muestra)."
+        : "",
       list: renderResultsList(def, practice.id),
       addLabel: "Nuevo mensurando",
       form: renderResultForm(null, practice.id, def),

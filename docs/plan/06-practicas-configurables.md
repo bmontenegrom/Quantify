@@ -1381,9 +1381,16 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
    - Cada símbolo toma la unidad declarada de su elemento; los generados (`_first`, `_last`,
      `_max`, `_at_…_max`, `_medio`) la de su base; `slope` = dim(y)/dim(x) e `intercept` =
      dim(y) de los ejes. Ninguna práctica de la biblioteca da avisos.
-5. **`feat(regresion)`: interpolación inversa.** Covarianza pendiente-ordenada en la regresión y
-   propagación con covarianzas; la interpolación es un mensurando común
-   (`(A_m - intercept)/slope`), verificado contra la fórmula de libro.
+5. **`feat(regresion)`: interpolación inversa.** ✅
+   - `linear_regression` da `cov_slope_intercept = -x̄·s²/Sxx` (0 con 2 puntos);
+     `uncertainty::propagate_correlated` suma `2·∂f/∂xi·∂f/∂xj·cov` y `propagate` la llama sin
+     covarianzas. Los mensurandos de la regresión la usan cuando la fórmula (o su cadena) toma
+     `slope` e `intercept`.
+   - La interpolación es un mensurando común (`(A_m - intercept)/slope`, `A_m` magnitud
+     compartida); su U coincide con `s/|m|·√(1/k + 1/n + (y0-ȳ)²/(m²·Sxx))`. Ayuda en el editor.
+   - El paso de la derivada numérica escala con `max(|x|, u)`: con una ordenada ~1e-17 (recta por
+     el origen) su derivada daba 0.
+   - Ninguna práctica de la biblioteca usa `slope` e `intercept` juntos: los golden no cambian.
 
 **General**
 
