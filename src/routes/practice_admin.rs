@@ -473,7 +473,7 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
         .collect();
     for c in def.curves.iter().filter(|_| curve) {
         for (axis, formula) in [("eje x", &c.x_formula), ("eje y", &c.y_formula)] {
-            let label = format!("{} ({axis})", c.y_formula);
+            let label = format!("{} vs {} ({axis})", c.y_formula, c.x_formula);
             warnings.extend(
                 problems("la curva", &label, None, &infer(formula, &base))
                     .into_iter()
@@ -3921,7 +3921,7 @@ mod tests {
             on_curve,
             [(
                 Some("id-c".to_string()),
-                "la curva L + T (eje y): la fórmula suma o resta términos con dimensiones distintas (m y s)."
+                "la curva L + T vs L (eje y): la fórmula suma o resta términos con dimensiones distintas (m y s)."
                     .to_string()
             )]
         );
