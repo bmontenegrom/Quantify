@@ -232,38 +232,48 @@ where
 {
     let value = f(means);
     let mut variance = 0.0;
-    let mut x = means.to_vec();
-    for i in 0..means.len() {
-        let scale = means[i].abs().max(us[i]);
-        let h = if scale == 0.0 { 1e-6 } else { scale * 1e-6 };
-        let original = x[i];
-        x[i] = original + h;
-        let f_plus = f(&x);
-        x[i] = original - h;
-        let f_minus = f(&x);
-        x[i] = original;
-        let derivative = (f_plus - f_minus) / (2.0 * h);
-        variance += (derivative * us[i]).powi(2);
+    for (i, &u) in us.iter().enumerate() {
+        let scale = means[i].abs().max(u);
+        let wide = if scale == 0.0 { 1e-6 } else { scale * 1e-6 };
+        let derivative = central(&f, means, &[(i, 1.0)], wide, means[i].abs() * 1e-6);
+        variance += (derivative * u).powi(2);
     }
     for factor in factors {
         let loads: Vec<(usize, f64)> = factor.iter().copied().filter(|&(_, l)| l != 0.0).collect();
-        let Some(t) = loads
-            .iter()
-            .map(|&(i, l)| 1e-6 * means[i].abs().max(l.abs()) / l.abs())
-            .reduce(f64::max)
-        else {
+        let smallest = |step: &dyn Fn(f64, f64) -> f64| {
+            loads
+                .iter()
+                .map(|&(i, l)| step(means[i].abs(), l.abs()) / l.abs())
+                .filter(|&t| t > 0.0)
+                .reduce(f64::min)
+        };
+        let Some(wide) = smallest(&|x, l| 1e-6 * x.max(l)) else {
             continue;
         };
-        let shifted = |sign: f64| {
-            let mut x = means.to_vec();
-            for &(i, l) in &loads {
-                x[i] += sign * t * l;
-            }
-            f(&x)
-        };
-        variance += ((shifted(1.0) - shifted(-1.0)) / (2.0 * t)).powi(2);
+        let narrow = smallest(&|x, _| 1e-6 * x).unwrap_or(0.0);
+        variance += central(&f, means, &loads, wide, narrow).powi(2);
     }
     (value, variance.sqrt())
+}
+
+fn central<F>(f: &F, means: &[f64], loads: &[(usize, f64)], wide: f64, narrow: f64) -> f64
+where
+    F: Fn(&[f64]) -> f64,
+{
+    let shifted = |t: f64| {
+        let mut x = means.to_vec();
+        for &(i, l) in loads {
+            x[i] += t * l;
+        }
+        f(&x)
+    };
+    let derivative = |t: f64| (shifted(t) - shifted(-t)) / (2.0 * t);
+    let first = derivative(wide);
+    if first.is_finite() || narrow <= 0.0 || narrow >= wide {
+        first
+    } else {
+        derivative(narrow)
+    }
 }
 
 #[cfg(test)]
@@ -405,6 +415,25 @@ mod tests {
     fn propagate_handles_a_mean_that_is_almost_zero() {
         let (_, u_q) = propagate(|x| x[0] + x[1], &[1e-17, 1.0], &[0.3, 0.4]);
         assert!(close(u_q, 0.5, 1e-9));
+    }
+
+    #[test]
+    fn propagate_stays_inside_the_domain_when_u_exceeds_the_mean() {
+        let (_, u_q) = propagate(|x| x[0].sqrt(), &[1e-8], &[0.1]);
+        assert!((u_q - 500.0).abs() / 500.0 < 1e-3, "{u_q}");
+    }
+
+    #[test]
+    fn a_tiny_loading_does_not_stretch_the_step_of_the_others() {
+        let f = |x: &[f64]| (2.0 - x[1]) / x[0];
+        let (m, b) = (0.997, 1.004);
+        let factors = [vec![(0, 0.005), (1, -1e-12)]];
+        let (_, u_q) = propagate_correlated(f, &[m, b], &[0.0, 0.0], &factors);
+        let analytic = (2.0 - b) / (m * m) * 0.005;
+        assert!(
+            (u_q - analytic).abs() / analytic < 1e-6,
+            "{u_q} vs {analytic}"
+        );
     }
 
     #[test]

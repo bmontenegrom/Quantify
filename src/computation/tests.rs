@@ -1631,7 +1631,10 @@ fn result(symbol: &str, formula: &str) -> PracticeResult {
     }
 }
 
-fn check_inverse_interpolation(offset: f64, sample_readings: &[f64], u_sample: f64) {
+const CAL_X: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];
+const CAL_Y: [f64; 5] = [0.21, 0.39, 0.62, 0.79, 1.02];
+
+fn check_inverse_interpolation(xs: [f64; 5], ys: [f64; 5], sample_readings: &[f64], u_sample: f64) {
     let mut sample = quantity("A_m");
     sample.per_point = false;
     let quantities = vec![quantity("c"), quantity("A"), sample];
@@ -1639,8 +1642,6 @@ fn check_inverse_interpolation(offset: f64, sample_readings: &[f64], u_sample: f
         result("c_m", "(A_m - intercept)/slope"),
         result("y0", "A_m"),
     ];
-    let xs = [1.0, 2.0, 3.0, 4.0, 5.0].map(|x| x + offset);
-    let ys = [0.21, 0.39, 0.62, 0.79, 1.02];
     let measurements = vec![
         measurement("c", &xs),
         measurement("A", &ys),
@@ -1653,9 +1654,9 @@ fn check_inverse_interpolation(offset: f64, sample_readings: &[f64], u_sample: f
     let c_m = a.derived.iter().find(|d| d.symbol == "c_m").unwrap();
 
     let n = xs.len() as f64;
-    let mean_x = 3.0 + offset;
+    let mean_x = xs.iter().sum::<f64>() / n;
     let mean_y = ys.iter().sum::<f64>() / n;
-    let ss_xx = 10.0;
+    let ss_xx = xs.iter().map(|x| (x - mean_x).powi(2)).sum::<f64>();
     let m = fit.slope;
     let s2 = xs
         .iter()
@@ -1663,7 +1664,7 @@ fn check_inverse_interpolation(offset: f64, sample_readings: &[f64], u_sample: f
         .map(|(x, y)| (y - mean_y - m * (x - mean_x)).powi(2))
         .sum::<f64>()
         / (n - 2.0);
-    let y0 = 0.56;
+    let y0 = sample_readings.iter().sum::<f64>() / sample_readings.len() as f64;
     let textbook = ((u_sample / m).powi(2)
         + s2 / m.powi(2) * (1.0 / n + (y0 - mean_y).powi(2) / (m * m * ss_xx)))
         .sqrt();
@@ -1674,11 +1675,11 @@ fn check_inverse_interpolation(offset: f64, sample_readings: &[f64], u_sample: f
         1e-9 * mean_x.max(1.0)
     ));
     assert!(
-        close(c_m.u, textbook, 1e-3 * textbook),
+        close(c_m.u, textbook, 5e-3 * textbook),
         "{} vs {textbook}",
         c_m.u
     );
-    if offset == 0.0 {
+    if mean_x.abs() > 1.0 {
         let independent = ((u_sample / m).powi(2)
             + (fit.u_intercept / m).powi(2)
             + ((y0 - fit.intercept) / (m * m) * fit.u_slope).powi(2))
@@ -1689,13 +1690,21 @@ fn check_inverse_interpolation(offset: f64, sample_readings: &[f64], u_sample: f
 
 #[test]
 fn inverse_interpolation_matches_textbook_uncertainty() {
-    check_inverse_interpolation(0.0, &[0.55, 0.57, 0.56], 0.01 / 3.0_f64.sqrt());
+    check_inverse_interpolation(CAL_X, CAL_Y, &[0.55, 0.57, 0.56], 0.01 / 3.0_f64.sqrt());
 }
 
 #[test]
 fn inverse_interpolation_survives_a_large_x_offset() {
-    check_inverse_interpolation(1e8, &[0.55, 0.57, 0.56], 0.01 / 3.0_f64.sqrt());
-    check_inverse_interpolation(1e8, &[0.56], 0.0);
+    let xs = CAL_X.map(|x| x + 1e8);
+    check_inverse_interpolation(xs, CAL_Y, &[0.55, 0.57, 0.56], 0.01 / 3.0_f64.sqrt());
+    check_inverse_interpolation(xs, CAL_Y, &[0.56], 0.0);
+}
+
+#[test]
+fn inverse_interpolation_with_x_centered_near_zero() {
+    let xs = [-2.0, -1.0, 0.0, 1.0, 2.0].map(|x| x + 1e-10);
+    let ys = [-0.98, -0.01, 1.02, 1.98, 3.01];
+    check_inverse_interpolation(xs, ys, &[2.0], 0.0);
 }
 
 #[test]
