@@ -371,11 +371,13 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
         if let Some(dim) = declared.get(name) {
             return *dim;
         }
-        let stem = name.split("_at_").next().unwrap_or(name);
-        ["_first2", "_first", "_last2", "_last", "_medio", "_max"]
-            .iter()
-            .find_map(|suffix| stem.strip_suffix(suffix))
-            .and_then(|s| declared.get(s))
+        let stem = match name.split_once("_at_") {
+            Some((stem, _)) => Some(stem),
+            None => ["_first2", "_first", "_last2", "_last", "_medio", "_max"]
+                .iter()
+                .find_map(|suffix| name.strip_suffix(suffix)),
+        };
+        stem.and_then(|s| declared.get(s))
             .copied()
             .unwrap_or(Dim::Unknown)
     };
@@ -3821,6 +3823,7 @@ mod tests {
             ],
             results: vec![
                 result("g", "m/s2", "4*pi^2*L/T^2"),
+                result("Lm", "s", "L_at_T_max + L_first"),
                 result("v", "m/s2", "L/T"),
                 result("s", "m", "L + T"),
                 result("k", "", "math::ln(T)"),
@@ -3836,6 +3839,10 @@ mod tests {
         assert_eq!(
             by,
             [
+                (
+                    "id-Lm",
+                    "el mensurando Lm: la fórmula da m y la unidad declarada (s) es s."
+                ),
                 (
                     "id-v",
                     "el mensurando v: la fórmula da m·s⁻¹ y la unidad declarada (m/s2) es m·s⁻²."
