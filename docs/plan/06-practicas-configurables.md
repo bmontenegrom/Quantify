@@ -1386,13 +1386,21 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
      del origen (x̄ ≫ dispersión) los términos casi se cancelan y el redondeo se come lo que queda.
      La recta se describe con dos fuentes independientes: la pendiente (`u_slope`) y la altura
      media (`u_mean_y = s/√n`), con `intercept = ȳ - m·x̄`. `uncertainty::propagated_u` suma, por
-     cada fuente, el cuadrado de `Σ ∂f/∂x_i·carga_i`: nunca resta varianzas.
+     cada fuente, el cuadrado de `Σ ∂f/∂x_i·carga_i`: las varianzas no se restan. Dentro de la
+     fuente de la pendiente sí se suman `∂f/∂m·u_m` y `−x̄·u_m·∂f/∂b`, que con x lejos del
+     origen casi se cancelan (la fórmula usa `intercept`, así que la cancelación es de la fórmula
+     misma). Se pierden unos `log10(x̄/dispersión)` dígitos de esa parte de la U: nada con 1e8
+     (verificado), unos 4 con x ~ 1e12.
    - **Derivadas exactas**: la propagación de los mensurandos deja la diferencia finita y evalúa la
      fórmula con números duales (`computation/dual.rs`, valor + gradiente) sobre el mismo árbol
      de evalexpr. Cada operador y cada función de `FUNCTIONS` tiene su derivada de libro; lo que
      no se reconoce da NaN (y el aviso de valor no finito). El valor sigue saliendo de evalexpr.
      Sin paso que elegir, desaparecen los casos borde de la diferencia finita (medias ~0, U ≫
      media, singularidades, desplazamientos grandes).
+   - **Quiebres**: en `abs` en 0 y en un `min`/`max` empatado (lecturas redondeadas a la
+     resolución empatan seguido) se toma, por entrada, la derivada más grande de las ramas: la U
+     sale finita y, si se equivoca, hacia arriba; el alumno ve un aviso de que puede estar
+     sobreestimada. En el salto de `%` no hay derivada: U no calculable, con su aviso.
    - La interpolación es un mensurando común (`(A_m - intercept)/slope`, `A_m` magnitud
      compartida); su U es `√((u(A_m)/m)² + (s/m)²·(1/n + (y0-ȳ)²/(m²·Sxx)))`, con u(A_m) la U
      propia de la muestra (tipo A + tipo B de su escala). Con u(A_m) = s/√k es la fórmula de

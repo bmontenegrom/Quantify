@@ -8,23 +8,29 @@ use super::formula::CONSTANTS;
 pub(crate) struct Dual {
     pub v: f64,
     pub d: Vec<f64>,
+    pub kink: bool,
 }
 
 impl Dual {
     pub(crate) fn constant(v: f64, n: usize) -> Self {
-        Dual { v, d: vec![0.0; n] }
+        Dual {
+            v,
+            d: vec![0.0; n],
+            kink: false,
+        }
     }
 
     pub(crate) fn variable(v: f64, index: usize, n: usize) -> Self {
         let mut d = vec![0.0; n];
         d[index] = 1.0;
-        Dual { v, d }
+        Dual { v, d, kink: false }
     }
 
     fn nan(n: usize) -> Self {
         Dual {
             v: f64::NAN,
             d: vec![f64::NAN; n],
+            kink: false,
         }
     }
 
@@ -36,6 +42,7 @@ impl Dual {
                 .iter()
                 .map(|&x| if x == 0.0 { 0.0 } else { x * dv })
                 .collect(),
+            kink: self.kink,
         }
     }
 
@@ -53,6 +60,7 @@ fn mix(a: &Dual, wa: f64, b: &Dual, wb: f64, v: f64) -> Dual {
             .zip(&b.d)
             .map(|(&x, &y)| term(wa, x) + term(wb, y))
             .collect(),
+        kink: a.kink || b.kink,
     }
 }
 
@@ -156,17 +164,16 @@ fn arguments(children: &[Node]) -> Vec<&Node> {
 
 fn extreme(winner: &Dual, args: &[Dual]) -> Dual {
     let tied: Vec<&Dual> = args.iter().filter(|a| a.v == winner.v).collect();
+    let steepest = |k: usize| {
+        tied.iter().map(|a| a.d[k]).fold(
+            winner.d[k],
+            |best, x| if x.abs() > best.abs() { x } else { best },
+        )
+    };
     Dual {
         v: winner.v,
-        d: (0..winner.d.len())
-            .map(|k| {
-                if tied.iter().all(|a| a.d[k] == winner.d[k]) {
-                    winner.d[k]
-                } else {
-                    f64::NAN
-                }
-            })
-            .collect(),
+        d: (0..winner.d.len()).map(steepest).collect(),
+        kink: tied.iter().any(|a| a.kink || a.d != winner.d),
     }
 }
 
@@ -183,7 +190,11 @@ fn function(name: &str, args: &[Dual], n: usize) -> Dual {
         ("math::log2", _) => one(f64::log2, |x| 1.0 / (x * std::f64::consts::LN_2)),
         ("math::exp", _) => one(f64::exp, f64::exp),
         ("math::exp2", _) => one(f64::exp2, |x| x.exp2() * std::f64::consts::LN_2),
-        ("math::abs", _) => one(f64::abs, |x| if x == 0.0 { f64::NAN } else { x.signum() }),
+        ("math::abs", [a]) if a.v == 0.0 => Dual {
+            kink: !a.is_constant(),
+            ..a.chain(0.0, 1.0)
+        },
+        ("math::abs", _) => one(f64::abs, f64::signum),
         ("math::sin", _) => one(f64::sin, f64::cos),
         ("math::cos", _) => one(f64::cos, |x| -x.sin()),
         ("math::tan", _) => one(f64::tan, |x| 1.0 / x.cos().powi(2)),
@@ -368,15 +379,21 @@ mod tests {
     }
 
     #[test]
-    fn kinks_have_no_derivative() {
+    fn kinks_take_the_steepest_branch_and_are_flagged() {
         let (dual, _, _) = at("math::abs(a - b)", &[("a", 1.0), ("b", 1.0)]);
-        assert!(dual.d.iter().all(|x| x.is_nan()));
+        assert_eq!((dual.d, dual.kink), (vec![1.0, -1.0], true));
         let (dual, _, _) = at("max(0, a)", &[("a", 0.0)]);
-        assert!(dual.d[0].is_nan());
+        assert_eq!((dual.d, dual.kink), (vec![1.0], true));
+        let (dual, _, _) = at("max(a, b)", &[("a", 12.5), ("b", 12.5)]);
+        assert_eq!((dual.d, dual.kink), (vec![1.0, 1.0], true));
+        let (dual, _, _) = at("2*max(a, b)", &[("a", 12.5), ("b", 12.5)]);
+        assert!(dual.kink);
         let (dual, _, _) = at("min(a, a)", &[("a", 2.0)]);
-        assert_eq!(dual.d, vec![1.0]);
+        assert_eq!((dual.d, dual.kink), (vec![1.0], false));
         let (dual, _, _) = at("max(a, b)", &[("a", 2.0), ("b", 1.0)]);
-        assert_eq!(dual.d, vec![1.0, 0.0]);
+        assert_eq!((dual.d, dual.kink), (vec![1.0, 0.0], false));
+        let (dual, _, _) = at("math::abs(a)", &[("a", -0.4)]);
+        assert_eq!((dual.d, dual.kink), (vec![-1.0], false));
     }
 
     #[test]

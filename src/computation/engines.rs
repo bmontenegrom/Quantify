@@ -898,8 +898,6 @@ pub fn compute_regresion(
     )?;
     means.insert("slope".into(), fit.slope);
     means.insert("intercept".into(), fit.intercept);
-    us.insert("slope".into(), fit.u_slope);
-    us.insert("intercept".into(), fit.u_intercept);
     let mut allowed: Vec<String> = shared.iter().map(|q| q.symbol.clone()).collect();
     allowed.push("slope".into());
     allowed.push("intercept".into());
@@ -1269,9 +1267,9 @@ fn derive_results(
             }
         }
         let value = eval_compiled(tree, &plain);
-        let gradient = eval_dual(tree, &duals, n).d;
+        let outcome = eval_dual(tree, &duals, n);
         let u = if value.is_finite() {
-            uncertainty::propagated_u(&gradient, &us, &factor_loads)
+            uncertainty::propagated_u(&outcome.d, &us, &factor_loads)
         } else {
             f64::NAN
         };
@@ -1283,6 +1281,11 @@ fn derive_results(
         } else if result.has_uncertainty && !u.is_finite() {
             warnings.push(format!(
                 "La incertidumbre del mensurando \"{}\" ({} = {}) no se puede calcular con estos valores: la fórmula no es derivable ahí (p. ej. una raíz en 0).",
+                result.name, result.symbol, result.formula
+            ));
+        } else if result.has_uncertainty && outcome.kink {
+            warnings.push(format!(
+                "El mensurando \"{}\" ({} = {}) cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con la rama más sensible, así que puede estar sobreestimada.",
                 result.name, result.symbol, result.formula
             ));
         }
