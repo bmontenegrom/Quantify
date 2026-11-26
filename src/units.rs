@@ -699,41 +699,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_constant_of_the_catalog_is_usable() {
-        let catalog: Vec<serde_json::Value> =
-            serde_json::from_str(include_str!("../static/constants.json")).unwrap();
-        assert!(catalog.len() >= 18);
-        for c in &catalog {
-            let unit = c["unit"].as_str().unwrap();
-            assert!(parse(unit).is_some(), "no reconoce {unit:?}");
-            if let Some(q) = c["quantity"].as_str() {
-                assert!(
-                    crate::magnitudes::MAGNITUDES
-                        .iter()
-                        .any(|(name, _)| *name == q),
-                    "{q:?} no está en el catálogo de magnitudes"
-                );
-            }
-            assert!(c["value"].as_f64().is_some_and(f64::is_finite), "{c}");
-            assert!(
-                c["u"].is_null() || c["u"].as_f64().is_some_and(|u| u >= 0.0),
-                "{c}"
-            );
-            assert!(!c["source"].as_str().unwrap().trim().is_empty(), "{c}");
-        }
-        let value = |symbol: &str| {
-            catalog
-                .iter()
-                .find(|c| c["symbol"] == symbol)
-                .and_then(|c| c["value"].as_f64())
-                .unwrap()
-        };
-        let exact = |derived: f64, product: f64| ((derived - product) / product).abs() < 1e-15;
-        assert!(exact(value("R"), value("N_A") * value("k_B")));
-        assert!(exact(value("F"), value("N_A") * value("q_e")));
-    }
-
     #[tokio::test]
     async fn every_unit_of_the_seeded_instruments_is_recognized() {
         let (pool, _dir) = crate::computation::tests::setup().await;

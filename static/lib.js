@@ -68,15 +68,19 @@ export function cssEscape(value) {
   return String(value).replaceAll('"', '\\"');
 }
 
-export function exactNumber(value, minDecimals = 0) {
+const decimalsOf = (x) => {
+  const text = String(x);
+  return /e/.test(text) ? 0 : (text.split(".")[1] ?? "").length;
+};
+
+export function exactNumber(value, uncertainty = null) {
   const v = Number(value);
   if (v !== 0 && (Math.abs(v) >= 1e6 || Math.abs(v) < 1e-4)) {
     const [mantissa, exponent] = v.toExponential().split("e");
     return `${mantissa.replace(".", ",")} × 10${sup(String(Number(exponent)))}`;
   }
-  const text = String(v);
-  const decimals = (text.split(".")[1] ?? "").length;
-  return (decimals < minDecimals ? v.toFixed(minDecimals) : text).replace(".", ",");
+  const places = uncertainty == null ? 0 : decimalsOf(uncertainty);
+  return (decimalsOf(v) < places ? v.toFixed(places) : String(v)).replace(".", ",");
 }
 
 export function format(value) {
