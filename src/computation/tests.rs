@@ -1689,6 +1689,26 @@ fn check_inverse_interpolation(xs: [f64; 5], ys: [f64; 5], sample_readings: &[f6
 }
 
 #[test]
+fn a_finite_value_with_no_uncertainty_gets_its_own_warning() {
+    let mut zero = quantity("z");
+    zero.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), zero];
+    let results = vec![result("r", "math::sqrt(z)")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        measurement("z", &[-0.1, 0.1]),
+    ];
+    let a = reg(&quantities, &[], &results, "px", "py", &measurements).unwrap();
+    let r = a.derived.iter().find(|d| d.symbol == "r").unwrap();
+    assert_eq!(r.value, 0.0);
+    assert!(!r.u.is_finite());
+    let warning = a.warnings.iter().find(|w| w.contains("\"r\"")).unwrap();
+    assert!(warning.contains("no se puede calcular"), "{warning}");
+    assert!(!warning.contains("division por cero"), "{warning}");
+}
+
+#[test]
 fn inverse_interpolation_matches_textbook_uncertainty() {
     check_inverse_interpolation(CAL_X, CAL_Y, &[0.55, 0.57, 0.56], 0.01 / 3.0_f64.sqrt());
 }

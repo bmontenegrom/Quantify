@@ -1419,6 +1419,13 @@ calcula sin incertidumbre usa el mismo evaluador:
 3. **Intermedias por punto**: U por réplica o sobre los promedios, para que lleguen a los ejes.
 4. **Ejes del ajuste**: U de x e y en cada punto (barras de error en el gráfico) a partir de las
    intermedias. Es la base de una regresión ponderada (ítem de "General").
+5. **Magnitudes compartidas dentro y fuera del ajuste**: una magnitud compartida que entra en
+   una fórmula de eje y también en un mensurando se trata hoy como independiente de la recta.
+   Ej.: eje y = `h*rho*g0` y `k = slope/rho`: `slope` ya lleva `rho`, pero la U de `k` cuenta
+   la de `rho` como si no estuviera en la pendiente (en general la sobreestima). Arreglo: dar a
+   la recta una carga sobre cada magnitud compartida de los ejes (la sensibilidad de
+   `slope`/`intercept` a esa magnitud, con duales sobre las fórmulas de eje) y propagar contra
+   las entradas.
 
 Cada uno en su PR, con su test contra una fórmula de libro y los golden revisados (hoy esos
 campos no tienen U: el golden gana campos, no cambia números).

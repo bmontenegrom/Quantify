@@ -100,6 +100,10 @@ pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -
             let v = a.v / b.v;
             mix(&a, 1.0 / b.v, &b, -v / b.v, v)
         }
+        Operator::Mod => {
+            let (a, b) = (child(0), child(1));
+            mix(&a, 1.0, &b, -(a.v / b.v).trunc(), a.v % b.v)
+        }
         Operator::Exp => power(&child(0), &child(1)),
         Operator::Const {
             value: Value::Float(v),
@@ -265,6 +269,8 @@ mod tests {
             ("min(a, b, c)", &[("a", 1.3), ("b", 0.7), ("c", 2.1)]),
             ("max(a, b, c)", &[("a", 1.3), ("b", 0.7), ("c", 2.1)]),
             ("2*pi*a + e", &[("a", 1.3)]),
+            ("a % b", &[("a", 7.3), ("b", 2.1)]),
+            ("a % b", &[("a", -7.3), ("b", 2.1)]),
         ];
         for (formula, point) in cases {
             let (dual, value, numeric) = at(formula, point);
@@ -350,7 +356,7 @@ mod tests {
 
     #[test]
     fn unknown_operators_give_nan() {
-        let (dual, _, _) = at("a % 2", &[("a", 3.0)]);
+        let (dual, _, _) = at("a > 2", &[("a", 3.0)]);
         assert!(dual.v.is_nan());
     }
 }

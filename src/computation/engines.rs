@@ -1275,9 +1275,14 @@ fn derive_results(
         } else {
             f64::NAN
         };
-        if !value.is_finite() || !u.is_finite() {
+        if !value.is_finite() {
             warnings.push(format!(
                 "El mensurando \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
+                result.name, result.symbol, result.formula
+            ));
+        } else if !u.is_finite() {
+            warnings.push(format!(
+                "La incertidumbre del mensurando \"{}\" ({} = {}) no se puede calcular con estos valores: la fórmula no es derivable ahí (p. ej. una raíz en 0).",
                 result.name, result.symbol, result.formula
             ));
         }
