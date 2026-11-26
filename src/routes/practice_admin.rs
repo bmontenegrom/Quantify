@@ -339,32 +339,57 @@ fn unit_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
 }
 
 fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
-    use crate::dimensions::{divide, infer, of_unit, text, Dim, NONE};
+    use crate::dimensions::{divide, infer, of_unit, text, Dim, Inference};
     use std::collections::HashMap;
+    let elements: Vec<(&str, &str, &str, &str, &'static str, &String)> = def
+        .results
+        .iter()
+        .map(|r| {
+            (
+                "el mensurando",
+                r.symbol.as_str(),
+                r.unit.as_str(),
+                r.formula.as_str(),
+                "result",
+                &r.id,
+            )
+        })
+        .chain(def.intermediates.iter().map(|i| {
+            (
+                "la intermedia",
+                i.symbol.as_str(),
+                i.unit.as_str(),
+                i.formula.as_str(),
+                "intermediate",
+                &i.id,
+            )
+        }))
+        .chain(def.point_results.iter().map(|p| {
+            (
+                "la derivada por punto",
+                p.symbol.as_str(),
+                p.unit.as_str(),
+                p.formula.as_str(),
+                "pointResult",
+                &p.id,
+            )
+        }))
+        .chain(def.aggregates.iter().map(|g| {
+            (
+                "el agregado",
+                g.symbol.as_str(),
+                g.unit.as_str(),
+                g.formula.as_str(),
+                "aggregate",
+                &g.id,
+            )
+        }))
+        .collect();
     let declared: HashMap<&str, Dim> = def
         .quantities
         .iter()
         .map(|q| (q.symbol.as_str(), q.unit.as_str()))
-        .chain(
-            def.intermediates
-                .iter()
-                .map(|i| (i.symbol.as_str(), i.unit.as_str())),
-        )
-        .chain(
-            def.results
-                .iter()
-                .map(|r| (r.symbol.as_str(), r.unit.as_str())),
-        )
-        .chain(
-            def.point_results
-                .iter()
-                .map(|p| (p.symbol.as_str(), p.unit.as_str())),
-        )
-        .chain(
-            def.aggregates
-                .iter()
-                .map(|a| (a.symbol.as_str(), a.unit.as_str())),
-        )
+        .chain(elements.iter().map(|e| (e.1, e.2)))
         .map(|(symbol, unit)| (symbol, of_unit(unit)))
         .collect();
     let base = |name: &str| -> Dim {
@@ -373,114 +398,77 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
         }
         let stem = match name.split_once("_at_") {
             Some((stem, _)) => Some(stem),
-            None => ["_first2", "_first", "_last2", "_last", "_medio", "_max"]
+            None => ENDPOINT_SUFFIXES
                 .iter()
+                .chain(&["_medio", "_max"])
                 .find_map(|suffix| name.strip_suffix(suffix)),
         };
         stem.and_then(|s| declared.get(s))
             .copied()
             .unwrap_or(Dim::Unknown)
     };
-    let axis = |formula: &Option<String>| match formula {
-        Some(f) => match infer(f, &base).dim {
-            Dim::Number => Dim::Known(NONE),
-            dim => dim,
-        },
-        None => Dim::Unknown,
+    let problems = |what: &str, symbol: &str, unit: Option<&str>, inferred: &Inference| {
+        let mut messages = Vec::new();
+        if let Some((a, b)) = inferred.mixed {
+            messages.push(format!(
+                "la fórmula suma o resta términos con dimensiones distintas ({} y {}).",
+                text(a),
+                text(b)
+            ));
+        }
+        if let Some((argument, d)) = &inferred.argument {
+            messages.push(format!("{argument} no es adimensional ({}).", text(*d)));
+        }
+        if let (Some(unit), Dim::Known(got)) = (unit, inferred.dim) {
+            if let Dim::Known(want) = of_unit(unit) {
+                if got != want {
+                    let shown = if unit.trim().is_empty() {
+                        "vacía"
+                    } else {
+                        unit.trim()
+                    };
+                    messages.push(format!(
+                        "la fórmula da {} y la unidad declarada ({shown}) es {}.",
+                        text(got),
+                        text(want)
+                    ));
+                }
+            }
+        }
+        messages
+            .into_iter()
+            .map(|m| format!("{what} {symbol}: {m}"))
+            .collect::<Vec<_>>()
     };
+    let warning = |message: String, kind: &'static str, id: Option<&String>| Problem {
+        message,
+        kind,
+        id: id.cloned(),
+        warning: true,
+    };
+    let axis = |formula: &Option<String>| formula.as_deref().map(|f| infer(f, &base));
     let (x, y) = (axis(&def.x_formula), axis(&def.y_formula));
+    let mut warnings: Vec<Problem> = x
+        .iter()
+        .chain(&y)
+        .flat_map(|inferred| problems("el ajuste", "lineal", None, inferred))
+        .map(|m| warning(m, "axes", None))
+        .collect();
+    let dim_of = |a: &Option<Inference>| a.as_ref().map_or(Dim::Unknown, |a| a.dim);
+    let (x, y) = (dim_of(&x), dim_of(&y));
     let slope = divide(y, x);
     let lookup = |name: &str| match name {
         "slope" => slope,
         "intercept" => y,
         _ => base(name),
     };
-    let results = def.results.iter().map(|r| {
-        (
-            "el mensurando",
-            r.symbol.as_str(),
-            r.unit.as_str(),
-            r.formula.as_str(),
-            "result",
-            &r.id,
-        )
-    });
-    let intermediates = def.intermediates.iter().map(|i| {
-        (
-            "la intermedia",
-            i.symbol.as_str(),
-            i.unit.as_str(),
-            i.formula.as_str(),
-            "intermediate",
-            &i.id,
-        )
-    });
-    let point_results = def.point_results.iter().map(|p| {
-        (
-            "la derivada por punto",
-            p.symbol.as_str(),
-            p.unit.as_str(),
-            p.formula.as_str(),
-            "pointResult",
-            &p.id,
-        )
-    });
-    let aggregates = def.aggregates.iter().map(|a| {
-        (
-            "el agregado",
-            a.symbol.as_str(),
-            a.unit.as_str(),
-            a.formula.as_str(),
-            "aggregate",
-            &a.id,
-        )
-    });
-    let mut warnings = Vec::new();
-    for (what, symbol, unit, formula, kind, id) in results
-        .chain(intermediates)
-        .chain(point_results)
-        .chain(aggregates)
-    {
+    for &(what, symbol, unit, formula, kind, id) in &elements {
         let inferred = infer(formula, &lookup);
-        let mut warn = |message: String| {
-            warnings.push(Problem {
-                message: format!("{what} {symbol}: {message}"),
-                kind,
-                id: Some(id.clone()),
-                warning: true,
-            })
-        };
-        if let Some((a, b)) = inferred.mixed {
-            warn(format!(
-                "la fórmula suma o resta términos con dimensiones distintas ({} y {}).",
-                text(a),
-                text(b)
-            ));
-        }
-        if let Some((function, d)) = inferred.argument {
-            warn(format!(
-                "el argumento de {function} no es adimensional ({}).",
-                text(d)
-            ));
-        }
-        let got = match inferred.dim {
-            Dim::Number => Dim::Known(NONE),
-            dim => dim,
-        };
-        if let (Dim::Known(got), Dim::Known(want)) = (got, of_unit(unit)) {
-            if got != want {
-                let shown = if unit.trim().is_empty() {
-                    "vacía"
-                } else {
-                    unit.trim()
-                };
-                warn(format!(
-                    "la fórmula da {} y la unidad declarada ({shown}) es {}.",
-                    text(got),
-                    text(want)
-                ));
-            }
-        }
+        warnings.extend(
+            problems(what, symbol, Some(unit), &inferred)
+                .into_iter()
+                .map(|m| warning(m, kind, Some(id))),
+        );
     }
     warnings
 }
@@ -3828,10 +3816,26 @@ mod tests {
                 result("s", "m", "L + T"),
                 result("k", "", "math::ln(T)"),
                 result("n", "", "c/L"),
+                result("g0", "m/s2", "9.81"),
+                result("p", "", "2^L"),
             ],
+            y_formula: Some("math::ln(T)".into()),
             ..Default::default()
         };
         let warnings = dimension_warnings(&def);
+        assert_eq!(
+            (
+                warnings[0].kind,
+                warnings[0].id.as_deref(),
+                warnings[0].message.as_str()
+            ),
+            (
+                "axes",
+                None,
+                "el ajuste lineal: el argumento de ln no es adimensional (s)."
+            )
+        );
+        let warnings = &warnings[1..];
         let by: Vec<_> = warnings
             .iter()
             .map(|w| (w.id.as_deref().unwrap(), w.message.as_str()))
@@ -3855,6 +3859,7 @@ mod tests {
                     "id-k",
                     "el mensurando k: el argumento de ln no es adimensional (s)."
                 ),
+                ("id-p", "el mensurando p: el exponente no es adimensional (m)."),
             ]
         );
         assert!(warnings.iter().all(|w| w.warning && w.kind == "result"));

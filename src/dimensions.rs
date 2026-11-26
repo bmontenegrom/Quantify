@@ -40,7 +40,14 @@ pub fn infer(formula: &str, dims_of: &dyn Fn(&str) -> Dim) -> Inference {
         mixed: None,
         argument: None,
     };
-    if let Ok(tree) = evalexpr::build_operator_tree(formula) {
+    if let Ok(mut tree) = evalexpr::build_operator_tree(formula) {
+        for operator in tree.iter_operators_mut() {
+            if let Operator::Const { value } = operator {
+                if let Value::Int(int) = *value {
+                    *value = Value::Float(int as f64);
+                }
+            }
+        }
         out.dim = walk(&tree, dims_of, &mut out);
     }
     out
@@ -108,7 +115,8 @@ fn walk(node: &Node, dims_of: &dyn Fn(&str) -> Dim, out: &mut Inference) -> Dim 
         Operator::Div => combine(child(0, out), child(1, out), -1),
         Operator::Exp => {
             let base = child(0, out);
-            child(1, out);
+            let exponent = child(1, out);
+            dimensionless("el exponente", exponent, out);
             power(base, children.get(1).and_then(constant))
         }
         Operator::Const {
@@ -148,7 +156,8 @@ fn function(name: &str, args: &[&Node], dims_of: &dyn Fn(&str) -> Dim, out: &mut
         "math::cbrt" => power(arg(0, out), Some(1.0 / 3.0)),
         "math::pow" => {
             let base = arg(0, out);
-            arg(1, out);
+            let exponent = arg(1, out);
+            dimensionless("el exponente", exponent, out);
             power(base, args.get(1).and_then(|n| constant(n)))
         }
         "math::abs" => arg(0, out),
@@ -168,16 +177,22 @@ fn function(name: &str, args: &[&Node], dims_of: &dyn Fn(&str) -> Dim, out: &mut
         | "math::sin" | "math::cos" | "math::tan" | "math::asin" | "math::acos" | "math::atan"
         | "math::sinh" | "math::cosh" | "math::tanh" | "math::asinh" | "math::acosh"
         | "math::atanh" => {
+            let what = format!("el argumento de {}", name.trim_start_matches("math::"));
             for i in 0..args.len() {
-                if let Dim::Known(d) = arg(i, out) {
-                    if d != NONE && out.argument.is_none() {
-                        out.argument = Some((name.trim_start_matches("math::").to_string(), d));
-                    }
-                }
+                let dim = arg(i, out);
+                dimensionless(&what, dim, out);
             }
             Dim::Known(NONE)
         }
         _ => Dim::Unknown,
+    }
+}
+
+fn dimensionless(what: &str, dim: Dim, out: &mut Inference) {
+    if let Dim::Known(d) = dim {
+        if d != NONE && out.argument.is_none() {
+            out.argument = Some((what.to_string(), d));
+        }
     }
 }
 
@@ -199,7 +214,16 @@ pub fn divide(a: Dim, b: Dim) -> Dim {
 
 fn combine(a: Dim, b: Dim, sign: i8) -> Dim {
     let b = match b {
-        Dim::Known(d) => Dim::Known(d.map(|e| e * sign)),
+        Dim::Known(d) => {
+            let mut scaled = NONE;
+            for i in 0..7 {
+                match d[i].checked_mul(sign) {
+                    Some(e) => scaled[i] = e,
+                    None => return Dim::Unknown,
+                }
+            }
+            Dim::Known(scaled)
+        }
         other => other,
     };
     match (a, b) {
@@ -241,17 +265,10 @@ fn power(base: Dim, exponent: Option<f64>) -> Dim {
 }
 
 fn constant(node: &Node) -> Option<f64> {
-    match node.operator() {
-        Operator::Const {
-            value: Value::Float(f),
-        } => Some(*f),
-        Operator::Const {
-            value: Value::Int(i),
-        } => Some(*i as f64),
-        Operator::Neg => node.children().first().and_then(constant).map(|v| -v),
-        Operator::RootNode if node.children().len() == 1 => constant(&node.children()[0]),
-        _ => None,
+    if node.iter_variable_identifiers().next().is_some() {
+        return None;
     }
+    node.eval().ok()?.as_number().ok()
 }
 
 #[cfg(test)]
@@ -303,7 +320,10 @@ mod tests {
         assert_eq!(infer("math::ln(L/L)", &dims).argument, None);
         let ln = infer("math::ln(K)", &dims);
         assert_eq!(ln.dim, of_unit(""));
-        assert_eq!(ln.argument.map(|(name, _)| name), Some("ln".into()));
+        assert_eq!(
+            ln.argument.map(|(what, _)| what),
+            Some("el argumento de ln".into())
+        );
         assert_eq!(infer("math::atan2(L, L)", &dims).dim, of_unit(""));
         assert!(infer("math::log(10, L)", &dims).argument.is_some());
         assert!(infer("math::log(L/L, 10)", &dims).argument.is_none());
@@ -316,6 +336,17 @@ mod tests {
         assert!(sum.mixed.is_some());
         assert!(infer("math::pow(2, math::ln(L))", &dims).argument.is_some());
         assert!(infer("L^(math::ln(K))", &dims).argument.is_some());
+        let exponent = infer("2^L", &dims).argument;
+        assert_eq!(exponent.map(|(what, _)| what), Some("el exponente".into()));
+        assert!(infer("math::pow(10, T)", &dims).argument.is_some());
+        assert!(infer("2^(L/L)", &dims).argument.is_none());
+    }
+
+    #[test]
+    fn fractions_as_exponents_and_extreme_exponents() {
+        assert_eq!(dim("(L*L)^(1/2)"), of_unit("m"));
+        assert_eq!(dim("math::pow(L*L*L, 1/3)"), of_unit("m"));
+        assert_eq!(dim("1/(T^-100*T^-28)"), Dim::Unknown);
     }
 
     #[test]
