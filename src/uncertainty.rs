@@ -267,13 +267,20 @@ where
         }
         f(&x)
     };
-    let derivative = |t: f64| (shifted(t) - shifted(-t)) / (2.0 * t);
-    let first = derivative(wide);
-    if first.is_finite() || narrow <= 0.0 || narrow >= wide {
-        first
-    } else {
-        derivative(narrow)
+    let derivative = |t: f64| {
+        let (plus, minus) = (shifted(t), shifted(-t));
+        let noise = f64::EPSILON * (plus.abs() + minus.abs()) / (2.0 * t);
+        ((plus - minus) / (2.0 * t), noise)
+    };
+    if narrow > 0.0 {
+        let (d, noise) = derivative(narrow);
+        if d.is_finite() && noise <= 1e-3 * d.abs() {
+            return d;
+        }
+        let (d_wide, _) = derivative(wide);
+        return if d_wide.is_finite() { d_wide } else { d };
     }
+    derivative(wide).0
 }
 
 #[cfg(test)]
@@ -421,6 +428,12 @@ mod tests {
     fn propagate_stays_inside_the_domain_when_u_exceeds_the_mean() {
         let (_, u_q) = propagate(|x| x[0].sqrt(), &[1e-8], &[0.1]);
         assert!((u_q - 500.0).abs() / 500.0 < 1e-3, "{u_q}");
+    }
+
+    #[test]
+    fn a_large_u_does_not_step_across_a_singularity() {
+        let (_, u_q) = propagate(|x| 1.0 / x[0], &[1e-8], &[0.1]);
+        assert!((u_q - 1e15).abs() / 1e15 < 1e-6, "{u_q}");
     }
 
     #[test]
