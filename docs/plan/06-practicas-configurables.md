@@ -554,7 +554,9 @@ con distinto análisis.
 **Estado (2026-11-03)**: hecho en dos PRs. Los detalles:
 - **Composición sin reescribir texto.** Cada mensurando se propaga con una sola llamada a
   `propagate` sobre sus hojas (magnitudes, `slope`/`intercept`, escalares de curva). El closure
-  evalúa las dependencias en orden topológico. La `u` es la de la fórmula expandida.
+  evalúa las dependencias en orden topológico. La `u` es la de la fórmula expandida. (Desde F10
+  química 5/5, `propagate` no existe: derivadas exactas con `computation/dual.rs` y
+  `uncertainty::propagated_u`.)
 - **Sin `part_id` en los resultados**, igual que en F2. Un mensurando sin sección que usa uno de
   una parte va a esa parte. Los compartidos se recalculan en cada parte y se sacan de su salida.
 - **Motor tolerante.** Un ciclo, o depender de un mensurando que no compila, deja un aviso y
@@ -583,7 +585,7 @@ que la fórmula expandida).
 1. **`feat(analisis)`: resultados que usan otros resultados (F4, 1/2).**
    - **Motor** (`derive_results` en `engines.rs`): grafo de los símbolos de resultado de cada
      fórmula y orden topológico. Un ciclo deja un aviso y saltea los resultados involucrados.
-     Cada resultado se propaga con una sola llamada a `propagate` sobre sus hojas (magnitudes,
+     Cada resultado se propaga (hoy con `eval_dual` + `propagated_u`) sobre sus hojas (magnitudes,
      `slope`/`intercept`, escalares de curva). El closure evalúa las dependencias en orden y
      después la fórmula propia, sin reescribir texto, así se conservan las correlaciones. Sirve
      para estadística, regresión, curva y operadores.
@@ -1394,17 +1396,19 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
    - **Derivadas exactas**: la propagación de los mensurandos deja la diferencia finita y evalúa la
      fórmula con números duales (`computation/dual.rs`, valor + gradiente) sobre el mismo árbol
      de evalexpr. Cada operador y cada función de `FUNCTIONS` tiene su derivada de libro; lo que
-     no se reconoce da NaN (y el aviso de valor no finito). El valor sigue saliendo de evalexpr.
+     no se reconoce da NaN en la derivada (y el aviso de U no calculable). El valor sigue saliendo de evalexpr.
      Sin paso que elegir, desaparecen los casos borde de la diferencia finita (medias ~0, U ≫
      media, singularidades, desplazamientos grandes).
    - **Quiebres**: en `abs` en 0 y en un `min`/`max` empatado (lecturas redondeadas a la
-     resolución empatan seguido) se toma, por entrada, la derivada más grande de las ramas: la U
-     sale finita y, sin fuentes compartidas, si se equivoca es hacia arriba; el alumno ve un aviso
-     de que puede no ser exacta (no si la U da 0). En el salto de `%` (cociente entero distinto de 0) no hay derivada: U no
+     resolución empatan seguido) se usa el gradiente completo de una sola rama, la de mayor
+     derivada (norma del gradiente; una rama con NaN pierde): la U sale finita y es la de una rama
+     real (`max(d1, d2)` con d1 = d2 da u₁, no √2·u₁). El alumno ve un aviso de que puede no ser
+     exacta (no si la U da 0). En el salto de `%` (cociente entero distinto de 0) no hay derivada: U no
      calculable, con su aviso.
-   - **Limitaciones conocidas**: (1) en un quiebre con la pendiente o la ordenada, las cargas de la
-     fuente compartida de la rama mezclada se pueden cancelar y la U quedar por debajo de la de la
-     rama más sensible; arreglarlo pide calcular la U de cada rama empatada y quedarse con la mayor.
+   - **Limitaciones conocidas**: (1) en un quiebre la rama se elige por su derivada, no por su U:
+     con fuentes compartidas (pendiente y ordenada) puede no ser la rama de mayor U; elegir por U
+     pide calcular la U de cada rama empatada, lo que hoy no se puede porque la rama se decide
+     antes de conocer las u.
      (2) Una magnitud que está en un eje y también en el mensurando (`y = h*rho*g0`, `k =
      slope/rho`) cuenta su u dos veces: las fuentes compartidas solo ligan pendiente y ordenada, no
      la pendiente con cada magnitud de los ejes.

@@ -161,15 +161,20 @@ fn extreme(winner: &Dual, args: &[Dual]) -> Dual {
         .iter()
         .filter(|a| a.v == winner.v && !std::ptr::eq(*a, winner))
         .collect();
-    let steepest = |k: usize| {
-        tied.iter().map(|a| a.d[k]).fold(
-            winner.d[k],
-            |best, x| if x.abs() > best.abs() { x } else { best },
-        )
+    let steepness = |a: &Dual| {
+        let norm = a.d.iter().map(|x| x * x).sum::<f64>();
+        (!norm.is_nan(), if norm.is_nan() { 0.0 } else { norm })
     };
+    let chosen = tied.iter().fold(winner, |best, a| {
+        if steepness(a) > steepness(best) {
+            a
+        } else {
+            best
+        }
+    });
     Dual {
         v: winner.v,
-        d: (0..winner.d.len()).map(steepest).collect(),
+        d: chosen.d.clone(),
         kink: winner.kink
             || tied
                 .iter()
@@ -386,13 +391,15 @@ mod tests {
     }
 
     #[test]
-    fn kinks_take_the_steepest_branch_and_are_flagged() {
+    fn kinks_take_one_whole_branch_and_are_flagged() {
         let (dual, _, _) = at("math::abs(a - b)", &[("a", 1.0), ("b", 1.0)]);
         assert_eq!((dual.d, dual.kink), (vec![1.0, -1.0], true));
         let (dual, _, _) = at("max(0, a)", &[("a", 0.0)]);
         assert_eq!((dual.d, dual.kink), (vec![1.0], true));
         let (dual, _, _) = at("max(a, b)", &[("a", 12.5), ("b", 12.5)]);
-        assert_eq!((dual.d, dual.kink), (vec![1.0, 1.0], true));
+        assert_eq!((dual.d, dual.kink), (vec![1.0, 0.0], true));
+        let (dual, _, _) = at("max(a, 2*b)", &[("a", 2.0), ("b", 1.0)]);
+        assert_eq!((dual.d, dual.kink), (vec![0.0, 2.0], true));
         let (dual, _, _) = at("2*max(a, b)", &[("a", 12.5), ("b", 12.5)]);
         assert!(dual.kink);
         let (dual, _, _) = at("min(a, a)", &[("a", 2.0)]);

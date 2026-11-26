@@ -228,17 +228,13 @@ pub fn linear_regression(
         1.0 - ss_res / ss_tot
     };
 
-    let (u_slope, u_intercept, u_mean_y) = if n >= 3 {
+    let (u_slope, u_mean_y) = if n >= 3 {
         let s2 = ss_res / (n_f - 2.0);
-        let sum_x2 = points.iter().map(|(x, _)| x * x).sum::<f64>();
-        (
-            (s2 / ss_xx).sqrt(),
-            (s2 * sum_x2 / (n_f * ss_xx)).sqrt(),
-            (s2 / n_f).sqrt(),
-        )
+        ((s2 / ss_xx).sqrt(), (s2 / n_f).sqrt())
     } else {
-        (0.0, 0.0, 0.0)
+        (0.0, 0.0)
     };
+    let u_intercept = u_mean_y.hypot(mean_x * u_slope);
 
     Some(LinearRegression {
         x_column: x_name.to_string(),

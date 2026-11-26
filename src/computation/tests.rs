@@ -1709,7 +1709,7 @@ fn a_finite_value_with_no_uncertainty_gets_its_own_warning() {
 }
 
 #[test]
-fn a_tied_maximum_keeps_a_conservative_uncertainty_and_warns() {
+fn a_tied_maximum_takes_the_uncertainty_of_one_branch_and_warns() {
     let mut d1 = quantity("d1");
     d1.per_point = false;
     let mut d2 = quantity("d2");
@@ -1725,7 +1725,7 @@ fn a_tied_maximum_keeps_a_conservative_uncertainty_and_warns() {
     let a = reg(&quantities, &[], &results, "px", "py", &measurements).unwrap();
     let u1 = a.derived.iter().find(|d| d.symbol == "u1").unwrap().u;
     let r = a.derived.iter().find(|d| d.symbol == "r").unwrap();
-    assert!(close(r.u, 2.0_f64.sqrt() * u1, 1e-12));
+    assert!(close(r.u, u1, 1e-12));
     let warning = a.warnings.iter().find(|w| w.contains("\"r\"")).unwrap();
     assert!(warning.contains("quiebre"), "{warning}");
 }

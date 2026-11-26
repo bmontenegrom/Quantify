@@ -20,7 +20,7 @@ Snapshot del MVP tal como está en `main` al 29-05-2026 (post Fases 0–2.5).
 | `db.rs` | **Persistencia y lógica de dominio** (≈2100 líneas): tipos, migraciones, seeds, queries. |
 | `routes.rs` | Handlers HTTP de la API (`/api/*`), auth helpers, validaciones. |
 | `instruments.rs` | Catálogo de instrumentos por curso: CRUD de instrumentos/escalas, export/import, seed. |
-| `uncertainty.rs` | Motor de incertidumbres: `type_a`, `type_b` (resolución/apreciación/fabricante), `combine`, `expand`, `propagate`. |
+| `uncertainty.rs` | Motor de incertidumbres: `type_a`, `type_b` (resolución/apreciación/fabricante), `combine`, `expand`, `propagated_u` (gradiente exacto de `computation/dual.rs`, con fuentes compartidas). |
 | `analysis.rs` | Análisis CSV: stats por columna + regresión lineal (usa `uncertainty`). |
 | `error.rs` | Tipo `AppError` → respuestas HTTP. |
 
