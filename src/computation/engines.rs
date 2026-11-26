@@ -1226,16 +1226,9 @@ fn derive_results(
             .iter()
             .map(|v| *means_by_symbol.get(v).unwrap_or(&0.0))
             .collect();
-        let in_factor = |v: &str| factors.iter().flatten().any(|(s, _)| *s == v);
         let us: Vec<f64> = vars
             .iter()
-            .map(|v| {
-                if in_factor(v) {
-                    0.0
-                } else {
-                    *u_by_symbol.get(v).unwrap_or(&0.0)
-                }
-            })
+            .map(|v| *u_by_symbol.get(v).unwrap_or(&0.0))
             .collect();
         let position = |symbol: &str| vars.iter().position(|v| v == symbol);
         let factor_loads: Vec<Vec<(usize, f64)>> = factors
@@ -1283,7 +1276,7 @@ fn derive_results(
                 "La incertidumbre del mensurando \"{}\" ({} = {}) no se puede calcular con estos valores: la fórmula no es derivable ahí (p. ej. una raíz en 0).",
                 result.name, result.symbol, result.formula
             ));
-        } else if result.has_uncertainty && outcome.kink {
+        } else if result.has_uncertainty && outcome.kink && u > 0.0 {
             warnings.push(format!(
                 "El mensurando \"{}\" ({} = {}) cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con la rama más sensible, así que puede estar sobreestimada.",
                 result.name, result.symbol, result.formula

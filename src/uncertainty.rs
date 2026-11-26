@@ -192,22 +192,25 @@ pub fn measured_given(value: f64, u_expanded: f64) -> QuantityResult {
     }
 }
 
-/// Incertidumbre combinada de `Q` a partir de su gradiente: `Σ(∂Q/∂x_i·u_i)²` más, por cada
-/// fuente compartida, `(Σ ∂Q/∂x_i·carga_i)²`. Una fuente compartida mueve varias entradas a la
-/// vez (`x_i += carga_i·z`, con `z` de desviación 1): así se expresa una correlación sin restar
-/// términos. Una entrada con `u = 0` no aporta aunque su derivada no sea finita.
+/// La u combinada de un gradiente, con las entradas independientes y cada fuente compartida sumada en cuadratura.
 ///
 /// ```
 /// use quantify::uncertainty::propagated_u;
-/// // Q = x·y en (2, 3) con u = (0.1, 0.2): u_Q² = (3·0.1)² + (2·0.2)².
 /// assert!((propagated_u(&[3.0, 2.0], &[0.1, 0.2], &[]) - 0.5).abs() < 1e-12);
-/// // x e y comparten una fuente de u = 1: x - y no la ve, x + y la ve dos veces.
 /// let shared = [vec![(0, 1.0), (1, 1.0)]];
 /// assert_eq!(propagated_u(&[1.0, -1.0], &[0.0, 0.0], &shared), 0.0);
 /// assert_eq!(propagated_u(&[1.0, 1.0], &[0.0, 0.0], &shared), 2.0);
 /// ```
+pub(crate) fn unless_zero(w: f64, x: f64) -> f64 {
+    if x == 0.0 {
+        0.0
+    } else {
+        w * x
+    }
+}
+
 pub fn propagated_u(gradient: &[f64], us: &[f64], factors: &[Vec<(usize, f64)>]) -> f64 {
-    let term = |g: f64, scale: f64| if scale == 0.0 { 0.0 } else { g * scale };
+    let term = |g: f64, scale: f64| unless_zero(g, scale);
     let independent = gradient
         .iter()
         .zip(us)

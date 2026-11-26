@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use evalexpr::{Node, Operator, Value};
 
 use super::formula::CONSTANTS;
+use crate::uncertainty::unless_zero;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Dual {
@@ -37,11 +38,7 @@ impl Dual {
     fn chain(&self, v: f64, dv: f64) -> Self {
         Dual {
             v,
-            d: self
-                .d
-                .iter()
-                .map(|&x| if x == 0.0 { 0.0 } else { x * dv })
-                .collect(),
+            d: self.d.iter().map(|&x| unless_zero(dv, x)).collect(),
             kink: self.kink,
         }
     }
@@ -52,13 +49,12 @@ impl Dual {
 }
 
 fn mix(a: &Dual, wa: f64, b: &Dual, wb: f64, v: f64) -> Dual {
-    let term = |w: f64, x: f64| if x == 0.0 { 0.0 } else { w * x };
     Dual {
         v,
         d: a.d
             .iter()
             .zip(&b.d)
-            .map(|(&x, &y)| term(wa, x) + term(wb, y))
+            .map(|(&x, &y)| unless_zero(wa, x) + unless_zero(wb, y))
             .collect(),
         kink: a.kink || b.kink,
     }
@@ -71,9 +67,6 @@ fn power(base: &Dual, exponent: &Dual) -> Dual {
     } else {
         exponent.v * base.v.powf(exponent.v - 1.0)
     };
-    if exponent.is_constant() {
-        return base.chain(v, by_base);
-    }
     let by_exponent = if v == 0.0 { 0.0 } else { base.v.ln() * v };
     mix(base, by_base, exponent, by_exponent, v)
 }
@@ -118,9 +111,7 @@ pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -
             };
             mix(&a, wa, &b, wb, a.v % b.v)
         }
-        Operator::Chain => children
-            .last()
-            .map_or_else(|| Dual::nan(n), |c| eval_dual(c, bindings, n)),
+        Operator::Chain => child(children.len().saturating_sub(1)),
         Operator::Exp => power(&child(0), &child(1)),
         Operator::Const {
             value: Value::Float(v),
@@ -162,8 +153,17 @@ fn arguments(children: &[Node]) -> Vec<&Node> {
     }
 }
 
+fn same_gradient(a: &[f64], b: &[f64]) -> bool {
+    a.iter()
+        .zip(b)
+        .all(|(x, y)| x == y || (x.is_nan() && y.is_nan()))
+}
+
 fn extreme(winner: &Dual, args: &[Dual]) -> Dual {
-    let tied: Vec<&Dual> = args.iter().filter(|a| a.v == winner.v).collect();
+    let tied: Vec<&Dual> = args
+        .iter()
+        .filter(|a| a.v == winner.v && !std::ptr::eq(*a, winner))
+        .collect();
     let steepest = |k: usize| {
         tied.iter().map(|a| a.d[k]).fold(
             winner.d[k],
@@ -173,7 +173,10 @@ fn extreme(winner: &Dual, args: &[Dual]) -> Dual {
     Dual {
         v: winner.v,
         d: (0..winner.d.len()).map(steepest).collect(),
-        kink: tied.iter().any(|a| a.kink || a.d != winner.d),
+        kink: winner.kink
+            || tied
+                .iter()
+                .any(|a| a.kink || !same_gradient(&a.d, &winner.d)),
     }
 }
 
@@ -219,9 +222,6 @@ fn function(name: &str, args: &[Dual], n: usize) -> Dual {
         ("math::log", [x, base]) => {
             let ln_base = base.v.ln();
             let v = x.v.ln() / ln_base;
-            if base.is_constant() {
-                return x.chain(v, 1.0 / (x.v * ln_base));
-            }
             mix(x, 1.0 / (x.v * ln_base), base, -v / (base.v * ln_base), v)
         }
         ("min", [first, rest @ ..]) => extreme(
@@ -394,6 +394,8 @@ mod tests {
         assert_eq!((dual.d, dual.kink), (vec![1.0, 0.0], false));
         let (dual, _, _) = at("math::abs(a)", &[("a", -0.4)]);
         assert_eq!((dual.d, dual.kink), (vec![-1.0], false));
+        let (dual, _, _) = at("max(a^b, c)", &[("a", -2.0), ("b", 2.0), ("c", 1.0)]);
+        assert!(dual.d[1].is_nan() && !dual.kink);
     }
 
     #[test]

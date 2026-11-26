@@ -1399,8 +1399,15 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
      media, singularidades, desplazamientos grandes).
    - **Quiebres**: en `abs` en 0 y en un `min`/`max` empatado (lecturas redondeadas a la
      resolución empatan seguido) se toma, por entrada, la derivada más grande de las ramas: la U
-     sale finita y, si se equivoca, hacia arriba; el alumno ve un aviso de que puede estar
-     sobreestimada. En el salto de `%` no hay derivada: U no calculable, con su aviso.
+     sale finita y, sin fuentes compartidas, si se equivoca es hacia arriba; el alumno ve un aviso
+     de que puede estar sobreestimada (no si la U da 0). En el salto de `%` no hay derivada: U no
+     calculable, con su aviso.
+   - **Limitaciones conocidas**: (1) en un quiebre con la pendiente o la ordenada, las cargas de la
+     fuente compartida de la rama mezclada se pueden cancelar y la U quedar por debajo de la de la
+     rama más sensible; arreglarlo pide calcular la U de cada rama empatada y quedarse con la mayor.
+     (2) Una magnitud que está en un eje y también en el mensurando (`y = h*rho*g0`, `k =
+     slope/rho`) cuenta su u dos veces: las fuentes compartidas solo ligan pendiente y ordenada, no
+     la pendiente con cada magnitud de los ejes.
    - La interpolación es un mensurando común (`(A_m - intercept)/slope`, `A_m` magnitud
      compartida); su U es `√((u(A_m)/m)² + (s/m)²·(1/n + (y0-ȳ)²/(m²·Sxx)))`, con u(A_m) la U
      propia de la muestra (tipo A + tipo B de su escala). Con u(A_m) = s/√k es la fórmula de
