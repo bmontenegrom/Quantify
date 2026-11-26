@@ -1241,6 +1241,7 @@ fn derive_results(
             })
             .collect();
         let n = vars.len();
+        let weigh = |d: &[f64]| uncertainty::propagated_u(d, &us, &factor_loads);
         let mut plain: HashMap<&str, f64> = vars
             .iter()
             .map(|s| s.as_str())
@@ -1256,11 +1257,11 @@ fn derive_results(
             if let Some(dep) = trees[d].as_ref() {
                 let symbol = results[d].symbol.as_str();
                 plain.insert(symbol, eval_compiled(dep, &plain));
-                duals.insert(symbol, eval_dual(dep, &duals, n));
+                duals.insert(symbol, eval_dual(dep, &duals, n, &weigh));
             }
         }
         let value = eval_compiled(tree, &plain);
-        let outcome = eval_dual(tree, &duals, n);
+        let outcome = eval_dual(tree, &duals, n, &weigh);
         let u = if value.is_finite() {
             uncertainty::propagated_u(&outcome.d, &us, &factor_loads)
         } else {

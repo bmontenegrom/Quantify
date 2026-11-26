@@ -1715,17 +1715,21 @@ fn a_tied_maximum_takes_the_uncertainty_of_one_branch_and_warns() {
     let mut d2 = quantity("d2");
     d2.per_point = false;
     let quantities = vec![quantity("px"), quantity("py"), d1, d2];
-    let results = vec![result("r", "max(d1, d2)"), result("u1", "d1")];
+    let results = vec![
+        result("r", "max(d1, d2)"),
+        result("r2", "max(d2, d1)"),
+        result("u2", "d2"),
+    ];
     let measurements = vec![
         measurement("px", &[1.0, 2.0, 3.0]),
         measurement("py", &[2.0, 4.1, 5.9]),
         measurement("d1", &[12.4, 12.6]),
-        measurement("d2", &[12.4, 12.6]),
+        measurement("d2", &[12.0, 13.0]),
     ];
     let a = reg(&quantities, &[], &results, "px", "py", &measurements).unwrap();
-    let u1 = a.derived.iter().find(|d| d.symbol == "u1").unwrap().u;
-    let r = a.derived.iter().find(|d| d.symbol == "r").unwrap();
-    assert!(close(r.u, u1, 1e-12));
+    let u = |s: &str| a.derived.iter().find(|d| d.symbol == s).unwrap().u;
+    assert!(close(u("r"), u("u2"), 1e-12));
+    assert!(close(u("r2"), u("u2"), 1e-12));
     let warning = a.warnings.iter().find(|w| w.contains("\"r\"")).unwrap();
     assert!(warning.contains("quiebre"), "{warning}");
 }

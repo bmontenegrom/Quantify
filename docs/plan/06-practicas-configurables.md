@@ -1400,15 +1400,14 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
      Sin paso que elegir, desaparecen los casos borde de la diferencia finita (medias ~0, U ≫
      media, singularidades, desplazamientos grandes).
    - **Quiebres**: en `abs` en 0 y en un `min`/`max` empatado (lecturas redondeadas a la
-     resolución empatan seguido) se usa el gradiente completo de una sola rama, la de mayor
-     derivada (norma del gradiente; una rama con NaN pierde): la U sale finita y es la de una rama
-     real (`max(d1, d2)` con d1 = d2 da u₁, no √2·u₁). El alumno ve un aviso de que puede no ser
-     exacta (no si la U da 0). En el salto de `%` (cociente entero distinto de 0) no hay derivada: U no
+     resolución empatan seguido) se usa el gradiente completo de una sola rama, la de mayor U
+     (con las u y las fuentes compartidas del mensurando; una rama con NaN pierde), sin importar el
+     orden de los argumentos. El alumno ve un aviso de que puede no ser exacta solo si las ramas
+     dan U distintas (o, en `abs`, si su argumento aporta U). En el salto de `%` (cociente entero distinto de 0) no hay derivada: U no
      calculable, con su aviso.
-   - **Limitaciones conocidas**: (1) en un quiebre la rama se elige por su derivada, no por su U:
-     con fuentes compartidas (pendiente y ordenada) puede no ser la rama de mayor U; elegir por U
-     pide calcular la U de cada rama empatada, lo que hoy no se puede porque la rama se decide
-     antes de conocer las u.
+   - **Limitaciones conocidas**: (1) en un quiebre la rama se elige por la U de esa parte de la
+     fórmula, no del mensurando completo: si lo que rodea al `min`/`max` se correlaciona con él,
+     puede no ser la rama que da la mayor U final.
      (2) Una magnitud que está en un eje y también en el mensurando (`y = h*rho*g0`, `k =
      slope/rho`) cuenta su u dos veces: las fuentes compartidas solo ligan pendiente y ordenada, no
      la pendiente con cada magnitud de los ejes.

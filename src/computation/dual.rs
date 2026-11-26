@@ -42,10 +42,6 @@ impl Dual {
             kink: self.kink,
         }
     }
-
-    fn is_constant(&self) -> bool {
-        self.d.iter().all(|&x| x == 0.0)
-    }
 }
 
 fn mix(a: &Dual, wa: f64, b: &Dual, wb: f64, v: f64) -> Dual {
@@ -71,12 +67,19 @@ fn power(base: &Dual, exponent: &Dual) -> Dual {
     mix(base, by_base, exponent, by_exponent, v)
 }
 
-pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -> Dual {
+pub(crate) type Weigh<'a> = &'a dyn Fn(&[f64]) -> f64;
+
+pub(crate) fn eval_dual(
+    node: &Node,
+    bindings: &HashMap<&str, Dual>,
+    n: usize,
+    weigh: Weigh,
+) -> Dual {
     let children = node.children();
     let child = |i: usize| {
         children
             .get(i)
-            .map_or_else(|| Dual::nan(n), |c| eval_dual(c, bindings, n))
+            .map_or_else(|| Dual::nan(n), |c| eval_dual(c, bindings, n, weigh))
     };
     match node.operator() {
         Operator::RootNode if children.len() == 1 => child(0),
@@ -103,13 +106,13 @@ pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -
         }
         Operator::Mod => {
             let (a, b) = (child(0), child(1));
-            let ratio = a.v / b.v;
-            let (wa, wb) = if ratio.fract() == 0.0 && ratio != 0.0 {
+            let rest = a.v % b.v;
+            let (wa, wb) = if rest == 0.0 && a.v != 0.0 {
                 (f64::NAN, f64::NAN)
             } else {
-                (1.0, -ratio.trunc())
+                (1.0, -((a.v - rest) / b.v).round())
             };
-            mix(&a, wa, &b, wb, a.v % b.v)
+            mix(&a, wa, &b, wb, rest)
         }
         Operator::Chain => child(children.len().saturating_sub(1)),
         Operator::Exp => power(&child(0), &child(1)),
@@ -128,9 +131,9 @@ pub(crate) fn eval_dual(node: &Node, bindings: &HashMap<&str, Dual>, n: usize) -
         Operator::FunctionIdentifier { identifier } => {
             let args: Vec<Dual> = arguments(children)
                 .into_iter()
-                .map(|a| eval_dual(a, bindings, n))
+                .map(|a| eval_dual(a, bindings, n, weigh))
                 .collect();
-            function(identifier, &args, n)
+            function(identifier, &args, n, weigh)
         }
         _ => Dual::nan(n),
     }
@@ -156,33 +159,29 @@ fn same_gradient(a: &[f64], b: &[f64]) -> bool {
         .all(|(x, y)| x == y || (x.is_nan() && y.is_nan()))
 }
 
-fn extreme(winner: &Dual, args: &[Dual]) -> Dual {
+fn extreme(winner: &Dual, args: &[Dual], weigh: Weigh) -> Dual {
     let tied: Vec<&Dual> = args
         .iter()
         .filter(|a| a.v == winner.v && !std::ptr::eq(*a, winner))
         .collect();
-    let steepness = |a: &Dual| {
-        let norm = a.d.iter().map(|x| x * x).sum::<f64>();
-        (!norm.is_nan(), if norm.is_nan() { 0.0 } else { norm })
+    let u = |a: &Dual| {
+        let u = weigh(&a.d);
+        (!u.is_nan(), if u.is_nan() { 0.0 } else { u })
     };
-    let chosen = tied.iter().fold(winner, |best, a| {
-        if steepness(a) > steepness(best) {
-            a
-        } else {
-            best
-        }
-    });
+    let chosen = tied
+        .iter()
+        .fold(winner, |best, a| if u(a) > u(best) { a } else { best });
     Dual {
         v: winner.v,
         d: chosen.d.clone(),
         kink: winner.kink
             || tied
                 .iter()
-                .any(|a| a.kink || !same_gradient(&a.d, &winner.d)),
+                .any(|a| a.kink || (!same_gradient(&a.d, &winner.d) && u(a) != u(winner))),
     }
 }
 
-fn function(name: &str, args: &[Dual], n: usize) -> Dual {
+fn function(name: &str, args: &[Dual], n: usize, weigh: Weigh) -> Dual {
     let one = |f: fn(f64) -> f64, df: fn(f64) -> f64| match args {
         [a] => a.chain(f(a.v), df(a.v)),
         _ => Dual::nan(n),
@@ -196,7 +195,7 @@ fn function(name: &str, args: &[Dual], n: usize) -> Dual {
         ("math::exp", _) => one(f64::exp, f64::exp),
         ("math::exp2", _) => one(f64::exp2, |x| x.exp2() * std::f64::consts::LN_2),
         ("math::abs", [a]) if a.v == 0.0 => Dual {
-            kink: !a.is_constant(),
+            kink: weigh(&a.d) > 0.0,
             ..a.chain(0.0, 1.0)
         },
         ("math::abs", _) => one(f64::abs, f64::signum),
@@ -235,6 +234,7 @@ fn function(name: &str, args: &[Dual], n: usize) -> Dual {
                 }
             }),
             args,
+            weigh,
         ),
         ("max", [first, rest @ ..]) => extreme(
             rest.iter().fold(first, |best, a| {
@@ -245,6 +245,7 @@ fn function(name: &str, args: &[Dual], n: usize) -> Dual {
                 }
             }),
             args,
+            weigh,
         ),
         _ => Dual::nan(n),
     }
@@ -263,7 +264,10 @@ mod tests {
             .enumerate()
             .map(|(i, &(s, v))| (s, Dual::variable(v, i, n)))
             .collect();
-        let dual = eval_dual(&tree, &bindings, n);
+        let ones = vec![1.0; n];
+        let dual = eval_dual(&tree, &bindings, n, &|d| {
+            crate::uncertainty::propagated_u(d, &ones, &[])
+        });
         let plain = |values: &[f64]| {
             let map: HashMap<&str, f64> = point
                 .iter()
@@ -397,11 +401,11 @@ mod tests {
         let (dual, _, _) = at("max(0, a)", &[("a", 0.0)]);
         assert_eq!((dual.d, dual.kink), (vec![1.0], true));
         let (dual, _, _) = at("max(a, b)", &[("a", 12.5), ("b", 12.5)]);
-        assert_eq!((dual.d, dual.kink), (vec![1.0, 0.0], true));
+        assert_eq!((dual.d, dual.kink), (vec![1.0, 0.0], false));
         let (dual, _, _) = at("max(a, 2*b)", &[("a", 2.0), ("b", 1.0)]);
         assert_eq!((dual.d, dual.kink), (vec![0.0, 2.0], true));
-        let (dual, _, _) = at("2*max(a, b)", &[("a", 12.5), ("b", 12.5)]);
-        assert!(dual.kink);
+        let (dual, _, _) = at("2*max(2*a, b)", &[("a", 6.25), ("b", 12.5)]);
+        assert_eq!((dual.d, dual.kink), (vec![4.0, 0.0], true));
         let (dual, _, _) = at("min(a, a)", &[("a", 2.0)]);
         assert_eq!((dual.d, dual.kink), (vec![1.0], false));
         let (dual, _, _) = at("max(a, b)", &[("a", 2.0), ("b", 1.0)]);
@@ -440,6 +444,9 @@ mod tests {
         assert!(dual.d.iter().all(|x| x.is_nan()));
         let (dual, _, _) = at("a % b", &[("a", 0.0), ("b", 360.0)]);
         assert_eq!(dual.d, vec![1.0, 0.0]);
+        let (dual, value, _) = at("a % b", &[("a", 1.0), ("b", 0.1)]);
+        assert_eq!(dual.v, value);
+        assert_eq!(dual.d, vec![1.0, -9.0]);
     }
 
     #[test]
