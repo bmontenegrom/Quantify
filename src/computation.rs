@@ -1,3 +1,4 @@
+mod dual;
 mod engines;
 mod formula;
 mod submission;

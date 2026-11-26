@@ -192,112 +192,38 @@ pub fn measured_given(value: f64, u_expanded: f64) -> QuantityResult {
     }
 }
 
-/// Propagacion de varianzas para `Q = f(x_1, ..., x_n)` por diferencias finitas
+/// Incertidumbre combinada de `Q` a partir de su gradiente: `Σ(∂Q/∂x_i·u_i)²` más, por cada
+/// fuente compartida, `(Σ ∂Q/∂x_i·carga_i)²`. Una fuente compartida mueve varias entradas a la
+/// vez (`x_i += carga_i·z`, con `z` de desviación 1): así se expresa una correlación sin restar
+/// términos. Una entrada con `u = 0` no aporta aunque su derivada no sea finita.
 ///
 /// ```
-/// // Q = l * a ; con incertidumbres nulas, u_Q = 0 y el valor es el producto.
-/// let (valor, u_q) = quantify::uncertainty::propagate(|x| x[0] * x[1], &[2.0, 3.0], &[0.0, 0.0]);
-/// assert_eq!(valor, 6.0);
-/// assert!(u_q.abs() < 1e-9);
-/// ```
-pub fn propagate<F>(f: F, means: &[f64], us: &[f64]) -> (f64, f64)
-where
-    F: Fn(&[f64]) -> f64,
-{
-    propagate_correlated(f, means, us, &[])
-}
-
-/// Como [`propagate`], con fuentes compartidas: cada factor es una fuente independiente de
-/// desviación 1 que mueve varias entradas a la vez, `x_i += carga_i·z`. Suma el cuadrado de la
-/// derivada direccional de cada factor: sin restas entre términos, no pierde lo que queda cuando
-/// las correlaciones casi se cancelan.
-///
-/// ```
+/// use quantify::uncertainty::propagated_u;
+/// // Q = x·y en (2, 3) con u = (0.1, 0.2): u_Q² = (3·0.1)² + (2·0.2)².
+/// assert!((propagated_u(&[3.0, 2.0], &[0.1, 0.2], &[]) - 0.5).abs() < 1e-12);
 /// // x e y comparten una fuente de u = 1: x - y no la ve, x + y la ve dos veces.
-/// use quantify::uncertainty::propagate_correlated;
 /// let shared = [vec![(0, 1.0), (1, 1.0)]];
-/// let (_, u_diff) = propagate_correlated(|x| x[0] - x[1], &[3.0, 1.0], &[0.0, 0.0], &shared);
-/// let (_, u_sum) = propagate_correlated(|x| x[0] + x[1], &[3.0, 1.0], &[0.0, 0.0], &shared);
-/// assert!(u_diff.abs() < 1e-9);
-/// assert!((u_sum - 2.0).abs() < 1e-6);
+/// assert_eq!(propagated_u(&[1.0, -1.0], &[0.0, 0.0], &shared), 0.0);
+/// assert_eq!(propagated_u(&[1.0, 1.0], &[0.0, 0.0], &shared), 2.0);
 /// ```
-pub fn propagate_correlated<F>(
-    f: F,
-    means: &[f64],
-    us: &[f64],
-    factors: &[Vec<(usize, f64)>],
-) -> (f64, f64)
-where
-    F: Fn(&[f64]) -> f64,
-{
-    let value = f(means);
-    let mut variance = 0.0;
-    let reach = |i: usize, scale: f64| 1e-3 * means[i].abs().max(scale.abs());
-    for (i, &u) in us.iter().enumerate() {
-        variance += (central(&f, means, &[(i, 1.0)], 0.0, reach(i, u)) * u).powi(2);
-    }
-    for factor in factors {
-        let loads: Vec<(usize, f64)> = factor.iter().copied().filter(|&(_, l)| l != 0.0).collect();
-        if loads.is_empty() {
-            continue;
-        }
-        let rounding = loads
-            .iter()
-            .map(|&(i, l)| {
-                let partial = central(&f, means, &[(i, 1.0)], 0.0, reach(i, l));
-                partial.abs() * f64::EPSILON * means[i].abs()
-            })
-            .sum::<f64>();
-        let max_step = loads
-            .iter()
-            .map(|&(i, l)| reach(i, l) / l.abs())
-            .fold(f64::INFINITY, f64::min);
-        variance += central(&f, means, &loads, rounding, max_step).powi(2);
-    }
-    (value, variance.sqrt())
-}
-
-fn central<F>(
-    f: &F,
-    means: &[f64],
-    loads: &[(usize, f64)],
-    input_rounding: f64,
-    max_step: f64,
-) -> f64
-where
-    F: Fn(&[f64]) -> f64,
-{
-    let start = loads
+pub fn propagated_u(gradient: &[f64], us: &[f64], factors: &[Vec<(usize, f64)>]) -> f64 {
+    let term = |g: f64, scale: f64| if scale == 0.0 { 0.0 } else { g * scale };
+    let independent = gradient
         .iter()
-        .filter(|&&(i, _)| means[i] != 0.0)
-        .map(|&(i, l)| 1e-6 * means[i].abs() / l.abs())
-        .reduce(f64::min)
-        .unwrap_or(1e-6);
-    let shifted = |t: f64| {
-        let mut x = means.to_vec();
-        for &(i, l) in loads {
-            x[i] += t * l;
-        }
-        f(&x)
-    };
-    let derivative = |t: f64| {
-        let (plus, minus) = (shifted(t), shifted(-t));
-        let noise = (f64::EPSILON * (plus.abs() + minus.abs()) / 2.0 + input_rounding) / t;
-        ((plus - minus) / (2.0 * t), noise)
-    };
-    let (first, _) = derivative(start);
-    let mut t = start;
-    while t <= max_step.max(start) {
-        let (d, noise) = derivative(t);
-        if d.is_finite() && noise <= 1e-3 * d.abs() {
-            let (d_wider, _) = derivative(2.0 * t);
-            if (d_wider - d).abs() <= 1e-2 * d.abs() {
-                return d;
-            }
-        }
-        t *= 10.0;
-    }
-    first
+        .zip(us)
+        .map(|(&g, &u)| term(g, u).powi(2))
+        .sum::<f64>();
+    let shared = factors
+        .iter()
+        .map(|factor| {
+            factor
+                .iter()
+                .map(|&(i, l)| term(gradient[i], l))
+                .sum::<f64>()
+                .powi(2)
+        })
+        .sum::<f64>();
+    (independent + shared).sqrt()
 }
 
 #[cfg(test)]
@@ -426,75 +352,9 @@ mod tests {
     }
 
     #[test]
-    fn propagate_matches_analytic_for_product_sum() {
-        let f = |x: &[f64]| x[0] * x[1] + x[0] * x[2];
-        let means = [2.0, 3.0, 4.0];
-        let us = [0.1, 0.2, 0.2];
-        let (value, u_q) = propagate(f, &means, &us);
-        assert!(close(value, 14.0, 1e-9));
-        assert!(close(u_q, 0.9, 1e-6));
-    }
-
-    #[test]
-    fn propagate_handles_a_mean_that_is_almost_zero() {
-        let (_, u_q) = propagate(|x| x[0] + x[1], &[1e-17, 1.0], &[0.3, 0.4]);
-        assert!(close(u_q, 0.5, 5e-4), "{u_q}");
-    }
-
-    #[test]
-    fn propagate_stays_inside_the_domain_when_u_exceeds_the_mean() {
-        let (_, u_q) = propagate(|x| x[0].sqrt(), &[1e-8], &[0.1]);
-        assert!((u_q - 500.0).abs() / 500.0 < 1e-3, "{u_q}");
-    }
-
-    #[test]
-    fn curvature_far_away_is_not_taken_for_a_slope() {
-        let (_, u_q) = propagate(|x| 1e12 + (x[0] - 1.0).powi(3), &[1.0], &[0.01]);
-        assert_eq!(u_q, 0.0);
-    }
-
-    #[test]
-    fn a_zero_mean_with_a_tiny_u_still_moves_the_output() {
-        let (_, u_q) = propagate(|x| 1.0 + x[0], &[0.0], &[1e-12]);
-        assert!((u_q - 1e-12).abs() / 1e-12 < 1e-6, "{u_q}");
-    }
-
-    #[test]
-    fn every_loaded_input_moves_with_its_factor() {
-        let factors = [vec![(0, 0.1), (1, -0.3)]];
-        let (_, u_q) = propagate_correlated(
-            |x| (x[0] - 1.0) + x[1],
-            &[1.0, 1e-17],
-            &[0.0, 0.0],
-            &factors,
-        );
-        assert!((u_q - 0.2).abs() / 0.2 < 1e-3, "{u_q}");
-    }
-
-    #[test]
-    fn a_large_u_does_not_step_across_a_singularity() {
-        let (_, u_q) = propagate(|x| 1.0 / x[0], &[1e-8], &[0.1]);
-        assert!((u_q - 1e15).abs() / 1e15 < 1e-6, "{u_q}");
-    }
-
-    #[test]
-    fn a_tiny_loading_does_not_stretch_the_step_of_the_others() {
-        let f = |x: &[f64]| (2.0 - x[1]) / x[0];
-        let (m, b) = (0.997, 1.004);
-        let factors = [vec![(0, 0.005), (1, -1e-12)]];
-        let (_, u_q) = propagate_correlated(f, &[m, b], &[0.0, 0.0], &factors);
-        let analytic = (2.0 - b) / (m * m) * 0.005;
-        assert!(
-            (u_q - analytic).abs() / analytic < 1e-6,
-            "{u_q} vs {analytic}"
-        );
-    }
-
-    #[test]
-    fn propagate_is_accurate_for_tiny_nonlinear_magnitudes() {
-        let (value, u_q) = propagate(|x| 1.0 / x[0], &[1e-8], &[1e-10]);
-        assert!(close(value, 1e8, 1.0));
-        assert!((u_q - 1e6).abs() / 1e6 < 1e-3);
+    fn an_input_without_u_does_not_spoil_the_rest() {
+        let u = propagated_u(&[f64::INFINITY, 2.0], &[0.0, 0.5], &[]);
+        assert_eq!(u, 1.0);
     }
 
     #[test]

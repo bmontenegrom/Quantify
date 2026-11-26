@@ -1385,14 +1385,18 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
    - La covarianza pendiente-ordenada no se suma como término `2·∂f/∂b·∂f/∂m·cov`: con x lejos
      del origen (x̄ ≫ dispersión) los términos casi se cancelan y el redondeo se come lo que queda.
      La recta se describe con dos fuentes independientes: la pendiente (`u_slope`) y la altura
-     media (`u_mean_y = s/√n`), con `intercept = ȳ - m·x̄`. `uncertainty::propagate_correlated`
-     recibe esos factores (cargas sobre `slope` e `intercept`) y suma el cuadrado de la derivada
-     direccional de cada uno: nunca resta.
+     media (`u_mean_y = s/√n`), con `intercept = ȳ - m·x̄`. `uncertainty::propagated_u` suma, por
+     cada fuente, el cuadrado de `Σ ∂f/∂x_i·carga_i`: nunca resta varianzas.
+   - **Derivadas exactas**: la propagación de los mensurandos deja la diferencia finita y evalúa la
+     fórmula con números duales (`computation/dual.rs`, valor + gradiente) sobre el mismo árbol
+     de evalexpr. Cada operador y cada función de `FUNCTIONS` tiene su derivada de libro; lo que
+     no se reconoce da NaN (y el aviso de valor no finito). El valor sigue saliendo de evalexpr.
+     Sin paso que elegir, desaparecen los casos borde de la diferencia finita (medias ~0, U ≫
+     media, singularidades, desplazamientos grandes).
    - La interpolación es un mensurando común (`(A_m - intercept)/slope`, `A_m` magnitud
-     compartida); su U coincide con `s/|m|·√(1/k + 1/n + (y0-ȳ)²/(m²·Sxx))`. Ayuda en el editor.
-   - El paso de la derivada numérica escala con `max(|x|, u)`: con una ordenada ~1e-17 (recta por
-     el origen) su derivada daba 0.
-   - Ninguna práctica de la biblioteca usa `slope` e `intercept` juntos: los golden no cambian.
+     compartida); su U coincide con `s/|m|·√(1/k + 1/n + (y0-ȳ)²/(m²·Sxx))`, también con x
+     desplazado 1e8. Ayuda en el editor.
+   - Los golden no cambian.
 
 **General**
 

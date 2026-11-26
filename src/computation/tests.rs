@@ -1675,7 +1675,7 @@ fn check_inverse_interpolation(xs: [f64; 5], ys: [f64; 5], sample_readings: &[f6
         1e-9 * mean_x.max(1.0)
     ));
     assert!(
-        close(c_m.u, textbook, 5e-3 * textbook),
+        close(c_m.u, textbook, 1e-6 * textbook),
         "{} vs {textbook}",
         c_m.u
     );

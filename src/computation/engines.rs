@@ -1,3 +1,4 @@
+use super::dual::{eval_dual, Dual};
 use super::formula::{compile_formula, eval_compiled, CONSTANTS};
 use super::{
     AggregateComputation, CurveSpec, DerivedComputation, DeterminationComputation, FormAnalysis,
@@ -1248,25 +1249,32 @@ fn derive_results(
                     .collect()
             })
             .collect();
-        let (value, u) = uncertainty::propagate_correlated(
-            |x: &[f64]| {
-                let mut bound: HashMap<&str, f64> = vars
-                    .iter()
-                    .map(|s| s.as_str())
-                    .zip(x.iter().copied())
-                    .collect();
-                for &d in &chain {
-                    if let Some(dep) = trees[d].as_ref() {
-                        let v = eval_compiled(dep, &bound);
-                        bound.insert(results[d].symbol.as_str(), v);
-                    }
-                }
-                eval_compiled(tree, &bound)
-            },
-            &means,
-            &us,
-            &factor_loads,
-        );
+        let n = vars.len();
+        let mut plain: HashMap<&str, f64> = vars
+            .iter()
+            .map(|s| s.as_str())
+            .zip(means.iter().copied())
+            .collect();
+        let mut duals: HashMap<&str, Dual> = vars
+            .iter()
+            .zip(&means)
+            .enumerate()
+            .map(|(k, (s, &v))| (s.as_str(), Dual::variable(v, k, n)))
+            .collect();
+        for &d in &chain {
+            if let Some(dep) = trees[d].as_ref() {
+                let symbol = results[d].symbol.as_str();
+                plain.insert(symbol, eval_compiled(dep, &plain));
+                duals.insert(symbol, eval_dual(dep, &duals, n));
+            }
+        }
+        let value = eval_compiled(tree, &plain);
+        let gradient = eval_dual(tree, &duals, n).d;
+        let u = if value.is_finite() {
+            uncertainty::propagated_u(&gradient, &us, &factor_loads)
+        } else {
+            f64::NAN
+        };
         if !value.is_finite() || !u.is_finite() {
             warnings.push(format!(
                 "El mensurando \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
