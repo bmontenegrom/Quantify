@@ -225,13 +225,23 @@ fn function(name: &str, args: &[Dual], n: usize) -> Dual {
             mix(x, 1.0 / (x.v * ln_base), base, -v / (base.v * ln_base), v)
         }
         ("min", [first, rest @ ..]) => extreme(
-            rest.iter()
-                .fold(first, |best, a| if a.v < best.v { a } else { best }),
+            rest.iter().fold(first, |best, a| {
+                if best.v.is_nan() || a.v < best.v {
+                    a
+                } else {
+                    best
+                }
+            }),
             args,
         ),
         ("max", [first, rest @ ..]) => extreme(
-            rest.iter()
-                .fold(first, |best, a| if a.v > best.v { a } else { best }),
+            rest.iter().fold(first, |best, a| {
+                if best.v.is_nan() || a.v > best.v {
+                    a
+                } else {
+                    best
+                }
+            }),
             args,
         ),
         _ => Dual::nan(n),
@@ -396,6 +406,28 @@ mod tests {
         assert_eq!((dual.d, dual.kink), (vec![-1.0], false));
         let (dual, _, _) = at("max(a^b, c)", &[("a", -2.0), ("b", 2.0), ("c", 1.0)]);
         assert!(dual.d[1].is_nan() && !dual.kink);
+    }
+
+    #[test]
+    fn a_nan_argument_of_min_or_max_is_skipped_as_in_evalexpr() {
+        for formula in [
+            "min(math::sqrt(z), b)",
+            "min(b, math::sqrt(z))",
+            "max(math::sqrt(z), b)",
+        ] {
+            let (dual, value, _) = at(formula, &[("z", -1.0), ("b", 2.0)]);
+            assert_eq!((dual.v, value), (2.0, 2.0), "{formula}");
+            assert_eq!(dual.d, vec![0.0, 1.0], "{formula}");
+        }
+    }
+
+    #[test]
+    fn a_zero_factor_cancels_an_infinite_slope() {
+        let (dual, _, _) = at(
+            "(a - b)*math::sqrt(c)",
+            &[("a", 1.0), ("b", 1.0), ("c", 0.0)],
+        );
+        assert_eq!(dual.d, vec![0.0, 0.0, 0.0]);
     }
 
     #[test]

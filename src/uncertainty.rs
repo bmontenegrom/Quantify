@@ -201,32 +201,31 @@ pub fn measured_given(value: f64, u_expanded: f64) -> QuantityResult {
 /// assert_eq!(propagated_u(&[1.0, -1.0], &[0.0, 0.0], &shared), 0.0);
 /// assert_eq!(propagated_u(&[1.0, 1.0], &[0.0, 0.0], &shared), 2.0);
 /// ```
-pub(crate) fn unless_zero(w: f64, x: f64) -> f64 {
-    if x == 0.0 {
-        0.0
-    } else {
-        w * x
-    }
-}
-
 pub fn propagated_u(gradient: &[f64], us: &[f64], factors: &[Vec<(usize, f64)>]) -> f64 {
-    let term = |g: f64, scale: f64| unless_zero(g, scale);
     let independent = gradient
         .iter()
         .zip(us)
-        .map(|(&g, &u)| term(g, u).powi(2))
+        .map(|(&g, &u)| unless_zero(g, u).powi(2))
         .sum::<f64>();
     let shared = factors
         .iter()
         .map(|factor| {
             factor
                 .iter()
-                .map(|&(i, l)| term(gradient[i], l))
+                .map(|&(i, l)| unless_zero(gradient[i], l))
                 .sum::<f64>()
                 .powi(2)
         })
         .sum::<f64>();
     (independent + shared).sqrt()
+}
+
+pub(crate) fn unless_zero(w: f64, x: f64) -> f64 {
+    if x == 0.0 || w == 0.0 {
+        0.0
+    } else {
+        w * x
+    }
 }
 
 #[cfg(test)]
