@@ -11,7 +11,7 @@ pub use engines::{
     analyze_definition, compute, compute_curva, compute_regresion, live_values, rename_symbols,
     scale_spec, PointContext,
 };
-pub(crate) use formula::{chain_order, formula_symbols};
+pub(crate) use formula::{chain_order, formula_symbols, parse, CONSTANTS};
 pub use formula::{check_formula, FUNCTIONS};
 pub use submission::{
     check_student_result_symbols, create_form_submission, update_form_submission,

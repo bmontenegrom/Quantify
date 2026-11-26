@@ -40,14 +40,7 @@ pub fn infer(formula: &str, dims_of: &dyn Fn(&str) -> Dim) -> Inference {
         mixed: None,
         argument: None,
     };
-    if let Ok(mut tree) = evalexpr::build_operator_tree(formula) {
-        for operator in tree.iter_operators_mut() {
-            if let Operator::Const { value } = operator {
-                if let Value::Int(int) = *value {
-                    *value = Value::Float(int as f64);
-                }
-            }
-        }
+    if let Ok(tree) = crate::computation::parse(formula) {
         out.dim = walk(&tree, dims_of, &mut out);
     }
     out
@@ -122,10 +115,16 @@ fn walk(node: &Node, dims_of: &dyn Fn(&str) -> Dim, out: &mut Inference) -> Dim 
         Operator::Const {
             value: Value::Int(_) | Value::Float(_),
         } => Dim::Number,
-        Operator::VariableIdentifierRead { identifier } => match identifier.as_str() {
-            "pi" | "e" => Dim::Number,
-            name => dims_of(name),
-        },
+        Operator::VariableIdentifierRead { identifier } => {
+            if crate::computation::CONSTANTS
+                .iter()
+                .any(|(name, _)| name == identifier)
+            {
+                Dim::Number
+            } else {
+                dims_of(identifier)
+            }
+        }
         Operator::FunctionIdentifier { identifier } => {
             let args = arguments(children);
             function(identifier, &args, dims_of, out)
@@ -253,7 +252,7 @@ fn power(base: Dim, exponent: Option<f64>) -> Dim {
             let mut out = NONE;
             for i in 0..7 {
                 let e = f64::from(d[i]) * n;
-                if (e - e.round()).abs() > 1e-9 || e.abs() > 127.0 {
+                if !e.is_finite() || (e - e.round()).abs() > 1e-9 || e.abs() > 127.0 {
                     return Dim::Unknown;
                 }
                 out[i] = e.round() as i8;
@@ -347,6 +346,7 @@ mod tests {
         assert_eq!(dim("(L*L)^(1/2)"), of_unit("m"));
         assert_eq!(dim("math::pow(L*L*L, 1/3)"), of_unit("m"));
         assert_eq!(dim("1/(T^-100*T^-28)"), Dim::Unknown);
+        assert_eq!(dim("L^(0/0)"), Dim::Unknown);
     }
 
     #[test]

@@ -396,16 +396,31 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
         if let Some(dim) = declared.get(name) {
             return *dim;
         }
-        let stem = match name.split_once("_at_") {
-            Some((stem, _)) => Some(stem),
-            None => ENDPOINT_SUFFIXES
+        let at = name
+            .match_indices("_at_")
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .find_map(|(i, _)| declared.get(&name[..i]));
+        let suffixed = || {
+            ENDPOINT_SUFFIXES
                 .iter()
                 .chain(&["_medio", "_max"])
-                .find_map(|suffix| name.strip_suffix(suffix)),
+                .find_map(|suffix| name.strip_suffix(suffix))
+                .and_then(|s| declared.get(s))
         };
-        stem.and_then(|s| declared.get(s))
-            .copied()
-            .unwrap_or(Dim::Unknown)
+        at.or_else(suffixed).copied().unwrap_or(Dim::Unknown)
+    };
+    let series = if def.parts.is_empty() || def.series_part().is_some() {
+        def.analysis_kind.as_deref()
+    } else {
+        None
+    };
+    let regression = series == Some("regresion_lineal");
+    let checked = |kind: &str| match kind {
+        "intermediate" => regression || series == Some("curva"),
+        "pointResult" | "aggregate" => regression,
+        _ => true,
     };
     let problems = |what: &str, symbol: &str, unit: Option<&str>, inferred: &Inference| {
         let mut messages = Vec::new();
@@ -420,7 +435,7 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
             messages.push(format!("{argument} no es adimensional ({}).", text(*d)));
         }
         if let (Some(unit), Dim::Known(got)) = (unit, inferred.dim) {
-            if let Dim::Known(want) = of_unit(unit) {
+            if let Some(Dim::Known(want)) = declared.get(symbol).copied() {
                 if got != want {
                     let shown = if unit.trim().is_empty() {
                         "vacía"
@@ -446,7 +461,12 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
         id: id.cloned(),
         warning: true,
     };
-    let axis = |formula: &Option<String>| formula.as_deref().map(|f| infer(f, &base));
+    let axis = |formula: &Option<String>| {
+        formula
+            .as_deref()
+            .filter(|_| regression)
+            .map(|f| infer(f, &base))
+    };
     let (x, y) = (axis(&def.x_formula), axis(&def.y_formula));
     let mut warnings: Vec<Problem> = x
         .iter()
@@ -462,7 +482,7 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
         "intercept" => y,
         _ => base(name),
     };
-    for &(what, symbol, unit, formula, kind, id) in &elements {
+    for &(what, symbol, unit, formula, kind, id) in elements.iter().filter(|e| checked(e.4)) {
         let inferred = infer(formula, &lookup);
         warnings.extend(
             problems(what, symbol, Some(unit), &inferred)
@@ -3808,6 +3828,7 @@ mod tests {
                 quantity("L", "cm"),
                 quantity("T", "s"),
                 quantity("c", "div"),
+                quantity("v_at_0", "m"),
             ],
             results: vec![
                 result("g", "m/s2", "4*pi^2*L/T^2"),
@@ -3818,9 +3839,15 @@ mod tests {
                 result("n", "", "c/L"),
                 result("g0", "m/s2", "9.81"),
                 result("p", "", "2^L"),
+                result("Vm", "s", "v_at_0_at_T_max"),
             ],
             y_formula: Some("math::ln(T)".into()),
             ..Default::default()
+        };
+        assert!(dimension_warnings(&def).iter().all(|w| w.kind != "axes"));
+        let def = practices::PracticeDefinition {
+            analysis_kind: Some("regresion_lineal".into()),
+            ..def
         };
         let warnings = dimension_warnings(&def);
         assert_eq!(
@@ -3860,6 +3887,10 @@ mod tests {
                     "el mensurando k: el argumento de ln no es adimensional (s)."
                 ),
                 ("id-p", "el mensurando p: el exponente no es adimensional (m)."),
+                (
+                    "id-Vm",
+                    "el mensurando Vm: la fórmula da m y la unidad declarada (s) es s."
+                ),
             ]
         );
         assert!(warnings.iter().all(|w| w.warning && w.kind == "result"));
