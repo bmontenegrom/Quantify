@@ -1,7 +1,7 @@
 import { escapeHtml, format, measureText, regressionPlot, scatterPlot } from "./lib.js";
 
 export function regressionMarkup(regression) {
-  const plot = regressionPlot(regression.points ?? [], regression.slope, regression.intercept, regression.u_points ?? []);
+  const plot = regressionPlot(regression.points ?? [], regression.slope, regression.intercept, { uPoints: regression.u_points ?? [] });
   return `
     <div class="metrics">
       <div class="metric">

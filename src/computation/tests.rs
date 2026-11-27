@@ -5310,3 +5310,36 @@ fn a_point_result_cancels_an_input_shared_with_an_intermediate_on_means() {
         );
     }
 }
+
+#[test]
+fn a_single_valued_intermediate_stays_per_replica() {
+    let mut c = quantity("c");
+    c.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), quantity("w"), c];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 2.0, 4.0]; 3]),
+            ..measurement("w", &[])
+        },
+        measurement("c", &[9.9, 10.1]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[intermediate("Q", "2*c", false)],
+        &[],
+        &[point_result("P", "Q*w*w"), point_result("D", "2*c*w*w")],
+        &HashMap::new(),
+        &measurements,
+    );
+    let pr = |s: &str| a.point_results.iter().find(|p| p.symbol == s).unwrap();
+    for i in 0..3 {
+        assert!(
+            close(pr("P").u[i], pr("D").u[i], 1e-12),
+            "{i}: {} vs {}",
+            pr("P").u[i],
+            pr("D").u[i]
+        );
+    }
+}
