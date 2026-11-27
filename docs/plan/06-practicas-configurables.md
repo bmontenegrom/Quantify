@@ -1438,7 +1438,9 @@ calcula sin incertidumbre usa el mismo evaluador:
    que use se expanden por su fórmula, así una magnitud que entra por varios caminos cuenta una
    vez (`m - slope*c` con `m = slope*c` da U = 0); no vale todavía para la pendiente y la
    ordenada frente a las magnitudes de los ejes (ítem 5: un residuo `py - (slope*px + intercept)`
-   sobreestima su U). El valor sigue saliendo como antes: los golden
+   sobreestima su U). Mientras tanto, el panel "Avisos" del editor marca la derivada por punto
+   que usa la recta y magnitudes de los ejes (las `Re` de Fluidos I y Viscosidad); no aparece en
+   las entregas, porque depende de la práctica y no de los datos. El valor sigue saliendo como antes: los golden
    de Fluidos I y Viscosidad solo ganan `u`/`u_expanded`. **Un mensurando sin incertidumbre es
    exacto** para todo lo que lo usa (otros mensurandos y derivadas): entra con su valor y u = 0,
    sin expandirse; `derive_results` los calcula en orden de dependencias. En la biblioteca solo

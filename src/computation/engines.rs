@@ -997,20 +997,27 @@ pub fn compute_regresion(
             Err(e) => warnings.push(skipped("la derivada por punto", &pr.symbol, &e)),
         }
     }
-    let mut used: Vec<&str> = Vec::new();
-    let mut stack: Vec<&str> = compiled_points
-        .iter()
-        .flat_map(|(_, tree)| tree.iter_variable_identifiers())
-        .collect();
-    while let Some(symbol) = stack.pop() {
-        if used.contains(&symbol) {
-            continue;
+    let reach = |roots: Vec<&str>| {
+        let mut stack: Vec<String> = roots.into_iter().map(str::to_string).collect();
+        let mut seen: Vec<String> = Vec::new();
+        while let Some(symbol) = stack.pop() {
+            if seen.contains(&symbol) {
+                continue;
+            }
+            if let Some(tree) = formulas.get(symbol.as_str()) {
+                stack.extend(tree.iter_variable_identifiers().map(str::to_string));
+            }
+            seen.push(symbol);
         }
-        used.push(symbol);
-        if let Some(tree) = formulas.get(symbol) {
-            stack.extend(tree.iter_variable_identifiers());
-        }
-    }
+        seen
+    };
+    let used = reach(
+        compiled_points
+            .iter()
+            .flat_map(|(_, tree)| tree.iter_variable_identifiers())
+            .collect(),
+    );
+    let used: Vec<&str> = used.iter().map(String::as_str).collect();
     let per_point: Vec<&PracticeQuantity> = quantities
         .iter()
         .filter(|q| q.per_point && !q.is_given)
