@@ -737,8 +737,9 @@ ejemplo la habilita; después el arranque no toca las prácticas ni sus habilita
 **Estado (2026-11-12)**: hecho en #115, #116, #119 y la PR de columnas en vivo. Cambios respecto
 de lo planeado:
 - **La columna en vivo calcula exactamente lo mismo que el ajuste**: el promedio que se ve es el
-  valor que usa el análisis. Un intermedio que usa otro anterior recibe su promedio, como en el
-  ajuste, así que muestra un solo valor.
+  valor que usa el análisis. Un intermedio que usa otro anterior toma su valor en la misma
+  réplica (desde la U de las intermedias, ítem 3 de "Pasaje a analítico del resto"; antes recibía
+  su promedio).
 - **Intermedios "sobre los promedios"** (`on_means`, estructural). Por defecto un intermedio se
   evalúa réplica por réplica y después se promedia: promedio(f(x_k)). Con `on_means` se evalúa una
   sola vez sobre las magnitudes ya promediadas del punto: f(promedio(x)). Para fórmulas no lineales
@@ -1471,12 +1472,15 @@ calcula sin incertidumbre usa el mismo evaluador:
    una réplica se tomaron juntas) con el tipo B propagado con duales en los promedios (solo `u_b`
    de las magnitudes que varían réplica a réplica; la u completa de las compartidas y de las de un
    solo valor por punto). Una intermedia **sobre promedios** (`v = dx/t`) se propaga en los
-   promedios con la u completa de cada punto. Una intermedia que usa otra anterior la toma como
-   hoja con su U en ese punto (su tipo A no sale de la fórmula); se pierde la correlación entre
-   las dos por entradas compartidas, y si las dos son por réplica y comparten una magnitud que
-   varía (`q = 2*V`, `r = q*V`), la dispersión de esa magnitud cuenta dos veces: la segunda toma
-   el promedio de la primera en cada réplica. Arreglarlo pide evaluar las intermedias anteriores
-   réplica por réplica, lo que cambia el valor; ninguna de la biblioteca encadena intermedias.
+   promedios con la u completa de cada punto. Una intermedia por réplica que usa otra anterior por
+   réplica toma su valor en la misma réplica (antes tomaba su promedio: `Qsq = Q*Q` pasa de
+   promedio(Q)² a promedio(Q²); ninguna de la biblioteca encadena intermedias) y la expande por su
+   fórmula, así una magnitud compartida (`q = 2*V`, `r = q*V`) cuenta una vez. Una intermedia sobre
+   promedios también expande las anteriores. Una anterior sobre promedios usada por una por réplica
+   vale lo mismo en todas las réplicas y entra como hoja con su U (se pierde la correlación por
+   entradas compartidas). Si la U no sale porque falta la de una entrada, el aviso queda en esa
+   entrada y no culpa a la fórmula. Una intermedia sin corridas (una magnitud opcional vacía) no
+   se muestra.
    Cada intermedia se muestra en tantas corridas como puntos tienen sus magnitudes (la menor
    cantidad común, como el ajuste), sin pasarse de las corridas del ajuste o de la primera curva:
    en curva, una intermedia que solo usa otra curva con más puntos queda cortada. Las

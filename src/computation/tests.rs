@@ -3735,12 +3735,12 @@ fn live_values_match_what_the_fit_uses_from_a_single_point() {
             },
             LiveValue {
                 symbol: "Qh".into(),
-                replicas: vec![None],
+                replicas: vec![Some(10.0), None],
                 mean: None,
             },
             LiveValue {
                 symbol: "Qsq".into(),
-                replicas: vec![None],
+                replicas: vec![Some(100.0), None],
                 mean: None,
             },
         ]
@@ -3754,9 +3754,9 @@ fn live_values_match_what_the_fit_uses_from_a_single_point() {
     let rows = live_values(&quantities, &intermediates, &measurements).unwrap();
     assert_eq!(rows[0][0].replicas, vec![Some(10.0), Some(5.0)]);
     assert_eq!(rows[0][0].mean, Some(7.5));
-    assert_eq!(rows[0][1].replicas, vec![Some(7.5)]);
-    assert_eq!(rows[0][2].replicas, vec![Some(56.25)]);
-    assert_eq!(rows[0][2].mean, Some(56.25));
+    assert_eq!(rows[0][1].replicas, vec![Some(10.0), Some(5.0)]);
+    assert_eq!(rows[0][2].replicas, vec![Some(100.0), Some(25.0)]);
+    assert_eq!(rows[0][2].mean, Some(62.5));
 }
 
 #[test]
@@ -3799,7 +3799,7 @@ fn an_intermediate_on_means_applies_its_formula_to_the_point_means() {
 }
 
 #[test]
-fn chained_intermediates_use_the_mean_of_the_earlier_one_in_the_fit() {
+fn chained_intermediates_use_the_earlier_one_replica_by_replica_in_the_fit() {
     let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
     let intermediate = |symbol: &str, formula: &str| PracticeIntermediate {
         symbol: symbol.into(),
@@ -3815,7 +3815,7 @@ fn chained_intermediates_use_the_mean_of_the_earlier_one_in_the_fit() {
     let a = reg(&quantities, &intermediates, &[], "Qsq", "py", &measurements).unwrap();
     assert_eq!(
         a.regression.unwrap().points,
-        vec![(56.25, 100.0), (225.0, 200.0)]
+        vec![(62.5, 100.0), (250.0, 200.0)]
     );
 }
 
@@ -4972,4 +4972,84 @@ async fn a_curve_also_reports_its_intermediates_with_u() {
         "{:?}",
         q.u
     );
+}
+
+#[test]
+fn a_chained_intermediate_counts_a_shared_spread_once() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("V")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 2.0, 3.0]; 3]),
+            ..measurement("V", &[])
+        },
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("q", "2*V", false),
+            intermediate("r", "q*V", false),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    let r = intermediate_u(&a, "r");
+    let textbook = crate::uncertainty::type_a(&[2.0, 8.0, 18.0]).2;
+    for i in 0..3 {
+        assert!(close(r.values[i], 28.0 / 3.0, 1e-12), "{}", r.values[i]);
+        assert!(close(r.u[i], textbook, 1e-12), "{} vs {textbook}", r.u[i]);
+    }
+}
+
+#[test]
+fn a_missing_input_u_does_not_blame_the_intermediate_formula() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale("V", vec![vec![1.0, 2.0]; 3]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("q", "2*V", false),
+            intermediate("r", "3*q", false),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    assert!(intermediate_u(&a, "r").u[0].is_nan());
+    assert!(
+        a.warnings.iter().any(|w| w.contains("\"V\"")),
+        "{:?}",
+        a.warnings
+    );
+    assert!(
+        !a.warnings.iter().any(|w| w.contains("no es derivable")),
+        "{:?}",
+        a.warnings
+    );
+}
+
+#[test]
+fn an_intermediate_of_an_empty_optional_quantity_is_not_shown() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("I")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[intermediate("P", "I*I", false)],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    assert!(a.intermediates.is_empty(), "{:?}", a.intermediates);
 }

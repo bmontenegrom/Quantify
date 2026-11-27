@@ -171,7 +171,6 @@ fn intermediate_uncertainties(
             .copied()
             .unwrap_or(f64::NAN)
     };
-    let no_formulas = HashMap::new();
     let mut out: Vec<PointResultComputation> = compiled
         .iter()
         .map(|(it, _)| PointResultComputation {
@@ -202,15 +201,20 @@ fn intermediate_uncertainties(
         runs.insert(it.symbol.as_str(), own.min(contexts.len()));
     }
     for (i, ctx) in contexts.iter().enumerate() {
-        let earlier_values: HashMap<&str, f64> = compiled
-            .iter()
-            .filter_map(|(it, _)| Some((it.symbol.as_str(), *ctx.get(&it.symbol)?)))
-            .collect();
+        let mut earlier_reps: HashMap<&str, Vec<f64>> = HashMap::new();
         let mut earlier_u: HashMap<&str, f64> = HashMap::new();
         for (k, (it, tree)) in compiled.iter().enumerate() {
+            let replicas = point_intermediate(it, tree, inputs, &earlier_reps, i);
+            earlier_reps.insert(it.symbol.as_str(), replicas.clone());
             if i >= runs[it.symbol.as_str()] {
                 continue;
             }
+            let expanded: HashMap<&str, &Node> = compiled[..k]
+                .iter()
+                .filter(|(e, _)| it.on_means || !e.on_means)
+                .map(|(e, t)| (e.symbol.as_str(), t))
+                .collect();
+            let missing = std::cell::Cell::new(false);
             let value = ctx.get(&it.symbol).copied().unwrap_or(f64::NAN);
             let varies = |s: &str| {
                 !it.on_means
@@ -221,7 +225,7 @@ fn intermediate_uncertainties(
             };
             let leaf = |s: &str| {
                 let v = ctx.get(s).copied().unwrap_or(f64::NAN);
-                if let Some(&u) = earlier_u.get(s) {
+                let (v, u) = if let Some(&u) = earlier_u.get(s) {
                     (v, u)
                 } else if point_us.contains_key(s) {
                     let map = if varies(s) { point_us_b } else { point_us };
@@ -230,18 +234,19 @@ fn intermediate_uncertainties(
                     (f64::NAN, f64::NAN)
                 } else {
                     (v, us.get(s).copied().unwrap_or(0.0))
-                }
+                };
+                missing.set(missing.get() || !v.is_finite() || !u.is_finite());
+                (v, u)
             };
-            let propagated = propagate(tree, &no_formulas, &leaf, &[]);
+            let propagated = propagate(tree, &expanded, &leaf, &[]);
             let u = if !value.is_finite() {
                 f64::NAN
             } else if it.on_means {
                 propagated.u
             } else {
-                let replicas = point_intermediate(it, tree, inputs, &earlier_values, i);
                 uncertainty::combine(uncertainty::type_a(&replicas).2, propagated.u)
             };
-            if value.is_finite() {
+            if value.is_finite() && !missing.get() {
                 not_derivable[k] |= !u.is_finite();
                 on_kink[k] |= propagated.kink && u > 0.0;
             }
@@ -266,6 +271,7 @@ fn intermediate_uncertainties(
             ));
         }
     }
+    out.retain(|r| !r.values.is_empty());
     out
 }
 
@@ -856,17 +862,11 @@ pub(crate) fn build_points(
             .iter()
             .map(|q| (q.symbol.clone(), magnitude_at(q.id.as_str(), i)))
             .collect();
-        let mut intermediate_values: HashMap<&str, f64> = HashMap::new();
+        let mut intermediate_values: HashMap<&str, Vec<f64>> = HashMap::new();
         for (it, tree) in &compiled_intermediates {
-            let value = mean(&point_intermediate(
-                it,
-                tree,
-                &inputs,
-                &intermediate_values,
-                i,
-            ));
-            intermediate_values.insert(it.symbol.as_str(), value);
-            context.insert(it.symbol.clone(), value);
+            let replicas = point_intermediate(it, tree, &inputs, &intermediate_values, i);
+            context.insert(it.symbol.clone(), mean(&replicas));
+            intermediate_values.insert(it.symbol.as_str(), replicas);
         }
 
         let bound: HashMap<&str, f64> = context.iter().map(|(k, v)| (k.as_str(), *v)).collect();
@@ -891,7 +891,7 @@ fn point_intermediate(
     it: &PracticeIntermediate,
     tree: &Node,
     inputs: &PointInputs,
-    earlier: &HashMap<&str, f64>,
+    earlier: &HashMap<&str, Vec<f64>>,
     i: usize,
 ) -> Vec<f64> {
     let PointInputs {
@@ -919,8 +919,11 @@ fn point_intermediate(
         1
     } else {
         tree.iter_variable_identifiers()
-            .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
-            .map(|v| reps_at(v).len())
+            .filter_map(|v| match id_of(v) {
+                Some(_) if !is_broadcastable(v) => Some(reps_at(v).len()),
+                Some(_) => None,
+                None => earlier.get(v).map(Vec::len),
+            })
             .max()
             .unwrap_or(0)
             .max(1)
@@ -932,7 +935,12 @@ fn point_intermediate(
                 .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
                 .map(|v| {
                     let value = if !symbol_to_id.contains_key(v) {
-                        earlier.get(v).copied().unwrap_or(f64::NAN)
+                        match earlier.get(v) {
+                            Some(reps) if it.on_means => mean(reps),
+                            Some(reps) if reps.len() == 1 => reps[0],
+                            Some(reps) => reps.get(r).copied().unwrap_or(f64::NAN),
+                            None => f64::NAN,
+                        }
                     } else if it.on_means {
                         mean_at(v)
                     } else if is_broadcastable(v) {
@@ -986,19 +994,19 @@ pub fn live_values(
     let finite = |v: f64| v.is_finite().then_some(v);
     Ok((0..n_points)
         .map(|i| {
-            let mut earlier: HashMap<&str, f64> = HashMap::new();
+            let mut earlier: HashMap<&str, Vec<f64>> = HashMap::new();
             let mut row = Vec::new();
             for (it, tree) in &compiled {
                 let replicas = point_intermediate(it, tree, &inputs, &earlier, i);
                 let value = mean(&replicas);
-                earlier.insert(it.symbol.as_str(), value);
                 if it.show_live {
                     row.push(LiveValue {
                         symbol: it.symbol.clone(),
-                        replicas: replicas.into_iter().map(finite).collect(),
+                        replicas: replicas.iter().copied().map(finite).collect(),
                         mean: finite(value),
                     });
                 }
+                earlier.insert(it.symbol.as_str(), replicas);
             }
             row
         })
