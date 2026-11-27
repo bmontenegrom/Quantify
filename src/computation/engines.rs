@@ -167,11 +167,11 @@ struct RunCtx<'a> {
     inputs: PointInputs<'a>,
     per_point: std::collections::HashSet<&'a str>,
     on_means: HashMap<&'a str, bool>,
-    formulas: HashMap<&'a str, &'a Node>,
+    formulas: &'a HashMap<&'a str, &'a Node>,
     point_us: &'a PointUs<'a>,
     us: &'a HashMap<String, f64>,
     means: &'a HashMap<String, f64>,
-    exact: HashMap<&'a str, f64>,
+    exact: &'a HashMap<&'a str, f64>,
     factors: &'a [Vec<(&'a str, f64)>],
 }
 
@@ -198,6 +198,12 @@ impl<'a> RunCtx<'a> {
         state: &RunState,
     ) -> RunU {
         let replicas = point_intermediate(on_means, tree, &self.inputs, &state.reps, i);
+        if !on_means && replicas.iter().any(|v| !v.is_finite()) {
+            return RunU {
+                replicas,
+                ..self.run_u(tree, true, i, ctx, state)
+            };
+        }
         let expanded: HashMap<&str, &Node> = self
             .formulas
             .iter()
@@ -313,18 +319,17 @@ fn intermediate_uncertainties<'a>(
         for (k, (it, tree)) in compiled.iter().enumerate() {
             let symbol = it.symbol.as_str();
             let r = run.run_u(tree, it.on_means, i, ctx, &state);
-            if i >= runs[symbol] {
-                state.reps.insert(symbol, r.replicas);
-                continue;
-            }
             let value = ctx.get(&it.symbol).copied().unwrap_or(f64::NAN);
             let u = if value.is_finite() { r.u } else { f64::NAN };
+            state.u.insert(symbol, u);
+            state.reps.insert(symbol, r.replicas);
+            if i >= runs[symbol] {
+                continue;
+            }
             if value.is_finite() && !r.missing {
                 not_derivable[k] |= !u.is_finite();
                 on_kink[k] |= r.kink && u > 0.0;
             }
-            state.u.insert(symbol, u);
-            state.reps.insert(symbol, r.replicas);
             out[k].values.push(value);
             out[k].u.push(u);
             out[k]
@@ -1252,11 +1257,11 @@ pub fn compute_regresion(
             .iter()
             .map(|(it, _)| (it.symbol.as_str(), it.on_means))
             .collect(),
-        formulas: formulas.clone(),
+        formulas: &formulas,
         point_us: &point_us,
         us: &us,
         means: &means,
-        exact: exact.clone(),
+        exact: &exact,
         factors: &line,
     };
     let (intermediates_out, mut states) =
@@ -2131,14 +2136,14 @@ fn run_kind_raw(
                 .iter()
                 .map(|(it, _)| (it.symbol.as_str(), it.on_means))
                 .collect(),
-            formulas: compiled_intermediates
+            formulas: &compiled_intermediates
                 .iter()
                 .map(|(it, tree)| (it.symbol.as_str(), tree))
                 .collect(),
             point_us: &point_us,
             us: &us,
             means: &no_means,
-            exact: HashMap::new(),
+            exact: &HashMap::new(),
             factors: &[],
         };
         (analysis.intermediates, _) = intermediate_uncertainties(

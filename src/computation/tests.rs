@@ -5212,3 +5212,58 @@ fn an_axis_of_magnitudes_propagates_like_a_textbook() {
         );
     }
 }
+
+#[test]
+fn a_point_result_keeps_the_u_of_an_intermediate_past_its_points() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("T")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![19.0, 21.0]]),
+            ..measurement("T", &[])
+        },
+    ];
+    let a = regression_with(
+        &quantities,
+        &[intermediate("Q", "2*T", false)],
+        &[],
+        &[point_result("P", "Q")],
+        &HashMap::new(),
+        &measurements,
+    );
+    let p = a.point_results.iter().find(|p| p.symbol == "P").unwrap();
+    assert!(p.u.iter().all(|u| close(*u, 2.0, 1e-12)), "{:?}", p.u);
+}
+
+#[test]
+fn a_point_result_with_uneven_replicas_falls_back_to_the_means() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("V"), quantity("t")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![10.0, 10.2, 9.8]; 3]),
+            ..measurement("V", &[])
+        },
+        MeasurementInput {
+            point_replicas: Some(vec![vec![5.0, 5.2]; 3]),
+            ..measurement("t", &[])
+        },
+    ];
+    let a = regression_with(
+        &quantities,
+        &[],
+        &[],
+        &[point_result("P", "V/t")],
+        &HashMap::new(),
+        &measurements,
+    );
+    let p = a.point_results.iter().find(|p| p.symbol == "P").unwrap();
+    assert!(p.u.iter().all(|u| u.is_finite() && *u > 0.0), "{:?}", p.u);
+    assert!(
+        !a.warnings.iter().any(|w| w.contains("\"P\"")),
+        "{:?}",
+        a.warnings
+    );
+}

@@ -153,7 +153,6 @@ pub struct RegressionResult {
     pub u_slope: f64,
     pub u_intercept: f64,
     pub r_squared: f64,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub u_points: Vec<(f64, f64)>,
     pub x_label: String,
     pub y_label: String,

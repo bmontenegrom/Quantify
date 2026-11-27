@@ -229,7 +229,7 @@ export function measureText(value, u) {
   return `${base} ± ${format(u)}`;
 }
 
-export function regressionPlot(points, slope, intercept, width = 320, height = 220, pad = 32, uPoints = []) {
+export function regressionPlot(points, slope, intercept, uPoints = [], width = 320, height = 220, pad = 32) {
   if (!Array.isArray(points) || points.length < 2) return null;
   const half = (i, axis) => {
     const u = uPoints?.[i]?.[axis];
@@ -237,12 +237,12 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
   };
   const xs = points.map((p) => p[0]);
   const ys = points.map((p) => p[1]);
-  const minX = Math.min(...points.map((p, i) => p[0] - half(i, 0)));
-  const maxX = Math.max(...points.map((p, i) => p[0] + half(i, 0)));
-  const lineYmin = slope * Math.min(...xs) + intercept;
-  const lineYmax = slope * Math.max(...xs) + intercept;
-  const minY = Math.min(...points.map((p, i) => p[1] - half(i, 1)), lineYmin, lineYmax);
-  const maxY = Math.max(...points.map((p, i) => p[1] + half(i, 1)), lineYmin, lineYmax);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const lineYmin = slope * minX + intercept;
+  const lineYmax = slope * maxX + intercept;
+  const minY = Math.min(...ys, lineYmin, lineYmax);
+  const maxY = Math.max(...ys, lineYmin, lineYmax);
   const spanX = maxX - minX;
   const spanY = maxY - minY;
   if (spanX === 0 || spanY === 0) return null;
@@ -250,6 +250,9 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
   const innerH = height - 2 * pad;
   const sx = (x) => pad + ((x - minX) / spanX) * innerW;
   const sy = (y) => height - pad - ((y - minY) / spanY) * innerH;
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+  const bx = (x) => clamp(sx(x), pad, width - pad);
+  const by = (y) => clamp(sy(y), pad, height - pad);
   return {
     width,
     height,
@@ -258,9 +261,9 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
       const point = { cx: sx(p[0]), cy: sy(p[1]) };
       const [ux, uy] = [half(i, 0), half(i, 1)];
       if (!ux && !uy) return point;
-      return { ...point, ex: [sx(p[0] - ux), sx(p[0] + ux)], ey: [sy(p[1] - uy), sy(p[1] + uy)] };
+      return { ...point, ex: [bx(p[0] - ux), bx(p[0] + ux)], ey: [by(p[1] - uy), by(p[1] + uy)] };
     }),
-    line: { x1: sx(Math.min(...xs)), y1: sy(lineYmin), x2: sx(Math.max(...xs)), y2: sy(lineYmax) },
+    line: { x1: sx(minX), y1: sy(lineYmin), x2: sx(maxX), y2: sy(lineYmax) },
     bounds: { minX, maxX, minY, maxY },
   };
 }
