@@ -1,3 +1,4 @@
+use super::dual::{eval_dual, Dual};
 use super::formula::{compile_formula, eval_compiled, CONSTANTS};
 use super::{
     AggregateComputation, CurveSpec, DerivedComputation, DeterminationComputation, FormAnalysis,
@@ -229,7 +230,7 @@ pub fn compute(
         &mut us,
         &mut warnings,
     )?;
-    let derived = derive_results(results, &symbols, &means, &us, &mut warnings)?;
+    let derived = derive_results(results, &symbols, &means, &us, &[], &mut warnings)?;
     Ok(FormAnalysis {
         quantities: computed,
         regression: None,
@@ -419,7 +420,7 @@ fn compute_determinations(
     }
 
     let mut derive_warnings = Vec::new();
-    let mut derived = derive_results(&expanded, &allowed, &means, &us, &mut derive_warnings)?;
+    let mut derived = derive_results(&expanded, &allowed, &means, &us, &[], &mut derive_warnings)?;
     for mut w in derive_warnings {
         for (formula, text) in &average_texts {
             w = w.replace(formula, text);
@@ -897,12 +898,23 @@ pub fn compute_regresion(
     )?;
     means.insert("slope".into(), fit.slope);
     means.insert("intercept".into(), fit.intercept);
-    us.insert("slope".into(), fit.u_slope);
-    us.insert("intercept".into(), fit.u_intercept);
     let mut allowed: Vec<String> = shared.iter().map(|q| q.symbol.clone()).collect();
     allowed.push("slope".into());
     allowed.push("intercept".into());
-    let derived = derive_results(results, &allowed, &means, &us, &mut warnings)?;
+    let derived = derive_results(
+        results,
+        &allowed,
+        &means,
+        &us,
+        &[
+            vec![
+                ("slope", fit.u_slope),
+                ("intercept", -fit.mean_x * fit.u_slope),
+            ],
+            vec![("intercept", fit.u_mean_y)],
+        ],
+        &mut warnings,
+    )?;
 
     let mut extras: HashMap<&str, f64> = HashMap::new();
     extras.insert("slope", fit.slope);
@@ -1134,6 +1146,7 @@ fn derive_results(
     allowed: &[String],
     means_by_symbol: &HashMap<String, f64>,
     u_by_symbol: &HashMap<String, f64>,
+    factors: &[Vec<(&str, f64)>],
     warnings: &mut Vec<String>,
 ) -> anyhow::Result<Vec<DerivedComputation>> {
     let mut scope = allowed.to_vec();
@@ -1217,27 +1230,56 @@ fn derive_results(
             .iter()
             .map(|v| *u_by_symbol.get(v).unwrap_or(&0.0))
             .collect();
-        let (value, u) = uncertainty::propagate(
-            |x: &[f64]| {
-                let mut bound: HashMap<&str, f64> = vars
+        let position = |symbol: &str| vars.iter().position(|v| v == symbol);
+        let factor_loads: Vec<Vec<(usize, f64)>> = factors
+            .iter()
+            .map(|factor| {
+                factor
                     .iter()
-                    .map(|s| s.as_str())
-                    .zip(x.iter().copied())
-                    .collect();
-                for &d in &chain {
-                    if let Some(dep) = trees[d].as_ref() {
-                        let v = eval_compiled(dep, &bound);
-                        bound.insert(results[d].symbol.as_str(), v);
-                    }
-                }
-                eval_compiled(tree, &bound)
-            },
-            &means,
-            &us,
-        );
-        if !value.is_finite() || !u.is_finite() {
+                    .filter_map(|&(s, load)| Some((position(s)?, load)))
+                    .collect()
+            })
+            .collect();
+        let n = vars.len();
+        let weigh = |d: &[f64]| uncertainty::propagated_u(d, &us, &factor_loads);
+        let mut plain: HashMap<&str, f64> = vars
+            .iter()
+            .map(|s| s.as_str())
+            .zip(means.iter().copied())
+            .collect();
+        let mut duals: HashMap<&str, Dual> = vars
+            .iter()
+            .zip(&means)
+            .enumerate()
+            .map(|(k, (s, &v))| (s.as_str(), Dual::variable(v, k, n)))
+            .collect();
+        for &d in &chain {
+            if let Some(dep) = trees[d].as_ref() {
+                let symbol = results[d].symbol.as_str();
+                plain.insert(symbol, eval_compiled(dep, &plain));
+                duals.insert(symbol, eval_dual(dep, &duals, n, &weigh));
+            }
+        }
+        let value = eval_compiled(tree, &plain);
+        let outcome = eval_dual(tree, &duals, n, &weigh);
+        let u = if value.is_finite() {
+            uncertainty::propagated_u(&outcome.d, &us, &factor_loads)
+        } else {
+            f64::NAN
+        };
+        if !value.is_finite() {
             warnings.push(format!(
                 "El mensurando \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
+                result.name, result.symbol, result.formula
+            ));
+        } else if result.has_uncertainty && !u.is_finite() {
+            warnings.push(format!(
+                "La incertidumbre del mensurando \"{}\" ({} = {}) no se puede calcular con estos valores: la fórmula no es derivable ahí (p. ej. una raíz en 0).",
+                result.name, result.symbol, result.formula
+            ));
+        } else if result.has_uncertainty && outcome.kink && u > 0.0 {
+            warnings.push(format!(
+                "El mensurando \"{}\" ({} = {}) cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta.",
                 result.name, result.symbol, result.formula
             ));
         }
@@ -1555,6 +1597,7 @@ fn run_kind_raw(
             &symbols,
             &means,
             &us,
+            &[],
             &mut analysis.warnings,
         )?;
         return Ok(analysis);

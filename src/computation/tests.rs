@@ -1631,6 +1631,148 @@ fn result(symbol: &str, formula: &str) -> PracticeResult {
     }
 }
 
+const CAL_X: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];
+const CAL_Y: [f64; 5] = [0.21, 0.39, 0.62, 0.79, 1.02];
+
+fn check_inverse_interpolation(xs: [f64; 5], ys: [f64; 5], sample_readings: &[f64], u_sample: f64) {
+    let mut sample = quantity("A_m");
+    sample.per_point = false;
+    let quantities = vec![quantity("c"), quantity("A"), sample];
+    let results = vec![
+        result("c_m", "(A_m - intercept)/slope"),
+        result("y0", "A_m"),
+    ];
+    let measurements = vec![
+        measurement("c", &xs),
+        measurement("A", &ys),
+        measurement("A_m", sample_readings),
+    ];
+    let a = reg(&quantities, &[], &results, "c", "A", &measurements).unwrap();
+    let fit = a.regression.unwrap();
+    let y0_u = a.derived.iter().find(|d| d.symbol == "y0").unwrap().u;
+    assert!(close(y0_u, u_sample, 1e-9));
+    let c_m = a.derived.iter().find(|d| d.symbol == "c_m").unwrap();
+
+    let n = xs.len() as f64;
+    let mean_x = xs.iter().sum::<f64>() / n;
+    let mean_y = ys.iter().sum::<f64>() / n;
+    let ss_xx = xs.iter().map(|x| (x - mean_x).powi(2)).sum::<f64>();
+    let m = fit.slope;
+    let s2 = xs
+        .iter()
+        .zip(ys)
+        .map(|(x, y)| (y - mean_y - m * (x - mean_x)).powi(2))
+        .sum::<f64>()
+        / (n - 2.0);
+    let y0 = sample_readings.iter().sum::<f64>() / sample_readings.len() as f64;
+    let textbook = ((u_sample / m).powi(2)
+        + s2 / m.powi(2) * (1.0 / n + (y0 - mean_y).powi(2) / (m * m * ss_xx)))
+        .sqrt();
+
+    assert!(close(
+        c_m.value,
+        mean_x + (y0 - mean_y) / m,
+        1e-9 * mean_x.max(1.0)
+    ));
+    assert!(
+        close(c_m.u, textbook, 1e-6 * textbook),
+        "{} vs {textbook}",
+        c_m.u
+    );
+    if mean_x.abs() > 1.0 {
+        let independent = ((u_sample / m).powi(2)
+            + (fit.u_intercept / m).powi(2)
+            + ((y0 - fit.intercept) / (m * m) * fit.u_slope).powi(2))
+        .sqrt();
+        assert!((independent - textbook).abs() > 0.1 * textbook);
+    }
+}
+
+#[test]
+fn a_finite_value_with_no_uncertainty_gets_its_own_warning() {
+    let mut zero = quantity("z");
+    zero.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), zero];
+    let results = vec![result("r", "math::sqrt(z)")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        measurement("z", &[-0.1, 0.1]),
+    ];
+    let a = reg(&quantities, &[], &results, "px", "py", &measurements).unwrap();
+    let r = a.derived.iter().find(|d| d.symbol == "r").unwrap();
+    assert_eq!(r.value, 0.0);
+    assert!(!r.u.is_finite());
+    let warning = a.warnings.iter().find(|w| w.contains("\"r\"")).unwrap();
+    assert!(warning.contains("no se puede calcular"), "{warning}");
+    assert!(!warning.contains("division por cero"), "{warning}");
+}
+
+#[test]
+fn a_tied_maximum_takes_the_uncertainty_of_one_branch_and_warns() {
+    let mut d1 = quantity("d1");
+    d1.per_point = false;
+    let mut d2 = quantity("d2");
+    d2.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), d1, d2];
+    let results = vec![
+        result("r", "max(d1, d2)"),
+        result("r2", "max(d2, d1)"),
+        result("u2", "d2"),
+    ];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        measurement("d1", &[12.4, 12.6]),
+        measurement("d2", &[12.0, 13.0]),
+    ];
+    let a = reg(&quantities, &[], &results, "px", "py", &measurements).unwrap();
+    let u = |s: &str| a.derived.iter().find(|d| d.symbol == s).unwrap().u;
+    assert!(close(u("r"), u("u2"), 1e-12));
+    assert!(close(u("r2"), u("u2"), 1e-12));
+    let warning = a.warnings.iter().find(|w| w.contains("\"r\"")).unwrap();
+    assert!(warning.contains("quiebre"), "{warning}");
+}
+
+#[test]
+fn a_result_without_uncertainty_does_not_warn_about_it() {
+    let mut zero = quantity("z");
+    zero.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), zero];
+    let mut r = result("r", "math::sqrt(z)");
+    r.has_uncertainty = false;
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        measurement("z", &[-0.1, 0.1]),
+    ];
+    let a = reg(&quantities, &[], &[r], "px", "py", &measurements).unwrap();
+    assert!(
+        a.warnings.iter().all(|w| !w.contains("\"r\"")),
+        "{:?}",
+        a.warnings
+    );
+}
+
+#[test]
+fn inverse_interpolation_matches_textbook_uncertainty() {
+    check_inverse_interpolation(CAL_X, CAL_Y, &[0.55, 0.57, 0.56], 0.01 / 3.0_f64.sqrt());
+}
+
+#[test]
+fn inverse_interpolation_survives_a_large_x_offset() {
+    let xs = CAL_X.map(|x| x + 1e8);
+    check_inverse_interpolation(xs, CAL_Y, &[0.55, 0.57, 0.56], 0.01 / 3.0_f64.sqrt());
+    check_inverse_interpolation(xs, CAL_Y, &[0.56], 0.0);
+}
+
+#[test]
+fn inverse_interpolation_with_x_centered_near_zero() {
+    let xs = [-2.0, -1.0, 0.0, 1.0, 2.0].map(|x| x + 1e-10);
+    let ys = [-0.98, -0.01, 1.02, 1.98, 3.01];
+    check_inverse_interpolation(xs, ys, &[2.0], 0.0);
+}
+
 #[test]
 fn compute_regresion_fits_known_line() {
     let quantities = vec![quantity("px"), quantity("py")];

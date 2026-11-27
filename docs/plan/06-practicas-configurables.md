@@ -554,7 +554,9 @@ con distinto análisis.
 **Estado (2026-11-03)**: hecho en dos PRs. Los detalles:
 - **Composición sin reescribir texto.** Cada mensurando se propaga con una sola llamada a
   `propagate` sobre sus hojas (magnitudes, `slope`/`intercept`, escalares de curva). El closure
-  evalúa las dependencias en orden topológico. La `u` es la de la fórmula expandida.
+  evalúa las dependencias en orden topológico. La `u` es la de la fórmula expandida. (Desde F10
+  química 5/5, `propagate` no existe: derivadas exactas con `computation/dual.rs` y
+  `uncertainty::propagated_u`.)
 - **Sin `part_id` en los resultados**, igual que en F2. Un mensurando sin sección que usa uno de
   una parte va a esa parte. Los compartidos se recalculan en cada parte y se sacan de su salida.
 - **Motor tolerante.** Un ciclo, o depender de un mensurando que no compila, deja un aviso y
@@ -583,7 +585,7 @@ que la fórmula expandida).
 1. **`feat(analisis)`: resultados que usan otros resultados (F4, 1/2).**
    - **Motor** (`derive_results` en `engines.rs`): grafo de los símbolos de resultado de cada
      fórmula y orden topológico. Un ciclo deja un aviso y saltea los resultados involucrados.
-     Cada resultado se propaga con una sola llamada a `propagate` sobre sus hojas (magnitudes,
+     Cada resultado se propaga (hoy con `eval_dual` + `propagated_u`) sobre sus hojas (magnitudes,
      `slope`/`intercept`, escalares de curva). El closure evalúa las dependencias en orden y
      después la fórmula propia, sin reescribir texto, así se conservan las correlaciones. Sirve
      para estadística, regresión, curva y operadores.
@@ -1381,9 +1383,73 @@ Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del ca
    - Cada símbolo toma la unidad declarada de su elemento; los generados (`_first`, `_last`,
      `_max`, `_at_…_max`, `_medio`) la de su base; `slope` = dim(y)/dim(x) e `intercept` =
      dim(y) de los ejes. Ninguna práctica de la biblioteca da avisos.
-5. **`feat(regresion)`: interpolación inversa.** Covarianza pendiente-ordenada en la regresión y
-   propagación con covarianzas; la interpolación es un mensurando común
-   (`(A_m - intercept)/slope`), verificado contra la fórmula de libro.
+5. **`feat(regresion)`: interpolación inversa.** ✅
+   - La covarianza pendiente-ordenada no se suma como término `2·∂f/∂b·∂f/∂m·cov`: con x lejos
+     del origen (x̄ ≫ dispersión) los términos casi se cancelan y el redondeo se come lo que queda.
+     La recta se describe con dos fuentes independientes: la pendiente (`u_slope`) y la altura
+     media (`u_mean_y = s/√n`), con `intercept = ȳ - m·x̄`. `uncertainty::propagated_u` suma, por
+     cada fuente, el cuadrado de `Σ ∂f/∂x_i·carga_i`: las varianzas no se restan. Dentro de la
+     fuente de la pendiente sí se suman `∂f/∂m·u_m` y `−x̄·u_m·∂f/∂b`, que con x lejos del
+     origen casi se cancelan (la fórmula usa `intercept`, así que la cancelación es de la fórmula
+     misma). Se pierden unos `log10(x̄/dispersión)` dígitos de esa parte de la U: nada con 1e8
+     (verificado), unos 4 con x ~ 1e12.
+   - **Derivadas exactas**: la propagación de los mensurandos deja la diferencia finita y evalúa la
+     fórmula con números duales (`computation/dual.rs`, valor + gradiente) sobre el mismo árbol
+     de evalexpr. Cada operador y cada función de `FUNCTIONS` tiene su derivada de libro; lo que
+     no se reconoce da NaN en la derivada (y el aviso de U no calculable). El valor sigue saliendo de evalexpr.
+     Sin paso que elegir, desaparecen los casos borde de la diferencia finita (medias ~0, U ≫
+     media, singularidades, desplazamientos grandes).
+   - **Quiebres**: en `abs` en 0 y en un `min`/`max` empatado (lecturas redondeadas a la
+     resolución empatan seguido) se usa el gradiente completo de una sola rama, la de mayor U
+     (con las u y las fuentes compartidas del mensurando; una rama con NaN pierde). El alumno ve un
+     aviso de que puede no ser exacta siempre que las ramas empatadas difieran y alguna aporte U
+     (o, en `abs`, si su argumento aporta U). Con ramas de igual U dentro de una fórmula más grande
+     (`max(a, b) + a`), la U final puede depender del orden de los argumentos; por eso el aviso se
+     mantiene. En el salto de `%` (cociente entero distinto de 0) no hay derivada: U no
+     calculable, con su aviso.
+   - **Limitaciones conocidas**: (1) en un quiebre la rama se elige por la U de esa parte de la
+     fórmula, no del mensurando completo: si lo que rodea al `min`/`max` se correlaciona con él,
+     puede no ser la rama que da la mayor U final.
+     (2) Una magnitud que está en un eje y también en el mensurando (`y = h*rho*g0`, `k =
+     slope/rho`) cuenta su u dos veces: las fuentes compartidas solo ligan pendiente y ordenada, no
+     la pendiente con cada magnitud de los ejes.
+   - La interpolación es un mensurando común (`(A_m - intercept)/slope`, `A_m` magnitud
+     compartida); su U es `√((u(A_m)/m)² + (s/m)²·(1/n + (y0-ȳ)²/(m²·Sxx)))`, con u(A_m) la U
+     propia de la muestra (tipo A + tipo B de su escala). Con u(A_m) = s/√k es la fórmula de
+     libro `s/|m|·√(1/k + 1/n + …)`. Verificado también con x desplazado 1e8. Ayuda en el editor.
+   - Los golden no cambian.
+
+**Pasaje a analítico del resto** (pendiente, después de la #164)
+
+**Regla:** toda incertidumbre que se propaga a través de una fórmula sale de `eval_dual` +
+`propagated_u`: sin diferencias finitas ni derivadas escritas a mano. Las correlaciones entran
+como fuentes compartidas (cargas), nunca como términos de covarianza que se restan. Quedan
+fuera las U que no son propagación sino definición (tipo A, tipo B de la escala, su
+combinación, y `u_slope`/`u_intercept`/`u_mean_y` de la regresión).
+
+Con los duales, la U de los mensurandos ya sale con derivadas exactas. Lo que todavía se
+calcula sin incertidumbre usa el mismo evaluador:
+
+1. **Derivadas por punto** (`point_results`, hoy "Sin incertidumbre"): U por corrida, con el
+   gradiente respecto de las magnitudes y las intermedias del punto, `slope`/`intercept` (con las
+   fuentes de la recta) y los mensurandos que use.
+2. **Agregados** (hoy "Sin incertidumbre"): U con el gradiente respecto de los escalares
+   compartidos, la recta, los mensurandos y los extremos de cada magnitud por punto (`x_first`,
+   `x_last`, …). Ojo con la correlación: un agregado que usa un mensurando y las mismas entradas
+   las ve dos veces; hay que propagar contra las entradas, como ya hace la cadena de mensurandos.
+3. **Intermedias por punto**: U por réplica o sobre los promedios, para que lleguen a los ejes.
+4. **Ejes del ajuste**: U de x e y en cada punto (barras de error en el gráfico) a partir de las
+   intermedias. Es la base de una regresión ponderada (ítem de "General").
+5. **Magnitudes compartidas dentro y fuera del ajuste**: una magnitud compartida que entra en
+   una fórmula de eje y también en un mensurando se trata hoy como independiente de la recta.
+   Ej.: eje y = `h*rho*g0` y `k = slope/rho`: `slope` ya lleva `rho`, pero la U de `k` cuenta
+   la de `rho` como si no estuviera en la pendiente (en general la sobreestima). Arreglo: dar a
+   la recta una carga sobre cada magnitud compartida de los ejes (la sensibilidad de
+   `slope`/`intercept` a esa magnitud, con duales sobre las fórmulas de eje) y propagar contra
+   las entradas.
+
+Cada uno en su PR, con su test contra una fórmula de libro y los golden revisados (hoy esos
+campos no tienen U: el golden gana campos, no cambia números).
 
 **General**
 
