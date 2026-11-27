@@ -1456,7 +1456,8 @@ calcula sin incertidumbre usa el mismo evaluador:
    extremos de las intermedias, armados con `rename_symbols` (`q_first = 2*px` pasa a
    `2*px_first`), así `q_first - 2*px_first` da U = 0. El editor también avisa cuando un
    agregado usa la recta y magnitudes de los ejes. Si una magnitud por punto tiene otro largo que
-   el ajuste, el extremo de una intermedia se arma con el extremo de cada magnitud en su serie.
+   el ajuste, el extremo de una intermedia se propaga desde el punto de su corrida (como su valor),
+   y dos extremos que nombran el mismo punto (`x_first` y `x_last2` con dos puntos) cuentan una vez.
 3. **Intermedias por punto**: U por réplica o sobre los promedios, para que lleguen a los ejes.
 4. **Ejes del ajuste**: U de x e y en cada punto (barras de error en el gráfico) a partir de las
    intermedias. Es la base de una regresión ponderada (ítem de "General").

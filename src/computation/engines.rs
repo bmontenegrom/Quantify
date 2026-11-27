@@ -128,7 +128,7 @@ fn point_uncertainties<'a>(
             Ok(type_b) => type_b,
             Err(e) => {
                 warnings.push(format!(
-                    "\"{}\" ({}): {e}; las derivadas por punto que la usan quedan sin incertidumbre.",
+                    "\"{}\" ({}): {e}; los resultados que la usan quedan sin incertidumbre.",
                     q.name, q.symbol
                 ));
                 out.insert(q.symbol.as_str(), vec![f64::NAN; replicas.len().max(1)]);
@@ -1162,6 +1162,9 @@ pub fn compute_regresion(
                 .unwrap_or(f64::NAN);
             point_leaves.insert(point_leaf(&q.symbol, k), (value, u));
         }
+        if series.is_empty() {
+            point_leaves.insert(point_leaf(&q.symbol, 0), (f64::NAN, f64::NAN));
+        }
     }
     let is_intermediate = |s: &str| intermediates.iter().any(|i| i.symbol == s);
     let at_run = |s: &str, i: usize| -> Option<String> {
@@ -1172,12 +1175,16 @@ pub fn compute_regresion(
     };
     let mut owned_trees: Vec<(String, Node)> = Vec::new();
     let mut runs: Vec<usize> = vec![0, 1, last - 1, last];
+    runs.sort_unstable();
     runs.dedup();
     for (it, _) in &compiled_intermediates {
         for &i in &runs {
             let renamed = rename_symbols(&it.formula, |s| at_run(s, i));
-            if let Ok(tree) = super::parse(&renamed) {
-                owned_trees.push((run_leaf(&it.symbol, i), tree));
+            match super::parse(&renamed) {
+                Ok(tree) => owned_trees.push((run_leaf(&it.symbol, i), tree)),
+                Err(_) => {
+                    point_leaves.insert(run_leaf(&it.symbol, i), (f64::NAN, f64::NAN));
+                }
             }
         }
     }
