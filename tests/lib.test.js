@@ -379,6 +379,17 @@ test("regressionPlot extiende el rango Y para incluir la recta", () => {
   assert.deepEqual(plot.line, { x1: 32, y1: 188, x2: 288, y2: 32 });
 });
 
+test("regressionPlot agrega barras de error y las incluye en el rango", () => {
+  const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1, 320, 220, 32, [[0, 0], [0.5, 1], [null, 2]]);
+  assert.deepEqual(plot.bounds, { minX: 0, maxX: 2, minY: 1, maxY: 7 });
+  assert.equal(plot.scatter[0].ex, undefined);
+  const [, mid, last] = plot.scatter;
+  assert.deepEqual(mid.ex, [96, 224]);
+  assert.ok(mid.ey[0] > mid.cy && mid.ey[1] < mid.cy);
+  assert.deepEqual(last.ex, [last.cx, last.cx]);
+  assert.equal(last.ey[1], 32);
+});
+
 test("regressionPlot devuelve null con <2 puntos o rango nulo", () => {
   assert.equal(regressionPlot([], 1, 0), null);
   assert.equal(regressionPlot([[1, 2]], 1, 0), null);

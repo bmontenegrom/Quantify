@@ -229,16 +229,20 @@ export function measureText(value, u) {
   return `${base} ± ${format(u)}`;
 }
 
-export function regressionPlot(points, slope, intercept, width = 320, height = 220, pad = 32) {
+export function regressionPlot(points, slope, intercept, width = 320, height = 220, pad = 32, uPoints = []) {
   if (!Array.isArray(points) || points.length < 2) return null;
+  const half = (i, axis) => {
+    const u = uPoints?.[i]?.[axis];
+    return Number.isFinite(u) && u > 0 ? u : 0;
+  };
   const xs = points.map((p) => p[0]);
   const ys = points.map((p) => p[1]);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const lineYmin = slope * minX + intercept;
-  const lineYmax = slope * maxX + intercept;
-  const minY = Math.min(...ys, lineYmin, lineYmax);
-  const maxY = Math.max(...ys, lineYmin, lineYmax);
+  const minX = Math.min(...points.map((p, i) => p[0] - half(i, 0)));
+  const maxX = Math.max(...points.map((p, i) => p[0] + half(i, 0)));
+  const lineYmin = slope * Math.min(...xs) + intercept;
+  const lineYmax = slope * Math.max(...xs) + intercept;
+  const minY = Math.min(...points.map((p, i) => p[1] - half(i, 1)), lineYmin, lineYmax);
+  const maxY = Math.max(...points.map((p, i) => p[1] + half(i, 1)), lineYmin, lineYmax);
   const spanX = maxX - minX;
   const spanY = maxY - minY;
   if (spanX === 0 || spanY === 0) return null;
@@ -250,8 +254,13 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
     width,
     height,
     pad,
-    scatter: points.map((p) => ({ cx: sx(p[0]), cy: sy(p[1]) })),
-    line: { x1: sx(minX), y1: sy(lineYmin), x2: sx(maxX), y2: sy(lineYmax) },
+    scatter: points.map((p, i) => {
+      const point = { cx: sx(p[0]), cy: sy(p[1]) };
+      const [ux, uy] = [half(i, 0), half(i, 1)];
+      if (!ux && !uy) return point;
+      return { ...point, ex: [sx(p[0] - ux), sx(p[0] + ux)], ey: [sy(p[1] - uy), sy(p[1] + uy)] };
+    }),
+    line: { x1: sx(Math.min(...xs)), y1: sy(lineYmin), x2: sx(Math.max(...xs)), y2: sy(lineYmax) },
     bounds: { minX, maxX, minY, maxY },
   };
 }

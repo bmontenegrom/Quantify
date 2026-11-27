@@ -1,7 +1,7 @@
 import { escapeHtml, format, measureText, regressionPlot, scatterPlot } from "./lib.js";
 
 export function regressionMarkup(regression) {
-  const plot = regressionPlot(regression.points ?? [], regression.slope, regression.intercept);
+  const plot = regressionPlot(regression.points ?? [], regression.slope, regression.intercept, undefined, undefined, undefined, regression.u_points ?? []);
   return `
     <div class="metrics">
       <div class="metric">
@@ -27,6 +27,11 @@ export function regressionMarkup(regression) {
 
 function plotSvg(plot, { ariaLabel, lineMarkup = "", xText, yLabel }) {
   const f = (n) => n.toFixed(1);
+  const bar = (x1, y1, x2, y2) => `<line class="reg-errbar" x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" />`;
+  const bars = plot.scatter
+    .filter((p) => p.ex)
+    .map((p) => bar(p.ex[0], p.cy, p.ex[1], p.cy) + bar(p.cx, p.ey[0], p.cx, p.ey[1]))
+    .join("");
   const points = plot.scatter
     .map((p) => `<circle cx="${f(p.cx)}" cy="${f(p.cy)}" r="3" class="reg-point" />`)
     .join("");
@@ -36,6 +41,7 @@ function plotSvg(plot, { ariaLabel, lineMarkup = "", xText, yLabel }) {
       <line class="reg-axis" x1="${plot.pad}" y1="${axisY}" x2="${plot.width - plot.pad}" y2="${axisY}" />
       <line class="reg-axis" x1="${plot.pad}" y1="${plot.pad}" x2="${plot.pad}" y2="${axisY}" />
       ${lineMarkup}
+      ${bars}
       ${points}
       <text class="reg-label" x="${plot.width - plot.pad}" y="${plot.height - 8}" text-anchor="end">${xText}</text>
       <text class="reg-label" x="${plot.pad}" y="${plot.pad - 12}" text-anchor="start">y: ${yLabel}</text>

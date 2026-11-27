@@ -4464,7 +4464,7 @@ fn point_uncertainties_reuse_the_last_reading_and_survive_a_bad_scale() {
         a.warnings
     );
     assert!(
-        a.warnings.iter().any(|w| w.contains("\"rw\"")),
+        !a.warnings.iter().any(|w| w.contains("\"rw\"")),
         "{:?}",
         a.warnings
     );
@@ -4500,21 +4500,22 @@ fn a_point_result_that_is_not_derivable_in_a_run_warns() {
 }
 
 #[test]
-fn point_uncertainties_only_look_at_what_the_point_results_use() {
+fn point_uncertainties_only_look_at_what_the_analysis_uses() {
     let mut c = quantity("c");
     c.per_point = false;
     let quantities = vec![quantity("px"), quantity("py"), c, quantity("w")];
     let measurements = vec![
-        MeasurementInput {
-            instrument_id: Some("i1".into()),
-            scale_id: Some("s1".into()),
-            ..measurement("px", &[1.0, 2.0, 3.0])
-        },
+        measurement("px", &[1.0, 2.0, 3.0]),
         MeasurementInput {
             point_replicas: Some(vec![vec![1.9, 2.1], vec![3.9, 4.1], vec![5.8, 6.2]]),
             ..measurement("py", &[])
         },
         measurement("c", &[9.9, 10.1]),
+        MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            ..measurement("w", &[1.0, 2.0, 3.0])
+        },
     ];
     let bad = InstrumentScale {
         b_model: "raro".into(),
@@ -5117,5 +5118,97 @@ fn an_unpaired_earlier_intermediate_enters_with_its_whole_u() {
     for i in 0..3 {
         assert!(close(r.values[i], 4.0, 1e-12), "{}", r.values[i]);
         assert!(close(r.u[i], q.u[i], 1e-12), "{} vs {}", r.u[i], q.u[i]);
+    }
+}
+
+fn axes_u(a: &FormAnalysis) -> &[(f64, f64)] {
+    &a.regression.as_ref().unwrap().u_points
+}
+
+#[test]
+fn an_axis_takes_the_u_of_its_intermediate() {
+    let quantities = vec![quantity("py"), amp("V"), amp("t")];
+    let measurements = vec![
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale(
+            "V",
+            vec![
+                vec![10.0, 10.2, 9.8],
+                vec![20.0, 20.4, 19.6],
+                vec![30.0, 30.1, 29.9],
+            ],
+        ),
+        on_scale(
+            "t",
+            vec![
+                vec![5.0, 5.1, 4.9],
+                vec![5.0, 5.2, 4.9],
+                vec![5.0, 5.0, 5.1],
+            ],
+        ),
+    ];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let a = compute_regresion(
+        &quantities,
+        &[intermediate("Q", "V/t", false)],
+        &[],
+        &[point_result("P", "Q")],
+        &[],
+        &scales,
+        "Q",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let q = intermediate_u(&a, "Q");
+    let p = a.point_results.iter().find(|p| p.symbol == "P").unwrap();
+    for i in 0..3 {
+        assert!(close(axes_u(&a)[i].0, q.u_expanded[i], 1e-12), "{i}");
+        assert!(
+            close(p.u[i], q.u[i], 1e-12),
+            "{i}: {} vs {}",
+            p.u[i],
+            q.u[i]
+        );
+    }
+}
+
+#[test]
+fn an_axis_of_magnitudes_propagates_like_a_textbook() {
+    let mut c = quantity("c");
+    c.per_point = false;
+    let quantities = vec![quantity("px"), amp("a"), c];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            ..measurement("a", &[10.0, 20.0, 30.0])
+        },
+        measurement("c", &[9.9, 10.1]),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[],
+        &[],
+        &scales,
+        "px",
+        "a*c",
+        &measurements,
+    )
+    .unwrap();
+    let u_c = 0.1;
+    for (i, a_i) in [10.0, 20.0, 30.0].into_iter().enumerate() {
+        let (u_a, _) = type_b_in(&fab_scale(), "A", a_i);
+        let textbook = 2.0 * f64::hypot(10.0 * u_a, a_i * u_c);
+        assert_eq!(axes_u(&a)[i].0, 0.0);
+        assert!(
+            close(axes_u(&a)[i].1, textbook, 1e-12),
+            "{i}: {} vs {textbook}",
+            axes_u(&a)[i].1
+        );
     }
 }
