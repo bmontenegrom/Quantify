@@ -4768,3 +4768,182 @@ fn intermediate_endpoints_propagate_from_the_point_of_their_run() {
     assert!(close(by("zero").value, 0.01, 1e-9));
     assert!(close(by("zero").u, 0.0, 1e-9), "{}", by("zero").u);
 }
+
+fn amp(symbol: &str) -> PracticeQuantity {
+    PracticeQuantity {
+        unit: "A".into(),
+        ..quantity(symbol)
+    }
+}
+
+fn on_scale(symbol: &str, replicas: Vec<Vec<f64>>) -> MeasurementInput {
+    MeasurementInput {
+        instrument_id: Some("i1".into()),
+        scale_id: Some("s1".into()),
+        point_replicas: Some(replicas),
+        ..measurement(symbol, &[])
+    }
+}
+
+fn intermediate(symbol: &str, formula: &str, on_means: bool) -> PracticeIntermediate {
+    PracticeIntermediate {
+        symbol: symbol.into(),
+        formula: formula.into(),
+        on_means,
+        ..Default::default()
+    }
+}
+
+fn intermediate_u<'a>(a: &'a FormAnalysis, symbol: &str) -> &'a PointResultComputation {
+    a.intermediates
+        .iter()
+        .find(|it| it.symbol == symbol)
+        .unwrap_or_else(|| panic!("falta la intermedia {symbol}"))
+}
+
+#[test]
+fn a_per_replica_intermediate_keeps_readings_taken_together() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale("V", vec![vec![10.0, 10.2, 9.8]; 3]),
+        on_scale("t", vec![vec![5.0, 5.1, 4.9]; 3]),
+    ];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let a = regression_with(
+        &quantities,
+        &[intermediate("Q", "V/t", false)],
+        &[],
+        &[],
+        &scales,
+        &measurements,
+    );
+    let q = intermediate_u(&a, "Q");
+    let (u_v, _) = type_b_in(&fab_scale(), "A", 10.0);
+    let (u_t, _) = type_b_in(&fab_scale(), "A", 5.0);
+    let textbook = 2.0 * f64::hypot(u_v / 10.0, u_t / 5.0);
+    for i in 0..3 {
+        assert!(close(q.values[i], 2.0, 1e-12), "{}", q.values[i]);
+        assert!(
+            close(q.u[i], textbook, 1e-12),
+            "{i}: {} vs {textbook}",
+            q.u[i]
+        );
+        assert!(close(q.u_expanded[i], 2.0 * q.u[i], 1e-12));
+    }
+}
+
+#[test]
+fn a_per_replica_intermediate_adds_the_spread_of_its_values() {
+    let mut k = quantity("k");
+    k.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), quantity("V"), k];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 2.0, 3.0]; 3]),
+            ..measurement("V", &[])
+        },
+        measurement("k", &[9.9, 10.1]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("q", "2*V", false),
+            intermediate("r", "V + k", false),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    let q = intermediate_u(&a, "q");
+    let r = intermediate_u(&a, "r");
+    for i in 0..3 {
+        assert!(close(q.u[i], 2.0 / 3f64.sqrt(), 1e-12), "{}", q.u[i]);
+        assert!(
+            close(r.u[i], (1.0 / 3.0 + 0.01f64).sqrt(), 1e-12),
+            "{}",
+            r.u[i]
+        );
+    }
+}
+
+#[test]
+fn an_intermediate_on_means_propagates_the_whole_u_of_its_point() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("dx"), amp("t")];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let with_scale = |symbol: &str, values: &[f64]| MeasurementInput {
+        instrument_id: Some("i1".into()),
+        scale_id: Some("s1".into()),
+        ..measurement(symbol, values)
+    };
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        with_scale("dx", &[10.0, 20.0, 30.0]),
+        with_scale("t", &[4.0, 5.0, 6.0]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("v", "dx/t", true),
+            intermediate("w", "3*v", true),
+        ],
+        &[],
+        &[],
+        &scales,
+        &measurements,
+    );
+    let (v, w) = (intermediate_u(&a, "v"), intermediate_u(&a, "w"));
+    for (i, (dx, t)) in [(10.0, 4.0), (20.0, 5.0), (30.0, 6.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let (u_dx, _) = type_b_in(&fab_scale(), "A", dx);
+        let (u_t, _) = type_b_in(&fab_scale(), "A", t);
+        let textbook = dx / t * f64::hypot(u_dx / dx, u_t / t);
+        assert!(
+            close(v.u[i], textbook, 1e-12),
+            "{i}: {} vs {textbook}",
+            v.u[i]
+        );
+        assert!(close(w.u[i], 3.0 * v.u[i], 1e-12), "{i}: {}", w.u[i]);
+    }
+}
+
+#[tokio::test]
+async fn a_curve_also_reports_its_intermediates_with_u() {
+    use crate::practices::{PracticeCurve, PracticeDefinition};
+    let (pool, _dir) = setup().await;
+    let def = PracticeDefinition {
+        analysis_kind: Some("curva".into()),
+        quantities: vec![quantity("f"), quantity("V")],
+        intermediates: vec![intermediate("q", "2*V", false)],
+        curves: vec![PracticeCurve {
+            x_formula: "f".into(),
+            y_formula: "q".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let measurements = vec![
+        measurement("f", &[1.0, 2.0, 3.0]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 2.0, 3.0]; 3]),
+            ..measurement("V", &[])
+        },
+    ];
+    let a = analyze_definition(&pool, &def, &measurements)
+        .await
+        .unwrap();
+    let q = intermediate_u(&a, "q");
+    assert_eq!(q.u.len(), 3);
+    assert!(
+        q.u.iter().all(|u| close(*u, 2.0 / 3f64.sqrt(), 1e-12)),
+        "{:?}",
+        q.u
+    );
+}

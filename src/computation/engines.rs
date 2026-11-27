@@ -113,13 +113,15 @@ fn endpoint_of(symbol: &str) -> Option<(&str, &'static str)> {
         .find_map(|suffix| Some((symbol.strip_suffix(suffix)?, suffix)))
 }
 
+type PerPointU<'a> = HashMap<&'a str, Vec<f64>>;
+
 fn point_uncertainties<'a>(
     quantities: &[&'a PracticeQuantity],
     by_quantity: &HashMap<&str, &MeasurementInput>,
     scales: &HashMap<String, InstrumentScale>,
     warnings: &mut Vec<String>,
-) -> HashMap<&'a str, Vec<f64>> {
-    let mut out = HashMap::new();
+) -> (PerPointU<'a>, PerPointU<'a>) {
+    let (mut out, mut out_b) = (HashMap::new(), HashMap::new());
     for &q in quantities {
         let Some(m) = by_quantity.get(q.id.as_str()) else {
             continue;
@@ -134,17 +136,116 @@ fn point_uncertainties<'a>(
                     q.name, q.symbol
                 ));
                 out.insert(q.symbol.as_str(), vec![f64::NAN; replicas.len().max(1)]);
+                out_b.insert(q.symbol.as_str(), vec![f64::NAN; replicas.len().max(1)]);
                 continue;
             }
         };
-        let per_point = replicas
+        let (per_point, per_point_b): (Vec<f64>, Vec<f64>) = replicas
             .iter()
             .map(|values| match &type_b {
-                Some(type_b) => uncertainty::measured_with(values, type_b).u_c,
-                None => uncertainty::measured_quantity(values, None).u_c,
+                Some(type_b) => uncertainty::measured_with(values, type_b),
+                None => uncertainty::measured_quantity(values, None),
             })
-            .collect();
+            .map(|r| (r.u_c, r.u_b))
+            .unzip();
         out.insert(q.symbol.as_str(), per_point);
+        out_b.insert(q.symbol.as_str(), per_point_b);
+    }
+    (out, out_b)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn intermediate_uncertainties(
+    compiled: &CompiledIntermediates<'_>,
+    inputs: &PointInputs<'_>,
+    contexts: &[PointContext],
+    point_us: &HashMap<&str, Vec<f64>>,
+    point_us_b: &HashMap<&str, Vec<f64>>,
+    per_point: &[&PracticeQuantity],
+    us: &HashMap<String, f64>,
+    warnings: &mut Vec<String>,
+) -> Vec<PointResultComputation> {
+    let at = |map: &HashMap<&str, Vec<f64>>, s: &str, i: usize| {
+        map.get(s)
+            .and_then(|v| v.get(i).or_else(|| v.last()))
+            .copied()
+            .unwrap_or(f64::NAN)
+    };
+    let no_formulas = HashMap::new();
+    let mut out: Vec<PointResultComputation> = compiled
+        .iter()
+        .map(|(it, _)| PointResultComputation {
+            symbol: it.symbol.clone(),
+            name: it.name.clone(),
+            unit: it.unit.clone(),
+            values: Vec::new(),
+            u: Vec::new(),
+            u_expanded: Vec::new(),
+        })
+        .collect();
+    let mut not_derivable = vec![false; compiled.len()];
+    let mut on_kink = vec![false; compiled.len()];
+    for (i, ctx) in contexts.iter().enumerate() {
+        let earlier_values: HashMap<&str, f64> = compiled
+            .iter()
+            .filter_map(|(it, _)| Some((it.symbol.as_str(), *ctx.get(&it.symbol)?)))
+            .collect();
+        let mut earlier_u: HashMap<&str, f64> = HashMap::new();
+        for (k, (it, tree)) in compiled.iter().enumerate() {
+            let value = ctx.get(&it.symbol).copied().unwrap_or(f64::NAN);
+            let varies = |s: &str| {
+                !it.on_means
+                    && inputs
+                        .symbol_to_id
+                        .get(s)
+                        .is_some_and(|id| !inputs.broadcastable.contains(id))
+            };
+            let leaf = |s: &str| {
+                let v = ctx.get(s).copied().unwrap_or(f64::NAN);
+                if let Some(&u) = earlier_u.get(s) {
+                    (v, u)
+                } else if point_us.contains_key(s) {
+                    let map = if varies(s) { point_us_b } else { point_us };
+                    (v, at(map, s, i))
+                } else if per_point.iter().any(|q| q.symbol == s) {
+                    (f64::NAN, f64::NAN)
+                } else {
+                    (v, us.get(s).copied().unwrap_or(0.0))
+                }
+            };
+            let propagated = propagate(tree, &no_formulas, &leaf, &[]);
+            let u = if !value.is_finite() {
+                f64::NAN
+            } else if it.on_means {
+                propagated.u
+            } else {
+                let replicas = point_intermediate(it, tree, inputs, &earlier_values, i);
+                uncertainty::combine(uncertainty::type_a(&replicas).2, propagated.u)
+            };
+            if value.is_finite() {
+                not_derivable[k] |= !u.is_finite();
+                on_kink[k] |= propagated.kink && u > 0.0;
+            }
+            earlier_u.insert(it.symbol.as_str(), u);
+            out[k].values.push(value);
+            out[k].u.push(u);
+            out[k]
+                .u_expanded
+                .push(uncertainty::expand(u, uncertainty::EXPANSION_K));
+        }
+    }
+    for (k, (it, _)) in compiled.iter().enumerate() {
+        if not_derivable[k] {
+            warnings.push(format!(
+                "La incertidumbre de la intermedia \"{}\" ({} = {}) no se puede calcular en alguna corrida: la fórmula no es derivable ahí (p. ej. una raíz en 0) o falta la de una magnitud.",
+                it.name, it.symbol, it.formula
+            ));
+        } else if on_kink[k] {
+            warnings.push(format!(
+                "La intermedia \"{}\" ({} = {}) cae justo en un quiebre de la fórmula en alguna corrida (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta.",
+                it.name, it.symbol, it.formula
+            ));
+        }
     }
     out
 }
@@ -290,6 +391,7 @@ pub fn compute(
         scatters: Vec::new(),
         derived,
         determinations: Vec::new(),
+        intermediates: Vec::new(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
@@ -541,6 +643,7 @@ fn compute_determinations(
                 derived,
             })
             .collect(),
+        intermediates: Vec::new(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
@@ -1028,6 +1131,7 @@ pub fn compute_regresion(
             .iter()
             .flat_map(|(_, tree)| tree.iter_variable_identifiers())
             .chain(aggregate_roots.iter().map(String::as_str))
+            .chain(intermediates.iter().map(|it| it.symbol.as_str()))
             .collect(),
     );
     let used: Vec<&str> = used.iter().map(String::as_str).collect();
@@ -1040,7 +1144,19 @@ pub fn compute_regresion(
         .copied()
         .filter(|q| used.contains(&q.symbol.as_str()))
         .collect();
-    let point_us = point_uncertainties(&used_per_point, &by_quantity, scales, &mut warnings);
+    let (point_us, point_us_b) =
+        point_uncertainties(&used_per_point, &by_quantity, scales, &mut warnings);
+    let point_inputs = PointInputs::new(quantities, measurements);
+    let intermediates_out = intermediate_uncertainties(
+        &compiled_intermediates,
+        &point_inputs,
+        &contexts,
+        &point_us,
+        &point_us_b,
+        &per_point,
+        &us,
+        &mut warnings,
+    );
     let mut point_results_out = Vec::with_capacity(point_results.len());
     for (pr, tree) in &compiled_points {
         let (mut values, mut u) = (Vec::new(), Vec::new());
@@ -1324,6 +1440,7 @@ pub fn compute_regresion(
         scatters: Vec::new(),
         derived,
         determinations: Vec::new(),
+        intermediates: intermediates_out,
         point_results: point_results_out,
         aggregates: aggregates_out,
         warnings,
@@ -1400,6 +1517,7 @@ pub fn compute_curva(
         scatters,
         derived: Vec::new(),
         determinations: Vec::new(),
+        intermediates: Vec::new(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
@@ -1881,6 +1999,44 @@ fn run_kind_raw(
             &mut us,
             &mut analysis.warnings,
         )?;
+        let (compiled_intermediates, _) = compile_intermediates(
+            definition
+                .quantities
+                .iter()
+                .map(|q| q.symbol.clone())
+                .collect(),
+            &definition.intermediates,
+        )?;
+        let per_point: Vec<&PracticeQuantity> = definition
+            .quantities
+            .iter()
+            .filter(|q| q.per_point && !q.is_given)
+            .collect();
+        let used_per_point: Vec<&PracticeQuantity> = per_point
+            .iter()
+            .copied()
+            .filter(|q| {
+                compiled_intermediates
+                    .iter()
+                    .any(|(_, tree)| tree.iter_variable_identifiers().any(|v| v == q.symbol))
+            })
+            .collect();
+        let (point_us, point_us_b) = point_uncertainties(
+            &used_per_point,
+            &by_quantity,
+            scales,
+            &mut analysis.warnings,
+        );
+        analysis.intermediates = intermediate_uncertainties(
+            &compiled_intermediates,
+            &PointInputs::new(&definition.quantities, measurements),
+            &contexts,
+            &point_us,
+            &point_us_b,
+            &per_point,
+            &us,
+            &mut analysis.warnings,
+        );
         let per_point_syms: Vec<String> = per_point_quantity_symbols(&definition.quantities)
             .map(String::from)
             .chain(definition.intermediates.iter().map(|it| it.symbol.clone()))
