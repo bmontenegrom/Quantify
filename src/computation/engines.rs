@@ -105,8 +105,10 @@ fn scale_type_b(
     })))
 }
 
+pub(crate) const ENDPOINT_SUFFIXES: [&str; 4] = ["_first", "_first2", "_last", "_last2"];
+
 fn endpoint_of(symbol: &str) -> Option<(&str, &'static str)> {
-    ["_first2", "_first", "_last2", "_last"]
+    ENDPOINT_SUFFIXES
         .into_iter()
         .find_map(|suffix| Some((symbol.strip_suffix(suffix)?, suffix)))
 }
@@ -1014,6 +1016,7 @@ pub fn compute_regresion(
     };
     let aggregate_roots: Vec<String> = aggregates
         .iter()
+        .filter(|a| a.has_uncertainty)
         .flat_map(|a| super::formula_symbols(&a.formula))
         .map(|s| match endpoint_of(&s) {
             Some((base, _)) => base.to_string(),
@@ -1109,7 +1112,6 @@ pub fn compute_regresion(
     }
     let n_points = contexts.len();
     let last = n_points - 1;
-    const ENDPOINT_SUFFIXES: [&str; 4] = ["_first", "_first2", "_last", "_last2"];
 
     let mut series_len: HashMap<&str, usize> = HashMap::new();
     for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
@@ -1202,6 +1204,7 @@ pub fn compute_regresion(
     let mut aggregates_out = Vec::with_capacity(aggregates.len());
     let mut referenced_endpoints: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    let mut exact_aggregates: std::collections::HashSet<String> = std::collections::HashSet::new();
     for agg in aggregates {
         let tree = match compile_formula(&agg.formula, &agg_allowed) {
             Ok(tree) => tree,
@@ -1225,6 +1228,8 @@ pub fn compute_regresion(
                 point
             } else if let Some(&v) = exact.get(s) {
                 (v, 0.0)
+            } else if exact_aggregates.contains(s) {
+                (agg_values.get(s).copied().unwrap_or(f64::NAN), 0.0)
             } else {
                 (
                     agg_values.get(s).copied().unwrap_or(0.0),
@@ -1234,7 +1239,15 @@ pub fn compute_regresion(
         };
         let canonical_tree =
             super::parse(&rename_symbols(&agg.formula, canonical)).unwrap_or_else(|_| tree.clone());
-        let propagated = propagate(&canonical_tree, &deps, &leaf, &line);
+        let propagated = if agg.has_uncertainty {
+            propagate(&canonical_tree, &deps, &leaf, &line)
+        } else {
+            Propagated {
+                value,
+                u: 0.0,
+                kink: false,
+            }
+        };
         let u = if value.is_finite() {
             propagated.u
         } else {
@@ -1258,7 +1271,11 @@ pub fn compute_regresion(
         }
         agg_values.insert(agg.symbol.clone(), value);
         agg_allowed.push(agg.symbol.clone());
-        owned_trees.push((agg.symbol.clone(), canonical_tree));
+        if agg.has_uncertainty {
+            owned_trees.push((agg.symbol.clone(), canonical_tree));
+        } else {
+            exact_aggregates.insert(agg.symbol.clone());
+        }
         aggregates_out.push(AggregateComputation {
             symbol: agg.symbol.clone(),
             name: agg.name.clone(),
@@ -1266,6 +1283,7 @@ pub fn compute_regresion(
             value,
             u,
             u_expanded: uncertainty::expand(u, uncertainty::EXPANSION_K),
+            has_uncertainty: agg.has_uncertainty,
         });
     }
     for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {

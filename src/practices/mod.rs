@@ -382,7 +382,7 @@ pub struct PointResultInput {
     pub formula: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(default)]
 pub struct PracticeAggregate {
     pub id: String,
@@ -392,8 +392,30 @@ pub struct PracticeAggregate {
     pub name: String,
     pub unit: String,
     pub formula: String,
-    #[serde(default)]
     pub is_final: bool,
+    pub has_uncertainty: bool,
+}
+
+impl Default for PracticeAggregate {
+    /// Como en la base, un agregado lleva U salvo que se marque lo contrario.
+    ///
+    /// ```
+    /// let a = quantify::practices::PracticeAggregate::default();
+    /// assert!(a.has_uncertainty && !a.is_final);
+    /// ```
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            practice_id: String::new(),
+            position: 0,
+            symbol: String::new(),
+            name: String::new(),
+            unit: String::new(),
+            formula: String::new(),
+            is_final: false,
+            has_uncertainty: true,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -406,6 +428,8 @@ pub struct AggregateInput {
     pub formula: String,
     #[serde(default)]
     pub is_final: bool,
+    #[serde(default = "default_true")]
+    pub has_uncertainty: bool,
 }
 
 #[derive(Debug, Deserialize)]

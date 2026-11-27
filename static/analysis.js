@@ -261,11 +261,17 @@ function pointResultsMarkup(pointResults) {
 
 function aggregatesMarkup(aggregates) {
   if (!aggregates.length) return "";
+  const valueText = (a) => {
+    if (!Number.isFinite(a.value)) return '<span class="error-inline">—</span>';
+    if (!hasUncertainty(a)) return measureText(a.value, null);
+    if ("u_expanded" in a && a.u_expanded == null) return `${measureText(a.value, null)} ± ?`;
+    return measureText(a.value, a.u_expanded);
+  };
   const rows = aggregates
     .map(
       (a) =>
         `<tr><td>${symbolHtml(a.symbol)}</td><td>${inlineMathHtml(a.name)}</td>` +
-        `<td>${Number.isFinite(a.value) ? measureText(a.value, a.u_expanded) : '<span class="error-inline">—</span>'} <span class="submission-meta">${unitHtml(a.unit)}</span></td></tr>`,
+        `<td>${valueText(a)} <span class="submission-meta">${unitHtml(a.unit)}</span></td></tr>`,
     )
     .join("");
   return `

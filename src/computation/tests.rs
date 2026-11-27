@@ -193,6 +193,7 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
         unit: "".into(),
         formula: "slope".into(),
         is_final,
+        has_uncertainty: true,
     };
     let definition = PracticeDefinition {
         description: String::new(),
@@ -2053,6 +2054,7 @@ fn compute_regresion_aggregates_use_endpoints_measurands_and_chain() {
         unit: "".into(),
         formula: formula.into(),
         is_final: false,
+        has_uncertainty: true,
     };
     let aggregates = vec![
         agg("ep", "px_first + px_last"),
@@ -2102,6 +2104,7 @@ fn compute_regresion_aggregate_non_finite_warns() {
         unit: "".into(),
         formula: "1 / (px_first - px_first)".into(),
         is_final: false,
+        has_uncertainty: true,
     }];
     let measurements = vec![
         measurement("px", &[1.0, 2.0]),
@@ -2141,6 +2144,7 @@ fn compute_regresion_aggregate_endpoints_use_own_series_not_contexts() {
         unit: "".into(),
         formula: formula.into(),
         is_final: false,
+        has_uncertainty: true,
     };
     let aggregates = vec![
         agg("z_end", "z_last"),
@@ -2203,6 +2207,7 @@ fn compute_regresion_aggregate_endpoint_misalignment_warns_only_if_referenced() 
         unit: "".into(),
         formula: "slope".into(),
         is_final: false,
+        has_uncertainty: true,
     }];
     let measurements = vec![
         measurement("px", &[1.0, 2.0, 3.0]),
@@ -4648,6 +4653,44 @@ fn aggregates_carry_their_uncertainty_against_the_inputs() {
     assert_eq!(u("exact"), 0.0);
     let span = a.aggregates.iter().find(|g| g.symbol == "span").unwrap();
     assert!(close(span.u_expanded, 2.0 * span.u, 1e-12));
+}
+
+#[test]
+fn an_aggregate_without_uncertainty_is_exact_for_the_next_ones() {
+    let quantities = vec![quantity("px"), quantity("py")];
+    let measurements = vec![
+        MeasurementInput {
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.9, 2.1], vec![2.8, 3.2]]),
+            ..measurement("px", &[])
+        },
+        measurement("py", &[2.0, 4.1, 5.9]),
+    ];
+    let aggregates = vec![
+        PracticeAggregate {
+            has_uncertainty: false,
+            ..aggregate("span", "px_last - px_first")
+        },
+        aggregate("twice", "2 * span"),
+        aggregate("mixed", "span + px_first"),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[],
+        &aggregates,
+        &HashMap::new(),
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let by = |s: &str| a.aggregates.iter().find(|g| g.symbol == s).unwrap();
+    assert!(!by("span").has_uncertainty);
+    assert_eq!(by("span").u, 0.0);
+    assert!(close(by("span").value, 2.0, 1e-12));
+    assert_eq!(by("twice").u, 0.0);
+    assert!(close(by("mixed").u, 0.1, 1e-12), "{}", by("mixed").u);
 }
 
 #[test]

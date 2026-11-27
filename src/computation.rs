@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 pub use engines::analyze;
-pub(crate) use engines::per_determination_symbols;
 pub use engines::{
     analyze_definition, compute, compute_curva, compute_regresion, live_values, rename_symbols,
     scale_spec, PointContext,
 };
+pub(crate) use engines::{per_determination_symbols, ENDPOINT_SUFFIXES};
 pub(crate) use formula::{chain_order, formula_symbols, parse, CONSTANTS};
 pub use formula::{check_formula, FUNCTIONS};
 pub use submission::{
@@ -190,6 +190,7 @@ pub struct AggregateComputation {
     pub value: f64,
     pub u: f64,
     pub u_expanded: f64,
+    pub has_uncertainty: bool,
 }
 
 #[derive(Debug, Serialize, PartialEq)]

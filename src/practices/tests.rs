@@ -317,6 +317,7 @@ async fn symbol_taken_detects_cross_table_collision() {
             unit: "".into(),
             formula: "slope".into(),
             is_final: false,
+            has_uncertainty: true,
         },
     )
     .await
@@ -344,6 +345,7 @@ async fn aggregate_crud_roundtrip() {
         unit: "".into(),
         formula: formula.into(),
         is_final: false,
+        has_uncertainty: true,
     };
     let a = create_aggregate(&pool, "p1-estadistica", mk("Re_max", "slope"))
         .await
@@ -1114,6 +1116,10 @@ async fn seeded_fluidos2_populates_and_computes() {
     assert!(
         def.aggregates.iter().all(|a| a.is_final),
         "los 4 agregados deben ser comparables (is_final)"
+    );
+    assert!(
+        def.aggregates.iter().all(|a| !a.has_uncertainty),
+        "los 4 agregados se entregan sin U"
     );
     for symbol in ["mu_agua", "kp"] {
         let q = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
@@ -3304,6 +3310,7 @@ async fn display_symbols_are_saved_with_the_element() {
         unit: "m".into(),
         formula: "2".into(),
         is_final: false,
+        has_uncertainty: true,
     };
     let row = create_aggregate(&pool, practice, aggregate).await.unwrap();
     assert_eq!(shown("Ga").await.as_deref(), Some("G_a"));
@@ -3314,6 +3321,7 @@ async fn display_symbols_are_saved_with_the_element() {
         unit: "m".into(),
         formula: "2".into(),
         is_final: false,
+        has_uncertainty: true,
     };
     update_aggregate(&pool, practice, &row.id, aggregate)
         .await

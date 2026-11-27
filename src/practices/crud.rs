@@ -329,7 +329,7 @@ pub async fn aggregates_for(
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeAggregate>> {
     Ok(sqlx::query_as::<_, PracticeAggregate>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final \
+        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final, has_uncertainty \
          FROM practice_aggregates WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
@@ -339,7 +339,7 @@ pub async fn aggregates_for(
 
 async fn fetch_aggregate(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeAggregate> {
     Ok(sqlx::query_as::<_, PracticeAggregate>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final \
+        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final, has_uncertainty \
          FROM practice_aggregates WHERE id = ?1",
     )
     .bind(id)
@@ -372,8 +372,9 @@ pub(super) async fn insert_aggregate(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_aggregates \
-         (id, practice_id, position, symbol, name, unit, formula, is_final, display_symbol) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         (id, practice_id, position, symbol, name, unit, formula, is_final, display_symbol, \
+          has_uncertainty) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -384,6 +385,7 @@ pub(super) async fn insert_aggregate(
     .bind(input.formula.trim())
     .bind(input.is_final)
     .bind(display_symbol(&input.display_symbol).unwrap_or(""))
+    .bind(input.has_uncertainty)
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -403,7 +405,7 @@ pub async fn update_aggregate(
     let result = sqlx::query(
         "UPDATE practice_aggregates \
          SET symbol = ?3, name = ?4, unit = ?5, formula = ?6, is_final = ?7, \
-             display_symbol = COALESCE(?8, display_symbol) \
+             display_symbol = COALESCE(?8, display_symbol), has_uncertainty = ?9 \
          WHERE id = ?1 AND practice_id = ?2",
     )
     .bind(aggregate_id)
@@ -414,6 +416,7 @@ pub async fn update_aggregate(
     .bind(formula)
     .bind(input.is_final)
     .bind(display_symbol(&input.display_symbol))
+    .bind(input.has_uncertainty)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {

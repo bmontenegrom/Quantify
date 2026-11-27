@@ -1458,6 +1458,12 @@ calcula sin incertidumbre usa el mismo evaluador:
    agregado usa la recta y magnitudes de los ejes. Si una magnitud por punto tiene otro largo que
    el ajuste, el extremo de una intermedia se propaga desde el punto de su corrida (como su valor),
    y dos extremos que nombran el mismo punto (`x_first` y `x_last2` con dos puntos) cuentan una vez.
+   Vale la misma **aproximación** del ítem 1: el extremo de una intermedia muestra el promedio de
+   `f(réplicas)` y su U sale de las derivadas en `f(promedios)`; en un caso extremo (una fórmula
+   que diverge justo en los promedios) el valor es finito y la U no se puede calcular, con su aviso.
+   Como los mensurandos, un agregado puede ir **sin incertidumbre** (`has_uncertainty = false`):
+   se entrega solo el valor y es exacto para los agregados siguientes. Así van los cuatro de
+   Fluidos II (`Re_max`, `Re_min`, `Re_medio`, `M_teorico`), como en la hoja de resultados.
 3. **Intermedias por punto**: U por réplica o sobre los promedios, para que lleguen a los ejes.
 4. **Ejes del ajuste**: U de x e y en cada punto (barras de error en el gráfico) a partir de las
    intermedias. Es la base de una regresión ponderada (ítem de "General").

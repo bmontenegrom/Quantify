@@ -218,7 +218,8 @@
       "name": "Numero de Reynolds maximo",
       "unit": "",
       "formula": "2*rho*((h_first - h_first2)/(t_first2 - t_first))*(R_recip^2/(mu_agua*R_cap))",
-      "is_final": true
+      "is_final": true,
+      "has_uncertainty": false
     },
     {
       "display_symbol": null,
@@ -226,7 +227,8 @@
       "name": "Numero de Reynolds minimo",
       "unit": "",
       "formula": "2*rho*((h_last2 - h_last)/(t_last - t_last2))*(R_recip^2/(mu_agua*R_cap))",
-      "is_final": true
+      "is_final": true,
+      "has_uncertainty": false
     },
     {
       "display_symbol": null,
@@ -234,7 +236,8 @@
       "name": "Numero de Reynolds medio",
       "unit": "",
       "formula": "(Re_max + Re_min)/2",
-      "is_final": true
+      "is_final": true,
+      "has_uncertainty": false
     },
     {
       "display_symbol": null,
@@ -242,7 +245,8 @@
       "name": "Coeficiente de perdidas teorico",
       "unit": "",
       "formula": "kp + 4*(L_cap/(2*R_cap))*(16/Re_medio)",
-      "is_final": true
+      "is_final": true,
+      "has_uncertainty": false
     }
   ],
   "curves": []

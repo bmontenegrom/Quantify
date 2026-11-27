@@ -523,6 +523,7 @@ fn line_correlation_warnings(def: &practices::PracticeDefinition) -> Vec<Problem
         .chain(
             def.aggregates
                 .iter()
+                .filter(|a| a.has_uncertainty)
                 .map(|a| (a.symbol.as_str(), a.formula.as_str())),
         )
         .collect();
@@ -570,6 +571,7 @@ fn line_correlation_warnings(def: &practices::PracticeDefinition) -> Vec<Problem
     let aggregates = def
         .aggregates
         .iter()
+        .filter(|a| a.has_uncertainty)
         .map(|a| ("el agregado", &a.symbol, &a.formula, "aggregate", &a.id));
     point_results
         .chain(aggregates)
@@ -2070,6 +2072,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<ElementProble
                 unit: a.unit.clone(),
                 formula: a.formula.clone(),
                 is_final: a.is_final,
+                has_uncertainty: a.has_uncertainty,
             };
             note(
                 "el agregado",
@@ -2496,7 +2499,7 @@ fn validate_symbol_format(symbol: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-const ENDPOINT_SUFFIXES: [&str; 4] = ["_first", "_first2", "_last", "_last2"];
+use crate::computation::ENDPOINT_SUFFIXES;
 
 fn validate_symbol_not_reserved(symbol: &str) -> Result<(), AppError> {
     let s = symbol.trim();
@@ -3308,6 +3311,7 @@ mod tests {
             unit: "".into(),
             formula: "slope".into(),
             is_final: false,
+            has_uncertainty: true,
         };
         let def = practices::PracticeDefinition {
             description: String::new(),
@@ -3357,6 +3361,7 @@ mod tests {
             unit: "".into(),
             formula: formula.into(),
             is_final: false,
+            has_uncertainty: true,
         };
 
         assert!(validate_aggregate(
@@ -4456,6 +4461,7 @@ mod tests {
                         unit: String::new(),
                         formula: c.into(),
                         is_final: false,
+                        has_uncertainty: true,
                     };
                     validate_aggregate(&def, &input, exclude).is_ok()
                 });
