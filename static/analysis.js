@@ -31,7 +31,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
         for (const { title, analysis } of sections) {
           const comparableAggregates = (analysis.aggregates ?? [])
             .filter((a) => finalAggregateSymbols.has(a.symbol))
-            .map((a) => (a.u_expanded == null ? { ...a, has_uncertainty: false } : a));
+            .map((a) => ("u_expanded" in a ? a : { ...a, has_uncertainty: false }));
           body += comparisonMarkup(
             [...(analysis.derived ?? []), ...comparableAggregates],
             studentResults,
