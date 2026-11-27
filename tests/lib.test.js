@@ -387,6 +387,9 @@ test("regressionPlot amplía el rango para las barras, hasta la mitad del rango 
   assert.deepEqual(mid.ex, [mid.cx, mid.cx]);
   assert.ok(mid.ey[0] > mid.cy && mid.ey[1] < mid.cy);
   assert.deepEqual(last.ey, [188, 32]);
+  assert.deepEqual(last.clipped, [false, false, true, true]);
+  assert.deepEqual(mid.clipped, [false, false, false, false]);
+  assert.deepEqual(plot.scatter[0].clipped, [false, false, false, false]);
   assert.equal(plot.line.x1, plot.scatter[0].cx);
 });
 

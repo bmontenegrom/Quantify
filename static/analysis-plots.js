@@ -22,16 +22,28 @@ export function regressionMarkup(regression) {
       </div>
     </div>
     ${plot ? regressionSvg(plot, regression.x_label, regression.y_label) : `<p class="submission-meta">No se puede graficar: el rango de los datos es nulo.</p>`}
+    ${plot?.scatter.some((p) => p.clipped?.some(Boolean)) ? `<p class="submission-meta">Las barras con flecha siguen fuera del gráfico: su incertidumbre es mayor que lo dibujado.</p>` : ""}
   `;
 }
 
 function plotSvg(plot, { ariaLabel, lineMarkup = "", xText, yLabel }) {
   const f = (n) => n.toFixed(1);
-  const bar = (x1, y1, x2, y2) => `<line class="reg-errbar" x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" />`;
+  const bar = (p, x, y, clipped) =>
+    `<line class="reg-errbar" x1="${f(p.cx)}" y1="${f(p.cy)}" x2="${f(x)}" y2="${f(y)}"${clipped ? ` marker-end="url(#reg-clip)"` : ""} />`;
   const bars = plot.scatter
     .filter((p) => p.ex)
-    .map((p) => bar(p.ex[0], p.cy, p.ex[1], p.cy) + bar(p.cx, p.ey[0], p.cx, p.ey[1]))
+    .map((p) =>
+      [
+        bar(p, p.ex[0], p.cy, p.clipped[0]),
+        bar(p, p.ex[1], p.cy, p.clipped[1]),
+        bar(p, p.cx, p.ey[0], p.clipped[2]),
+        bar(p, p.cx, p.ey[1], p.clipped[3]),
+      ].join(""),
+    )
     .join("");
+  const clipMarker = bars.includes("reg-clip")
+    ? `<defs><marker id="reg-clip" viewBox="0 0 6 6" refX="6" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path class="reg-clip-arrow" d="M0,0 L6,3 L0,6 z" /></marker></defs>`
+    : "";
   const points = plot.scatter
     .map((p) => `<circle cx="${f(p.cx)}" cy="${f(p.cy)}" r="3" class="reg-point" />`)
     .join("");
@@ -40,6 +52,7 @@ function plotSvg(plot, { ariaLabel, lineMarkup = "", xText, yLabel }) {
     <svg class="reg-plot" viewBox="0 0 ${plot.width} ${plot.height}" role="img" aria-label="${ariaLabel}">
       <line class="reg-axis" x1="${plot.pad}" y1="${axisY}" x2="${plot.width - plot.pad}" y2="${axisY}" />
       <line class="reg-axis" x1="${plot.pad}" y1="${plot.pad}" x2="${plot.pad}" y2="${axisY}" />
+      ${clipMarker}
       ${lineMarkup}
       ${bars}
       ${points}

@@ -260,8 +260,8 @@ export function regressionPlot(points, slope, intercept, { uPoints = [], width =
   const sx = (x) => pad + ((x - minX) / spanX) * innerW;
   const sy = (y) => height - pad - ((y - minY) / spanY) * innerH;
   const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
-  const bx = (x) => clamp(sx(x), pad, width - pad);
-  const by = (y) => clamp(sy(y), pad, height - pad);
+  const bx = (px) => clamp(px, pad, width - pad);
+  const by = (py) => clamp(py, pad, height - pad);
   return {
     width,
     height,
@@ -270,7 +270,9 @@ export function regressionPlot(points, slope, intercept, { uPoints = [], width =
       const point = { cx: sx(p[0]), cy: sy(p[1]) };
       const [ux, uy] = [half(i, 0), half(i, 1)];
       if (!ux && !uy) return point;
-      return { ...point, ex: [bx(p[0] - ux), bx(p[0] + ux)], ey: [by(p[1] - uy), by(p[1] + uy)] };
+      const ends = [sx(p[0] - ux), sx(p[0] + ux), sy(p[1] - uy), sy(p[1] + uy)];
+      const clipped = ends.map((v, k) => (k < 2 ? bx(v) : by(v)) !== v);
+      return { ...point, ex: [bx(ends[0]), bx(ends[1])], ey: [by(ends[2]), by(ends[3])], clipped };
     }),
     line: { x1: sx(dataMinX), y1: sy(lineYmin), x2: sx(dataMaxX), y2: sy(lineYmax) },
     bounds: { minX, maxX, minY, maxY },

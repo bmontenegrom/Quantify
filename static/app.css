@@ -1615,6 +1615,10 @@ button.back-link {
   stroke-width: 1;
 }
 
+.reg-clip-arrow {
+  fill: var(--muted);
+}
+
 .reg-label {
   fill: var(--muted);
   font-size: 11px;
