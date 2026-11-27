@@ -313,7 +313,7 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
       <h3>Ajuste lineal</h3>
       ${regressionMarkup(analysis.regression)}
       ${derivedBlock}
-      ${pointResultsMarkup(analysis.point_results ?? [])}
+      ${pointResultsMarkup([...(analysis.intermediates ?? []), ...(analysis.point_results ?? [])])}
       ${aggregatesMarkup(analysis.aggregates ?? [])}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
@@ -336,6 +336,7 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
     return `
       <h3>${title}</h3>
       ${blocks}
+      ${pointResultsMarkup(analysis.intermediates ?? [])}
       ${quantitiesSection}
       ${derivedBlock}
       ${measuredVsTheoreticalMarkup(measured, derived, pairs)}

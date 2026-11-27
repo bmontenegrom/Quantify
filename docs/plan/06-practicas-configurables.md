@@ -1464,7 +1464,19 @@ calcula sin incertidumbre usa el mismo evaluador:
    Como los mensurandos, un agregado puede ir **sin incertidumbre** (`has_uncertainty = false`):
    se entrega solo el valor y es exacto para los agregados siguientes. Así van los cuatro de
    Fluidos II (`Re_max`, `Re_min`, `Re_medio`, `M_teorico`), como en la hoja de resultados.
-3. **Intermedias por punto**: U por réplica o sobre los promedios, para que lleguen a los ejes.
+3. **Intermedias por punto** ✅: U por corrida (`intermediates` en el análisis, con `values`/`u`/
+   `u_expanded` como las derivadas por punto; `valor ± U` en la tabla "Por corrida", también en
+   las prácticas de curva). Una intermedia **por réplica** (`Q = V/t`) calcula y promedia: su U
+   combina el tipo A de los valores calculados `f(r₁…rₙ)` (s/√n, que respeta que las lecturas de
+   una réplica se tomaron juntas) con el tipo B propagado con duales en los promedios (solo `u_b`
+   de las magnitudes que varían réplica a réplica; la u completa de las compartidas y de las de un
+   solo valor por punto). Una intermedia **sobre promedios** (`v = dx/t`) se propaga en los
+   promedios con la u completa de cada punto. Una intermedia que usa otra anterior la toma como
+   hoja con su U en ese punto (su tipo A no sale de la fórmula); se pierde la correlación entre
+   las dos por entradas compartidas, y ninguna de la biblioteca encadena intermedias. Las
+   derivadas por punto y los agregados siguen expandiendo las intermedias en los promedios (la
+   aproximación del ítem 1); pasarlos a este método va con el ítem 4, que lo necesita para los
+   ejes. Golden: Fluidos I, Viscosidad, Filtros y CC ganan `intermediates`; ningún valor cambia.
 4. **Ejes del ajuste**: U de x e y en cada punto (barras de error en el gráfico) a partir de las
    intermedias. Es la base de una regresión ponderada (ítem de "General").
 5. **Magnitudes compartidas dentro y fuera del ajuste**: una magnitud compartida que entra en
