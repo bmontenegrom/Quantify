@@ -4649,3 +4649,79 @@ fn aggregates_carry_their_uncertainty_against_the_inputs() {
     let span = a.aggregates.iter().find(|g| g.symbol == "span").unwrap();
     assert!(close(span.u_expanded, 2.0 * span.u, 1e-12));
 }
+
+#[test]
+fn endpoints_that_name_the_same_point_share_their_uncertainty() {
+    let quantities = vec![quantity("px"), quantity("py")];
+    let measurements = vec![
+        MeasurementInput {
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.8, 2.2]]),
+            ..measurement("px", &[])
+        },
+        measurement("py", &[2.0, 4.0]),
+    ];
+    let aggregates = vec![
+        aggregate("zero", "px_first - px_last2"),
+        aggregate("zero2", "px_first2 - px_last"),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[],
+        &aggregates,
+        &HashMap::new(),
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    for g in &a.aggregates {
+        assert_eq!(g.value, 0.0, "{}", g.symbol);
+        assert_eq!(g.u, 0.0, "{}", g.symbol);
+    }
+}
+
+#[test]
+fn intermediate_endpoints_propagate_from_the_point_of_their_run() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("z")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![
+                vec![9.9, 10.1],
+                vec![19.9, 20.1],
+                vec![29.9, 30.1],
+                vec![39.8, 40.2],
+            ]),
+            ..measurement("z", &[])
+        },
+    ];
+    let intermediates = vec![PracticeIntermediate {
+        symbol: "q".into(),
+        formula: "z*z".into(),
+        ..Default::default()
+    }];
+    let aggregates = vec![
+        aggregate("qe", "q_last"),
+        aggregate("zero", "q_last - z_last2*z_last2"),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &intermediates,
+        &[],
+        &[],
+        &aggregates,
+        &HashMap::new(),
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let by = |s: &str| a.aggregates.iter().find(|g| g.symbol == s).unwrap();
+    assert!(close(by("qe").value, 900.01, 1e-9), "{}", by("qe").value);
+    assert!(close(by("qe").u, 2.0 * 30.0 * 0.1, 1e-9), "{}", by("qe").u);
+    assert!(close(by("zero").value, 0.01, 1e-9));
+    assert!(close(by("zero").u, 0.0, 1e-9), "{}", by("zero").u);
+}

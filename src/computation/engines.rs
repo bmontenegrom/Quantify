@@ -1140,41 +1140,56 @@ pub fn compute_regresion(
         agg_values.insert(format!("{sym}_last"), at(last));
         agg_values.insert(format!("{sym}_last2"), at(last - 1));
     }
-    let per_point_symbols: Vec<&str> = per_point.iter().map(|q| q.symbol.as_str()).collect();
+    let point_leaf = |s: &str, k: usize| format!("{s}__p{k}");
+    let run_leaf = |s: &str, i: usize| format!("{s}__c{i}");
+    let endpoint_index = |suffix: &str, n: usize| match suffix {
+        "_first" => (n > 0).then_some(0),
+        "_first2" => (n > 1).then_some(1),
+        "_last" => n.checked_sub(1),
+        _ => n.checked_sub(2),
+    };
+    let mut point_leaves: HashMap<String, (f64, f64)> = HashMap::new();
+    for q in &per_point {
+        let series = by_quantity
+            .get(q.id.as_str())
+            .map(|m| m.point_values())
+            .unwrap_or_default();
+        let us_of = point_us.get(q.symbol.as_str());
+        for (k, &value) in series.iter().enumerate() {
+            let u = us_of
+                .and_then(|us_of| us_of.get(k).or_else(|| us_of.last()))
+                .copied()
+                .unwrap_or(f64::NAN);
+            point_leaves.insert(point_leaf(&q.symbol, k), (value, u));
+        }
+    }
+    let is_intermediate = |s: &str| intermediates.iter().any(|i| i.symbol == s);
+    let at_run = |s: &str, i: usize| -> Option<String> {
+        match series_len.get(s) {
+            Some(&n) => Some(point_leaf(s, i.min(n.saturating_sub(1)))),
+            None => is_intermediate(s).then(|| run_leaf(s, i)),
+        }
+    };
     let mut owned_trees: Vec<(String, Node)> = Vec::new();
+    let mut runs: Vec<usize> = vec![0, 1, last - 1, last];
+    runs.dedup();
     for (it, _) in &compiled_intermediates {
-        for suffix in ENDPOINT_SUFFIXES {
-            let renamed = rename_symbols(&it.formula, |s| {
-                let local =
-                    per_point_symbols.contains(&s) || intermediates.iter().any(|i| i.symbol == s);
-                local.then(|| format!("{s}{suffix}"))
-            });
+        for &i in &runs {
+            let renamed = rename_symbols(&it.formula, |s| at_run(s, i));
             if let Ok(tree) = super::parse(&renamed) {
-                owned_trees.push((format!("{}{suffix}", it.symbol), tree));
+                owned_trees.push((run_leaf(&it.symbol, i), tree));
             }
         }
     }
-    let endpoint_u = |s: &str| -> Option<f64> {
+    let canonical = |s: &str| -> Option<String> {
         let (base, suffix) = endpoint_of(s)?;
-        if !per_point_symbols.contains(&base) {
-            return None;
+        match series_len.get(base) {
+            Some(&n) => endpoint_index(suffix, n).map(|k| point_leaf(base, k)),
+            None if is_intermediate(base) => {
+                endpoint_index(suffix, n_points).map(|i| run_leaf(base, i))
+            }
+            None => None,
         }
-        let Some(us_of) = point_us.get(base) else {
-            return Some(f64::NAN);
-        };
-        let n = us_of.len();
-        let index = match suffix {
-            "_first" => Some(0),
-            "_first2" => Some(1),
-            "_last" => n.checked_sub(1),
-            _ => n.checked_sub(2),
-        };
-        Some(
-            index
-                .and_then(|i| us_of.get(i))
-                .copied()
-                .unwrap_or(f64::NAN),
-        )
     };
     let mut agg_allowed: Vec<String> = agg_values.keys().cloned().collect();
     let mut aggregates_out = Vec::with_capacity(aggregates.len());
@@ -1199,8 +1214,8 @@ pub fn compute_regresion(
             .chain(owned_trees.iter().map(|(s, t)| (s.as_str(), t)))
             .collect();
         let leaf = |s: &str| {
-            if let Some(u) = endpoint_u(s) {
-                (agg_values.get(s).copied().unwrap_or(f64::NAN), u)
+            if let Some(&point) = point_leaves.get(s) {
+                point
             } else if let Some(&v) = exact.get(s) {
                 (v, 0.0)
             } else {
@@ -1210,7 +1225,9 @@ pub fn compute_regresion(
                 )
             }
         };
-        let propagated = propagate(&tree, &deps, &leaf, &line);
+        let canonical_tree =
+            super::parse(&rename_symbols(&agg.formula, canonical)).unwrap_or_else(|_| tree.clone());
+        let propagated = propagate(&canonical_tree, &deps, &leaf, &line);
         let u = if value.is_finite() {
             propagated.u
         } else {
@@ -1234,7 +1251,7 @@ pub fn compute_regresion(
         }
         agg_values.insert(agg.symbol.clone(), value);
         agg_allowed.push(agg.symbol.clone());
-        owned_trees.push((agg.symbol.clone(), tree));
+        owned_trees.push((agg.symbol.clone(), canonical_tree));
         aggregates_out.push(AggregateComputation {
             symbol: agg.symbol.clone(),
             name: agg.name.clone(),
