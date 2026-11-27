@@ -4414,3 +4414,81 @@ fn point_results_see_through_intermediates_and_instrument_scales() {
         assert!(close(triple.u[i], 3.0 * u_b, 1e-12), "{i}: {}", triple.u[i]);
     }
 }
+
+#[test]
+fn point_uncertainties_reuse_the_last_reading_and_survive_a_bad_scale() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("T"), quantity("w")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![19.0, 21.0]]),
+            ..measurement("T", &[])
+        },
+        MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.9, 2.1], vec![2.9, 3.1]]),
+            ..measurement("w", &[])
+        },
+    ];
+    let bad = InstrumentScale {
+        b_model: "raro".into(),
+        ..fab_scale()
+    };
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), bad)].into();
+    let a = regression_with(
+        &quantities,
+        &[],
+        &[],
+        &[point_result("t2", "2*T"), point_result("rw", "w")],
+        &scales,
+        &measurements,
+    );
+    assert!(a.regression.is_some());
+    let t2 = a.point_results.iter().find(|p| p.symbol == "t2").unwrap();
+    assert!(t2.u.iter().all(|u| close(*u, 2.0, 1e-12)), "{:?}", t2.u);
+    let rw = a.point_results.iter().find(|p| p.symbol == "rw").unwrap();
+    assert!(rw.u.iter().all(|u| u.is_nan()));
+    assert!(
+        a.warnings
+            .iter()
+            .any(|w| w.contains("quedan sin incertidumbre")),
+        "{:?}",
+        a.warnings
+    );
+    assert!(
+        a.warnings.iter().any(|w| w.contains("\"rw\"")),
+        "{:?}",
+        a.warnings
+    );
+}
+
+#[test]
+fn a_point_result_that_is_not_derivable_in_a_run_warns() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("w")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.9, 2.1], vec![2.9, 3.1]]),
+            ..measurement("w", &[])
+        },
+    ];
+    let a = regression_with(
+        &quantities,
+        &[],
+        &[],
+        &[point_result("r", "math::sqrt(w - 1)")],
+        &HashMap::new(),
+        &measurements,
+    );
+    assert!(a.point_results[0].values[0] == 0.0);
+    assert!(
+        a.warnings
+            .iter()
+            .any(|w| w.contains("derivada por punto \"r\"") && w.contains("no se puede calcular")),
+        "{:?}",
+        a.warnings
+    );
+}

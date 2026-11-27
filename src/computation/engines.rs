@@ -78,43 +78,72 @@ fn scale_to_quantity(scale: &InstrumentScale, unit: &str) -> Result<(f64, f64), 
     })
 }
 
+type TypeB = Box<dyn Fn(f64) -> f64>;
+
+fn scale_type_b(
+    quantity: &PracticeQuantity,
+    scale_id: Option<&str>,
+    scales: &HashMap<String, InstrumentScale>,
+    has_values: bool,
+    warnings: &mut Vec<String>,
+) -> anyhow::Result<Option<TypeB>> {
+    let Some(scale_id) = scale_id else {
+        return Ok(None);
+    };
+    let Some(scale) = scales.get(scale_id) else {
+        anyhow::bail!("la escala seleccionada no existe");
+    };
+    let spec = scale_spec(scale)?;
+    let (factor, offset) = scale_to_quantity(scale, &quantity.unit).unwrap_or_else(|w| {
+        if has_values {
+            warnings.push(format!("\"{}\" ({}): {w}.", quantity.name, quantity.symbol));
+        }
+        (1.0, 0.0)
+    });
+    Ok(Some(Box::new(move |mean| {
+        uncertainty::type_b(&spec, (mean - offset) / factor) * factor
+    })))
+}
+
 fn point_uncertainties<'a>(
     quantities: &'a [PracticeQuantity],
     by_quantity: &HashMap<&str, &MeasurementInput>,
     scales: &HashMap<String, InstrumentScale>,
     n_points: usize,
     warnings: &mut Vec<String>,
-) -> anyhow::Result<HashMap<&'a str, Vec<f64>>> {
+) -> HashMap<&'a str, Vec<f64>> {
     let mut out = HashMap::new();
     for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
         let Some(m) = by_quantity.get(q.id.as_str()) else {
             continue;
         };
         let replicas = m.point_replica_matrix();
-        let type_b: Box<dyn Fn(f64) -> f64> = match m.instrument_for(None).1 {
-            Some(scale_id) => {
-                let Some(scale) = scales.get(scale_id) else {
-                    anyhow::bail!("la escala seleccionada no existe");
-                };
-                let spec = scale_spec(scale)?;
-                let (factor, offset) = scale_to_quantity(scale, &q.unit).unwrap_or_else(|w| {
-                    warnings.push(format!("\"{}\" ({}): {w}.", q.name, q.symbol));
-                    (1.0, 0.0)
-                });
-                Box::new(move |mean| uncertainty::type_b(&spec, (mean - offset) / factor) * factor)
+        let has_values = replicas.iter().any(|r| !r.is_empty());
+        let type_b = match scale_type_b(q, m.instrument_for(None).1, scales, has_values, warnings) {
+            Ok(type_b) => type_b,
+            Err(e) => {
+                warnings.push(format!(
+                    "\"{}\" ({}): {e}; las derivadas por punto que la usan quedan sin incertidumbre.",
+                    q.name, q.symbol
+                ));
+                out.insert(q.symbol.as_str(), vec![f64::NAN; n_points]);
+                continue;
             }
-            None => Box::new(|_| 0.0),
         };
         let per_point = (0..n_points)
             .map(|i| {
-                replicas.get(i).map_or(f64::NAN, |values| {
-                    uncertainty::measured_with(values, &type_b).u_c
-                })
+                replicas
+                    .get(i)
+                    .or_else(|| replicas.last())
+                    .map_or(f64::NAN, |values| match &type_b {
+                        Some(type_b) => uncertainty::measured_with(values, type_b).u_c,
+                        None => uncertainty::measured_quantity(values, None).u_c,
+                    })
             })
             .collect();
         out.insert(q.symbol.as_str(), per_point);
     }
-    Ok(out)
+    out
 }
 
 fn compute_quantities(
@@ -160,26 +189,8 @@ fn compute_quantities(
                     quantity.name, quantity.symbol
                 ));
             }
-            match instrument.1 {
-                Some(scale_id) => {
-                    let Some(scale) = scales.get(scale_id) else {
-                        anyhow::bail!("la escala seleccionada no existe");
-                    };
-                    let spec = scale_spec(scale)?;
-                    let (factor, offset) =
-                        scale_to_quantity(scale, &quantity.unit).unwrap_or_else(|w| {
-                            if !values.is_empty() {
-                                warnings.push(format!(
-                                    "\"{}\" ({}): {w}.",
-                                    quantity.name, quantity.symbol
-                                ));
-                            }
-                            (1.0, 0.0)
-                        });
-                    uncertainty::measured_with(&values, |mean| {
-                        uncertainty::type_b(&spec, (mean - offset) / factor) * factor
-                    })
-                }
+            match scale_type_b(quantity, instrument.1, scales, !values.is_empty(), warnings)? {
+                Some(type_b) => uncertainty::measured_with(&values, type_b),
                 None => uncertainty::measured_quantity(&values, None),
             }
         };
@@ -269,7 +280,7 @@ pub fn compute(
         &mut us,
         &mut warnings,
     )?;
-    let derived = derive_results(results, &symbols, &means, &us, &[], &mut warnings)?;
+    let (derived, _) = derive_results(results, &symbols, &means, &us, &[], &mut warnings)?;
     Ok(FormAnalysis {
         quantities: computed,
         regression: None,
@@ -459,7 +470,8 @@ fn compute_determinations(
     }
 
     let mut derive_warnings = Vec::new();
-    let mut derived = derive_results(&expanded, &allowed, &means, &us, &[], &mut derive_warnings)?;
+    let (mut derived, _) =
+        derive_results(&expanded, &allowed, &means, &us, &[], &mut derive_warnings)?;
     for mut w in derive_warnings {
         for (formula, text) in &average_texts {
             w = w.replace(formula, text);
@@ -947,7 +959,8 @@ pub fn compute_regresion(
         ],
         vec![("intercept", fit.u_mean_y)],
     ];
-    let derived = derive_results(results, &allowed, &means, &us, &line, &mut warnings)?;
+    let (derived, result_trees) =
+        derive_results(results, &allowed, &means, &us, &line, &mut warnings)?;
 
     let mut extras: HashMap<&str, f64> = HashMap::new();
     extras.insert("slope", fit.slope);
@@ -960,31 +973,23 @@ pub fn compute_regresion(
     pr_allowed.extend(derived.iter().map(|d| d.symbol.clone()));
     pr_allowed.push("slope".into());
     pr_allowed.push("intercept".into());
-    let point_us = point_uncertainties(
-        quantities,
-        &by_quantity,
-        scales,
-        contexts.len(),
-        &mut warnings,
-    )?;
+    let point_us = if point_results.is_empty() {
+        HashMap::new()
+    } else {
+        point_uncertainties(
+            quantities,
+            &by_quantity,
+            scales,
+            contexts.len(),
+            &mut warnings,
+        )
+    };
     let quantity_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
     let (compiled_intermediates, _) = compile_intermediates(quantity_symbols, intermediates)?;
-    let mut result_scope = allowed.clone();
-    result_scope.extend(results.iter().map(|r| r.symbol.clone()));
-    let result_trees: Vec<(&str, Node)> = results
-        .iter()
-        .filter(|r| derived.iter().any(|d| d.symbol == r.symbol))
-        .filter_map(|r| {
-            Some((
-                r.symbol.as_str(),
-                compile_formula(&r.formula, &result_scope).ok()?,
-            ))
-        })
-        .collect();
     let formulas: HashMap<&str, &Node> = compiled_intermediates
         .iter()
         .map(|(it, tree)| (it.symbol.as_str(), tree))
-        .chain(result_trees.iter().map(|(s, tree)| (*s, tree)))
+        .chain(result_trees.iter().map(|(s, tree)| (s.as_str(), tree)))
         .collect();
     let mut point_results_out = Vec::with_capacity(point_results.len());
     for pr in point_results {
@@ -996,6 +1001,7 @@ pub fn compute_regresion(
             }
         };
         let (mut values, mut u) = (Vec::new(), Vec::new());
+        let (mut not_derivable, mut on_kink) = (false, false);
         for (i, ctx) in contexts.iter().enumerate() {
             let mut bound: HashMap<&str, f64> = ctx.iter().map(|(k, v)| (k.as_str(), *v)).collect();
             bound.extend(&extras);
@@ -1011,12 +1017,27 @@ pub fn compute_regresion(
                 ),
             };
             let propagated = propagate(&tree, &formulas, &leaf, &line);
+            if value.is_finite() {
+                not_derivable |= !propagated.u.is_finite();
+                on_kink |= propagated.kink && propagated.u > 0.0;
+            }
             values.push(value);
             u.push(if value.is_finite() {
                 propagated.u
             } else {
                 f64::NAN
             });
+        }
+        if not_derivable {
+            warnings.push(format!(
+                "La incertidumbre de la derivada por punto \"{}\" ({} = {}) no se puede calcular en alguna corrida: la fórmula no es derivable ahí (p. ej. una raíz en 0) o falta la de una magnitud.",
+                pr.name, pr.symbol, pr.formula
+            ));
+        } else if on_kink {
+            warnings.push(format!(
+                "La derivada por punto \"{}\" ({} = {}) cae justo en un quiebre de la fórmula en alguna corrida (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta.",
+                pr.name, pr.symbol, pr.formula
+            ));
         }
         point_results_out.push(PointResultComputation {
             symbol: pr.symbol.clone(),
@@ -1219,6 +1240,8 @@ fn skipped(what: &str, symbol: &str, error: &anyhow::Error) -> String {
     format!("No se calculó {what} {symbol}: {error}. Revisá su fórmula en la práctica.")
 }
 
+type CompiledResults = Vec<(String, Node)>;
+
 struct Propagated {
     value: f64,
     u: f64,
@@ -1308,7 +1331,7 @@ fn derive_results(
     u_by_symbol: &HashMap<String, f64>,
     factors: &[Vec<(&str, f64)>],
     warnings: &mut Vec<String>,
-) -> anyhow::Result<Vec<DerivedComputation>> {
+) -> anyhow::Result<(Vec<DerivedComputation>, CompiledResults)> {
     let mut scope = allowed.to_vec();
     scope.extend(results.iter().map(|r| r.symbol.clone()));
     let index: HashMap<&str, usize> = results
@@ -1370,6 +1393,7 @@ fn derive_results(
         )
     };
     let mut derived = Vec::with_capacity(results.len());
+    let mut compiled = Vec::with_capacity(results.len());
     for (i, result) in results.iter().enumerate() {
         if blocked.contains(&i) {
             continue;
@@ -1394,6 +1418,7 @@ fn derive_results(
                 result.name, result.symbol, result.formula
             ));
         }
+        compiled.push((result.symbol.clone(), tree.clone()));
         derived.push(DerivedComputation {
             symbol: result.symbol.clone(),
             name: result.name.clone(),
@@ -1405,7 +1430,7 @@ fn derive_results(
             u_expanded: uncertainty::expand(u, uncertainty::EXPANSION_K),
         });
     }
-    Ok(derived)
+    Ok((derived, compiled))
 }
 
 #[cfg(test)]
@@ -1710,7 +1735,8 @@ fn run_kind_raw(
             &us,
             &[],
             &mut analysis.warnings,
-        )?;
+        )?
+        .0;
         return Ok(analysis);
     }
 
