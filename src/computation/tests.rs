@@ -4575,3 +4575,77 @@ fn a_result_without_uncertainty_is_exact_for_everything_that_uses_it() {
     assert!(close(derived("m3").u, u_c, 1e-12), "{}", derived("m3").u);
     assert!(a.point_results[0].u.iter().all(|u| *u == 0.0));
 }
+
+fn aggregate(symbol: &str, formula: &str) -> PracticeAggregate {
+    PracticeAggregate {
+        id: format!("ag-{symbol}"),
+        symbol: symbol.into(),
+        name: symbol.into(),
+        formula: formula.into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn aggregates_carry_their_uncertainty_against_the_inputs() {
+    let mut c = quantity("c");
+    c.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), c];
+    let measurements = vec![
+        MeasurementInput {
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.9, 2.1], vec![2.8, 3.2]]),
+            ..measurement("px", &[])
+        },
+        measurement("py", &[2.0, 4.1, 5.9]),
+        measurement("c", &[9.9, 10.1]),
+    ];
+    let intermediates = vec![PracticeIntermediate {
+        symbol: "q".into(),
+        formula: "2*px".into(),
+        ..Default::default()
+    }];
+    let results = vec![
+        result("m", "slope * c"),
+        PracticeResult {
+            has_uncertainty: false,
+            ..result("e", "slope * c")
+        },
+    ];
+    let aggregates = vec![
+        aggregate("span", "px_last - px_first"),
+        aggregate("same", "slope * c"),
+        aggregate("zero", "m - slope * c"),
+        aggregate("qf", "q_first"),
+        aggregate("qzero", "q_first - 2*px_first"),
+        aggregate("twice", "2 * span"),
+        aggregate("exact", "e * 1"),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &intermediates,
+        &results,
+        &[],
+        &aggregates,
+        &HashMap::new(),
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let u = |s: &str| a.aggregates.iter().find(|g| g.symbol == s).unwrap().u;
+    let (u_first, u_last) = (0.1, 0.2);
+    assert!(
+        close(u("span"), f64::hypot(u_first, u_last), 1e-12),
+        "{}",
+        u("span")
+    );
+    let m = a.derived.iter().find(|d| d.symbol == "m").unwrap().u;
+    assert!(close(u("same"), m, 1e-12), "{} vs {m}", u("same"));
+    assert_eq!(u("zero"), 0.0);
+    assert!(close(u("qf"), 2.0 * u_first, 1e-12), "{}", u("qf"));
+    assert_eq!(u("qzero"), 0.0);
+    assert!(close(u("twice"), 2.0 * u("span"), 1e-12));
+    assert_eq!(u("exact"), 0.0);
+    let span = a.aggregates.iter().find(|g| g.symbol == "span").unwrap();
+    assert!(close(span.u_expanded, 2.0 * span.u, 1e-12));
+}

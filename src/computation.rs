@@ -188,6 +188,8 @@ pub struct AggregateComputation {
     pub name: String,
     pub unit: String,
     pub value: f64,
+    pub u: f64,
+    pub u_expanded: f64,
 }
 
 #[derive(Debug, Serialize, PartialEq)]

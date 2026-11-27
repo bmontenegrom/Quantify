@@ -520,10 +520,25 @@ fn line_correlation_warnings(def: &practices::PracticeDefinition) -> Vec<Problem
                 .filter(|r| r.has_uncertainty)
                 .map(|r| (r.symbol.as_str(), r.formula.as_str())),
         )
+        .chain(
+            def.aggregates
+                .iter()
+                .map(|a| (a.symbol.as_str(), a.formula.as_str())),
+        )
         .collect();
+    let base = |symbol: String| {
+        if formulas.contains_key(symbol.as_str()) {
+            return symbol;
+        }
+        ENDPOINT_SUFFIXES
+            .iter()
+            .find_map(|suffix| symbol.strip_suffix(suffix))
+            .map_or(symbol.clone(), str::to_string)
+    };
     let reach = |roots: Vec<String>| {
         let (mut stack, mut seen) = (roots, Vec::<String>::new());
         while let Some(symbol) = stack.pop() {
+            let symbol = base(symbol);
             if seen.contains(&symbol) {
                 continue;
             }
@@ -543,10 +558,23 @@ fn line_correlation_warnings(def: &practices::PracticeDefinition) -> Vec<Problem
         .into_iter()
         .filter(|s| def.quantities.iter().any(|q| q.symbol == *s))
         .collect();
-    def.point_results
+    let point_results = def.point_results.iter().map(|pr| {
+        (
+            "la derivada por punto",
+            &pr.symbol,
+            &pr.formula,
+            "pointResult",
+            &pr.id,
+        )
+    });
+    let aggregates = def
+        .aggregates
         .iter()
-        .filter_map(|pr| {
-            let leaves = reach(formula_symbols(&pr.formula));
+        .map(|a| ("el agregado", &a.symbol, &a.formula, "aggregate", &a.id));
+    point_results
+        .chain(aggregates)
+        .filter_map(|(what, symbol, formula, kind, id)| {
+            let leaves = reach(formula_symbols(formula));
             if !leaves.iter().any(|s| s == "slope" || s == "intercept") {
                 return None;
             }
@@ -561,14 +589,13 @@ fn line_correlation_warnings(def: &practices::PracticeDefinition) -> Vec<Problem
             shared.sort_unstable();
             Some(Problem {
                 message: format!(
-                    "la derivada por punto {}: su incertidumbre toma la recta como independiente de \
-                     las magnitudes de los ejes que también usa ({}), así que puede no ser exacta \
+                    "{what} {symbol}: su incertidumbre toma la recta como independiente de las \
+                     magnitudes de los ejes que también usa ({}), así que puede no ser exacta \
                      (en general la sobreestima).",
-                    pr.symbol,
                     shared.join(", ")
                 ),
-                kind: "pointResult",
-                id: Some(pr.id.clone()),
+                kind,
+                id: Some(id.clone()),
                 warning: true,
             })
         })
@@ -4028,10 +4055,28 @@ mod tests {
         );
         assert!(warned("viscosidad").await[0].message.contains("(R, dx, t)"));
         assert!(warned("p1-estadistica").await.is_empty());
-        let def = practices::definition(&pool, "fluidos-1")
+        let mut def = practices::definition(&pool, "fluidos-1")
             .await
             .unwrap()
             .unwrap();
+        assert!(warned("fluidos-2").await.is_empty());
+        let aggregate = |symbol: &str, formula: &str| practices::PracticeAggregate {
+            id: format!("ag-{symbol}"),
+            symbol: symbol.into(),
+            formula: formula.into(),
+            ..Default::default()
+        };
+        def.aggregates = vec![
+            aggregate("a1", "slope*V_first"),
+            aggregate("a2", "2*a1"),
+            aggregate("a3", "rho*2"),
+        ];
+        let on_aggregates: Vec<_> = line_correlation_warnings(&def)
+            .into_iter()
+            .filter(|w| w.kind == "aggregate")
+            .map(|w| w.id.unwrap())
+            .collect();
+        assert_eq!(on_aggregates, ["ag-a1", "ag-a2"]);
         assert!(!publish_problems(&def)
             .iter()
             .any(|p| p.contains("ejes que también usa")));

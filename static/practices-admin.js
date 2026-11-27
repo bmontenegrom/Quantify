@@ -1257,7 +1257,7 @@ function renderPointResultsSection(practice, def) {
 function renderAggregatesSection(practice, def) {
   return symbolFormulaSection("aggregate", practice, def, {
     title: "Mensurandos agregados",
-    help: "Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Sin incertidumbre.",
+    help: "Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Llevan su U: la de los extremos (la u de ese punto), las compartidas, la recta, los mensurandos y los agregados anteriores, contando cada magnitud una sola vez.",
     addLabel: "Nuevo agregado",
   });
 }

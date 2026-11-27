@@ -265,7 +265,7 @@ function aggregatesMarkup(aggregates) {
     .map(
       (a) =>
         `<tr><td>${symbolHtml(a.symbol)}</td><td>${inlineMathHtml(a.name)}</td>` +
-        `<td>${Number.isFinite(a.value) ? format(a.value) : '<span class="error-inline">—</span>'} <span class="submission-meta">${unitHtml(a.unit)}</span></td></tr>`,
+        `<td>${Number.isFinite(a.value) ? measureText(a.value, a.u_expanded) : '<span class="error-inline">—</span>'} <span class="submission-meta">${unitHtml(a.unit)}</span></td></tr>`,
     )
     .join("");
   return `
