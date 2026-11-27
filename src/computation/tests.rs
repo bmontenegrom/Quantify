@@ -5055,7 +5055,7 @@ fn an_intermediate_of_an_empty_optional_quantity_is_not_shown() {
 }
 
 #[test]
-fn a_chained_intermediate_with_more_replicas_takes_the_earlier_mean() {
+fn a_chained_intermediate_with_other_replica_counts_takes_the_earlier_mean() {
     let quantities = vec![quantity("h"), quantity("V"), quantity("t")];
     let intermediates = vec![
         PracticeIntermediate {
@@ -5076,5 +5076,46 @@ fn a_chained_intermediate_with_more_replicas_takes_the_earlier_mean() {
         point_rep("q-t", vec![vec![1.0, 2.0]]),
     ];
     let rows = live_values(&quantities, &intermediates, &measurements).unwrap();
-    assert_eq!(rows[0][0].replicas, vec![Some(10.0), Some(5.0), Some(7.5)]);
+    assert_eq!(rows[0][0].replicas, vec![Some(7.5); 3]);
+
+    let measurements = vec![
+        point_rep("q-h", vec![vec![1.0, 1.0]]),
+        point_rep("q-V", vec![vec![10.0, 10.0, 10.0]]),
+        point_rep("q-t", vec![vec![1.0, 2.0, 4.0]]),
+    ];
+    let rows = live_values(&quantities, &intermediates, &measurements).unwrap();
+    assert_eq!(rows[0][0].replicas, vec![Some(17.5 / 3.0); 2]);
+}
+
+#[test]
+fn an_unpaired_earlier_intermediate_enters_with_its_whole_u() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("V"), quantity("h")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 2.0, 3.0]; 3]),
+            ..measurement("V", &[])
+        },
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 1.0]; 3]),
+            ..measurement("h", &[])
+        },
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("q", "2*V", false),
+            intermediate("r", "q*h", false),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    let (q, r) = (intermediate_u(&a, "q"), intermediate_u(&a, "r"));
+    for i in 0..3 {
+        assert!(close(r.values[i], 4.0, 1e-12), "{}", r.values[i]);
+        assert!(close(r.u[i], q.u[i], 1e-12), "{} vs {}", r.u[i], q.u[i]);
+    }
 }

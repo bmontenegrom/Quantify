@@ -1473,8 +1473,9 @@ calcula sin incertidumbre usa el mismo evaluador:
    de las magnitudes que varían réplica a réplica; la u completa de las compartidas y de las de un
    solo valor por punto). Una intermedia **sobre promedios** (`v = dx/t`) se propaga en los
    promedios con la u completa de cada punto. Una intermedia por réplica que usa otra anterior por
-   réplica toma su valor en la misma réplica (si tiene menos réplicas, su promedio en las que
-   faltan; antes tomaba siempre su promedio: `Qsq = Q*Q` pasa de
+   réplica toma su valor en la misma réplica si tiene tantas réplicas como las magnitudes que usa
+   directo (si no, entra su promedio con su U completa, sin inventar réplicas; antes tomaba siempre
+   su promedio: `Qsq = Q*Q` pasa de
    promedio(Q)² a promedio(Q²); ninguna de la biblioteca encadena intermedias) y la expande por su
    fórmula, así una magnitud compartida (`q = 2*V`, `r = q*V`) cuenta una vez. Una intermedia sobre
    promedios también expande las anteriores. Una anterior sobre promedios usada por una por réplica

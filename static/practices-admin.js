@@ -1268,7 +1268,7 @@ function renderAggregatesSection(practice, def) {
 function renderIntermediatesSection(practice, def) {
   return symbolFormulaSection("intermediate", practice, def, {
     title: "Magnitudes intermedias por punto",
-    help: "Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio), o, con \"Calcular sobre los promedios\", una sola vez con las magnitudes ya promediadas (p. ej. v = dx/t con el tiempo medio). Una intermedia que usa otra anterior toma su valor en la misma réplica (su promedio si alguna de las dos va sobre los promedios). El símbolo queda disponible en las fórmulas de eje.",
+    help: "Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio), o, con \"Calcular sobre los promedios\", una sola vez con las magnitudes ya promediadas (p. ej. v = dx/t con el tiempo medio). Una intermedia que usa otra anterior toma su valor en la misma réplica (su promedio si alguna de las dos va sobre los promedios o tienen distinta cantidad de réplicas). El símbolo queda disponible en las fórmulas de eje.",
     addLabel: "Nueva intermedia",
   });
 }

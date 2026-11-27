@@ -205,13 +205,16 @@ fn intermediate_uncertainties(
         let mut earlier_u: HashMap<&str, f64> = HashMap::new();
         for (k, (it, tree)) in compiled.iter().enumerate() {
             let replicas = point_intermediate(it, tree, inputs, &earlier_reps, i);
-            earlier_reps.insert(it.symbol.as_str(), replicas.clone());
             if i >= runs[it.symbol.as_str()] {
+                earlier_reps.insert(it.symbol.as_str(), replicas);
                 continue;
             }
             let expanded: HashMap<&str, &Node> = compiled[..k]
                 .iter()
-                .filter(|(e, _)| it.on_means || !e.on_means)
+                .filter(|(e, _)| {
+                    it.on_means
+                        || !e.on_means && earlier_reps[e.symbol.as_str()].len() == replicas.len()
+                })
                 .map(|(e, t)| (e.symbol.as_str(), t))
                 .collect();
             let missing = std::cell::Cell::new(false);
@@ -251,6 +254,7 @@ fn intermediate_uncertainties(
                 on_kink[k] |= propagated.kink && u > 0.0;
             }
             earlier_u.insert(it.symbol.as_str(), u);
+            earlier_reps.insert(it.symbol.as_str(), replicas);
             out[k].values.push(value);
             out[k].u.push(u);
             out[k]
@@ -918,13 +922,12 @@ fn point_intermediate(
     let n_reps = if it.on_means {
         1
     } else {
-        tree.iter_variable_identifiers()
-            .filter_map(|v| match id_of(v) {
-                Some(_) if !is_broadcastable(v) => Some(reps_at(v).len()),
-                Some(_) => None,
-                None => earlier.get(v).map(Vec::len),
-            })
+        let vars = || tree.iter_variable_identifiers();
+        vars()
+            .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
+            .map(|v| reps_at(v).len())
             .max()
+            .or_else(|| vars().filter_map(|v| earlier.get(v).map(Vec::len)).max())
             .unwrap_or(0)
             .max(1)
     };
@@ -936,9 +939,8 @@ fn point_intermediate(
                 .map(|v| {
                     let value = if !symbol_to_id.contains_key(v) {
                         match earlier.get(v) {
-                            Some(reps) if it.on_means => mean(reps),
-                            Some(reps) if reps.len() == 1 => reps[0],
-                            Some(reps) => reps.get(r).copied().unwrap_or_else(|| mean(reps)),
+                            Some(reps) if !it.on_means && reps.len() == n_reps => reps[r],
+                            Some(reps) => mean(reps),
                             None => f64::NAN,
                         }
                     } else if it.on_means {
