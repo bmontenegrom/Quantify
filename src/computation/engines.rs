@@ -198,7 +198,27 @@ impl<'a> RunCtx<'a> {
         state: &RunState,
     ) -> RunU {
         let replicas = point_intermediate(on_means, tree, &self.inputs, &state.reps, i);
-        if !on_means && replicas.iter().any(|v| !v.is_finite()) {
+        let unpaired = || {
+            let mut stack: Vec<&str> = tree.iter_variable_identifiers().collect();
+            let mut seen = std::collections::HashSet::new();
+            while let Some(s) = stack.pop() {
+                if !seen.insert(s) {
+                    continue;
+                }
+                if let Some(&e_on_means) = self.on_means.get(s) {
+                    if state.u.contains_key(s)
+                        && (e_on_means || state.reps[s].len() != replicas.len())
+                    {
+                        return true;
+                    }
+                }
+                if let Some(t) = self.formulas.get(s) {
+                    stack.extend(t.iter_variable_identifiers());
+                }
+            }
+            false
+        };
+        if !on_means && (replicas.iter().any(|v| !v.is_finite()) || unpaired()) {
             return RunU {
                 replicas,
                 ..self.run_u(tree, true, i, ctx, state)

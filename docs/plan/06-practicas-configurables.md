@@ -1477,8 +1477,9 @@ calcula sin incertidumbre usa el mismo evaluador:
    promedio(Q)² a promedio(Q²); ninguna de la biblioteca encadena intermedias) y la expande por su
    fórmula, así una magnitud compartida (`q = 2*V`, `r = q*V`) cuenta una vez. Una intermedia sobre
    promedios también expande las anteriores. Una anterior sobre promedios usada por una por réplica
-   vale lo mismo en todas las réplicas y entra como hoja con su U (se pierde la correlación por
-   entradas compartidas). Si la U no sale porque falta la de una entrada, el aviso queda en esa
+   vale lo mismo en todas las réplicas; desde el ítem 4a, en ese caso (y si alcanza una anterior
+   con otra cantidad de réplicas) la U se propaga en los promedios expandiendo todo, así una
+   magnitud compartida cuenta una vez. Si la U no sale porque falta la de una entrada, el aviso queda en esa
    entrada y no culpa a la fórmula. Una intermedia sin corridas (una magnitud opcional vacía) no
    se muestra.
    Cada intermedia se muestra en tantas corridas como puntos tienen sus magnitudes (la menor
@@ -1492,7 +1493,10 @@ calcula sin incertidumbre usa el mismo evaluador:
      por réplica (con las intermedias anteriores emparejadas por réplica) y tipo B propagado con
      duales expandiendo las intermedias emparejadas y los mensurandos con U, con `u_b` para las
      magnitudes que varían réplica a réplica; `slope`/`intercept` llevan las fuentes de la recta.
-     Así un eje `Q` da la U de `Q`, y la derivada `P = Q` coincide con la tabla. El valor no
+     Así un eje `Q` da la U de `Q`, y la derivada `P = Q` coincide con la tabla. Si la fórmula
+     alcanza una intermedia sobre promedios, una con otra cantidad de réplicas o una réplica no
+     finita, su U se propaga en los promedios con la u completa expandiendo todo (como antes),
+     así `P = Q*t` con `Q = V/t` sobre promedios da la U de `V`. El valor no
      cambia. Una magnitud que solo entra en un eje ahora tiene u por punto (y su aviso de escala,
      si no la tiene). Las curvas no llevan barras. Golden: los de regresión ganan `u_points`;
      Fluidos I y Viscosidad cambian levemente la U de `Re` (no el valor).

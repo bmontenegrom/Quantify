@@ -5267,3 +5267,46 @@ fn a_point_result_with_uneven_replicas_falls_back_to_the_means() {
         a.warnings
     );
 }
+
+#[test]
+fn a_point_result_cancels_an_input_shared_with_an_intermediate_on_means() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale(
+            "V",
+            vec![
+                vec![10.0, 10.2, 9.8],
+                vec![20.0, 20.4, 19.6],
+                vec![30.0, 30.1, 29.9],
+            ],
+        ),
+        on_scale(
+            "t",
+            vec![
+                vec![5.0, 5.1, 4.9],
+                vec![5.0, 5.2, 4.9],
+                vec![5.0, 5.0, 5.1],
+            ],
+        ),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[intermediate("Q", "V/t", true)],
+        &[],
+        &[point_result("P", "Q*t"), point_result("W", "V")],
+        &scales,
+        &measurements,
+    );
+    let pr = |s: &str| a.point_results.iter().find(|p| p.symbol == s).unwrap();
+    for i in 0..3 {
+        assert!(
+            close(pr("P").u[i], pr("W").u[i], 1e-12),
+            "{i}: {} vs {}",
+            pr("P").u[i],
+            pr("W").u[i]
+        );
+    }
+}
