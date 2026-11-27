@@ -407,7 +407,7 @@ async fn determinations_keep_the_numbers_of_the_hand_written_practices() {
         ("gamma1", 0.019600000000000003, 0.00022632130553941764),
         ("gamma2", 0.020384000000000003, 0.00022632130550397843),
         ("gamma3", 0.019208000000000003, 0.00022632130553778247),
-        ("gamma_medio", 0.01973066666666667, 0.00013066666667650308),
+        ("gamma_medio", 0.01973066666666667, 0.0),
     ];
     for (symbol, value, u) in today {
         let (got_value, got_u) = found

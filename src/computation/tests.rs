@@ -4542,3 +4542,36 @@ fn point_uncertainties_only_look_at_what_the_point_results_use() {
         pr("scaled").u
     );
 }
+
+#[test]
+fn a_result_without_uncertainty_is_exact_for_everything_that_uses_it() {
+    let mut c = quantity("c");
+    c.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), c];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        measurement("c", &[9.9, 10.1]),
+    ];
+    let results = vec![
+        PracticeResult {
+            has_uncertainty: false,
+            ..result("m1", "slope * c")
+        },
+        result("m2", "2*m1"),
+        result("m3", "m1 + c"),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[],
+        &results,
+        &[point_result("p", "m2")],
+        &HashMap::new(),
+        &measurements,
+    );
+    let derived = |s: &str| a.derived.iter().find(|d| d.symbol == s).unwrap();
+    assert_eq!(derived("m2").u, 0.0);
+    let u_c = 0.1;
+    assert!(close(derived("m3").u, u_c, 1e-12), "{}", derived("m3").u);
+    assert!(a.point_results[0].u.iter().all(|u| *u == 0.0));
+}

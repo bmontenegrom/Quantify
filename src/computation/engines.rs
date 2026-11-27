@@ -1406,7 +1406,7 @@ fn derive_results(
                 .collect()
         })
         .collect();
-    let (_, blocked) = super::formula::chain_order(&uses);
+    let (order, blocked) = super::formula::chain_order(&uses);
     for &i in &blocked {
         if trees[i].is_some() {
             warnings.push(format!(
@@ -1416,56 +1416,69 @@ fn derive_results(
         }
     }
 
-    let formulas: HashMap<&str, &Node> = results
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !blocked.contains(i))
-        .filter_map(|(i, r)| Some((r.symbol.as_str(), trees[i].as_ref()?)))
-        .collect();
-    let leaf = |s: &str| {
-        (
-            means_by_symbol.get(s).copied().unwrap_or(0.0),
-            u_by_symbol.get(s).copied().unwrap_or(0.0),
-        )
-    };
-    let mut derived = Vec::with_capacity(results.len());
-    let mut compiled = Vec::with_capacity(results.len());
-    for (i, result) in results.iter().enumerate() {
-        if blocked.contains(&i) {
-            continue;
+    let mut computed: Vec<Option<DerivedComputation>> = (0..results.len()).map(|_| None).collect();
+    let mut notes: Vec<Vec<String>> = vec![Vec::new(); results.len()];
+    {
+        let formulas: HashMap<&str, &Node> = results
+            .iter()
+            .enumerate()
+            .filter(|(i, r)| !blocked.contains(i) && r.has_uncertainty)
+            .filter_map(|(i, r)| Some((r.symbol.as_str(), trees[i].as_ref()?)))
+            .collect();
+        let mut exact: HashMap<&str, f64> = HashMap::new();
+        for &i in &order {
+            let result = &results[i];
+            let Some(tree) = trees[i].as_ref() else {
+                continue;
+            };
+            let leaf = |s: &str| match exact.get(s) {
+                Some(&value) => (value, 0.0),
+                None => (
+                    means_by_symbol.get(s).copied().unwrap_or(0.0),
+                    u_by_symbol.get(s).copied().unwrap_or(0.0),
+                ),
+            };
+            let Propagated { value, u, kink } = propagate(tree, &formulas, &leaf, factors);
+            let note = &mut notes[i];
+            if !value.is_finite() {
+                note.push(format!(
+                    "El mensurando \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
+                    result.name, result.symbol, result.formula
+                ));
+            } else if result.has_uncertainty && !u.is_finite() {
+                note.push(format!(
+                    "La incertidumbre del mensurando \"{}\" ({} = {}) no se puede calcular con estos valores: la fórmula no es derivable ahí (p. ej. una raíz en 0).",
+                    result.name, result.symbol, result.formula
+                ));
+            } else if result.has_uncertainty && kink && u > 0.0 {
+                note.push(format!(
+                    "El mensurando \"{}\" ({} = {}) cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta.",
+                    result.name, result.symbol, result.formula
+                ));
+            }
+            if !result.has_uncertainty {
+                exact.insert(result.symbol.as_str(), value);
+            }
+            computed[i] = Some(DerivedComputation {
+                symbol: result.symbol.clone(),
+                name: result.name.clone(),
+                unit: result.unit.clone(),
+                has_uncertainty: result.has_uncertainty,
+                formula: result.formula.clone(),
+                value,
+                u,
+                u_expanded: uncertainty::expand(u, uncertainty::EXPANSION_K),
+            });
         }
-        let Some(tree) = trees[i].as_ref() else {
-            continue;
-        };
-        let Propagated { value, u, kink } = propagate(tree, &formulas, &leaf, factors);
-        if !value.is_finite() {
-            warnings.push(format!(
-                "El mensurando \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
-                result.name, result.symbol, result.formula
-            ));
-        } else if result.has_uncertainty && !u.is_finite() {
-            warnings.push(format!(
-                "La incertidumbre del mensurando \"{}\" ({} = {}) no se puede calcular con estos valores: la fórmula no es derivable ahí (p. ej. una raíz en 0).",
-                result.name, result.symbol, result.formula
-            ));
-        } else if result.has_uncertainty && kink && u > 0.0 {
-            warnings.push(format!(
-                "El mensurando \"{}\" ({} = {}) cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta.",
-                result.name, result.symbol, result.formula
-            ));
-        }
-        compiled.push((result.symbol.clone(), tree.clone()));
-        derived.push(DerivedComputation {
-            symbol: result.symbol.clone(),
-            name: result.name.clone(),
-            unit: result.unit.clone(),
-            has_uncertainty: result.has_uncertainty,
-            formula: result.formula.clone(),
-            value,
-            u,
-            u_expanded: uncertainty::expand(u, uncertainty::EXPANSION_K),
-        });
     }
+    warnings.extend(notes.into_iter().flatten());
+    let compiled: CompiledResults = trees
+        .into_iter()
+        .zip(&computed)
+        .zip(results)
+        .filter_map(|((tree, done), r)| Some((r.symbol.clone(), tree.filter(|_| done.is_some())?)))
+        .collect();
+    let derived = computed.into_iter().flatten().collect();
     Ok((derived, compiled))
 }
 
