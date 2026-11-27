@@ -4492,3 +4492,53 @@ fn a_point_result_that_is_not_derivable_in_a_run_warns() {
         a.warnings
     );
 }
+
+#[test]
+fn point_uncertainties_only_look_at_what_the_point_results_use() {
+    let mut c = quantity("c");
+    c.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), c, quantity("w")];
+    let measurements = vec![
+        MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            ..measurement("px", &[1.0, 2.0, 3.0])
+        },
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.9, 2.1], vec![3.9, 4.1], vec![5.8, 6.2]]),
+            ..measurement("py", &[])
+        },
+        measurement("c", &[9.9, 10.1]),
+    ];
+    let bad = InstrumentScale {
+        b_model: "raro".into(),
+        ..fab_scale()
+    };
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), bad)].into();
+    let exact = PracticeResult {
+        has_uncertainty: false,
+        ..result("m", "slope * c")
+    };
+    let a = regression_with(
+        &quantities,
+        &[],
+        &[exact],
+        &[point_result("twice", "2*py"), point_result("scaled", "m*1")],
+        &scales,
+        &measurements,
+    );
+    assert!(
+        a.warnings
+            .iter()
+            .all(|w| !w.contains("quedan sin incertidumbre")),
+        "{:?}",
+        a.warnings
+    );
+    let pr = |s: &str| a.point_results.iter().find(|p| p.symbol == s).unwrap();
+    assert!(pr("twice").u.iter().all(|u| u.is_finite() && *u > 0.0));
+    assert!(
+        pr("scaled").u.iter().all(|u| *u == 0.0),
+        "{:?}",
+        pr("scaled").u
+    );
+}

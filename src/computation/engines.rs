@@ -106,14 +106,14 @@ fn scale_type_b(
 }
 
 fn point_uncertainties<'a>(
-    quantities: &'a [PracticeQuantity],
+    quantities: &[&'a PracticeQuantity],
     by_quantity: &HashMap<&str, &MeasurementInput>,
     scales: &HashMap<String, InstrumentScale>,
     n_points: usize,
     warnings: &mut Vec<String>,
 ) -> HashMap<&'a str, Vec<f64>> {
     let mut out = HashMap::new();
-    for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
+    for &q in quantities {
         let Some(m) = by_quantity.get(q.id.as_str()) else {
             continue;
         };
@@ -973,50 +973,86 @@ pub fn compute_regresion(
     pr_allowed.extend(derived.iter().map(|d| d.symbol.clone()));
     pr_allowed.push("slope".into());
     pr_allowed.push("intercept".into());
-    let point_us = if point_results.is_empty() {
-        HashMap::new()
-    } else {
-        point_uncertainties(
-            quantities,
-            &by_quantity,
-            scales,
-            contexts.len(),
-            &mut warnings,
-        )
-    };
     let quantity_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
     let (compiled_intermediates, _) = compile_intermediates(quantity_symbols, intermediates)?;
+    let exact: HashMap<&str, f64> = derived
+        .iter()
+        .filter(|d| !d.has_uncertainty)
+        .map(|d| (d.symbol.as_str(), d.value))
+        .collect();
     let formulas: HashMap<&str, &Node> = compiled_intermediates
         .iter()
         .map(|(it, tree)| (it.symbol.as_str(), tree))
-        .chain(result_trees.iter().map(|(s, tree)| (s.as_str(), tree)))
+        .chain(
+            result_trees
+                .iter()
+                .filter(|(s, _)| !exact.contains_key(s.as_str()))
+                .map(|(s, tree)| (s.as_str(), tree)),
+        )
         .collect();
-    let mut point_results_out = Vec::with_capacity(point_results.len());
+    let mut compiled_points = Vec::with_capacity(point_results.len());
     for pr in point_results {
-        let tree = match compile_formula(&pr.formula, &pr_allowed) {
-            Ok(tree) => tree,
-            Err(e) => {
-                warnings.push(skipped("la derivada por punto", &pr.symbol, &e));
-                continue;
-            }
-        };
+        match compile_formula(&pr.formula, &pr_allowed) {
+            Ok(tree) => compiled_points.push((pr, tree)),
+            Err(e) => warnings.push(skipped("la derivada por punto", &pr.symbol, &e)),
+        }
+    }
+    let mut used: Vec<&str> = Vec::new();
+    let mut stack: Vec<&str> = compiled_points
+        .iter()
+        .flat_map(|(_, tree)| tree.iter_variable_identifiers())
+        .collect();
+    while let Some(symbol) = stack.pop() {
+        if used.contains(&symbol) {
+            continue;
+        }
+        used.push(symbol);
+        if let Some(tree) = formulas.get(symbol) {
+            stack.extend(tree.iter_variable_identifiers());
+        }
+    }
+    let per_point: Vec<&PracticeQuantity> = quantities
+        .iter()
+        .filter(|q| q.per_point && !q.is_given)
+        .collect();
+    let used_per_point: Vec<&PracticeQuantity> = per_point
+        .iter()
+        .copied()
+        .filter(|q| used.contains(&q.symbol.as_str()))
+        .collect();
+    let point_us = point_uncertainties(
+        &used_per_point,
+        &by_quantity,
+        scales,
+        contexts.len(),
+        &mut warnings,
+    );
+    let mut point_results_out = Vec::with_capacity(point_results.len());
+    for (pr, tree) in &compiled_points {
         let (mut values, mut u) = (Vec::new(), Vec::new());
         let (mut not_derivable, mut on_kink) = (false, false);
         for (i, ctx) in contexts.iter().enumerate() {
             let mut bound: HashMap<&str, f64> = ctx.iter().map(|(k, v)| (k.as_str(), *v)).collect();
             bound.extend(&extras);
-            let value = eval_compiled(&tree, &bound);
-            let leaf = |s: &str| match point_us.get(s) {
-                Some(per_point) => (
-                    ctx.get(s).copied().unwrap_or(f64::NAN),
-                    per_point.get(i).copied().unwrap_or(f64::NAN),
-                ),
-                None => (
-                    means.get(s).copied().unwrap_or(0.0),
-                    us.get(s).copied().unwrap_or(0.0),
-                ),
+            let value = eval_compiled(tree, &bound);
+            let leaf = |s: &str| {
+                if let Some(per_point) = point_us.get(s) {
+                    (
+                        ctx.get(s).copied().unwrap_or(f64::NAN),
+                        per_point.get(i).copied().unwrap_or(f64::NAN),
+                    )
+                } else if per_point.iter().any(|q| q.symbol == s) {
+                    (f64::NAN, f64::NAN)
+                } else if let Some(&value) = exact.get(s) {
+                    (value, 0.0)
+                } else {
+                    (
+                        means.get(s).copied().unwrap_or(0.0),
+                        us.get(s).copied().unwrap_or(0.0),
+                    )
+                }
             };
-            let propagated = propagate(&tree, &formulas, &leaf, &line);
+            let propagated = propagate(tree, &formulas, &leaf, &line);
             if value.is_finite() {
                 not_derivable |= !propagated.u.is_finite();
                 on_kink |= propagated.kink && propagated.u > 0.0;

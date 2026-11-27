@@ -1437,7 +1437,12 @@ calcula sin incertidumbre usa el mismo evaluador:
    u; `slope`/`intercept` entran con las fuentes de la recta. Las intermedias y los mensurandos
    que use se expanden por su fórmula, así una magnitud que entra por varios caminos cuenta una
    vez (`m - slope*c` con `m = slope*c` da U = 0). El valor sigue saliendo como antes: los golden
-   de Fluidos I y Viscosidad solo ganan `u`/`u_expanded`. Sigue el límite del ítem 5.
+   de Fluidos I y Viscosidad solo ganan `u`/`u_expanded`. Un mensurando marcado sin incertidumbre
+   entra con su valor y u = 0 (no se expande); solo se calcula la u de las magnitudes que usan las
+   derivadas. Sigue el límite del ítem 5. **Aproximación**: una intermedia que no es "sobre
+   promedios" muestra el promedio de `f(réplicas)`, pero su U sale de las derivadas en
+   `f(promedios)` (primer orden); la diferencia crece con la dispersión entre réplicas, y hacerlo
+   exacto pide propagar réplica por réplica.
 2. **Agregados** (hoy "Sin incertidumbre"): U con el gradiente respecto de los escalares
    compartidos, la recta, los mensurandos y los extremos de cada magnitud por punto (`x_first`,
    `x_last`, …). Ojo con la correlación: un agregado que usa un mensurando y las mismas entradas
