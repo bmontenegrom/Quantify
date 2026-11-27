@@ -1237,16 +1237,19 @@ pub fn compute_regresion(
                 )
             }
         };
-        let canonical_tree =
-            super::parse(&rename_symbols(&agg.formula, canonical)).unwrap_or_else(|_| tree.clone());
-        let propagated = if agg.has_uncertainty {
-            propagate(&canonical_tree, &deps, &leaf, &line)
-        } else {
-            Propagated {
+        let canonical_tree = super::parse(&rename_symbols(&agg.formula, canonical)).ok();
+        let propagated = match (&canonical_tree, agg.has_uncertainty) {
+            (_, false) => Propagated {
                 value,
                 u: 0.0,
                 kink: false,
-            }
+            },
+            (Some(canonical_tree), true) => propagate(canonical_tree, &deps, &leaf, &line),
+            (None, true) => Propagated {
+                value,
+                u: f64::NAN,
+                kink: false,
+            },
         };
         let u = if value.is_finite() {
             propagated.u
@@ -1271,10 +1274,14 @@ pub fn compute_regresion(
         }
         agg_values.insert(agg.symbol.clone(), value);
         agg_allowed.push(agg.symbol.clone());
-        if agg.has_uncertainty {
-            owned_trees.push((agg.symbol.clone(), canonical_tree));
-        } else {
-            exact_aggregates.insert(agg.symbol.clone());
+        match (agg.has_uncertainty, canonical_tree) {
+            (false, _) => {
+                exact_aggregates.insert(agg.symbol.clone());
+            }
+            (true, Some(canonical_tree)) => owned_trees.push((agg.symbol.clone(), canonical_tree)),
+            (true, None) => {
+                point_leaves.insert(agg.symbol.clone(), (value, f64::NAN));
+            }
         }
         aggregates_out.push(AggregateComputation {
             symbol: agg.symbol.clone(),
