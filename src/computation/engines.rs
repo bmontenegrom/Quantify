@@ -113,15 +113,23 @@ fn endpoint_of(symbol: &str) -> Option<(&str, &'static str)> {
         .find_map(|suffix| Some((symbol.strip_suffix(suffix)?, suffix)))
 }
 
-type PerPointU<'a> = HashMap<&'a str, Vec<f64>>;
+type PointUs<'a> = HashMap<&'a str, Vec<(f64, f64)>>;
+
+fn u_at(point_us: &PointUs, symbol: &str, i: usize) -> (f64, f64) {
+    point_us
+        .get(symbol)
+        .and_then(|v| v.get(i).or_else(|| v.last()))
+        .copied()
+        .unwrap_or((f64::NAN, f64::NAN))
+}
 
 fn point_uncertainties<'a>(
     quantities: &[&'a PracticeQuantity],
     by_quantity: &HashMap<&str, &MeasurementInput>,
     scales: &HashMap<String, InstrumentScale>,
     warnings: &mut Vec<String>,
-) -> (PerPointU<'a>, PerPointU<'a>) {
-    let (mut out, mut out_b) = (HashMap::new(), HashMap::new());
+) -> PointUs<'a> {
+    let mut out = HashMap::new();
     for &q in quantities {
         let Some(m) = by_quantity.get(q.id.as_str()) else {
             continue;
@@ -135,42 +143,38 @@ fn point_uncertainties<'a>(
                     "\"{}\" ({}): {e}; los resultados que la usan quedan sin incertidumbre.",
                     q.name, q.symbol
                 ));
-                out.insert(q.symbol.as_str(), vec![f64::NAN; replicas.len().max(1)]);
-                out_b.insert(q.symbol.as_str(), vec![f64::NAN; replicas.len().max(1)]);
+                out.insert(
+                    q.symbol.as_str(),
+                    vec![(f64::NAN, f64::NAN); replicas.len().max(1)],
+                );
                 continue;
             }
         };
-        let (per_point, per_point_b): (Vec<f64>, Vec<f64>) = replicas
+        let per_point = replicas
             .iter()
             .map(|values| match &type_b {
                 Some(type_b) => uncertainty::measured_with(values, type_b),
                 None => uncertainty::measured_quantity(values, None),
             })
             .map(|r| (r.u_c, r.u_b))
-            .unzip();
+            .collect();
         out.insert(q.symbol.as_str(), per_point);
-        out_b.insert(q.symbol.as_str(), per_point_b);
     }
-    (out, out_b)
+    out
 }
 
-#[allow(clippy::too_many_arguments)]
 fn intermediate_uncertainties(
     compiled: &CompiledIntermediates<'_>,
-    inputs: &PointInputs<'_>,
+    quantities: &[PracticeQuantity],
+    measurements: &[MeasurementInput],
     contexts: &[PointContext],
-    point_us: &HashMap<&str, Vec<f64>>,
-    point_us_b: &HashMap<&str, Vec<f64>>,
-    per_point: &[&PracticeQuantity],
+    point_us: &PointUs,
     us: &HashMap<String, f64>,
     warnings: &mut Vec<String>,
 ) -> Vec<PointResultComputation> {
-    let at = |map: &HashMap<&str, Vec<f64>>, s: &str, i: usize| {
-        map.get(s)
-            .and_then(|v| v.get(i).or_else(|| v.last()))
-            .copied()
-            .unwrap_or(f64::NAN)
-    };
+    let inputs = &PointInputs::new(quantities, measurements);
+    let per_point: std::collections::HashSet<&str> =
+        per_point_quantity_symbols(quantities).collect();
     let mut out: Vec<PointResultComputation> = compiled
         .iter()
         .map(|(it, _)| PointResultComputation {
@@ -190,10 +194,13 @@ fn intermediate_uncertainties(
             .iter_variable_identifiers()
             .filter_map(|v| {
                 runs.get(v).copied().or_else(|| {
-                    per_point
-                        .iter()
-                        .find(|q| q.symbol == v)
-                        .map(|q| inputs.point_values.get(q.id.as_str()).map_or(0, Vec::len))
+                    per_point.contains(v).then(|| {
+                        inputs
+                            .symbol_to_id
+                            .get(v)
+                            .and_then(|id| inputs.point_values.get(id))
+                            .map_or(0, Vec::len)
+                    })
                 })
             })
             .min()
@@ -231,9 +238,9 @@ fn intermediate_uncertainties(
                 let (v, u) = if let Some(&u) = earlier_u.get(s) {
                     (v, u)
                 } else if point_us.contains_key(s) {
-                    let map = if varies(s) { point_us_b } else { point_us };
-                    (v, at(map, s, i))
-                } else if per_point.iter().any(|q| q.symbol == s) {
+                    let (u_c, u_b) = u_at(point_us, s, i);
+                    (v, if varies(s) { u_b } else { u_c })
+                } else if per_point.contains(s) {
                     (f64::NAN, f64::NAN)
                 } else {
                     (v, us.get(s).copied().unwrap_or(0.0))
@@ -1173,16 +1180,13 @@ pub fn compute_regresion(
         .copied()
         .filter(|q| used.contains(&q.symbol.as_str()))
         .collect();
-    let (point_us, point_us_b) =
-        point_uncertainties(&used_per_point, &by_quantity, scales, &mut warnings);
-    let point_inputs = PointInputs::new(quantities, measurements);
+    let point_us = point_uncertainties(&used_per_point, &by_quantity, scales, &mut warnings);
     let intermediates_out = intermediate_uncertainties(
         &compiled_intermediates,
-        &point_inputs,
+        quantities,
+        measurements,
         &contexts,
         &point_us,
-        &point_us_b,
-        &per_point,
         &us,
         &mut warnings,
     );
@@ -1195,14 +1199,10 @@ pub fn compute_regresion(
             bound.extend(&extras);
             let value = eval_compiled(tree, &bound);
             let leaf = |s: &str| {
-                if let Some(per_point) = point_us.get(s) {
+                if point_us.contains_key(s) {
                     (
                         ctx.get(s).copied().unwrap_or(f64::NAN),
-                        per_point
-                            .get(i)
-                            .or_else(|| per_point.last())
-                            .copied()
-                            .unwrap_or(f64::NAN),
+                        u_at(&point_us, s, i).0,
                     )
                 } else if per_point.iter().any(|q| q.symbol == s) {
                     (f64::NAN, f64::NAN)
@@ -1301,12 +1301,8 @@ pub fn compute_regresion(
             .get(q.id.as_str())
             .map(|m| m.point_values())
             .unwrap_or_default();
-        let us_of = point_us.get(q.symbol.as_str());
         for (k, &value) in series.iter().enumerate() {
-            let u = us_of
-                .and_then(|us_of| us_of.get(k).or_else(|| us_of.last()))
-                .copied()
-                .unwrap_or(f64::NAN);
+            let u = u_at(&point_us, &q.symbol, k).0;
             point_leaves.insert(point_leaf(&q.symbol, k), (value, u));
         }
         if series.is_empty() {
@@ -2036,21 +2032,17 @@ fn run_kind_raw(
                 .collect(),
             &definition.intermediates,
         )?;
-        let per_point: Vec<&PracticeQuantity> = definition
+        let used_per_point: Vec<&PracticeQuantity> = definition
             .quantities
             .iter()
             .filter(|q| q.per_point && !q.is_given)
-            .collect();
-        let used_per_point: Vec<&PracticeQuantity> = per_point
-            .iter()
-            .copied()
             .filter(|q| {
                 compiled_intermediates
                     .iter()
                     .any(|(_, tree)| tree.iter_variable_identifiers().any(|v| v == q.symbol))
             })
             .collect();
-        let (point_us, point_us_b) = point_uncertainties(
+        let point_us = point_uncertainties(
             &used_per_point,
             &by_quantity,
             scales,
@@ -2058,11 +2050,10 @@ fn run_kind_raw(
         );
         analysis.intermediates = intermediate_uncertainties(
             &compiled_intermediates,
-            &PointInputs::new(&definition.quantities, measurements),
+            &definition.quantities,
+            measurements,
             &contexts,
             &point_us,
-            &point_us_b,
-            &per_point,
             &us,
             &mut analysis.warnings,
         );
