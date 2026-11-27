@@ -1,26 +1,38 @@
 {
   "aggregates": [
     {
+      "has_uncertainty": false,
       "name": "Numero de Reynolds maximo",
       "symbol": "Re_max",
+      "u": 0.0,
+      "u_expanded": 0.0,
       "unit": "",
       "value": 32967.032967032974
     },
     {
+      "has_uncertainty": false,
       "name": "Numero de Reynolds minimo",
       "symbol": "Re_min",
+      "u": 0.0,
+      "u_expanded": 0.0,
       "unit": "",
       "value": 23809.523809523824
     },
     {
+      "has_uncertainty": false,
       "name": "Numero de Reynolds medio",
       "symbol": "Re_medio",
+      "u": 0.0,
+      "u_expanded": 0.0,
       "unit": "",
       "value": 28388.2783882784
     },
     {
+      "has_uncertainty": false,
       "name": "Coeficiente de perdidas teorico",
       "symbol": "M_teorico",
+      "u": 0.0,
+      "u_expanded": 0.0,
       "unit": "",
       "value": 0.8927225806451613
     }

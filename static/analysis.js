@@ -31,7 +31,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
         for (const { title, analysis } of sections) {
           const comparableAggregates = (analysis.aggregates ?? [])
             .filter((a) => finalAggregateSymbols.has(a.symbol))
-            .map((a) => ({ ...a, u_expanded: 0, has_uncertainty: false }));
+            .map((a) => ("u_expanded" in a ? a : { ...a, has_uncertainty: false }));
           body += comparisonMarkup(
             [...(analysis.derived ?? []), ...comparableAggregates],
             studentResults,
@@ -261,11 +261,17 @@ function pointResultsMarkup(pointResults) {
 
 function aggregatesMarkup(aggregates) {
   if (!aggregates.length) return "";
+  const valueText = (a) => {
+    if (!Number.isFinite(a.value)) return '<span class="error-inline">—</span>';
+    if (!hasUncertainty(a)) return measureText(a.value, null);
+    if ("u_expanded" in a && a.u_expanded == null) return `${measureText(a.value, null)} ± ?`;
+    return measureText(a.value, a.u_expanded);
+  };
   const rows = aggregates
     .map(
       (a) =>
         `<tr><td>${symbolHtml(a.symbol)}</td><td>${inlineMathHtml(a.name)}</td>` +
-        `<td>${Number.isFinite(a.value) ? format(a.value) : '<span class="error-inline">—</span>'} <span class="submission-meta">${unitHtml(a.unit)}</span></td></tr>`,
+        `<td>${valueText(a)} <span class="submission-meta">${unitHtml(a.unit)}</span></td></tr>`,
     )
     .join("");
   return `
@@ -360,9 +366,7 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
 }
 
 function studentResultsFormMarkup(submission, definition, isTeacher = false) {
-  const finalAggregates = (definition?.aggregates ?? [])
-    .filter((a) => a.is_final)
-    .map((a) => ({ ...a, has_uncertainty: false }));
+  const finalAggregates = (definition?.aggregates ?? []).filter((a) => a.is_final);
   const measurands = [
     ...expandDeterminationResults(definition, (definition?.results ?? []).filter((r) => r.is_final)),
     ...finalAggregates,

@@ -105,11 +105,18 @@ fn scale_type_b(
     })))
 }
 
+pub(crate) const ENDPOINT_SUFFIXES: [&str; 4] = ["_first", "_first2", "_last", "_last2"];
+
+fn endpoint_of(symbol: &str) -> Option<(&str, &'static str)> {
+    ENDPOINT_SUFFIXES
+        .into_iter()
+        .find_map(|suffix| Some((symbol.strip_suffix(suffix)?, suffix)))
+}
+
 fn point_uncertainties<'a>(
     quantities: &[&'a PracticeQuantity],
     by_quantity: &HashMap<&str, &MeasurementInput>,
     scales: &HashMap<String, InstrumentScale>,
-    n_points: usize,
     warnings: &mut Vec<String>,
 ) -> HashMap<&'a str, Vec<f64>> {
     let mut out = HashMap::new();
@@ -123,22 +130,18 @@ fn point_uncertainties<'a>(
             Ok(type_b) => type_b,
             Err(e) => {
                 warnings.push(format!(
-                    "\"{}\" ({}): {e}; las derivadas por punto que la usan quedan sin incertidumbre.",
+                    "\"{}\" ({}): {e}; los resultados que la usan quedan sin incertidumbre.",
                     q.name, q.symbol
                 ));
-                out.insert(q.symbol.as_str(), vec![f64::NAN; n_points]);
+                out.insert(q.symbol.as_str(), vec![f64::NAN; replicas.len().max(1)]);
                 continue;
             }
         };
-        let per_point = (0..n_points)
-            .map(|i| {
-                replicas
-                    .get(i)
-                    .or_else(|| replicas.last())
-                    .map_or(f64::NAN, |values| match &type_b {
-                        Some(type_b) => uncertainty::measured_with(values, type_b).u_c,
-                        None => uncertainty::measured_quantity(values, None).u_c,
-                    })
+        let per_point = replicas
+            .iter()
+            .map(|values| match &type_b {
+                Some(type_b) => uncertainty::measured_with(values, type_b).u_c,
+                None => uncertainty::measured_quantity(values, None).u_c,
             })
             .collect();
         out.insert(q.symbol.as_str(), per_point);
@@ -1011,10 +1014,20 @@ pub fn compute_regresion(
         }
         seen
     };
+    let aggregate_roots: Vec<String> = aggregates
+        .iter()
+        .filter(|a| a.has_uncertainty)
+        .flat_map(|a| super::formula_symbols(&a.formula))
+        .map(|s| match endpoint_of(&s) {
+            Some((base, _)) => base.to_string(),
+            None => s,
+        })
+        .collect();
     let used = reach(
         compiled_points
             .iter()
             .flat_map(|(_, tree)| tree.iter_variable_identifiers())
+            .chain(aggregate_roots.iter().map(String::as_str))
             .collect(),
     );
     let used: Vec<&str> = used.iter().map(String::as_str).collect();
@@ -1027,13 +1040,7 @@ pub fn compute_regresion(
         .copied()
         .filter(|q| used.contains(&q.symbol.as_str()))
         .collect();
-    let point_us = point_uncertainties(
-        &used_per_point,
-        &by_quantity,
-        scales,
-        contexts.len(),
-        &mut warnings,
-    );
+    let point_us = point_uncertainties(&used_per_point, &by_quantity, scales, &mut warnings);
     let mut point_results_out = Vec::with_capacity(point_results.len());
     for (pr, tree) in &compiled_points {
         let (mut values, mut u) = (Vec::new(), Vec::new());
@@ -1046,7 +1053,11 @@ pub fn compute_regresion(
                 if let Some(per_point) = point_us.get(s) {
                     (
                         ctx.get(s).copied().unwrap_or(f64::NAN),
-                        per_point.get(i).copied().unwrap_or(f64::NAN),
+                        per_point
+                            .get(i)
+                            .or_else(|| per_point.last())
+                            .copied()
+                            .unwrap_or(f64::NAN),
                     )
                 } else if per_point.iter().any(|q| q.symbol == s) {
                     (f64::NAN, f64::NAN)
@@ -1101,7 +1112,6 @@ pub fn compute_regresion(
     }
     let n_points = contexts.len();
     let last = n_points - 1;
-    const ENDPOINT_SUFFIXES: [&str; 4] = ["_first", "_first2", "_last", "_last2"];
 
     let mut series_len: HashMap<&str, usize> = HashMap::new();
     for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
@@ -1132,10 +1142,69 @@ pub fn compute_regresion(
         agg_values.insert(format!("{sym}_last"), at(last));
         agg_values.insert(format!("{sym}_last2"), at(last - 1));
     }
+    let point_leaf = |s: &str, k: usize| format!("{s}__p{k}");
+    let run_leaf = |s: &str, i: usize| format!("{s}__c{i}");
+    let endpoint_index = |suffix: &str, n: usize| match suffix {
+        "_first" => (n > 0).then_some(0),
+        "_first2" => (n > 1).then_some(1),
+        "_last" => n.checked_sub(1),
+        _ => n.checked_sub(2),
+    };
+    let mut point_leaves: HashMap<String, (f64, f64)> = HashMap::new();
+    for q in &per_point {
+        let series = by_quantity
+            .get(q.id.as_str())
+            .map(|m| m.point_values())
+            .unwrap_or_default();
+        let us_of = point_us.get(q.symbol.as_str());
+        for (k, &value) in series.iter().enumerate() {
+            let u = us_of
+                .and_then(|us_of| us_of.get(k).or_else(|| us_of.last()))
+                .copied()
+                .unwrap_or(f64::NAN);
+            point_leaves.insert(point_leaf(&q.symbol, k), (value, u));
+        }
+        if series.is_empty() {
+            point_leaves.insert(point_leaf(&q.symbol, 0), (f64::NAN, f64::NAN));
+        }
+    }
+    let is_intermediate = |s: &str| intermediates.iter().any(|i| i.symbol == s);
+    let at_run = |s: &str, i: usize| -> Option<String> {
+        match series_len.get(s) {
+            Some(&n) => Some(point_leaf(s, i.min(n.saturating_sub(1)))),
+            None => is_intermediate(s).then(|| run_leaf(s, i)),
+        }
+    };
+    let mut owned_trees: Vec<(String, Node)> = Vec::new();
+    let mut runs: Vec<usize> = vec![0, 1, last - 1, last];
+    runs.sort_unstable();
+    runs.dedup();
+    for (it, _) in &compiled_intermediates {
+        for &i in &runs {
+            let renamed = rename_symbols(&it.formula, |s| at_run(s, i));
+            match super::parse(&renamed) {
+                Ok(tree) => owned_trees.push((run_leaf(&it.symbol, i), tree)),
+                Err(_) => {
+                    point_leaves.insert(run_leaf(&it.symbol, i), (f64::NAN, f64::NAN));
+                }
+            }
+        }
+    }
+    let canonical = |s: &str| -> Option<String> {
+        let (base, suffix) = endpoint_of(s)?;
+        match series_len.get(base) {
+            Some(&n) => endpoint_index(suffix, n).map(|k| point_leaf(base, k)),
+            None if is_intermediate(base) => {
+                endpoint_index(suffix, n_points).map(|i| run_leaf(base, i))
+            }
+            None => None,
+        }
+    };
     let mut agg_allowed: Vec<String> = agg_values.keys().cloned().collect();
     let mut aggregates_out = Vec::with_capacity(aggregates.len());
     let mut referenced_endpoints: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    let mut exact_aggregates: std::collections::HashSet<String> = std::collections::HashSet::new();
     for agg in aggregates {
         let tree = match compile_formula(&agg.formula, &agg_allowed) {
             Ok(tree) => tree,
@@ -1149,19 +1218,79 @@ pub fn compute_regresion(
         }
         let bound: HashMap<&str, f64> = agg_values.iter().map(|(k, v)| (k.as_str(), *v)).collect();
         let value = eval_compiled(&tree, &bound);
+        let deps: HashMap<&str, &Node> = formulas
+            .iter()
+            .map(|(&s, &t)| (s, t))
+            .chain(owned_trees.iter().map(|(s, t)| (s.as_str(), t)))
+            .collect();
+        let leaf = |s: &str| {
+            if let Some(&point) = point_leaves.get(s) {
+                point
+            } else if let Some(&v) = exact.get(s) {
+                (v, 0.0)
+            } else if exact_aggregates.contains(s) {
+                (agg_values.get(s).copied().unwrap_or(f64::NAN), 0.0)
+            } else {
+                (
+                    agg_values.get(s).copied().unwrap_or(0.0),
+                    us.get(s).copied().unwrap_or(0.0),
+                )
+            }
+        };
+        let canonical_tree = super::parse(&rename_symbols(&agg.formula, canonical)).ok();
+        let propagated = match (&canonical_tree, agg.has_uncertainty) {
+            (_, false) => Propagated {
+                value,
+                u: 0.0,
+                kink: false,
+            },
+            (Some(canonical_tree), true) => propagate(canonical_tree, &deps, &leaf, &line),
+            (None, true) => Propagated {
+                value,
+                u: f64::NAN,
+                kink: false,
+            },
+        };
+        let u = if value.is_finite() {
+            propagated.u
+        } else {
+            f64::NAN
+        };
         if !value.is_finite() {
             warnings.push(format!(
                 "El mensurando agregado \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
                 agg.name, agg.symbol, agg.formula
             ));
+        } else if !u.is_finite() {
+            warnings.push(format!(
+                "La incertidumbre del mensurando agregado \"{}\" ({} = {}) no se puede calcular con estos valores: la fórmula no es derivable ahí (p. ej. una raíz en 0) o falta la de una magnitud.",
+                agg.name, agg.symbol, agg.formula
+            ));
+        } else if propagated.kink && u > 0.0 {
+            warnings.push(format!(
+                "El mensurando agregado \"{}\" ({} = {}) cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta.",
+                agg.name, agg.symbol, agg.formula
+            ));
         }
         agg_values.insert(agg.symbol.clone(), value);
         agg_allowed.push(agg.symbol.clone());
+        match (agg.has_uncertainty, canonical_tree) {
+            (false, _) => {
+                exact_aggregates.insert(agg.symbol.clone());
+            }
+            (true, Some(canonical_tree)) => owned_trees.push((agg.symbol.clone(), canonical_tree)),
+            (true, None) => {
+                point_leaves.insert(agg.symbol.clone(), (value, f64::NAN));
+            }
+        }
         aggregates_out.push(AggregateComputation {
             symbol: agg.symbol.clone(),
             name: agg.name.clone(),
             unit: agg.unit.clone(),
             value,
+            u,
+            u_expanded: uncertainty::expand(u, uncertainty::EXPANSION_K),
+            has_uncertainty: agg.has_uncertainty,
         });
     }
     for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {

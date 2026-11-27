@@ -165,7 +165,10 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "(Re_max + Re_min) / 2",
     ...statusStrings("Mensurando agregado", false),
     confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
-    flags: [{ field: "is_final", column: "Final", label: "Resultado final (comparable, sin incertidumbre)" }],
+    flags: [
+      { field: "is_final", column: "Final", label: "Resultado final (comparable)" },
+      { field: "has_uncertainty", column: "Con U", label: "Lleva incertidumbre (U); desmarcalo si se entrega solo el valor", defaultOn: true },
+    ],
   },
   intermediate: {
     kind: "intermediate",
@@ -202,7 +205,7 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" />`, formulaScope(state.practiceDefinition, kind.scopeKind, { id: item?.id ?? "" }))}
       ${
         (kind.flags ?? [])
-          .map((f) => `<label class="checkbox-field"><input name="${f.field}" type="checkbox" ${item?.[f.field] ? "checked" : ""} /> ${f.label}</label>`)
+          .map((f) => `<label class="checkbox-field"><input name="${f.field}" type="checkbox" ${(item ? item[f.field] : f.defaultOn) ? "checked" : ""} /> ${f.label}</label>`)
           .join("")
       }
       <div class="detail-actions">
@@ -1257,7 +1260,7 @@ function renderPointResultsSection(practice, def) {
 function renderAggregatesSection(practice, def) {
   return symbolFormulaSection("aggregate", practice, def, {
     title: "Mensurandos agregados",
-    help: "Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Sin incertidumbre.",
+    help: "Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Llevan su U: la de los extremos (la u de ese punto), las compartidas, la recta, los mensurandos y los agregados anteriores, contando cada magnitud una sola vez, salvo la recta frente a las magnitudes de los ejes (el editor avisa de ese caso). Si se desmarca \"Lleva incertidumbre\", se entrega solo el valor y los agregados siguientes lo toman como exacto.",
     addLabel: "Nuevo agregado",
   });
 }

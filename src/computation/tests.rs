@@ -193,6 +193,7 @@ fn check_student_result_symbols_accepts_finals_and_per_run() {
         unit: "".into(),
         formula: "slope".into(),
         is_final,
+        has_uncertainty: true,
     };
     let definition = PracticeDefinition {
         description: String::new(),
@@ -2053,6 +2054,7 @@ fn compute_regresion_aggregates_use_endpoints_measurands_and_chain() {
         unit: "".into(),
         formula: formula.into(),
         is_final: false,
+        has_uncertainty: true,
     };
     let aggregates = vec![
         agg("ep", "px_first + px_last"),
@@ -2102,6 +2104,7 @@ fn compute_regresion_aggregate_non_finite_warns() {
         unit: "".into(),
         formula: "1 / (px_first - px_first)".into(),
         is_final: false,
+        has_uncertainty: true,
     }];
     let measurements = vec![
         measurement("px", &[1.0, 2.0]),
@@ -2141,6 +2144,7 @@ fn compute_regresion_aggregate_endpoints_use_own_series_not_contexts() {
         unit: "".into(),
         formula: formula.into(),
         is_final: false,
+        has_uncertainty: true,
     };
     let aggregates = vec![
         agg("z_end", "z_last"),
@@ -2203,6 +2207,7 @@ fn compute_regresion_aggregate_endpoint_misalignment_warns_only_if_referenced() 
         unit: "".into(),
         formula: "slope".into(),
         is_final: false,
+        has_uncertainty: true,
     }];
     let measurements = vec![
         measurement("px", &[1.0, 2.0, 3.0]),
@@ -4574,4 +4579,192 @@ fn a_result_without_uncertainty_is_exact_for_everything_that_uses_it() {
     let u_c = 0.1;
     assert!(close(derived("m3").u, u_c, 1e-12), "{}", derived("m3").u);
     assert!(a.point_results[0].u.iter().all(|u| *u == 0.0));
+}
+
+fn aggregate(symbol: &str, formula: &str) -> PracticeAggregate {
+    PracticeAggregate {
+        id: format!("ag-{symbol}"),
+        symbol: symbol.into(),
+        name: symbol.into(),
+        formula: formula.into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn aggregates_carry_their_uncertainty_against_the_inputs() {
+    let mut c = quantity("c");
+    c.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), c];
+    let measurements = vec![
+        MeasurementInput {
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.9, 2.1], vec![2.8, 3.2]]),
+            ..measurement("px", &[])
+        },
+        measurement("py", &[2.0, 4.1, 5.9]),
+        measurement("c", &[9.9, 10.1]),
+    ];
+    let intermediates = vec![PracticeIntermediate {
+        symbol: "q".into(),
+        formula: "2*px".into(),
+        ..Default::default()
+    }];
+    let results = vec![
+        result("m", "slope * c"),
+        PracticeResult {
+            has_uncertainty: false,
+            ..result("e", "slope * c")
+        },
+    ];
+    let aggregates = vec![
+        aggregate("span", "px_last - px_first"),
+        aggregate("same", "slope * c"),
+        aggregate("zero", "m - slope * c"),
+        aggregate("qf", "q_first"),
+        aggregate("qzero", "q_first - 2*px_first"),
+        aggregate("twice", "2 * span"),
+        aggregate("exact", "e * 1"),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &intermediates,
+        &results,
+        &[],
+        &aggregates,
+        &HashMap::new(),
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let u = |s: &str| a.aggregates.iter().find(|g| g.symbol == s).unwrap().u;
+    let (u_first, u_last) = (0.1, 0.2);
+    assert!(
+        close(u("span"), f64::hypot(u_first, u_last), 1e-12),
+        "{}",
+        u("span")
+    );
+    let m = a.derived.iter().find(|d| d.symbol == "m").unwrap().u;
+    assert!(close(u("same"), m, 1e-12), "{} vs {m}", u("same"));
+    assert_eq!(u("zero"), 0.0);
+    assert!(close(u("qf"), 2.0 * u_first, 1e-12), "{}", u("qf"));
+    assert_eq!(u("qzero"), 0.0);
+    assert!(close(u("twice"), 2.0 * u("span"), 1e-12));
+    assert_eq!(u("exact"), 0.0);
+    let span = a.aggregates.iter().find(|g| g.symbol == "span").unwrap();
+    assert!(close(span.u_expanded, 2.0 * span.u, 1e-12));
+}
+
+#[test]
+fn an_aggregate_without_uncertainty_is_exact_for_the_next_ones() {
+    let quantities = vec![quantity("px"), quantity("py")];
+    let measurements = vec![
+        MeasurementInput {
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.9, 2.1], vec![2.8, 3.2]]),
+            ..measurement("px", &[])
+        },
+        measurement("py", &[2.0, 4.1, 5.9]),
+    ];
+    let aggregates = vec![
+        PracticeAggregate {
+            has_uncertainty: false,
+            ..aggregate("span", "px_last - px_first")
+        },
+        aggregate("twice", "2 * span"),
+        aggregate("mixed", "span + px_first"),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[],
+        &aggregates,
+        &HashMap::new(),
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let by = |s: &str| a.aggregates.iter().find(|g| g.symbol == s).unwrap();
+    assert!(!by("span").has_uncertainty);
+    assert_eq!(by("span").u, 0.0);
+    assert!(close(by("span").value, 2.0, 1e-12));
+    assert_eq!(by("twice").u, 0.0);
+    assert!(close(by("mixed").u, 0.1, 1e-12), "{}", by("mixed").u);
+}
+
+#[test]
+fn endpoints_that_name_the_same_point_share_their_uncertainty() {
+    let quantities = vec![quantity("px"), quantity("py")];
+    let measurements = vec![
+        MeasurementInput {
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.8, 2.2]]),
+            ..measurement("px", &[])
+        },
+        measurement("py", &[2.0, 4.0]),
+    ];
+    let aggregates = vec![
+        aggregate("zero", "px_first - px_last2"),
+        aggregate("zero2", "px_first2 - px_last"),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[],
+        &aggregates,
+        &HashMap::new(),
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    for g in &a.aggregates {
+        assert_eq!(g.value, 0.0, "{}", g.symbol);
+        assert_eq!(g.u, 0.0, "{}", g.symbol);
+    }
+}
+
+#[test]
+fn intermediate_endpoints_propagate_from_the_point_of_their_run() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("z")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![
+                vec![9.9, 10.1],
+                vec![19.9, 20.1],
+                vec![29.9, 30.1],
+                vec![39.8, 40.2],
+            ]),
+            ..measurement("z", &[])
+        },
+    ];
+    let intermediates = vec![PracticeIntermediate {
+        symbol: "q".into(),
+        formula: "z*z".into(),
+        ..Default::default()
+    }];
+    let aggregates = vec![
+        aggregate("qe", "q_last"),
+        aggregate("zero", "q_last - z_last2*z_last2"),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &intermediates,
+        &[],
+        &[],
+        &aggregates,
+        &HashMap::new(),
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let by = |s: &str| a.aggregates.iter().find(|g| g.symbol == s).unwrap();
+    assert!(close(by("qe").value, 900.01, 1e-9), "{}", by("qe").value);
+    assert!(close(by("qe").u, 2.0 * 30.0 * 0.1, 1e-9), "{}", by("qe").u);
+    assert!(close(by("zero").value, 0.01, 1e-9));
+    assert!(close(by("zero").u, 0.0, 1e-9), "{}", by("zero").u);
 }

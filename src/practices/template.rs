@@ -274,6 +274,7 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
                 unit: a.unit.clone(),
                 formula: a.formula.clone(),
                 is_final: a.is_final,
+                has_uncertainty: a.has_uncertainty,
             })
             .collect(),
         curves: def

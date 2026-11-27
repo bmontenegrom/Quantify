@@ -1449,10 +1449,21 @@ calcula sin incertidumbre usa el mismo evaluador:
    promedios" muestra el promedio de `f(réplicas)`, pero su U sale de las derivadas en
    `f(promedios)` (primer orden); la diferencia crece con la dispersión entre réplicas, y hacerlo
    exacto pide propagar réplica por réplica.
-2. **Agregados** (hoy "Sin incertidumbre"): U con el gradiente respecto de los escalares
-   compartidos, la recta, los mensurandos y los extremos de cada magnitud por punto (`x_first`,
-   `x_last`, …). Ojo con la correlación: un agregado que usa un mensurando y las mismas entradas
-   las ve dos veces; hay que propagar contra las entradas, como ya hace la cadena de mensurandos.
+2. **Agregados** ✅: U de cada agregado (`u`/`u_expanded`, `valor ± U` en la tabla), con
+   `propagate` contra las entradas. Hojas: las compartidas, la recta (sus fuentes), los extremos de
+   las magnitudes por punto (`X_first`… con la u de ese punto de su serie) y los mensurandos
+   exactos. Se expanden los mensurandos con incertidumbre, los agregados anteriores y los
+   extremos de las intermedias, armados con `rename_symbols` (`q_first = 2*px` pasa a
+   `2*px_first`), así `q_first - 2*px_first` da U = 0. El editor también avisa cuando un
+   agregado usa la recta y magnitudes de los ejes. Si una magnitud por punto tiene otro largo que
+   el ajuste, el extremo de una intermedia se propaga desde el punto de su corrida (como su valor),
+   y dos extremos que nombran el mismo punto (`x_first` y `x_last2` con dos puntos) cuentan una vez.
+   Vale la misma **aproximación** del ítem 1: el extremo de una intermedia muestra el promedio de
+   `f(réplicas)` y su U sale de las derivadas en `f(promedios)`; en un caso extremo (una fórmula
+   que diverge justo en los promedios) el valor es finito y la U no se puede calcular, con su aviso.
+   Como los mensurandos, un agregado puede ir **sin incertidumbre** (`has_uncertainty = false`):
+   se entrega solo el valor y es exacto para los agregados siguientes. Así van los cuatro de
+   Fluidos II (`Re_max`, `Re_min`, `Re_medio`, `M_teorico`), como en la hoja de resultados.
 3. **Intermedias por punto**: U por réplica o sobre los promedios, para que lleguen a los ejes.
 4. **Ejes del ajuste**: U de x e y en cada punto (barras de error en el gráfico) a partir de las
    intermedias. Es la base de una regresión ponderada (ítem de "General").
