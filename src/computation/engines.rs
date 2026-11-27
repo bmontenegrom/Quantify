@@ -78,6 +78,45 @@ fn scale_to_quantity(scale: &InstrumentScale, unit: &str) -> Result<(f64, f64), 
     })
 }
 
+fn point_uncertainties<'a>(
+    quantities: &'a [PracticeQuantity],
+    by_quantity: &HashMap<&str, &MeasurementInput>,
+    scales: &HashMap<String, InstrumentScale>,
+    n_points: usize,
+    warnings: &mut Vec<String>,
+) -> anyhow::Result<HashMap<&'a str, Vec<f64>>> {
+    let mut out = HashMap::new();
+    for q in quantities.iter().filter(|q| q.per_point && !q.is_given) {
+        let Some(m) = by_quantity.get(q.id.as_str()) else {
+            continue;
+        };
+        let replicas = m.point_replica_matrix();
+        let type_b: Box<dyn Fn(f64) -> f64> = match m.instrument_for(None).1 {
+            Some(scale_id) => {
+                let Some(scale) = scales.get(scale_id) else {
+                    anyhow::bail!("la escala seleccionada no existe");
+                };
+                let spec = scale_spec(scale)?;
+                let (factor, offset) = scale_to_quantity(scale, &q.unit).unwrap_or_else(|w| {
+                    warnings.push(format!("\"{}\" ({}): {w}.", q.name, q.symbol));
+                    (1.0, 0.0)
+                });
+                Box::new(move |mean| uncertainty::type_b(&spec, (mean - offset) / factor) * factor)
+            }
+            None => Box::new(|_| 0.0),
+        };
+        let per_point = (0..n_points)
+            .map(|i| {
+                replicas.get(i).map_or(f64::NAN, |values| {
+                    uncertainty::measured_with(values, &type_b).u_c
+                })
+            })
+            .collect();
+        out.insert(q.symbol.as_str(), per_point);
+    }
+    Ok(out)
+}
+
 fn compute_quantities(
     quantities: &[&PracticeQuantity],
     by_quantity: &HashMap<&str, &MeasurementInput>,
@@ -901,20 +940,14 @@ pub fn compute_regresion(
     let mut allowed: Vec<String> = shared.iter().map(|q| q.symbol.clone()).collect();
     allowed.push("slope".into());
     allowed.push("intercept".into());
-    let derived = derive_results(
-        results,
-        &allowed,
-        &means,
-        &us,
-        &[
-            vec![
-                ("slope", fit.u_slope),
-                ("intercept", -fit.mean_x * fit.u_slope),
-            ],
-            vec![("intercept", fit.u_mean_y)],
+    let line = [
+        vec![
+            ("slope", fit.u_slope),
+            ("intercept", -fit.mean_x * fit.u_slope),
         ],
-        &mut warnings,
-    )?;
+        vec![("intercept", fit.u_mean_y)],
+    ];
+    let derived = derive_results(results, &allowed, &means, &us, &line, &mut warnings)?;
 
     let mut extras: HashMap<&str, f64> = HashMap::new();
     extras.insert("slope", fit.slope);
@@ -927,6 +960,32 @@ pub fn compute_regresion(
     pr_allowed.extend(derived.iter().map(|d| d.symbol.clone()));
     pr_allowed.push("slope".into());
     pr_allowed.push("intercept".into());
+    let point_us = point_uncertainties(
+        quantities,
+        &by_quantity,
+        scales,
+        contexts.len(),
+        &mut warnings,
+    )?;
+    let quantity_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
+    let (compiled_intermediates, _) = compile_intermediates(quantity_symbols, intermediates)?;
+    let mut result_scope = allowed.clone();
+    result_scope.extend(results.iter().map(|r| r.symbol.clone()));
+    let result_trees: Vec<(&str, Node)> = results
+        .iter()
+        .filter(|r| derived.iter().any(|d| d.symbol == r.symbol))
+        .filter_map(|r| {
+            Some((
+                r.symbol.as_str(),
+                compile_formula(&r.formula, &result_scope).ok()?,
+            ))
+        })
+        .collect();
+    let formulas: HashMap<&str, &Node> = compiled_intermediates
+        .iter()
+        .map(|(it, tree)| (it.symbol.as_str(), tree))
+        .chain(result_trees.iter().map(|(s, tree)| (*s, tree)))
+        .collect();
     let mut point_results_out = Vec::with_capacity(point_results.len());
     for pr in point_results {
         let tree = match compile_formula(&pr.formula, &pr_allowed) {
@@ -936,20 +995,39 @@ pub fn compute_regresion(
                 continue;
             }
         };
-        let values: Vec<f64> = contexts
-            .iter()
-            .map(|ctx| {
-                let mut bound: HashMap<&str, f64> =
-                    ctx.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-                bound.extend(&extras);
-                eval_compiled(&tree, &bound)
-            })
-            .collect();
+        let (mut values, mut u) = (Vec::new(), Vec::new());
+        for (i, ctx) in contexts.iter().enumerate() {
+            let mut bound: HashMap<&str, f64> = ctx.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+            bound.extend(&extras);
+            let value = eval_compiled(&tree, &bound);
+            let leaf = |s: &str| match point_us.get(s) {
+                Some(per_point) => (
+                    ctx.get(s).copied().unwrap_or(f64::NAN),
+                    per_point.get(i).copied().unwrap_or(f64::NAN),
+                ),
+                None => (
+                    means.get(s).copied().unwrap_or(0.0),
+                    us.get(s).copied().unwrap_or(0.0),
+                ),
+            };
+            let propagated = propagate(&tree, &formulas, &leaf, &line);
+            values.push(value);
+            u.push(if value.is_finite() {
+                propagated.u
+            } else {
+                f64::NAN
+            });
+        }
         point_results_out.push(PointResultComputation {
             symbol: pr.symbol.clone(),
             name: pr.name.clone(),
             unit: pr.unit.clone(),
+            u_expanded: u
+                .iter()
+                .map(|&u| uncertainty::expand(u, uncertainty::EXPANSION_K))
+                .collect(),
             values,
+            u,
         });
     }
 
@@ -1141,6 +1219,88 @@ fn skipped(what: &str, symbol: &str, error: &anyhow::Error) -> String {
     format!("No se calculó {what} {symbol}: {error}. Revisá su fórmula en la práctica.")
 }
 
+struct Propagated {
+    value: f64,
+    u: f64,
+    kink: bool,
+}
+
+fn propagate(
+    tree: &Node,
+    formulas: &HashMap<&str, &Node>,
+    leaf: &dyn Fn(&str) -> (f64, f64),
+    factors: &[Vec<(&str, f64)>],
+) -> Propagated {
+    fn visit<'a>(
+        name: &str,
+        formulas: &HashMap<&'a str, &'a Node>,
+        seen: &mut Vec<&'a str>,
+        order: &mut Vec<&'a str>,
+    ) {
+        let Some((&key, tree)) = formulas.get_key_value(name) else {
+            return;
+        };
+        if seen.contains(&key) {
+            return;
+        }
+        seen.push(key);
+        for v in tree.iter_variable_identifiers() {
+            visit(v, formulas, seen, order);
+        }
+        order.push(key);
+    }
+    let (mut seen, mut order) = (Vec::new(), Vec::new());
+    for v in tree.iter_variable_identifiers() {
+        visit(v, formulas, &mut seen, &mut order);
+    }
+    let vars: Vec<&str> = order
+        .iter()
+        .map(|name| formulas[name])
+        .chain(std::iter::once(tree))
+        .flat_map(|t| t.iter_variable_identifiers())
+        .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v) && !formulas.contains_key(v))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let (means, us): (Vec<f64>, Vec<f64>) = vars.iter().map(|v| leaf(v)).unzip();
+    let position = |symbol: &str| vars.iter().position(|v| *v == symbol);
+    let factor_loads: Vec<Vec<(usize, f64)>> = factors
+        .iter()
+        .map(|factor| {
+            factor
+                .iter()
+                .filter_map(|&(s, load)| Some((position(s)?, load)))
+                .collect()
+        })
+        .collect();
+    let n = vars.len();
+    let weigh = |d: &[f64]| uncertainty::propagated_u(d, &us, &factor_loads);
+    let mut plain: HashMap<&str, f64> = vars.iter().copied().zip(means.iter().copied()).collect();
+    let mut duals: HashMap<&str, Dual> = vars
+        .iter()
+        .zip(&means)
+        .enumerate()
+        .map(|(k, (&s, &v))| (s, Dual::variable(v, k, n)))
+        .collect();
+    for &name in &order {
+        let dep = formulas[name];
+        plain.insert(name, eval_compiled(dep, &plain));
+        duals.insert(name, eval_dual(dep, &duals, n, &weigh));
+    }
+    let value = eval_compiled(tree, &plain);
+    let outcome = eval_dual(tree, &duals, n, &weigh);
+    let u = if value.is_finite() {
+        uncertainty::propagated_u(&outcome.d, &us, &factor_loads)
+    } else {
+        f64::NAN
+    };
+    Propagated {
+        value,
+        u,
+        kink: outcome.kink,
+    }
+}
+
 fn derive_results(
     results: &[PracticeResult],
     allowed: &[String],
@@ -1187,7 +1347,7 @@ fn derive_results(
                 .collect()
         })
         .collect();
-    let (order, blocked) = super::formula::chain_order(&uses);
+    let (_, blocked) = super::formula::chain_order(&uses);
     for &i in &blocked {
         if trees[i].is_some() {
             warnings.push(format!(
@@ -1197,6 +1357,18 @@ fn derive_results(
         }
     }
 
+    let formulas: HashMap<&str, &Node> = results
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !blocked.contains(i))
+        .filter_map(|(i, r)| Some((r.symbol.as_str(), trees[i].as_ref()?)))
+        .collect();
+    let leaf = |s: &str| {
+        (
+            means_by_symbol.get(s).copied().unwrap_or(0.0),
+            u_by_symbol.get(s).copied().unwrap_or(0.0),
+        )
+    };
     let mut derived = Vec::with_capacity(results.len());
     for (i, result) in results.iter().enumerate() {
         if blocked.contains(&i) {
@@ -1205,68 +1377,7 @@ fn derive_results(
         let Some(tree) = trees[i].as_ref() else {
             continue;
         };
-        let mut needed = vec![false; results.len()];
-        let mut stack = uses[i].clone();
-        while let Some(d) = stack.pop() {
-            if !needed[d] {
-                needed[d] = true;
-                stack.extend(uses[d].iter().copied());
-            }
-        }
-        let chain: Vec<usize> = order.iter().copied().filter(|&d| needed[d]).collect();
-        let vars: Vec<String> = chain
-            .iter()
-            .chain(std::iter::once(&i))
-            .flat_map(|&d| vars_of(d))
-            .filter(|v| !index.contains_key(v.as_str()))
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let means: Vec<f64> = vars
-            .iter()
-            .map(|v| *means_by_symbol.get(v).unwrap_or(&0.0))
-            .collect();
-        let us: Vec<f64> = vars
-            .iter()
-            .map(|v| *u_by_symbol.get(v).unwrap_or(&0.0))
-            .collect();
-        let position = |symbol: &str| vars.iter().position(|v| v == symbol);
-        let factor_loads: Vec<Vec<(usize, f64)>> = factors
-            .iter()
-            .map(|factor| {
-                factor
-                    .iter()
-                    .filter_map(|&(s, load)| Some((position(s)?, load)))
-                    .collect()
-            })
-            .collect();
-        let n = vars.len();
-        let weigh = |d: &[f64]| uncertainty::propagated_u(d, &us, &factor_loads);
-        let mut plain: HashMap<&str, f64> = vars
-            .iter()
-            .map(|s| s.as_str())
-            .zip(means.iter().copied())
-            .collect();
-        let mut duals: HashMap<&str, Dual> = vars
-            .iter()
-            .zip(&means)
-            .enumerate()
-            .map(|(k, (s, &v))| (s.as_str(), Dual::variable(v, k, n)))
-            .collect();
-        for &d in &chain {
-            if let Some(dep) = trees[d].as_ref() {
-                let symbol = results[d].symbol.as_str();
-                plain.insert(symbol, eval_compiled(dep, &plain));
-                duals.insert(symbol, eval_dual(dep, &duals, n, &weigh));
-            }
-        }
-        let value = eval_compiled(tree, &plain);
-        let outcome = eval_dual(tree, &duals, n, &weigh);
-        let u = if value.is_finite() {
-            uncertainty::propagated_u(&outcome.d, &us, &factor_loads)
-        } else {
-            f64::NAN
-        };
+        let Propagated { value, u, kink } = propagate(tree, &formulas, &leaf, factors);
         if !value.is_finite() {
             warnings.push(format!(
                 "El mensurando \"{}\" ({} = {}) no dio un valor finito; revisa la formula y las lecturas (p. ej. division por cero).",
@@ -1277,7 +1388,7 @@ fn derive_results(
                 "La incertidumbre del mensurando \"{}\" ({} = {}) no se puede calcular con estos valores: la fórmula no es derivable ahí (p. ej. una raíz en 0).",
                 result.name, result.symbol, result.formula
             ));
-        } else if result.has_uncertainty && outcome.kink && u > 0.0 {
+        } else if result.has_uncertainty && kink && u > 0.0 {
             warnings.push(format!(
                 "El mensurando \"{}\" ({} = {}) cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta.",
                 result.name, result.symbol, result.formula

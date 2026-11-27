@@ -4295,3 +4295,122 @@ async fn a_submission_stores_and_computes_the_fixed_value_not_the_sent_one() {
     .unwrap();
     assert_eq!(stored, (1.0, Some(0.002)));
 }
+
+fn point_result(symbol: &str, formula: &str) -> PracticePointResult {
+    PracticePointResult {
+        id: format!("pr-{symbol}"),
+        practice_id: "p".into(),
+        position: 0,
+        symbol: symbol.into(),
+        name: symbol.into(),
+        unit: "".into(),
+        formula: formula.into(),
+    }
+}
+
+fn regression_with(
+    quantities: &[PracticeQuantity],
+    intermediates: &[PracticeIntermediate],
+    results: &[PracticeResult],
+    point_results: &[PracticePointResult],
+    scales: &HashMap<String, InstrumentScale>,
+    measurements: &[MeasurementInput],
+) -> FormAnalysis {
+    compute_regresion(
+        quantities,
+        intermediates,
+        results,
+        point_results,
+        &[],
+        scales,
+        "px",
+        "py",
+        measurements,
+    )
+    .unwrap()
+}
+
+#[test]
+fn point_results_carry_the_uncertainty_of_their_point() {
+    let mut c = quantity("c");
+    c.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), c];
+    let replicas = MeasurementInput {
+        point_replicas: Some(vec![vec![1.9, 2.1], vec![3.9, 4.1], vec![5.8, 6.2]]),
+        ..measurement("py", &[])
+    };
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        replicas,
+        measurement("c", &[9.9, 10.1]),
+    ];
+    let results = vec![result("m", "slope * c")];
+    let point_results = vec![
+        point_result("twice", "2*py"),
+        point_result("along", "slope*px"),
+        point_result("zero", "m - slope*c"),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[],
+        &results,
+        &point_results,
+        &HashMap::new(),
+        &measurements,
+    );
+    let u_of = |s: &str| &a.point_results.iter().find(|p| p.symbol == s).unwrap().u;
+    let u_a = [0.1, 0.1, 0.2];
+    for (i, u) in u_of("twice").iter().enumerate() {
+        assert!(close(*u, 2.0 * u_a[i], 1e-12), "{i}: {u}");
+    }
+    let u_slope = a.regression.as_ref().unwrap().u_slope;
+    for (i, u) in u_of("along").iter().enumerate() {
+        assert!(close(*u, (i as f64 + 1.0) * u_slope, 1e-12), "{i}: {u}");
+    }
+    assert!(u_of("zero").iter().all(|u| *u == 0.0), "{:?}", u_of("zero"));
+    let twice = a
+        .point_results
+        .iter()
+        .find(|p| p.symbol == "twice")
+        .unwrap();
+    assert!(close(twice.u_expanded[2], 2.0 * twice.u[2], 1e-12));
+}
+
+#[test]
+fn point_results_see_through_intermediates_and_instrument_scales() {
+    let quantities = vec![
+        PracticeQuantity {
+            unit: "A".into(),
+            ..quantity("px")
+        },
+        quantity("py"),
+    ];
+    let intermediates = vec![PracticeIntermediate {
+        symbol: "q".into(),
+        formula: "3*px".into(),
+        ..Default::default()
+    }];
+    let measurements = vec![
+        MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            ..measurement("px", &[1.0, 2.0, 3.0])
+        },
+        measurement("py", &[2.0, 4.1, 5.9]),
+    ];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let a = regression_with(
+        &quantities,
+        &intermediates,
+        &[],
+        &[point_result("triple", "q")],
+        &scales,
+        &measurements,
+    );
+    let triple = &a.point_results[0];
+    for (i, x) in [1.0, 2.0, 3.0].iter().enumerate() {
+        let (u_b, _) = type_b_in(&fab_scale(), "A", *x);
+        assert!(u_b > 0.0);
+        assert!(close(triple.u[i], 3.0 * u_b, 1e-12), "{i}: {}", triple.u[i]);
+    }
+}

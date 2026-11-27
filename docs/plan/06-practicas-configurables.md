@@ -1430,9 +1430,14 @@ combinación, y `u_slope`/`u_intercept`/`u_mean_y` de la regresión).
 Con los duales, la U de los mensurandos ya sale con derivadas exactas. Lo que todavía se
 calcula sin incertidumbre usa el mismo evaluador:
 
-1. **Derivadas por punto** (`point_results`, hoy "Sin incertidumbre"): U por corrida, con el
-   gradiente respecto de las magnitudes y las intermedias del punto, `slope`/`intercept` (con las
-   fuentes de la recta) y los mensurandos que use.
+1. **Derivadas por punto** ✅: U por corrida (`u`/`u_expanded` en `point_results`, `valor ± U` en
+   la tabla "Por corrida"). `propagate` (sacado de `derive_results`) evalúa con duales una fórmula
+   y sus dependencias. Las hojas son las magnitudes: las por punto con la u de su punto (tipo A
+   de las réplicas del punto y tipo B de su escala en la media del punto) y las compartidas con su
+   u; `slope`/`intercept` entran con las fuentes de la recta. Las intermedias y los mensurandos
+   que use se expanden por su fórmula, así una magnitud que entra por varios caminos cuenta una
+   vez (`m - slope*c` con `m = slope*c` da U = 0). El valor sigue saliendo como antes: los golden
+   de Fluidos I y Viscosidad solo ganan `u`/`u_expanded`. Sigue el límite del ítem 5.
 2. **Agregados** (hoy "Sin incertidumbre"): U con el gradiente respecto de los escalares
    compartidos, la recta, los mensurandos y los extremos de cada magnitud por punto (`x_first`,
    `x_last`, …). Ojo con la correlación: un agregado que usa un mensurando y las mismas entradas
