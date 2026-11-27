@@ -165,7 +165,7 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "(Re_max + Re_min) / 2",
     ...statusStrings("Mensurando agregado", false),
     confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
-    flags: [{ field: "is_final", column: "Final", label: "Resultado final (comparable, sin incertidumbre)" }],
+    flags: [{ field: "is_final", column: "Final", label: "Resultado final (comparable)" }],
   },
   intermediate: {
     kind: "intermediate",

@@ -360,9 +360,7 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
 }
 
 function studentResultsFormMarkup(submission, definition, isTeacher = false) {
-  const finalAggregates = (definition?.aggregates ?? [])
-    .filter((a) => a.is_final)
-    .map((a) => ({ ...a, has_uncertainty: false }));
+  const finalAggregates = (definition?.aggregates ?? []).filter((a) => a.is_final);
   const measurands = [
     ...expandDeterminationResults(definition, (definition?.results ?? []).filter((r) => r.is_final)),
     ...finalAggregates,
