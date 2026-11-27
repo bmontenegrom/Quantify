@@ -27,6 +27,7 @@ pub(crate) fn flattened(mut analysis: FormAnalysis) -> FormAnalysis {
         analysis.quantities.extend(a.quantities);
         analysis.derived.extend(a.derived);
         analysis.scatters.extend(a.scatters);
+        analysis.intermediates.extend(a.intermediates);
         analysis.point_results.extend(a.point_results);
         analysis.aggregates.extend(a.aggregates);
         analysis.warnings.extend(a.warnings);
@@ -4912,6 +4913,31 @@ fn an_intermediate_on_means_propagates_the_whole_u_of_its_point() {
         );
         assert!(close(w.u[i], 3.0 * v.u[i], 1e-12), "{i}: {}", w.u[i]);
     }
+}
+
+#[test]
+fn an_intermediate_off_the_axes_stops_at_its_own_points() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("I")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0, 4.0, 5.0]),
+        measurement("py", &[2.0, 4.1, 5.9, 8.0, 10.1]),
+        measurement("I", &[1.0, 2.0, 3.0]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("P", "I*I", false),
+            intermediate("P2", "2*P", true),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    assert_eq!(a.regression.as_ref().unwrap().points.len(), 5);
+    assert_eq!(intermediate_u(&a, "P").values, [1.0, 4.0, 9.0]);
+    assert_eq!(intermediate_u(&a, "P").u.len(), 3);
+    assert_eq!(intermediate_u(&a, "P2").values, [2.0, 8.0, 18.0]);
 }
 
 #[tokio::test]

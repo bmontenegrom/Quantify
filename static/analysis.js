@@ -246,7 +246,14 @@ function pointResultsMarkup(pointResults) {
     .map((p) => `<th>${symbolHtml(p.symbol)} <span class="submission-meta">${unitHtml(p.unit)}</span></th>`)
     .join("");
   const rows = Array.from({ length: n }, (_, i) => {
-    const cells = pointResults.map((p) => `<td>${p.values[i] != null ? measureText(p.values[i], p.u_expanded?.[i]) : ""}</td>`).join("");
+    const cell = (p) => {
+      const value = p.values[i];
+      if (value == null) return "";
+      const u = p.u_expanded?.[i];
+      if (Array.isArray(p.u_expanded) && u == null && Number.isFinite(value)) return `${measureText(value, null)} ± ?`;
+      return measureText(value, u);
+    };
+    const cells = pointResults.map((p) => `<td>${cell(p)}</td>`).join("");
     return `<tr><td>${i + 1}</td>${cells}</tr>`;
   }).join("");
   return `

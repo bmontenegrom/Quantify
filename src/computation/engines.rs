@@ -185,6 +185,22 @@ fn intermediate_uncertainties(
         .collect();
     let mut not_derivable = vec![false; compiled.len()];
     let mut on_kink = vec![false; compiled.len()];
+    let mut runs: HashMap<&str, usize> = HashMap::new();
+    for (it, tree) in compiled {
+        let own = tree
+            .iter_variable_identifiers()
+            .filter_map(|v| {
+                runs.get(v).copied().or_else(|| {
+                    per_point
+                        .iter()
+                        .find(|q| q.symbol == v)
+                        .map(|q| inputs.point_values.get(q.id.as_str()).map_or(0, Vec::len))
+                })
+            })
+            .min()
+            .unwrap_or(contexts.len());
+        runs.insert(it.symbol.as_str(), own.min(contexts.len()));
+    }
     for (i, ctx) in contexts.iter().enumerate() {
         let earlier_values: HashMap<&str, f64> = compiled
             .iter()
@@ -192,6 +208,9 @@ fn intermediate_uncertainties(
             .collect();
         let mut earlier_u: HashMap<&str, f64> = HashMap::new();
         for (k, (it, tree)) in compiled.iter().enumerate() {
+            if i >= runs[it.symbol.as_str()] {
+                continue;
+            }
             let value = ctx.get(&it.symbol).copied().unwrap_or(f64::NAN);
             let varies = |s: &str| {
                 !it.on_means

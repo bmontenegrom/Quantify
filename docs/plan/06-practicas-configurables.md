@@ -1473,7 +1473,13 @@ calcula sin incertidumbre usa el mismo evaluador:
    solo valor por punto). Una intermedia **sobre promedios** (`v = dx/t`) se propaga en los
    promedios con la u completa de cada punto. Una intermedia que usa otra anterior la toma como
    hoja con su U en ese punto (su tipo A no sale de la fórmula); se pierde la correlación entre
-   las dos por entradas compartidas, y ninguna de la biblioteca encadena intermedias. Las
+   las dos por entradas compartidas, y si las dos son por réplica y comparten una magnitud que
+   varía (`q = 2*V`, `r = q*V`), la dispersión de esa magnitud cuenta dos veces: la segunda toma
+   el promedio de la primera en cada réplica. Arreglarlo pide evaluar las intermedias anteriores
+   réplica por réplica, lo que cambia el valor; ninguna de la biblioteca encadena intermedias.
+   Cada intermedia se muestra en tantas corridas como puntos tienen sus magnitudes (la menor
+   cantidad común, como el ajuste), sin pasarse de las corridas del ajuste o de la primera curva:
+   en curva, una intermedia que solo usa otra curva con más puntos queda cortada. Las
    derivadas por punto y los agregados siguen expandiendo las intermedias en los promedios (la
    aproximación del ítem 1); pasarlos a este método va con el ítem 4, que lo necesita para los
    ejes. Golden: Fluidos I, Viscosidad, Filtros y CC ganan `intermediates`; ningún valor cambia.
