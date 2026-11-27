@@ -5053,3 +5053,28 @@ fn an_intermediate_of_an_empty_optional_quantity_is_not_shown() {
     );
     assert!(a.intermediates.is_empty(), "{:?}", a.intermediates);
 }
+
+#[test]
+fn a_chained_intermediate_with_more_replicas_takes_the_earlier_mean() {
+    let quantities = vec![quantity("h"), quantity("V"), quantity("t")];
+    let intermediates = vec![
+        PracticeIntermediate {
+            symbol: "Q".into(),
+            formula: "V/t".into(),
+            ..Default::default()
+        },
+        PracticeIntermediate {
+            symbol: "Qh".into(),
+            formula: "Q*h".into(),
+            show_live: true,
+            ..Default::default()
+        },
+    ];
+    let measurements = vec![
+        point_rep("q-h", vec![vec![1.0, 1.0, 1.0]]),
+        point_rep("q-V", vec![vec![10.0, 10.0]]),
+        point_rep("q-t", vec![vec![1.0, 2.0]]),
+    ];
+    let rows = live_values(&quantities, &intermediates, &measurements).unwrap();
+    assert_eq!(rows[0][0].replicas, vec![Some(10.0), Some(5.0), Some(7.5)]);
+}

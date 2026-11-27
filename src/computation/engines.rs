@@ -938,7 +938,7 @@ fn point_intermediate(
                         match earlier.get(v) {
                             Some(reps) if it.on_means => mean(reps),
                             Some(reps) if reps.len() == 1 => reps[0],
-                            Some(reps) => reps.get(r).copied().unwrap_or(f64::NAN),
+                            Some(reps) => reps.get(r).copied().unwrap_or_else(|| mean(reps)),
                             None => f64::NAN,
                         }
                     } else if it.on_means {
