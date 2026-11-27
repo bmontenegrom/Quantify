@@ -170,15 +170,14 @@ struct RunCtx<'a> {
     formulas: &'a HashMap<&'a str, &'a Node>,
     point_us: &'a PointUs<'a>,
     us: &'a HashMap<String, f64>,
-    means: &'a HashMap<String, f64>,
-    exact: &'a HashMap<&'a str, f64>,
+    means: Option<&'a HashMap<String, f64>>,
+    exact: Option<&'a HashMap<&'a str, f64>>,
     factors: &'a [Vec<(&'a str, f64)>],
 }
 
 #[derive(Default)]
 struct RunState<'a> {
     reps: HashMap<&'a str, Vec<f64>>,
-    u: HashMap<&'a str, f64>,
 }
 
 struct RunU {
@@ -189,6 +188,30 @@ struct RunU {
 }
 
 impl<'a> RunCtx<'a> {
+    fn new(
+        quantities: &'a [PracticeQuantity],
+        measurements: &'a [MeasurementInput],
+        compiled: &'a CompiledIntermediates<'a>,
+        formulas: &'a HashMap<&'a str, &'a Node>,
+        point_us: &'a PointUs<'a>,
+        us: &'a HashMap<String, f64>,
+    ) -> Self {
+        Self {
+            inputs: PointInputs::new(quantities, measurements),
+            per_point: per_point_quantity_symbols(quantities).collect(),
+            on_means: compiled
+                .iter()
+                .map(|(it, _)| (it.symbol.as_str(), it.on_means))
+                .collect(),
+            formulas,
+            point_us,
+            us,
+            means: None,
+            exact: None,
+            factors: &[],
+        }
+    }
+
     fn run_u(
         &self,
         tree: &Node,
@@ -205,10 +228,8 @@ impl<'a> RunCtx<'a> {
                 if !seen.insert(s) {
                     continue;
                 }
-                if let Some(&e_on_means) = self.on_means.get(s) {
-                    if state.u.contains_key(s)
-                        && (e_on_means || state.reps[s].len() != replicas.len())
-                    {
+                if let (Some(&e_on_means), Some(reps)) = (self.on_means.get(s), state.reps.get(s)) {
+                    if e_on_means || reps.len() != replicas.len() {
                         return true;
                     }
                 }
@@ -224,18 +245,6 @@ impl<'a> RunCtx<'a> {
                 ..self.run_u(tree, true, i, ctx, state)
             };
         }
-        let expanded: HashMap<&str, &Node> = self
-            .formulas
-            .iter()
-            .filter(|(s, _)| match self.on_means.get(*s) {
-                None => true,
-                Some(&e_on_means) => {
-                    state.u.contains_key(*s)
-                        && (on_means || !e_on_means && state.reps[*s].len() == replicas.len())
-                }
-            })
-            .map(|(&s, &t)| (s, t))
-            .collect();
         let missing = std::cell::Cell::new(false);
         let varies = |s: &str| {
             !on_means
@@ -248,17 +257,15 @@ impl<'a> RunCtx<'a> {
         let leaf = |s: &str| {
             let v = ctx
                 .get(s)
-                .or_else(|| self.means.get(s))
+                .or_else(|| self.means.and_then(|m| m.get(s)))
                 .copied()
                 .unwrap_or(f64::NAN);
-            let (v, u) = if let Some(&u) = state.u.get(s) {
-                (v, u)
-            } else if self.point_us.contains_key(s) {
+            let (v, u) = if self.point_us.contains_key(s) {
                 let (u_c, u_b) = u_at(self.point_us, s, i);
                 (v, if varies(s) { u_b } else { u_c })
             } else if self.per_point.contains(s) {
                 (f64::NAN, f64::NAN)
-            } else if let Some(&exact) = self.exact.get(s) {
+            } else if let Some(&exact) = self.exact.and_then(|e| e.get(s)) {
                 (exact, 0.0)
             } else {
                 (v, self.us.get(s).copied().unwrap_or(0.0))
@@ -266,7 +273,7 @@ impl<'a> RunCtx<'a> {
             missing.set(missing.get() || !v.is_finite() || !u.is_finite());
             (v, u)
         };
-        let propagated = propagate(tree, &expanded, &leaf, self.factors);
+        let propagated = propagate(tree, self.formulas, &leaf, self.factors);
         let u = if on_means {
             propagated.u
         } else {
@@ -341,7 +348,6 @@ fn intermediate_uncertainties<'a>(
             let r = run.run_u(tree, it.on_means, i, ctx, &state);
             let value = ctx.get(&it.symbol).copied().unwrap_or(f64::NAN);
             let u = if value.is_finite() { r.u } else { f64::NAN };
-            state.u.insert(symbol, u);
             state.reps.insert(symbol, r.replicas);
             if i >= runs[symbol] {
                 continue;
@@ -771,6 +777,7 @@ fn compute_determinations(
 }
 
 type PointSeries = Vec<(f64, f64)>;
+type BuiltPoints = (PointSeries, Vec<String>, Vec<PointContext>, [Node; 2]);
 
 pub type PointContext = HashMap<String, f64>;
 
@@ -869,7 +876,7 @@ pub(crate) fn build_points(
     y_formula: &str,
     measurements: &[MeasurementInput],
     too_few_msg: &str,
-) -> anyhow::Result<(PointSeries, Vec<String>, Vec<PointContext>)> {
+) -> anyhow::Result<BuiltPoints> {
     let mut warnings = Vec::new();
     let magnitude_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
 
@@ -974,7 +981,7 @@ pub(crate) fn build_points(
         points.push((x, y));
         contexts.push(context);
     }
-    Ok((points, warnings, contexts))
+    Ok((points, warnings, contexts, [x_tree, y_tree]))
 }
 
 fn mean(values: &[f64]) -> f64 {
@@ -1141,7 +1148,7 @@ pub fn compute_regresion(
     y_formula: &str,
     measurements: &[MeasurementInput],
 ) -> anyhow::Result<FormAnalysis> {
-    let (points, mut warnings, contexts) = build_points(
+    let (points, mut warnings, contexts, axis_trees) = build_points(
         quantities,
         intermediates,
         x_formula,
@@ -1199,12 +1206,7 @@ pub fn compute_regresion(
     pr_allowed.push("slope".into());
     pr_allowed.push("intercept".into());
     let quantity_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    let (compiled_intermediates, axis_symbols) =
-        compile_intermediates(quantity_symbols, intermediates)?;
-    let axis_trees = [
-        compile_formula(x_formula, &axis_symbols)?,
-        compile_formula(y_formula, &axis_symbols)?,
-    ];
+    let (compiled_intermediates, _) = compile_intermediates(quantity_symbols, intermediates)?;
     let exact: HashMap<&str, f64> = derived
         .iter()
         .filter(|d| !d.has_uncertainty)
@@ -1271,18 +1273,17 @@ pub fn compute_regresion(
         .collect();
     let point_us = point_uncertainties(&used_per_point, &by_quantity, scales, &mut warnings);
     let run = RunCtx {
-        inputs: PointInputs::new(quantities, measurements),
-        per_point: per_point_quantity_symbols(quantities).collect(),
-        on_means: compiled_intermediates
-            .iter()
-            .map(|(it, _)| (it.symbol.as_str(), it.on_means))
-            .collect(),
-        formulas: &formulas,
-        point_us: &point_us,
-        us: &us,
-        means: &means,
-        exact: &exact,
+        means: Some(&means),
+        exact: Some(&exact),
         factors: &line,
+        ..RunCtx::new(
+            quantities,
+            measurements,
+            &compiled_intermediates,
+            &formulas,
+            &point_us,
+            &us,
+        )
     };
     let (intermediates_out, mut states) =
         intermediate_uncertainties(&compiled_intermediates, &run, &contexts, &mut warnings);
@@ -1607,7 +1608,7 @@ pub fn compute_curva(
     let mut warnings = Vec::new();
     let mut contexts: Vec<PointContext> = Vec::new();
     for curve in curves {
-        let (points, mut curve_warnings, ctx) = build_points(
+        let (points, mut curve_warnings, ctx, _) = build_points(
             quantities,
             intermediates,
             curve.x_formula,
@@ -2148,24 +2149,18 @@ fn run_kind_raw(
             scales,
             &mut analysis.warnings,
         );
-        let no_means = HashMap::new();
-        let run = RunCtx {
-            inputs: PointInputs::new(&definition.quantities, measurements),
-            per_point: per_point_quantity_symbols(&definition.quantities).collect(),
-            on_means: compiled_intermediates
-                .iter()
-                .map(|(it, _)| (it.symbol.as_str(), it.on_means))
-                .collect(),
-            formulas: &compiled_intermediates
-                .iter()
-                .map(|(it, tree)| (it.symbol.as_str(), tree))
-                .collect(),
-            point_us: &point_us,
-            us: &us,
-            means: &no_means,
-            exact: &HashMap::new(),
-            factors: &[],
-        };
+        let formulas: HashMap<&str, &Node> = compiled_intermediates
+            .iter()
+            .map(|(it, tree)| (it.symbol.as_str(), tree))
+            .collect();
+        let run = RunCtx::new(
+            &definition.quantities,
+            measurements,
+            &compiled_intermediates,
+            &formulas,
+            &point_us,
+            &us,
+        );
         (analysis.intermediates, _) = intermediate_uncertainties(
             &compiled_intermediates,
             &run,
