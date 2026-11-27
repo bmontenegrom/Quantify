@@ -1249,7 +1249,7 @@ function symbolFormulaSection(kindKey, practice, def, { title, help, addLabel })
 function renderPointResultsSection(practice, def) {
   return symbolFormulaSection("pointResult", practice, def, {
     title: "Magnitudes derivadas por punto",
-    help: "Se calculan tras el ajuste, una por corrida (p. ej. Reynolds). La fórmula puede usar las magnitudes y las intermedias del punto, <code>slope</code>/<code>intercept</code> y los mensurandos. Sin incertidumbre.",
+    help: "Se calculan tras el ajuste, una por corrida (p. ej. Reynolds). La fórmula puede usar las magnitudes y las intermedias del punto, <code>slope</code>/<code>intercept</code> y los mensurandos. Cada corrida lleva su U: la de las magnitudes del punto (tipo A de sus réplicas y tipo B de su escala), las compartidas, la recta y los mensurandos.",
     addLabel: "Nueva derivada por punto",
   });
 }

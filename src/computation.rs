@@ -178,6 +178,8 @@ pub struct PointResultComputation {
     pub name: String,
     pub unit: String,
     pub values: Vec<f64>,
+    pub u: Vec<f64>,
+    pub u_expanded: Vec<f64>,
 }
 
 #[derive(Debug, Serialize)]

@@ -500,6 +500,81 @@ fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
     warnings
 }
 
+fn line_correlation_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
+    use crate::computation::formula_symbols;
+    let regression = if def.parts.is_empty() {
+        def.analysis_kind.as_deref() == Some("regresion_lineal")
+    } else {
+        def.part_kinds().iter().any(|k| k == "regresion_lineal")
+    };
+    if !regression {
+        return Vec::new();
+    }
+    let formulas: std::collections::HashMap<&str, &str> = def
+        .intermediates
+        .iter()
+        .map(|i| (i.symbol.as_str(), i.formula.as_str()))
+        .chain(
+            def.results
+                .iter()
+                .filter(|r| r.has_uncertainty)
+                .map(|r| (r.symbol.as_str(), r.formula.as_str())),
+        )
+        .collect();
+    let reach = |roots: Vec<String>| {
+        let (mut stack, mut seen) = (roots, Vec::<String>::new());
+        while let Some(symbol) = stack.pop() {
+            if seen.contains(&symbol) {
+                continue;
+            }
+            if let Some(formula) = formulas.get(symbol.as_str()) {
+                stack.extend(formula_symbols(formula));
+            }
+            seen.push(symbol);
+        }
+        seen
+    };
+    let axes = [&def.x_formula, &def.y_formula]
+        .into_iter()
+        .flatten()
+        .flat_map(|f| formula_symbols(f))
+        .collect();
+    let on_axes: Vec<String> = reach(axes)
+        .into_iter()
+        .filter(|s| def.quantities.iter().any(|q| q.symbol == *s))
+        .collect();
+    def.point_results
+        .iter()
+        .filter_map(|pr| {
+            let leaves = reach(formula_symbols(&pr.formula));
+            if !leaves.iter().any(|s| s == "slope" || s == "intercept") {
+                return None;
+            }
+            let mut shared: Vec<&str> = on_axes
+                .iter()
+                .filter(|s| leaves.contains(s))
+                .map(String::as_str)
+                .collect();
+            if shared.is_empty() {
+                return None;
+            }
+            shared.sort_unstable();
+            Some(Problem {
+                message: format!(
+                    "la derivada por punto {}: su incertidumbre toma la recta como independiente de \
+                     las magnitudes de los ejes que también usa ({}), así que puede no ser exacta \
+                     (en general la sobreestima).",
+                    pr.symbol,
+                    shared.join(", ")
+                ),
+                kind: "pointResult",
+                id: Some(pr.id.clone()),
+                warning: true,
+            })
+        })
+        .collect()
+}
+
 struct ElementProblem {
     check: &'static str,
     element: String,
@@ -545,6 +620,7 @@ pub(super) async fn practice_problems(
     let mut problems = draft_problems(&def);
     problems.extend(unit_warnings(&def));
     problems.extend(dimension_warnings(&def));
+    problems.extend(line_correlation_warnings(&def));
     Ok(Json(problems))
 }
 
@@ -3930,6 +4006,35 @@ mod tests {
             .any(|p| p.contains("la fórmula da")
                 || p.contains("suma o resta")
                 || p.contains("argumento de")));
+    }
+
+    #[tokio::test]
+    async fn a_point_result_that_mixes_the_line_and_the_axes_warns_in_the_editor() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let warned = |id: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let def = practices::definition(&pool, id).await.unwrap().unwrap();
+                line_correlation_warnings(&def)
+            }
+        };
+        let fluidos = warned("fluidos-1").await;
+        assert_eq!(fluidos.len(), 1);
+        assert!(fluidos[0].warning && fluidos[0].kind == "pointResult");
+        assert!(
+            fluidos[0].message.contains("(V, t)"),
+            "{}",
+            fluidos[0].message
+        );
+        assert!(warned("viscosidad").await[0].message.contains("(R, dx, t)"));
+        assert!(warned("p1-estadistica").await.is_empty());
+        let def = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!publish_problems(&def)
+            .iter()
+            .any(|p| p.contains("ejes que también usa")));
     }
 
     #[tokio::test]

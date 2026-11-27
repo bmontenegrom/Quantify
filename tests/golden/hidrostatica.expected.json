@@ -793,8 +793,8 @@
             "has_uncertainty": false,
             "name": "Tension superficial (promedio)",
             "symbol": "gamma_medio",
-            "u": 0.00006533333333825154,
-            "u_expanded": 0.00013066666667650308,
+            "u": 0.0,
+            "u_expanded": 0.0,
             "unit": "N/m",
             "value": 0.01973066666666667
           }
