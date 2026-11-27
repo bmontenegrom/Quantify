@@ -737,8 +737,9 @@ ejemplo la habilita; después el arranque no toca las prácticas ni sus habilita
 **Estado (2026-11-12)**: hecho en #115, #116, #119 y la PR de columnas en vivo. Cambios respecto
 de lo planeado:
 - **La columna en vivo calcula exactamente lo mismo que el ajuste**: el promedio que se ve es el
-  valor que usa el análisis. Un intermedio que usa otro anterior recibe su promedio, como en el
-  ajuste, así que muestra un solo valor.
+  valor que usa el análisis. Un intermedio que usa otro anterior toma su valor en la misma
+  réplica (desde la U de las intermedias, ítem 3 de "Pasaje a analítico del resto"; antes recibía
+  su promedio).
 - **Intermedios "sobre los promedios"** (`on_means`, estructural). Por defecto un intermedio se
   evalúa réplica por réplica y después se promedia: promedio(f(x_k)). Con `on_means` se evalúa una
   sola vez sobre las magnitudes ya promediadas del punto: f(promedio(x)). Para fórmulas no lineales
@@ -1464,7 +1465,30 @@ calcula sin incertidumbre usa el mismo evaluador:
    Como los mensurandos, un agregado puede ir **sin incertidumbre** (`has_uncertainty = false`):
    se entrega solo el valor y es exacto para los agregados siguientes. Así van los cuatro de
    Fluidos II (`Re_max`, `Re_min`, `Re_medio`, `M_teorico`), como en la hoja de resultados.
-3. **Intermedias por punto**: U por réplica o sobre los promedios, para que lleguen a los ejes.
+3. **Intermedias por punto** ✅: U por corrida (`intermediates` en el análisis, con `values`/`u`/
+   `u_expanded` como las derivadas por punto; `valor ± U` en la tabla "Por corrida", también en
+   las prácticas de curva). Una intermedia **por réplica** (`Q = V/t`) calcula y promedia: su U
+   combina el tipo A de los valores calculados `f(r₁…rₙ)` (s/√n, que respeta que las lecturas de
+   una réplica se tomaron juntas) con el tipo B propagado con duales en los promedios (solo `u_b`
+   de las magnitudes que varían réplica a réplica; la u completa de las compartidas y de las de un
+   solo valor por punto). Una intermedia **sobre promedios** (`v = dx/t`) se propaga en los
+   promedios con la u completa de cada punto. Una intermedia por réplica que usa otra anterior por
+   réplica toma su valor en la misma réplica si tiene tantas réplicas como las magnitudes que usa
+   directo (si no, entra su promedio con su U completa, sin inventar réplicas; antes tomaba siempre
+   su promedio: `Qsq = Q*Q` pasa de
+   promedio(Q)² a promedio(Q²); ninguna de la biblioteca encadena intermedias) y la expande por su
+   fórmula, así una magnitud compartida (`q = 2*V`, `r = q*V`) cuenta una vez. Una intermedia sobre
+   promedios también expande las anteriores. Una anterior sobre promedios usada por una por réplica
+   vale lo mismo en todas las réplicas y entra como hoja con su U (se pierde la correlación por
+   entradas compartidas). Si la U no sale porque falta la de una entrada, el aviso queda en esa
+   entrada y no culpa a la fórmula. Una intermedia sin corridas (una magnitud opcional vacía) no
+   se muestra.
+   Cada intermedia se muestra en tantas corridas como puntos tienen sus magnitudes (la menor
+   cantidad común, como el ajuste), sin pasarse de las corridas del ajuste o de la primera curva:
+   en curva, una intermedia que solo usa otra curva con más puntos queda cortada. Las
+   derivadas por punto y los agregados siguen expandiendo las intermedias en los promedios (la
+   aproximación del ítem 1); pasarlos a este método va con el ítem 4, que lo necesita para los
+   ejes. Golden: Fluidos I, Viscosidad, Filtros y CC ganan `intermediates`; ningún valor cambia.
 4. **Ejes del ajuste**: U de x e y en cada punto (barras de error en el gráfico) a partir de las
    intermedias. Es la base de una regresión ponderada (ítem de "General").
 5. **Magnitudes compartidas dentro y fuera del ajuste**: una magnitud compartida que entra en

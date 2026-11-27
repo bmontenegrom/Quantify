@@ -208,6 +208,8 @@ pub struct FormAnalysis {
     pub derived: Vec<DerivedComputation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub determinations: Vec<DeterminationComputation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intermediates: Vec<PointResultComputation>,
     #[serde(default)]
     pub point_results: Vec<PointResultComputation>,
     #[serde(default)]

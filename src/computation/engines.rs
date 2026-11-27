@@ -113,12 +113,22 @@ fn endpoint_of(symbol: &str) -> Option<(&str, &'static str)> {
         .find_map(|suffix| Some((symbol.strip_suffix(suffix)?, suffix)))
 }
 
+type PointUs<'a> = HashMap<&'a str, Vec<(f64, f64)>>;
+
+fn u_at(point_us: &PointUs, symbol: &str, i: usize) -> (f64, f64) {
+    point_us
+        .get(symbol)
+        .and_then(|v| v.get(i).or_else(|| v.last()))
+        .copied()
+        .unwrap_or((f64::NAN, f64::NAN))
+}
+
 fn point_uncertainties<'a>(
     quantities: &[&'a PracticeQuantity],
     by_quantity: &HashMap<&str, &MeasurementInput>,
     scales: &HashMap<String, InstrumentScale>,
     warnings: &mut Vec<String>,
-) -> HashMap<&'a str, Vec<f64>> {
+) -> PointUs<'a> {
     let mut out = HashMap::new();
     for &q in quantities {
         let Some(m) = by_quantity.get(q.id.as_str()) else {
@@ -133,19 +143,146 @@ fn point_uncertainties<'a>(
                     "\"{}\" ({}): {e}; los resultados que la usan quedan sin incertidumbre.",
                     q.name, q.symbol
                 ));
-                out.insert(q.symbol.as_str(), vec![f64::NAN; replicas.len().max(1)]);
+                out.insert(
+                    q.symbol.as_str(),
+                    vec![(f64::NAN, f64::NAN); replicas.len().max(1)],
+                );
                 continue;
             }
         };
         let per_point = replicas
             .iter()
             .map(|values| match &type_b {
-                Some(type_b) => uncertainty::measured_with(values, type_b).u_c,
-                None => uncertainty::measured_quantity(values, None).u_c,
+                Some(type_b) => uncertainty::measured_with(values, type_b),
+                None => uncertainty::measured_quantity(values, None),
             })
+            .map(|r| (r.u_c, r.u_b))
             .collect();
         out.insert(q.symbol.as_str(), per_point);
     }
+    out
+}
+
+fn intermediate_uncertainties(
+    compiled: &CompiledIntermediates<'_>,
+    quantities: &[PracticeQuantity],
+    measurements: &[MeasurementInput],
+    contexts: &[PointContext],
+    point_us: &PointUs,
+    us: &HashMap<String, f64>,
+    warnings: &mut Vec<String>,
+) -> Vec<PointResultComputation> {
+    let inputs = &PointInputs::new(quantities, measurements);
+    let per_point: std::collections::HashSet<&str> =
+        per_point_quantity_symbols(quantities).collect();
+    let mut out: Vec<PointResultComputation> = compiled
+        .iter()
+        .map(|(it, _)| PointResultComputation {
+            symbol: it.symbol.clone(),
+            name: it.name.clone(),
+            unit: it.unit.clone(),
+            values: Vec::new(),
+            u: Vec::new(),
+            u_expanded: Vec::new(),
+        })
+        .collect();
+    let mut not_derivable = vec![false; compiled.len()];
+    let mut on_kink = vec![false; compiled.len()];
+    let mut runs: HashMap<&str, usize> = HashMap::new();
+    for (it, tree) in compiled {
+        let own = tree
+            .iter_variable_identifiers()
+            .filter_map(|v| {
+                runs.get(v).copied().or_else(|| {
+                    per_point.contains(v).then(|| {
+                        inputs
+                            .symbol_to_id
+                            .get(v)
+                            .and_then(|id| inputs.point_values.get(id))
+                            .map_or(0, Vec::len)
+                    })
+                })
+            })
+            .min()
+            .unwrap_or(contexts.len());
+        runs.insert(it.symbol.as_str(), own.min(contexts.len()));
+    }
+    for (i, ctx) in contexts.iter().enumerate() {
+        let mut earlier_reps: HashMap<&str, Vec<f64>> = HashMap::new();
+        let mut earlier_u: HashMap<&str, f64> = HashMap::new();
+        for (k, (it, tree)) in compiled.iter().enumerate() {
+            let replicas = point_intermediate(it, tree, inputs, &earlier_reps, i);
+            if i >= runs[it.symbol.as_str()] {
+                earlier_reps.insert(it.symbol.as_str(), replicas);
+                continue;
+            }
+            let expanded: HashMap<&str, &Node> = compiled[..k]
+                .iter()
+                .filter(|(e, _)| {
+                    it.on_means
+                        || !e.on_means && earlier_reps[e.symbol.as_str()].len() == replicas.len()
+                })
+                .map(|(e, t)| (e.symbol.as_str(), t))
+                .collect();
+            let missing = std::cell::Cell::new(false);
+            let value = ctx.get(&it.symbol).copied().unwrap_or(f64::NAN);
+            let varies = |s: &str| {
+                !it.on_means
+                    && inputs
+                        .symbol_to_id
+                        .get(s)
+                        .is_some_and(|id| !inputs.broadcastable.contains(id))
+            };
+            let leaf = |s: &str| {
+                let v = ctx.get(s).copied().unwrap_or(f64::NAN);
+                let (v, u) = if let Some(&u) = earlier_u.get(s) {
+                    (v, u)
+                } else if point_us.contains_key(s) {
+                    let (u_c, u_b) = u_at(point_us, s, i);
+                    (v, if varies(s) { u_b } else { u_c })
+                } else if per_point.contains(s) {
+                    (f64::NAN, f64::NAN)
+                } else {
+                    (v, us.get(s).copied().unwrap_or(0.0))
+                };
+                missing.set(missing.get() || !v.is_finite() || !u.is_finite());
+                (v, u)
+            };
+            let propagated = propagate(tree, &expanded, &leaf, &[]);
+            let u = if !value.is_finite() {
+                f64::NAN
+            } else if it.on_means {
+                propagated.u
+            } else {
+                uncertainty::combine(uncertainty::type_a(&replicas).2, propagated.u)
+            };
+            if value.is_finite() && !missing.get() {
+                not_derivable[k] |= !u.is_finite();
+                on_kink[k] |= propagated.kink && u > 0.0;
+            }
+            earlier_u.insert(it.symbol.as_str(), u);
+            earlier_reps.insert(it.symbol.as_str(), replicas);
+            out[k].values.push(value);
+            out[k].u.push(u);
+            out[k]
+                .u_expanded
+                .push(uncertainty::expand(u, uncertainty::EXPANSION_K));
+        }
+    }
+    for (k, (it, _)) in compiled.iter().enumerate() {
+        if not_derivable[k] {
+            warnings.push(format!(
+                "La incertidumbre de la intermedia \"{}\" ({} = {}) no se puede calcular en alguna corrida: la fórmula no es derivable ahí (p. ej. una raíz en 0) o falta la de una magnitud.",
+                it.name, it.symbol, it.formula
+            ));
+        } else if on_kink[k] {
+            warnings.push(format!(
+                "La intermedia \"{}\" ({} = {}) cae justo en un quiebre de la fórmula en alguna corrida (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta.",
+                it.name, it.symbol, it.formula
+            ));
+        }
+    }
+    out.retain(|r| !r.values.is_empty());
     out
 }
 
@@ -290,6 +427,7 @@ pub fn compute(
         scatters: Vec::new(),
         derived,
         determinations: Vec::new(),
+        intermediates: Vec::new(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
@@ -541,6 +679,7 @@ fn compute_determinations(
                 derived,
             })
             .collect(),
+        intermediates: Vec::new(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
@@ -734,17 +873,11 @@ pub(crate) fn build_points(
             .iter()
             .map(|q| (q.symbol.clone(), magnitude_at(q.id.as_str(), i)))
             .collect();
-        let mut intermediate_values: HashMap<&str, f64> = HashMap::new();
+        let mut intermediate_values: HashMap<&str, Vec<f64>> = HashMap::new();
         for (it, tree) in &compiled_intermediates {
-            let value = mean(&point_intermediate(
-                it,
-                tree,
-                &inputs,
-                &intermediate_values,
-                i,
-            ));
-            intermediate_values.insert(it.symbol.as_str(), value);
-            context.insert(it.symbol.clone(), value);
+            let replicas = point_intermediate(it, tree, &inputs, &intermediate_values, i);
+            context.insert(it.symbol.clone(), mean(&replicas));
+            intermediate_values.insert(it.symbol.as_str(), replicas);
         }
 
         let bound: HashMap<&str, f64> = context.iter().map(|(k, v)| (k.as_str(), *v)).collect();
@@ -769,7 +902,7 @@ fn point_intermediate(
     it: &PracticeIntermediate,
     tree: &Node,
     inputs: &PointInputs,
-    earlier: &HashMap<&str, f64>,
+    earlier: &HashMap<&str, Vec<f64>>,
     i: usize,
 ) -> Vec<f64> {
     let PointInputs {
@@ -796,10 +929,12 @@ fn point_intermediate(
     let n_reps = if it.on_means {
         1
     } else {
-        tree.iter_variable_identifiers()
+        let vars = || tree.iter_variable_identifiers();
+        vars()
             .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
             .map(|v| reps_at(v).len())
             .max()
+            .or_else(|| vars().filter_map(|v| earlier.get(v).map(Vec::len)).max())
             .unwrap_or(0)
             .max(1)
     };
@@ -810,7 +945,11 @@ fn point_intermediate(
                 .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
                 .map(|v| {
                     let value = if !symbol_to_id.contains_key(v) {
-                        earlier.get(v).copied().unwrap_or(f64::NAN)
+                        match earlier.get(v) {
+                            Some(reps) if !it.on_means && reps.len() == n_reps => reps[r],
+                            Some(reps) => mean(reps),
+                            None => f64::NAN,
+                        }
                     } else if it.on_means {
                         mean_at(v)
                     } else if is_broadcastable(v) {
@@ -864,19 +1003,19 @@ pub fn live_values(
     let finite = |v: f64| v.is_finite().then_some(v);
     Ok((0..n_points)
         .map(|i| {
-            let mut earlier: HashMap<&str, f64> = HashMap::new();
+            let mut earlier: HashMap<&str, Vec<f64>> = HashMap::new();
             let mut row = Vec::new();
             for (it, tree) in &compiled {
                 let replicas = point_intermediate(it, tree, &inputs, &earlier, i);
                 let value = mean(&replicas);
-                earlier.insert(it.symbol.as_str(), value);
                 if it.show_live {
                     row.push(LiveValue {
                         symbol: it.symbol.clone(),
-                        replicas: replicas.into_iter().map(finite).collect(),
+                        replicas: replicas.iter().copied().map(finite).collect(),
                         mean: finite(value),
                     });
                 }
+                earlier.insert(it.symbol.as_str(), replicas);
             }
             row
         })
@@ -1028,6 +1167,7 @@ pub fn compute_regresion(
             .iter()
             .flat_map(|(_, tree)| tree.iter_variable_identifiers())
             .chain(aggregate_roots.iter().map(String::as_str))
+            .chain(intermediates.iter().map(|it| it.symbol.as_str()))
             .collect(),
     );
     let used: Vec<&str> = used.iter().map(String::as_str).collect();
@@ -1041,6 +1181,15 @@ pub fn compute_regresion(
         .filter(|q| used.contains(&q.symbol.as_str()))
         .collect();
     let point_us = point_uncertainties(&used_per_point, &by_quantity, scales, &mut warnings);
+    let intermediates_out = intermediate_uncertainties(
+        &compiled_intermediates,
+        quantities,
+        measurements,
+        &contexts,
+        &point_us,
+        &us,
+        &mut warnings,
+    );
     let mut point_results_out = Vec::with_capacity(point_results.len());
     for (pr, tree) in &compiled_points {
         let (mut values, mut u) = (Vec::new(), Vec::new());
@@ -1050,14 +1199,10 @@ pub fn compute_regresion(
             bound.extend(&extras);
             let value = eval_compiled(tree, &bound);
             let leaf = |s: &str| {
-                if let Some(per_point) = point_us.get(s) {
+                if point_us.contains_key(s) {
                     (
                         ctx.get(s).copied().unwrap_or(f64::NAN),
-                        per_point
-                            .get(i)
-                            .or_else(|| per_point.last())
-                            .copied()
-                            .unwrap_or(f64::NAN),
+                        u_at(&point_us, s, i).0,
                     )
                 } else if per_point.iter().any(|q| q.symbol == s) {
                     (f64::NAN, f64::NAN)
@@ -1156,12 +1301,8 @@ pub fn compute_regresion(
             .get(q.id.as_str())
             .map(|m| m.point_values())
             .unwrap_or_default();
-        let us_of = point_us.get(q.symbol.as_str());
         for (k, &value) in series.iter().enumerate() {
-            let u = us_of
-                .and_then(|us_of| us_of.get(k).or_else(|| us_of.last()))
-                .copied()
-                .unwrap_or(f64::NAN);
+            let u = u_at(&point_us, &q.symbol, k).0;
             point_leaves.insert(point_leaf(&q.symbol, k), (value, u));
         }
         if series.is_empty() {
@@ -1324,6 +1465,7 @@ pub fn compute_regresion(
         scatters: Vec::new(),
         derived,
         determinations: Vec::new(),
+        intermediates: intermediates_out,
         point_results: point_results_out,
         aggregates: aggregates_out,
         warnings,
@@ -1400,6 +1542,7 @@ pub fn compute_curva(
         scatters,
         derived: Vec::new(),
         determinations: Vec::new(),
+        intermediates: Vec::new(),
         point_results: Vec::new(),
         aggregates: Vec::new(),
         warnings,
@@ -1881,6 +2024,39 @@ fn run_kind_raw(
             &mut us,
             &mut analysis.warnings,
         )?;
+        let (compiled_intermediates, _) = compile_intermediates(
+            definition
+                .quantities
+                .iter()
+                .map(|q| q.symbol.clone())
+                .collect(),
+            &definition.intermediates,
+        )?;
+        let used_per_point: Vec<&PracticeQuantity> = definition
+            .quantities
+            .iter()
+            .filter(|q| q.per_point && !q.is_given)
+            .filter(|q| {
+                compiled_intermediates
+                    .iter()
+                    .any(|(_, tree)| tree.iter_variable_identifiers().any(|v| v == q.symbol))
+            })
+            .collect();
+        let point_us = point_uncertainties(
+            &used_per_point,
+            &by_quantity,
+            scales,
+            &mut analysis.warnings,
+        );
+        analysis.intermediates = intermediate_uncertainties(
+            &compiled_intermediates,
+            &definition.quantities,
+            measurements,
+            &contexts,
+            &point_us,
+            &us,
+            &mut analysis.warnings,
+        );
         let per_point_syms: Vec<String> = per_point_quantity_symbols(&definition.quantities)
             .map(String::from)
             .chain(definition.intermediates.iter().map(|it| it.symbol.clone()))

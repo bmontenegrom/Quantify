@@ -246,7 +246,14 @@ function pointResultsMarkup(pointResults) {
     .map((p) => `<th>${symbolHtml(p.symbol)} <span class="submission-meta">${unitHtml(p.unit)}</span></th>`)
     .join("");
   const rows = Array.from({ length: n }, (_, i) => {
-    const cells = pointResults.map((p) => `<td>${p.values[i] != null ? measureText(p.values[i], p.u_expanded?.[i]) : ""}</td>`).join("");
+    const cell = (p) => {
+      const value = p.values[i];
+      if (value == null) return "";
+      const u = p.u_expanded?.[i];
+      if (Array.isArray(p.u_expanded) && u == null && Number.isFinite(value)) return `${measureText(value, null)} ± ?`;
+      return measureText(value, u);
+    };
+    const cells = pointResults.map((p) => `<td>${cell(p)}</td>`).join("");
     return `<tr><td>${i + 1}</td>${cells}</tr>`;
   }).join("");
   return `
@@ -313,7 +320,7 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
       <h3>Ajuste lineal</h3>
       ${regressionMarkup(analysis.regression)}
       ${derivedBlock}
-      ${pointResultsMarkup(analysis.point_results ?? [])}
+      ${pointResultsMarkup([...(analysis.intermediates ?? []), ...(analysis.point_results ?? [])])}
       ${aggregatesMarkup(analysis.aggregates ?? [])}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
@@ -336,6 +343,7 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
     return `
       <h3>${title}</h3>
       ${blocks}
+      ${pointResultsMarkup(analysis.intermediates ?? [])}
       ${quantitiesSection}
       ${derivedBlock}
       ${measuredVsTheoreticalMarkup(measured, derived, pairs)}

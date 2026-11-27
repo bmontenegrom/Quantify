@@ -27,6 +27,7 @@ pub(crate) fn flattened(mut analysis: FormAnalysis) -> FormAnalysis {
         analysis.quantities.extend(a.quantities);
         analysis.derived.extend(a.derived);
         analysis.scatters.extend(a.scatters);
+        analysis.intermediates.extend(a.intermediates);
         analysis.point_results.extend(a.point_results);
         analysis.aggregates.extend(a.aggregates);
         analysis.warnings.extend(a.warnings);
@@ -3734,12 +3735,12 @@ fn live_values_match_what_the_fit_uses_from_a_single_point() {
             },
             LiveValue {
                 symbol: "Qh".into(),
-                replicas: vec![None],
+                replicas: vec![Some(10.0), None],
                 mean: None,
             },
             LiveValue {
                 symbol: "Qsq".into(),
-                replicas: vec![None],
+                replicas: vec![Some(100.0), None],
                 mean: None,
             },
         ]
@@ -3753,9 +3754,9 @@ fn live_values_match_what_the_fit_uses_from_a_single_point() {
     let rows = live_values(&quantities, &intermediates, &measurements).unwrap();
     assert_eq!(rows[0][0].replicas, vec![Some(10.0), Some(5.0)]);
     assert_eq!(rows[0][0].mean, Some(7.5));
-    assert_eq!(rows[0][1].replicas, vec![Some(7.5)]);
-    assert_eq!(rows[0][2].replicas, vec![Some(56.25)]);
-    assert_eq!(rows[0][2].mean, Some(56.25));
+    assert_eq!(rows[0][1].replicas, vec![Some(10.0), Some(5.0)]);
+    assert_eq!(rows[0][2].replicas, vec![Some(100.0), Some(25.0)]);
+    assert_eq!(rows[0][2].mean, Some(62.5));
 }
 
 #[test]
@@ -3798,7 +3799,7 @@ fn an_intermediate_on_means_applies_its_formula_to_the_point_means() {
 }
 
 #[test]
-fn chained_intermediates_use_the_mean_of_the_earlier_one_in_the_fit() {
+fn chained_intermediates_use_the_earlier_one_replica_by_replica_in_the_fit() {
     let quantities = vec![quantity("V"), quantity("t"), quantity("py")];
     let intermediate = |symbol: &str, formula: &str| PracticeIntermediate {
         symbol: symbol.into(),
@@ -3814,7 +3815,7 @@ fn chained_intermediates_use_the_mean_of_the_earlier_one_in_the_fit() {
     let a = reg(&quantities, &intermediates, &[], "Qsq", "py", &measurements).unwrap();
     assert_eq!(
         a.regression.unwrap().points,
-        vec![(56.25, 100.0), (225.0, 200.0)]
+        vec![(62.5, 100.0), (250.0, 200.0)]
     );
 }
 
@@ -4767,4 +4768,354 @@ fn intermediate_endpoints_propagate_from_the_point_of_their_run() {
     assert!(close(by("qe").u, 2.0 * 30.0 * 0.1, 1e-9), "{}", by("qe").u);
     assert!(close(by("zero").value, 0.01, 1e-9));
     assert!(close(by("zero").u, 0.0, 1e-9), "{}", by("zero").u);
+}
+
+fn amp(symbol: &str) -> PracticeQuantity {
+    PracticeQuantity {
+        unit: "A".into(),
+        ..quantity(symbol)
+    }
+}
+
+fn on_scale(symbol: &str, replicas: Vec<Vec<f64>>) -> MeasurementInput {
+    MeasurementInput {
+        instrument_id: Some("i1".into()),
+        scale_id: Some("s1".into()),
+        point_replicas: Some(replicas),
+        ..measurement(symbol, &[])
+    }
+}
+
+fn intermediate(symbol: &str, formula: &str, on_means: bool) -> PracticeIntermediate {
+    PracticeIntermediate {
+        symbol: symbol.into(),
+        formula: formula.into(),
+        on_means,
+        ..Default::default()
+    }
+}
+
+fn intermediate_u<'a>(a: &'a FormAnalysis, symbol: &str) -> &'a PointResultComputation {
+    a.intermediates
+        .iter()
+        .find(|it| it.symbol == symbol)
+        .unwrap_or_else(|| panic!("falta la intermedia {symbol}"))
+}
+
+#[test]
+fn a_per_replica_intermediate_keeps_readings_taken_together() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale("V", vec![vec![10.0, 10.2, 9.8]; 3]),
+        on_scale("t", vec![vec![5.0, 5.1, 4.9]; 3]),
+    ];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let a = regression_with(
+        &quantities,
+        &[intermediate("Q", "V/t", false)],
+        &[],
+        &[],
+        &scales,
+        &measurements,
+    );
+    let q = intermediate_u(&a, "Q");
+    let (u_v, _) = type_b_in(&fab_scale(), "A", 10.0);
+    let (u_t, _) = type_b_in(&fab_scale(), "A", 5.0);
+    let textbook = 2.0 * f64::hypot(u_v / 10.0, u_t / 5.0);
+    for i in 0..3 {
+        assert!(close(q.values[i], 2.0, 1e-12), "{}", q.values[i]);
+        assert!(
+            close(q.u[i], textbook, 1e-12),
+            "{i}: {} vs {textbook}",
+            q.u[i]
+        );
+        assert!(close(q.u_expanded[i], 2.0 * q.u[i], 1e-12));
+    }
+}
+
+#[test]
+fn a_per_replica_intermediate_adds_the_spread_of_its_values() {
+    let mut k = quantity("k");
+    k.per_point = false;
+    let quantities = vec![quantity("px"), quantity("py"), quantity("V"), k];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 2.0, 3.0]; 3]),
+            ..measurement("V", &[])
+        },
+        measurement("k", &[9.9, 10.1]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("q", "2*V", false),
+            intermediate("r", "V + k", false),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    let q = intermediate_u(&a, "q");
+    let r = intermediate_u(&a, "r");
+    for i in 0..3 {
+        assert!(close(q.u[i], 2.0 / 3f64.sqrt(), 1e-12), "{}", q.u[i]);
+        assert!(
+            close(r.u[i], (1.0 / 3.0 + 0.01f64).sqrt(), 1e-12),
+            "{}",
+            r.u[i]
+        );
+    }
+}
+
+#[test]
+fn an_intermediate_on_means_propagates_the_whole_u_of_its_point() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("dx"), amp("t")];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let with_scale = |symbol: &str, values: &[f64]| MeasurementInput {
+        instrument_id: Some("i1".into()),
+        scale_id: Some("s1".into()),
+        ..measurement(symbol, values)
+    };
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        with_scale("dx", &[10.0, 20.0, 30.0]),
+        with_scale("t", &[4.0, 5.0, 6.0]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("v", "dx/t", true),
+            intermediate("w", "3*v", true),
+        ],
+        &[],
+        &[],
+        &scales,
+        &measurements,
+    );
+    let (v, w) = (intermediate_u(&a, "v"), intermediate_u(&a, "w"));
+    for (i, (dx, t)) in [(10.0, 4.0), (20.0, 5.0), (30.0, 6.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let (u_dx, _) = type_b_in(&fab_scale(), "A", dx);
+        let (u_t, _) = type_b_in(&fab_scale(), "A", t);
+        let textbook = dx / t * f64::hypot(u_dx / dx, u_t / t);
+        assert!(
+            close(v.u[i], textbook, 1e-12),
+            "{i}: {} vs {textbook}",
+            v.u[i]
+        );
+        assert!(close(w.u[i], 3.0 * v.u[i], 1e-12), "{i}: {}", w.u[i]);
+    }
+}
+
+#[test]
+fn an_intermediate_off_the_axes_stops_at_its_own_points() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("I")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0, 4.0, 5.0]),
+        measurement("py", &[2.0, 4.1, 5.9, 8.0, 10.1]),
+        measurement("I", &[1.0, 2.0, 3.0]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("P", "I*I", false),
+            intermediate("P2", "2*P", true),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    assert_eq!(a.regression.as_ref().unwrap().points.len(), 5);
+    assert_eq!(intermediate_u(&a, "P").values, [1.0, 4.0, 9.0]);
+    assert_eq!(intermediate_u(&a, "P").u.len(), 3);
+    assert_eq!(intermediate_u(&a, "P2").values, [2.0, 8.0, 18.0]);
+}
+
+#[tokio::test]
+async fn a_curve_also_reports_its_intermediates_with_u() {
+    use crate::practices::{PracticeCurve, PracticeDefinition};
+    let (pool, _dir) = setup().await;
+    let def = PracticeDefinition {
+        analysis_kind: Some("curva".into()),
+        quantities: vec![quantity("f"), quantity("V")],
+        intermediates: vec![intermediate("q", "2*V", false)],
+        curves: vec![PracticeCurve {
+            x_formula: "f".into(),
+            y_formula: "q".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let measurements = vec![
+        measurement("f", &[1.0, 2.0, 3.0]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 2.0, 3.0]; 3]),
+            ..measurement("V", &[])
+        },
+    ];
+    let a = analyze_definition(&pool, &def, &measurements)
+        .await
+        .unwrap();
+    let q = intermediate_u(&a, "q");
+    assert_eq!(q.u.len(), 3);
+    assert!(
+        q.u.iter().all(|u| close(*u, 2.0 / 3f64.sqrt(), 1e-12)),
+        "{:?}",
+        q.u
+    );
+}
+
+#[test]
+fn a_chained_intermediate_counts_a_shared_spread_once() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("V")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 2.0, 3.0]; 3]),
+            ..measurement("V", &[])
+        },
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("q", "2*V", false),
+            intermediate("r", "q*V", false),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    let r = intermediate_u(&a, "r");
+    let textbook = crate::uncertainty::type_a(&[2.0, 8.0, 18.0]).2;
+    for i in 0..3 {
+        assert!(close(r.values[i], 28.0 / 3.0, 1e-12), "{}", r.values[i]);
+        assert!(close(r.u[i], textbook, 1e-12), "{} vs {textbook}", r.u[i]);
+    }
+}
+
+#[test]
+fn a_missing_input_u_does_not_blame_the_intermediate_formula() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale("V", vec![vec![1.0, 2.0]; 3]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("q", "2*V", false),
+            intermediate("r", "3*q", false),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    assert!(intermediate_u(&a, "r").u[0].is_nan());
+    assert!(
+        a.warnings.iter().any(|w| w.contains("\"V\"")),
+        "{:?}",
+        a.warnings
+    );
+    assert!(
+        !a.warnings.iter().any(|w| w.contains("no es derivable")),
+        "{:?}",
+        a.warnings
+    );
+}
+
+#[test]
+fn an_intermediate_of_an_empty_optional_quantity_is_not_shown() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("I")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+    ];
+    let a = regression_with(
+        &quantities,
+        &[intermediate("P", "I*I", false)],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    assert!(a.intermediates.is_empty(), "{:?}", a.intermediates);
+}
+
+#[test]
+fn a_chained_intermediate_with_other_replica_counts_takes_the_earlier_mean() {
+    let quantities = vec![quantity("h"), quantity("V"), quantity("t")];
+    let intermediates = vec![
+        PracticeIntermediate {
+            symbol: "Q".into(),
+            formula: "V/t".into(),
+            ..Default::default()
+        },
+        PracticeIntermediate {
+            symbol: "Qh".into(),
+            formula: "Q*h".into(),
+            show_live: true,
+            ..Default::default()
+        },
+    ];
+    let measurements = vec![
+        point_rep("q-h", vec![vec![1.0, 1.0, 1.0]]),
+        point_rep("q-V", vec![vec![10.0, 10.0]]),
+        point_rep("q-t", vec![vec![1.0, 2.0]]),
+    ];
+    let rows = live_values(&quantities, &intermediates, &measurements).unwrap();
+    assert_eq!(rows[0][0].replicas, vec![Some(7.5); 3]);
+
+    let measurements = vec![
+        point_rep("q-h", vec![vec![1.0, 1.0]]),
+        point_rep("q-V", vec![vec![10.0, 10.0, 10.0]]),
+        point_rep("q-t", vec![vec![1.0, 2.0, 4.0]]),
+    ];
+    let rows = live_values(&quantities, &intermediates, &measurements).unwrap();
+    assert_eq!(rows[0][0].replicas, vec![Some(17.5 / 3.0); 2]);
+}
+
+#[test]
+fn an_unpaired_earlier_intermediate_enters_with_its_whole_u() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("V"), quantity("h")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 2.0, 3.0]; 3]),
+            ..measurement("V", &[])
+        },
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 1.0]; 3]),
+            ..measurement("h", &[])
+        },
+    ];
+    let a = regression_with(
+        &quantities,
+        &[
+            intermediate("q", "2*V", false),
+            intermediate("r", "q*h", false),
+        ],
+        &[],
+        &[],
+        &HashMap::new(),
+        &measurements,
+    );
+    let (q, r) = (intermediate_u(&a, "q"), intermediate_u(&a, "r"));
+    for i in 0..3 {
+        assert!(close(r.values[i], 4.0, 1e-12), "{}", r.values[i]);
+        assert!(close(r.u[i], q.u[i], 1e-12), "{} vs {}", r.u[i], q.u[i]);
+    }
 }
