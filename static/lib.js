@@ -229,16 +229,29 @@ export function measureText(value, u) {
   return `${base} ± ${format(u)}`;
 }
 
-export function regressionPlot(points, slope, intercept, width = 320, height = 220, pad = 32) {
+export function regressionPlot(points, slope, intercept, { uPoints = [], width = 320, height = 220, pad = 32 } = {}) {
   if (!Array.isArray(points) || points.length < 2) return null;
+  const half = (i, axis) => {
+    const u = uPoints?.[i]?.[axis];
+    return Number.isFinite(u) && u > 0 ? u : 0;
+  };
   const xs = points.map((p) => p[0]);
   const ys = points.map((p) => p[1]);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const lineYmin = slope * minX + intercept;
-  const lineYmax = slope * maxX + intercept;
-  const minY = Math.min(...ys, lineYmin, lineYmax);
-  const maxY = Math.max(...ys, lineYmin, lineYmax);
+  const dataMinX = Math.min(...xs);
+  const dataMaxX = Math.max(...xs);
+  const lineYmin = slope * dataMinX + intercept;
+  const lineYmax = slope * dataMaxX + intercept;
+  const dataMinY = Math.min(...ys, lineYmin, lineYmax);
+  const dataMaxY = Math.max(...ys, lineYmin, lineYmax);
+  const widen = (lo, hi, axis) => {
+    const room = (hi - lo) / 2;
+    return [
+      Math.max(lo - room, Math.min(lo, ...points.map((p, i) => p[axis] - half(i, axis)))),
+      Math.min(hi + room, Math.max(hi, ...points.map((p, i) => p[axis] + half(i, axis)))),
+    ];
+  };
+  const [minX, maxX] = widen(dataMinX, dataMaxX, 0);
+  const [minY, maxY] = widen(dataMinY, dataMaxY, 1);
   const spanX = maxX - minX;
   const spanY = maxY - minY;
   if (spanX === 0 || spanY === 0) return null;
@@ -246,12 +259,23 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
   const innerH = height - 2 * pad;
   const sx = (x) => pad + ((x - minX) / spanX) * innerW;
   const sy = (y) => height - pad - ((y - minY) / spanY) * innerH;
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+  const bx = (px) => clamp(px, pad, width - pad);
+  const by = (py) => clamp(py, pad, height - pad);
   return {
     width,
     height,
     pad,
-    scatter: points.map((p) => ({ cx: sx(p[0]), cy: sy(p[1]) })),
-    line: { x1: sx(minX), y1: sy(lineYmin), x2: sx(maxX), y2: sy(lineYmax) },
+    scatter: points.map((p, i) => {
+      const point = { cx: sx(p[0]), cy: sy(p[1]) };
+      if (Array.isArray(uPoints?.[i]) && uPoints[i].some((u) => !Number.isFinite(u))) point.noU = true;
+      const bar = (lo, hi, fit) => ({ ends: [fit(lo), fit(hi)], clipped: [fit(lo) !== lo, fit(hi) !== hi] });
+      const [ux, uy] = [half(i, 0), half(i, 1)];
+      if (ux) point.ex = bar(sx(p[0] - ux), sx(p[0] + ux), bx);
+      if (uy) point.ey = bar(sy(p[1] - uy), sy(p[1] + uy), by);
+      return point;
+    }),
+    line: { x1: sx(dataMinX), y1: sy(lineYmin), x2: sx(dataMaxX), y2: sy(lineYmax) },
     bounds: { minX, maxX, minY, maxY },
   };
 }

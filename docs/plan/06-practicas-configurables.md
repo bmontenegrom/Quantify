@@ -1446,10 +1446,8 @@ calcula sin incertidumbre usa el mismo evaluador:
    exacto** para todo lo que lo usa (otros mensurandos y derivadas): entra con su valor y u = 0,
    sin expandirse; `derive_results` los calcula en orden de dependencias. En la biblioteca solo
    cambia `gamma_medio` de Hidrostática (promedio de γ, que no tiene U): su U oculta pasa a 0; solo se calcula la u de las magnitudes que usan las
-   derivadas. Sigue el límite del ítem 5. **Aproximación**: una intermedia que no es "sobre
-   promedios" muestra el promedio de `f(réplicas)`, pero su U sale de las derivadas en
-   `f(promedios)` (primer orden); la diferencia crece con la dispersión entre réplicas, y hacerlo
-   exacto pide propagar réplica por réplica.
+   derivadas. Sigue el límite del ítem 5. Desde el ítem 4a las derivadas por punto usan el método
+   de las intermedias por réplica (ítem 3), así una derivada `P = Q` da la U de `Q`.
 2. **Agregados** ✅: U de cada agregado (`u`/`u_expanded`, `valor ± U` en la tabla), con
    `propagate` contra las entradas. Hojas: las compartidas, la recta (sus fuentes), los extremos de
    las magnitudes por punto (`X_first`… con la u de ese punto de su serie) y los mensurandos
@@ -1479,18 +1477,31 @@ calcula sin incertidumbre usa el mismo evaluador:
    promedio(Q)² a promedio(Q²); ninguna de la biblioteca encadena intermedias) y la expande por su
    fórmula, así una magnitud compartida (`q = 2*V`, `r = q*V`) cuenta una vez. Una intermedia sobre
    promedios también expande las anteriores. Una anterior sobre promedios usada por una por réplica
-   vale lo mismo en todas las réplicas y entra como hoja con su U (se pierde la correlación por
-   entradas compartidas). Si la U no sale porque falta la de una entrada, el aviso queda en esa
+   vale lo mismo en todas las réplicas; desde el ítem 4a, en ese caso (y si alcanza una anterior
+   con otra cantidad de réplicas) la U se propaga en los promedios expandiendo todo, así una
+   magnitud compartida cuenta una vez. Si la U no sale porque falta la de una entrada, el aviso queda en esa
    entrada y no culpa a la fórmula. Una intermedia sin corridas (una magnitud opcional vacía) no
    se muestra.
    Cada intermedia se muestra en tantas corridas como puntos tienen sus magnitudes (la menor
    cantidad común, como el ajuste), sin pasarse de las corridas del ajuste o de la primera curva:
-   en curva, una intermedia que solo usa otra curva con más puntos queda cortada. Las
-   derivadas por punto y los agregados siguen expandiendo las intermedias en los promedios (la
-   aproximación del ítem 1); pasarlos a este método va con el ítem 4, que lo necesita para los
-   ejes. Golden: Fluidos I, Viscosidad, Filtros y CC ganan `intermediates`; ningún valor cambia.
-4. **Ejes del ajuste**: U de x e y en cada punto (barras de error en el gráfico) a partir de las
-   intermedias. Es la base de una regresión ponderada (ítem de "General").
+   en curva, una intermedia que solo usa otra curva con más puntos queda cortada. Golden:
+   Fluidos I, Viscosidad, Filtros y CC ganan `intermediates`; ningún valor cambia.
+4. **Ejes del ajuste**:
+   - **4a** ✅: U de x e y en cada punto (`u_points` en la regresión, expandida, k = 2; barras de
+     error en el gráfico) y derivadas por punto con el método de las intermedias. Cada eje y cada
+     derivada se calcula como una intermedia por réplica: tipo A de la fórmula evaluada réplica
+     por réplica (con las intermedias anteriores emparejadas por réplica) y tipo B propagado con
+     duales expandiendo las intermedias emparejadas y los mensurandos con U, con `u_b` para las
+     magnitudes que varían réplica a réplica; `slope`/`intercept` llevan las fuentes de la recta.
+     Así un eje `Q` da la U de `Q`, y la derivada `P = Q` coincide con la tabla. Si la fórmula
+     alcanza una intermedia sobre promedios, una con otra cantidad de réplicas o una réplica no
+     finita, su U se propaga en los promedios con la u completa expandiendo todo (como antes),
+     así `P = Q*t` con `Q = V/t` sobre promedios da la U de `V`. El valor no
+     cambia. Una magnitud que solo entra en un eje ahora tiene u por punto (y su aviso de escala,
+     si no la tiene). Las curvas no llevan barras. Golden: los de regresión ganan `u_points`;
+     Fluidos I y Viscosidad cambian levemente la U de `Re` (no el valor).
+   - **4b**: los agregados con el mismo método (combinan varias corridas: `q_first`, `px_last`).
+   Es la base de una regresión ponderada (ítem de "General").
 5. **Magnitudes compartidas dentro y fuera del ajuste**: una magnitud compartida que entra en
    una fórmula de eje y también en un mensurando se trata hoy como independiente de la recta.
    Ej.: eje y = `h*rho*g0` y `k = slope/rho`: `slope` ya lleva `rho`, pero la U de `k` cuenta

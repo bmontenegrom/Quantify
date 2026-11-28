@@ -362,7 +362,7 @@ test("measureText formatea 'valor ± U' y omite U inválida", () => {
 });
 
 test("regressionPlot escala puntos y recta al lienzo (recta conocida)", () => {
-  const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1, 320, 220, 32);
+  const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1);
   assert.deepEqual(plot.bounds, { minX: 0, maxX: 2, minY: 1, maxY: 5 });
   assert.deepEqual(plot.scatter, [
     { cx: 32, cy: 188 },
@@ -373,10 +373,25 @@ test("regressionPlot escala puntos y recta al lienzo (recta conocida)", () => {
 });
 
 test("regressionPlot extiende el rango Y para incluir la recta", () => {
-  const plot = regressionPlot([[0, 0], [1, 0]], 5, 0, 320, 220, 32);
+  const plot = regressionPlot([[0, 0], [1, 0]], 5, 0);
   assert.equal(plot.bounds.minY, 0);
   assert.equal(plot.bounds.maxY, 5);
   assert.deepEqual(plot.line, { x1: 32, y1: 188, x2: 288, y2: 32 });
+});
+
+test("regressionPlot amplía el rango para las barras, hasta la mitad del rango de los datos", () => {
+  const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1, { uPoints: [[0.5, 0], [0, 1], [null, 100]] });
+  assert.deepEqual(plot.bounds, { minX: -0.5, maxX: 2, minY: -1, maxY: 7 });
+  const [first, mid, last] = plot.scatter;
+  assert.deepEqual(first.ex, { ends: [32, first.cx + (first.cx - 32)], clipped: [false, false] });
+  assert.equal(first.ey, undefined);
+  assert.equal(mid.ex, undefined);
+  assert.ok(mid.ey.ends[0] > mid.cy && mid.ey.ends[1] < mid.cy);
+  assert.deepEqual(mid.ey.clipped, [false, false]);
+  assert.deepEqual(last.ey, { ends: [188, 32], clipped: [true, true] });
+  assert.equal(last.noU, true);
+  assert.equal(first.noU, undefined);
+  assert.equal(plot.line.x1, first.cx);
 });
 
 test("regressionPlot devuelve null con <2 puntos o rango nulo", () => {
