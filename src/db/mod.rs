@@ -244,7 +244,7 @@ pub async fn next_position(
 ) -> anyhow::Result<i64> {
     let query =
         format!("SELECT COALESCE(MAX(position), 0) + 1 FROM {table} WHERE {scope_col} = ?1");
-    let position: (i64,) = sqlx::query_as(&query)
+    let position: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(query))
         .bind(scope_val)
         .fetch_one(&mut *conn)
         .await?;
@@ -609,9 +609,9 @@ async fn insert_test_submissions(conn: &mut sqlx::SqliteConnection) -> anyhow::R
 }
 
 pub async fn practices(pool: &SqlitePool) -> anyhow::Result<Vec<Practice>> {
-    let rows = sqlx::query_as::<_, Practice>(&format!(
+    let rows = sqlx::query_as::<_, Practice>(sqlx::AssertSqlSafe(format!(
         "SELECT {PRACTICE_COLS} FROM practices ORDER BY name"
-    ))
+    )))
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -791,7 +791,10 @@ mod tests {
     }
 
     async fn count(pool: &SqlitePool, sql: &str) -> i64 {
-        let (n,): (i64,) = sqlx::query_as(sql).fetch_one(pool).await.unwrap();
+        let (n,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+            .fetch_one(pool)
+            .await
+            .unwrap();
         n
     }
 

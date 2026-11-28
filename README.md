@@ -62,7 +62,7 @@ las del curso de Física 103, y sirven como referencia para armar las propias.
 
 ## Stack
 
-- **Backend**: Rust + Axum 0.8, SQLite vía `sqlx` 0.8, Tokio.
+- **Backend**: Rust + Axum 0.8, SQLite vía `sqlx` 0.9, Tokio.
 - **Frontend**: HTML/CSS/JS estático (`static/`) servido por el backend con `ServeDir`. La lógica
   pura y los selectores se extraen a `static/lib.js` (ES module) para poder testearlos.
 - **Auth**: sesiones por cookie `quantify_session` (12 h); hash de contraseña Argon2id (re-hash

@@ -770,12 +770,16 @@ async fn add_column_if_missing(
 ) -> anyhow::Result<()> {
     let pragma = format!("PRAGMA table_info({table})");
     let rows: Vec<(i64, String, String, i64, Option<String>, i64)> =
-        sqlx::query_as(&pragma).fetch_all(pool).await?;
+        sqlx::query_as(sqlx::AssertSqlSafe(pragma))
+            .fetch_all(pool)
+            .await?;
     if rows.iter().any(|(_, name, _, _, _, _)| name == column) {
         return Ok(());
     }
 
     let alter = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
-    sqlx::query(&alter).execute(pool).await?;
+    sqlx::query(sqlx::AssertSqlSafe(alter))
+        .execute(pool)
+        .await?;
     Ok(())
 }

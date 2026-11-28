@@ -160,7 +160,7 @@ tests de siempre. Las funciones de complejidad son las 69 de
 
 | # | PR | Alcance | Hecho cuando |
 |---|---|---|---|
-| M1 | `fix(deps): actualizar dependencias con avisos de RustSec` | `cargo update` y revisión de `sqlx` (`libsqlite3-sys`, `url`, `webpki-roots`). `rsa` solo está en el lockfile, por `sqlx-mysql`, y no se compila: se declara. | `cargo audit` sin vulnerabilidades salvo `rsa`, justificada. |
+| M1 | `fix(deps): actualizar dependencias con avisos de RustSec` | `cargo update` y sqlx 0.8 → 0.9, que permite `libsqlite3-sys` ≥ 0.39 (cierra `libsqlite3-sys`, `url`, `webpki-roots` y saca `rsa` del lockfile). Las consultas con SQL armado en el código pasan por `AssertSqlSafe`. | `cargo audit` sin vulnerabilidades. |
 | M2 | `chore: política de comentarios y doctest faltante` | `comments.py --fix` en `src/practices/mod.rs`, `src/practices/parts.rs` y `src/routes/practice_admin.rs`; doctest para `validate_student_results`. | `comments.py --check` sin hallazgos y ninguna `pub fn` del motor sin doctest. |
 | M3 | `fix(frontend): manejar promesas sin capturar y etiquetas de index.html` | Las 26 promesas sin manejar (S9383) de `navigation.js`, `forms.js`, `practices-admin.js` y otros, con un `.catch` que avisa con `toast.js`; las 2 etiquetas de `index.html` (`:90` y `:291`). | Sonar con 0 bugs y fiabilidad A. |
 | M4 | `test(rutas): tests de integración de auth, entregas, cursos e instrumentos` | Router en memoria con `tower::ServiceExt::oneshot`, el mismo patrón que los tests de `src/routes/practice_admin.rs`. | Cobertura de líneas ≥ 70 % en `routes/auth.rs`, `routes/submissions.rs`, `routes/courses.rs` y `routes/instruments.rs`. |
@@ -171,10 +171,24 @@ tests de siempre. Las funciones de complejidad son las 69 de
 | M9 | `refactor(frontend): romper ciclos de navigation.js y borrar exports sin uso` | Las vistas se registran en `navigation.js` en vez de que él las importe; la clausura de las pestañas (`navigation.js:95`) y las 6 funciones de `practices-admin.js`; los 35 *exports* sin uso que marca knip. | `madge` sin ciclos, knip sin *exports* sin uso y esos archivos sin funciones sobre los umbrales. |
 | M10 | `refactor(practicas): complejidad de src/practices/` | `template.rs` (3), `versions.rs` (2), `changes.rs` (2), `lifecycle.rs` y `crud.rs`. | Esos archivos sin funciones sobre los umbrales. |
 | M11 | `refactor: complejidad restante de Rust` | `dimensions.rs` (3), `units.rs` (2), `db/mod.rs` (2), `routes/submissions.rs` (2), `instruments/seed.rs`, `routes/auth.rs`, `submissions/mod.rs`, `main.rs` y `db/schema.rs` (`migrate`, con un paso por versión). | Ninguna función de Rust sobre los umbrales. |
+| M12 | `refactor(deps): reemplazar chrono por jiff` | `chrono` no tiene mantenimiento ([RUSTSEC-2026-0543](https://rustsec.org/advisories/RUSTSEC-2026-0543), [chrono#1768](https://github.com/chronotope/chrono/issues/1768)); su mantenedor y RustSec recomiendan `jiff`. Se usa `jiff` con serde y `jiff-sqlx` 1.0 (SQLite, sqlx 0.9) para `Utc::now()`, las sumas de duraciones y los 21 campos `DateTime<Utc>`. Hay que probar: que lea las fechas que guardó chrono en una copia de una base vieja, que el JSON siga en RFC 3339 y cómo se integran los tipos de `jiff-sqlx` con `FromRow`. | `chrono` fuera de `Cargo.lock` y `cargo audit` sin avisos; la app arranca sobre una base vieja y los E2E pasan sin cambios en el frontend. |
+
+**Limpiezas de SQL** (del review de #180, se hacen en el ítem que ya toca cada archivo):
+
+- **M10:** armar una sola vez, fuera del bucle, el `UPDATE` que hoy se arma en cada vuelta en
+  `move_item_in` (`src/practices/crud.rs`) y en `write_template` (`src/practices/template.rs`).
+- **M11:**
+  - Las consultas que solo usan constantes (`INSTRUMENT_COLS`, `SCALE_COLS`, `PRACTICE_COLS` en
+    `src/instruments/mod.rs`, `src/db/mod.rs`, `src/practices/lifecycle.rs` y
+    `src/courses/subgroup.rs`) pasan a ser `&'static str` (columnas como macro y `concat!`), sin
+    `format!` ni `AssertSqlSafe`.
+  - `subgroups_for_course` (`src/courses/subgroup.rs`) deja de hacer una consulta por subgrupo
+    (N+1).
+  - `submission_list_for_user` (`src/submissions/mod.rs`) unifica sus dos consultas casi iguales.
 
 **Orden.** Primero lo barato y lo que corrige riesgos (M1–M3). Después M4, porque los tests de rutas
-cubren los refactors de M7 y M11. Los refactors del motor (M5 y M6) agregan sus tests de mutantes
-antes de tocar el código.
+cubren los refactors de M7, M11 y M12. Los refactors del motor (M5 y M6) agregan sus tests de
+mutantes antes de tocar el código.
 
 **Reglas de los refactors:**
 

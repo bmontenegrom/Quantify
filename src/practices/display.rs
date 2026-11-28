@@ -20,10 +20,11 @@ pub(super) async fn display_symbols_for(
             )
         })
         .collect();
-    let rows: Vec<(String, String)> = sqlx::query_as(&selects.join(" UNION ALL "))
-        .bind(practice_id)
-        .fetch_all(conn)
-        .await?;
+    let rows: Vec<(String, String)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(selects.join(" UNION ALL ")))
+            .bind(practice_id)
+            .fetch_all(conn)
+            .await?;
     Ok(rows.into_iter().collect())
 }
 

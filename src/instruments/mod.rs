@@ -77,9 +77,9 @@ pub async fn list_instruments(
     pool: &SqlitePool,
     course_id: &str,
 ) -> anyhow::Result<Vec<InstrumentWithScales>> {
-    let instruments = sqlx::query_as::<_, Instrument>(&format!(
+    let instruments = sqlx::query_as::<_, Instrument>(sqlx::AssertSqlSafe(format!(
         "SELECT {INSTRUMENT_COLS} FROM instruments WHERE course_id = ?1 ORDER BY name COLLATE NOCASE"
-    ))
+    )))
     .bind(course_id)
     .fetch_all(pool)
     .await?;
@@ -96,18 +96,18 @@ async fn scales_for_instrument(
     pool: &SqlitePool,
     instrument_id: &str,
 ) -> anyhow::Result<Vec<InstrumentScale>> {
-    Ok(sqlx::query_as::<_, InstrumentScale>(&format!(
+    Ok(sqlx::query_as::<_, InstrumentScale>(sqlx::AssertSqlSafe(format!(
         "SELECT {SCALE_COLS} FROM instrument_scales WHERE instrument_id = ?1 ORDER BY position, label"
-    ))
+    )))
     .bind(instrument_id)
     .fetch_all(pool)
     .await?)
 }
 
 async fn fetch_instrument(pool: &SqlitePool, id: &str) -> anyhow::Result<Instrument> {
-    Ok(sqlx::query_as::<_, Instrument>(&format!(
+    Ok(sqlx::query_as::<_, Instrument>(sqlx::AssertSqlSafe(format!(
         "SELECT {INSTRUMENT_COLS} FROM instruments WHERE id = ?1"
-    ))
+    )))
     .bind(id)
     .fetch_one(pool)
     .await?)
@@ -117,12 +117,14 @@ pub(crate) async fn find_scale(
     pool: &SqlitePool,
     id: &str,
 ) -> anyhow::Result<Option<InstrumentScale>> {
-    Ok(sqlx::query_as::<_, InstrumentScale>(&format!(
-        "SELECT {SCALE_COLS} FROM instrument_scales WHERE id = ?1"
-    ))
-    .bind(id)
-    .fetch_optional(pool)
-    .await?)
+    Ok(
+        sqlx::query_as::<_, InstrumentScale>(sqlx::AssertSqlSafe(format!(
+            "SELECT {SCALE_COLS} FROM instrument_scales WHERE id = ?1"
+        )))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?,
+    )
 }
 
 async fn fetch_scale(pool: &SqlitePool, id: &str) -> anyhow::Result<InstrumentScale> {

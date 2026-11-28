@@ -41,10 +41,10 @@ pub async fn sections_for(
     .fetch_all(&mut *conn)
     .await?;
     for (table, is_quantity) in [("practice_quantities", true), ("practice_results", false)] {
-        let members: Vec<(String, String)> = sqlx::query_as(&format!(
+        let members: Vec<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT section_id, symbol FROM {table} \
              WHERE practice_id = ?1 AND section_id IS NOT NULL ORDER BY position, symbol"
-        ))
+        )))
         .bind(practice_id)
         .fetch_all(&mut *conn)
         .await?;
@@ -181,9 +181,9 @@ async fn belongs(
     id: &str,
     practice_id: &str,
 ) -> anyhow::Result<bool> {
-    let found: Option<(i64,)> = sqlx::query_as(&format!(
+    let found: Option<(i64,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT 1 FROM {table} WHERE id = ?1 AND practice_id = ?2"
-    ))
+    )))
     .bind(id)
     .bind(practice_id)
     .fetch_optional(pool)
@@ -302,9 +302,9 @@ pub async fn set_member_section(
         SectionMember::Quantity => ("practice_quantities", "AND removed = 0"),
         SectionMember::Result => ("practice_results", ""),
     };
-    let changed = sqlx::query(&format!(
+    let changed = sqlx::query(sqlx::AssertSqlSafe(format!(
         "UPDATE {table} SET section_id = ?3 WHERE id = ?2 AND practice_id = ?1 {live}"
-    ))
+    )))
     .bind(practice_id)
     .bind(member_id)
     .bind(section_id)
