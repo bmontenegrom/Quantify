@@ -191,13 +191,11 @@ struct RunU {
 
 impl RunU {
     fn checked(&self, value: f64, not_derivable: &mut bool, on_kink: &mut bool) -> f64 {
-        if !value.is_finite() {
+        if !value.is_finite() || self.missing {
             return f64::NAN;
         }
-        if !self.missing {
-            *not_derivable |= !self.u.is_finite();
-            *on_kink |= self.kink && self.u > 0.0;
-        }
+        *not_derivable |= !self.u.is_finite();
+        *on_kink |= self.kink && self.u > 0.0;
         self.u
     }
 }
@@ -268,9 +266,10 @@ impl<'a> RunCtx<'a> {
                     .is_some_and(|id| !self.inputs.broadcastable.contains(id))
         };
         let leaf = |s: &str| {
-            let v = ctx
-                .get(s)
-                .or_else(|| self.means.and_then(|m| m.get(s)))
+            let v = self
+                .means
+                .and_then(|m| m.get(s))
+                .or_else(|| ctx.get(s))
                 .copied()
                 .unwrap_or(f64::NAN);
             let (v, u) = if self.point_us.contains_key(s) {
@@ -301,17 +300,19 @@ impl<'a> RunCtx<'a> {
     }
 }
 
-fn u_warning(what: &str, not_derivable: bool, on_kink: bool) -> Option<String> {
+fn u_warning(
+    (the, of_the): (&str, &str),
+    subject: &str,
+    not_derivable: bool,
+    on_kink: bool,
+) -> Option<String> {
     if not_derivable {
-        let of = what
-            .strip_prefix("el ")
-            .map_or_else(|| format!("de {what}"), |rest| format!("del {rest}"));
         Some(format!(
-            "La incertidumbre {of} no se puede calcular en alguna corrida: la fórmula no es derivable ahí (p. ej. una raíz en 0) o falta la de una magnitud."
+            "La incertidumbre {of_the} {subject} no se puede calcular en alguna corrida: la fórmula no es derivable ahí (p. ej. una raíz en 0) o falta la de una magnitud."
         ))
     } else if on_kink {
         Some(format!(
-            "En alguna corrida, {what} cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta."
+            "En alguna corrida, {the} {subject} cae justo en un quiebre de la fórmula (un valor absoluto en 0 o un mínimo/máximo empatado): la incertidumbre se calculó con una sola de las ramas (la de mayor incertidumbre), así que puede no ser exacta."
         ))
     } else {
         None
@@ -382,11 +383,16 @@ fn intermediate_uncertainties<'a>(
         states.push(state);
     }
     for (k, (it, _)) in compiled.iter().enumerate() {
-        let what = format!(
-            "la intermedia \"{}\" ({} = {})",
+        let subject = format!(
+            "intermedia \"{}\" ({} = {})",
             it.name, it.symbol, it.formula
         );
-        warnings.extend(u_warning(&what, not_derivable[k], on_kink[k]));
+        warnings.extend(u_warning(
+            ("la", "de la"),
+            &subject,
+            not_derivable[k],
+            on_kink[k],
+        ));
     }
     out.retain(|r| !r.values.is_empty());
     (out, states)
@@ -1323,8 +1329,8 @@ pub fn compute_regresion(
         .into_iter()
         .zip(axis_flags)
     {
-        let what = format!("el eje {axis} ({formula})");
-        warnings.extend(u_warning(&what, not_derivable, on_kink));
+        let subject = format!("eje {axis} ({formula})");
+        warnings.extend(u_warning(("el", "del"), &subject, not_derivable, on_kink));
     }
     let mut point_results_out = Vec::with_capacity(point_results.len());
     for (pr, tree) in &compiled_points {
@@ -1338,11 +1344,11 @@ pub fn compute_regresion(
             u.push(r.checked(value, &mut not_derivable, &mut on_kink));
             values.push(value);
         }
-        let what = format!(
-            "la derivada por punto \"{}\" ({} = {})",
+        let subject = format!(
+            "derivada por punto \"{}\" ({} = {})",
             pr.name, pr.symbol, pr.formula
         );
-        warnings.extend(u_warning(&what, not_derivable, on_kink));
+        warnings.extend(u_warning(("la", "de la"), &subject, not_derivable, on_kink));
         point_results_out.push(PointResultComputation {
             symbol: pr.symbol.clone(),
             name: pr.name.clone(),

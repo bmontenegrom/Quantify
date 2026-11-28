@@ -26,7 +26,7 @@ export function regressionMarkup(regression) {
     </div>
     ${plot ? regressionSvg(plot, regression.x_label, regression.y_label) : `<p class="submission-meta">No se puede graficar: el rango de los datos es nulo.</p>`}
     ${plot?.scatter.some(isClipped) ? `<p class="submission-meta">Las barras con flecha siguen fuera del gráfico: su incertidumbre es mayor que lo dibujado.</p>` : ""}
-    ${plot?.scatter.some((p) => p.noU) ? `<p class="submission-meta">Los puntos huecos no tienen incertidumbre: falta la de alguna magnitud o la fórmula no es derivable ahí (ver avisos).</p>` : ""}
+    ${plot?.scatter.some((p) => p.noU) ? `<p class="submission-meta">Los puntos huecos no tienen incertidumbre en al menos un eje (el que no lleva barra): falta la de alguna magnitud o la fórmula no es derivable ahí (ver avisos).</p>` : ""}
   `;
 }
 
