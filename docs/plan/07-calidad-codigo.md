@@ -173,6 +173,19 @@ tests de siempre. Las funciones de complejidad son las 69 de
 | M11 | `refactor: complejidad restante de Rust` | `dimensions.rs` (3), `units.rs` (2), `db/mod.rs` (2), `routes/submissions.rs` (2), `instruments/seed.rs`, `routes/auth.rs`, `submissions/mod.rs`, `main.rs` y `db/schema.rs` (`migrate`, con un paso por versión). | Ninguna función de Rust sobre los umbrales. |
 | M12 | `refactor(deps): reemplazar chrono por jiff` | `chrono` no tiene mantenimiento ([RUSTSEC-2026-0543](https://rustsec.org/advisories/RUSTSEC-2026-0543), [chrono#1768](https://github.com/chronotope/chrono/issues/1768)); su mantenedor y RustSec recomiendan `jiff`. Se usa `jiff` con serde y `jiff-sqlx` 1.0 (SQLite, sqlx 0.9) para `Utc::now()`, las sumas de duraciones y los 21 campos `DateTime<Utc>`. Hay que probar: que lea las fechas que guardó chrono en una copia de una base vieja, que el JSON siga en RFC 3339 y cómo se integran los tipos de `jiff-sqlx` con `FromRow`. | `chrono` fuera de `Cargo.lock` y `cargo audit` sin avisos; la app arranca sobre una base vieja y los E2E pasan sin cambios en el frontend. |
 
+**Limpiezas de SQL** (del review de #180, se hacen en el ítem que ya toca cada archivo):
+
+- **M10:** armar una sola vez, fuera del bucle, el `UPDATE` que hoy se arma en cada vuelta en
+  `move_item_in` (`src/practices/crud.rs`) y en `write_template` (`src/practices/template.rs`).
+- **M11:**
+  - Las consultas que solo usan constantes (`INSTRUMENT_COLS`, `SCALE_COLS`, `PRACTICE_COLS` en
+    `src/instruments/mod.rs`, `src/db/mod.rs`, `src/practices/lifecycle.rs` y
+    `src/courses/subgroup.rs`) pasan a ser `&'static str` (columnas como macro y `concat!`), sin
+    `format!` ni `AssertSqlSafe`.
+  - `subgroups_for_course` (`src/courses/subgroup.rs`) deja de hacer una consulta por subgrupo
+    (N+1).
+  - `submission_list_for_user` (`src/submissions/mod.rs`) unifica sus dos consultas casi iguales.
+
 **Orden.** Primero lo barato y lo que corrige riesgos (M1–M3). Después M4, porque los tests de rutas
 cubren los refactors de M7, M11 y M12. Los refactors del motor (M5 y M6) agregan sus tests de
 mutantes antes de tocar el código.
