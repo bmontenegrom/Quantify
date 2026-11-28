@@ -359,6 +359,7 @@ fn per_replica_points(
         type_a: Vec::new(),
         varied: std::collections::HashSet::new(),
     };
+    let (order, vars) = dependencies(tree, deps);
     for (k, leaves) in points {
         let n = leaves.iter().map(|(_, r)| r.len()).max().unwrap_or(0);
         if n == 0
@@ -369,11 +370,18 @@ fn per_replica_points(
         }
         let values: Vec<f64> = (0..n)
             .map(|r| {
-                let at_r = |s: &str| match leaves.iter().find(|(l, _)| *l == s) {
-                    Some((_, reps)) if !reps.is_empty() => (reps[r], 0.0),
-                    _ => (leaf(s).0, 0.0),
-                };
-                propagate(tree, deps, &at_r, &[]).value
+                let mut bound: HashMap<&str, f64> = vars
+                    .iter()
+                    .map(|&s| match leaves.iter().find(|(l, _)| *l == s) {
+                        Some((_, reps)) if !reps.is_empty() => (s, reps[r]),
+                        _ => (s, leaf(s).0),
+                    })
+                    .collect();
+                for &name in &order {
+                    let value = eval_compiled(deps[name], &bound);
+                    bound.insert(name, value);
+                }
+                eval_compiled(tree, &bound)
             })
             .collect();
         if values.iter().all(|v| v.is_finite()) {
@@ -1787,12 +1795,10 @@ struct Propagated {
     kink: bool,
 }
 
-fn propagate(
-    tree: &Node,
-    formulas: &HashMap<&str, &Node>,
-    leaf: &dyn Fn(&str) -> (f64, f64),
-    factors: &[Vec<(&str, f64)>],
-) -> Propagated {
+fn dependencies<'a>(
+    tree: &'a Node,
+    formulas: &HashMap<&'a str, &'a Node>,
+) -> (Vec<&'a str>, Vec<&'a str>) {
     fn visit<'a>(
         name: &str,
         formulas: &HashMap<&'a str, &'a Node>,
@@ -1824,6 +1830,16 @@ fn propagate(
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
+    (order, vars)
+}
+
+fn propagate(
+    tree: &Node,
+    formulas: &HashMap<&str, &Node>,
+    leaf: &dyn Fn(&str) -> (f64, f64),
+    factors: &[Vec<(&str, f64)>],
+) -> Propagated {
+    let (order, vars) = dependencies(tree, formulas);
     let (means, us): (Vec<f64>, Vec<f64>) = vars.iter().map(|v| leaf(v)).unzip();
     let position = |symbol: &str| vars.iter().position(|v| *v == symbol);
     let factor_loads: Vec<Vec<(usize, f64)>> = factors
