@@ -9,11 +9,11 @@ export function regressionMarkup(regression) {
     <div class="metrics">
       <div class="metric">
         <div class="metric-label">Pendiente</div>
-        <div class="metric-value metric-text">${escapeHtml(measureText(regression.slope, regression.u_slope))}</div>
+        ${lineUncertainty(regression, regression.slope, regression.u_slope, regression.u_slope_total)}
       </div>
       <div class="metric">
         <div class="metric-label">Intercepto</div>
-        <div class="metric-value metric-text">${escapeHtml(measureText(regression.intercept, regression.u_intercept))}</div>
+        ${lineUncertainty(regression, regression.intercept, regression.u_intercept, regression.u_intercept_total)}
       </div>
       <div class="metric">
         <div class="metric-label">R²</div>
@@ -28,6 +28,14 @@ export function regressionMarkup(regression) {
     ${plot?.scatter.some(isClipped) ? `<p class="submission-meta">Las barras con flecha siguen fuera del gráfico: su incertidumbre es mayor que lo dibujado.</p>` : ""}
     ${plot?.scatter.some((p) => p.noU) ? `<p class="submission-meta">Los puntos huecos no tienen incertidumbre en al menos un eje (el que no lleva barra): falta la de alguna magnitud o la fórmula no es derivable ahí (ver avisos).</p>` : ""}
   `;
+}
+
+function lineUncertainty(regression, value, uFit, uTotal) {
+  const fit = `<div class="metric-value metric-text">${escapeHtml(measureText(value, uFit))}</div>`;
+  if (uTotal == null) return fit;
+  const names = (regression.shared ?? []).map(escapeHtml).join(", ");
+  return `${fit}<div class="submission-meta">ajuste</div>
+        <div class="metric-value metric-text">${escapeHtml(measureText(value, uTotal))}</div><div class="submission-meta">total (incluye ${names})</div>`;
 }
 
 function plotSvg(plot, { ariaLabel, lineMarkup = "", xText, yLabel }) {

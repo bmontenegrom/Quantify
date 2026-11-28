@@ -1437,10 +1437,11 @@ calcula sin incertidumbre usa el mismo evaluador:
    de las réplicas del punto y tipo B de su escala en la media del punto) y las compartidas con su
    u; `slope`/`intercept` entran con las fuentes de la recta. Las intermedias y los mensurandos
    que use se expanden por su fórmula, así una magnitud que entra por varios caminos cuenta una
-   vez (`m - slope*c` con `m = slope*c` da U = 0); no vale todavía para la pendiente y la
-   ordenada frente a las magnitudes de los ejes (ítem 5: un residuo `py - (slope*px + intercept)`
-   sobreestima su U). Mientras tanto, el panel "Avisos" del editor marca la derivada por punto
-   que usa la recta y magnitudes de los ejes (las `Re` de Fluidos I y Viscosidad); no aparece en
+   vez (`m - slope*c` con `m = slope*c` da U = 0); para las compartidas de los ejes vale desde el
+   ítem 5, pero no para la pendiente y la ordenada frente a las magnitudes por punto de los ejes
+   (un residuo `py - (slope*px + intercept)` sobreestima su U). El panel "Avisos" del editor marca
+   la derivada por punto que usa la recta y magnitudes por punto de los ejes (las `Re` de Fluidos I
+   y Viscosidad); no aparece en
    las entregas, porque depende de la práctica y no de los datos. El valor sigue saliendo como antes: los golden
    de Fluidos I y Viscosidad solo ganan `u`/`u_expanded`. **Un mensurando sin incertidumbre es
    exacto** para todo lo que lo usa (otros mensurandos y derivadas): entra con su valor y u = 0,
@@ -1514,13 +1515,20 @@ calcula sin incertidumbre usa el mismo evaluador:
      sigue en 0. Ningún golden cambia: los únicos agregados de la biblioteca (Fluidos II) van sin
      incertidumbre.
    Es la base de una regresión ponderada (ítem de "General").
-5. **Magnitudes compartidas dentro y fuera del ajuste**: una magnitud compartida que entra en
-   una fórmula de eje y también en un mensurando se trata hoy como independiente de la recta.
-   Ej.: eje y = `h*rho*g0` y `k = slope/rho`: `slope` ya lleva `rho`, pero la U de `k` cuenta
-   la de `rho` como si no estuviera en la pendiente (en general la sobreestima). Arreglo: dar a
-   la recta una carga sobre cada magnitud compartida de los ejes (la sensibilidad de
-   `slope`/`intercept` a esa magnitud, con duales sobre las fórmulas de eje) y propagar contra
-   las entradas.
+5. **Magnitudes compartidas dentro y fuera del ajuste** ✅: una magnitud compartida que entra en
+   un eje corre la recta entera sin agregar dispersión, así que la u estadística del ajuste no la
+   ve. Ahora cada compartida `m` con u que alcanzan las fórmulas de eje (directo o por intermedias)
+   es una fuente común: con duales se calcula `∂x_i/∂m` y `∂y_i/∂m` en cada punto, y de ahí la
+   sensibilidad de la pendiente y la ordenada (`analysis::line_sensitivity`, forma cerrada de
+   mínimos cuadrados). El factor `[slope: db·u_m, intercept: da·u_m, m: u_m]` se suma a las fuentes
+   de la recta y la u independiente de `m` pasa a 0, en todas las propagaciones de la regresión
+   (mensurandos, intermedias, ejes, derivadas y agregados). Así `k = slope/rho` con eje
+   `h*rho*g0` cancela `rho`, y `µ = …/slope` con eje `dx/t` suma la u de `dx` (que antes faltaba).
+   El panel del ajuste muestra las dos U: la del ajuste y, si hay compartidas, la total
+   (`u_slope_total`, `u_intercept_total`, `shared` en la regresión). Las magnitudes por punto de los
+   ejes quedan fuera: su dispersión ya está en la u del ajuste, y la parte sistemática de su escala
+   pide otro modelo; el editor sigue avisando ese caso. En la biblioteca `dx` (Viscosidad) y
+   `h_max` (Fluidos II) van sin u, así que ningún golden cambia.
 
 Cada uno en su PR, con su test contra una fórmula de libro y los golden revisados (hoy esos
 campos no tienen U: el golden gana campos, no cambia números).

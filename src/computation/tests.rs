@@ -5668,3 +5668,185 @@ fn a_single_reading_shared_by_two_endpoints_does_not_force_the_means() {
     let u = aggregate_u(&a, "s");
     assert!(close(u, textbook, 1e-9), "{u} vs {textbook}");
 }
+
+fn shared_on_axis(symbol: &str, values: &[f64]) -> (PracticeQuantity, MeasurementInput) {
+    let mut q = quantity(symbol);
+    q.per_point = false;
+    (q, measurement(symbol, values))
+}
+
+#[test]
+fn a_shared_quantity_on_an_axis_cancels_in_the_slope() {
+    let (rho, rho_m) = shared_on_axis("rho", &[999.0, 1001.0]);
+    let quantities = vec![quantity("px"), quantity("py"), rho];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0, 4.0]),
+        measurement("py", &[2.0, 4.1, 5.9, 8.2]),
+        rho_m,
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[result("k", "slope/rho")],
+        &[],
+        &[],
+        &HashMap::new(),
+        "px",
+        "py*rho",
+        &measurements,
+    )
+    .unwrap();
+    let reg = a.regression.as_ref().unwrap();
+    let k = a.derived.iter().find(|d| d.symbol == "k").unwrap();
+    let textbook = reg.u_slope / 1000.0;
+    assert!(close(k.u, textbook, 1e-9), "{} vs {textbook}", k.u);
+    assert_eq!(reg.shared, ["rho"]);
+}
+
+#[test]
+fn a_shared_quantity_on_an_axis_reaches_a_result_through_the_slope() {
+    let (dx, dx_m) = shared_on_axis("dx", &[0.19, 0.21]);
+    let quantities = vec![quantity("px"), quantity("py"), dx];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0, 4.0]),
+        measurement("py", &[2.0, 4.1, 5.9, 8.2]),
+        dx_m,
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[result("mu", "1/slope")],
+        &[point_result("w", "dx*py")],
+        &[],
+        &HashMap::new(),
+        "px",
+        "dx*py",
+        &measurements,
+    )
+    .unwrap();
+    let reg = a.regression.as_ref().unwrap();
+    let (u_dx, dx) = (0.01, 0.2);
+    let mu = a.derived.iter().find(|d| d.symbol == "mu").unwrap();
+    let textbook = mu.value * f64::hypot(reg.u_slope / reg.slope, u_dx / dx);
+    assert!(close(mu.u, textbook, 1e-9), "{} vs {textbook}", mu.u);
+    let total = f64::hypot(reg.u_slope, reg.slope * u_dx / dx);
+    assert!(close(reg.u_slope_total.unwrap(), total, 1e-9));
+    assert!(reg.u_intercept_total.unwrap() >= reg.u_intercept);
+    assert_eq!(reg.shared, ["dx"]);
+    let w = &a.point_results[0];
+    for (i, py) in [2.0, 4.1, 5.9, 8.2].into_iter().enumerate() {
+        assert!(close(w.u[i], py * u_dx, 1e-12), "{i}: {}", w.u[i]);
+    }
+}
+
+#[test]
+fn without_shared_quantities_on_the_axes_the_line_keeps_its_u() {
+    let a = regression_with(
+        &[quantity("px"), quantity("py")],
+        &[],
+        &[],
+        &[],
+        &HashMap::new(),
+        &[
+            measurement("px", &[1.0, 2.0, 3.0]),
+            measurement("py", &[2.0, 4.1, 5.9]),
+        ],
+    );
+    let reg = a.regression.as_ref().unwrap();
+    assert!(
+        reg.shared.is_empty() && reg.u_slope_total.is_none() && reg.u_intercept_total.is_none()
+    );
+}
+
+#[test]
+fn the_line_moves_with_a_shared_quantity_inside_a_per_replica_intermediate() {
+    let (dx, dx_m) = shared_on_axis("dx", &[0.19, 0.21]);
+    let quantities = vec![quantity("px"), quantity("t"), dx];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![1.0, 3.0], vec![0.5, 1.5], vec![0.3, 0.9]]),
+            ..measurement("t", &[])
+        },
+        dx_m,
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[intermediate("v", "dx/t", false)],
+        &[],
+        &[],
+        &[],
+        &HashMap::new(),
+        "px",
+        "v",
+        &measurements,
+    )
+    .unwrap();
+    let reg = a.regression.as_ref().unwrap();
+    let total = f64::hypot(reg.u_slope, reg.slope * 0.01 / 0.2);
+    assert!(
+        close(reg.u_slope_total.unwrap(), total, 1e-9),
+        "{} vs {total}",
+        reg.u_slope_total.unwrap()
+    );
+}
+
+#[test]
+fn a_shared_quantity_the_line_cannot_follow_warns() {
+    let (m, m_m) = shared_on_axis("m", &[1.9, 2.1]);
+    let quantities = vec![quantity("px"), quantity("py"), m];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        m_m,
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[],
+        &[],
+        &HashMap::new(),
+        "px",
+        "math::sqrt(py - m)",
+        &measurements,
+    )
+    .unwrap();
+    assert!(
+        a.warnings.iter().any(|w| w.contains("cuánto mueve \"m\"")),
+        "{:?}",
+        a.warnings
+    );
+    assert!(a.regression.unwrap().shared.is_empty());
+}
+
+#[test]
+fn a_shared_quantity_at_a_kink_of_an_axis_warns() {
+    let (m, m_m) = shared_on_axis("m", &[1.9, 2.1]);
+    let quantities = vec![quantity("px"), quantity("py"), m];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        m_m,
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[],
+        &[],
+        &HashMap::new(),
+        "px",
+        "math::abs(py - m)",
+        &measurements,
+    )
+    .unwrap();
+    assert!(
+        a.warnings
+            .iter()
+            .any(|w| w.contains("quiebre de su fórmula respecto de \"m\"")),
+        "{:?}",
+        a.warnings
+    );
+    assert_eq!(a.regression.unwrap().shared, ["m"]);
+}
