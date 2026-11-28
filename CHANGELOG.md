@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.9.0](https://github.com/bmontenegrom/Quantify/compare/v0.8.0...v0.9.0) (2026-11-28)
+
+
+### Funcionalidades
+
+* **editor:** catálogo de constantes (F10 química, 3/5) ([#161](https://github.com/bmontenegrom/Quantify/issues/161)) ([3f96bbf](https://github.com/bmontenegrom/Quantify/commit/3f96bbf8a3954139983533ab5a7c4de49057760f))
+* **editor:** chequeo dimensional de fórmulas (F10 química, 4/5) ([#163](https://github.com/bmontenegrom/Quantify/issues/163)) ([c4f4a53](https://github.com/bmontenegrom/Quantify/commit/c4f4a53e6c0838004fa9ce8f74c66ef61cc1a8fd))
+* **editor:** el docente ve si la unidad se reconoce (F10, 4/4) ([#158](https://github.com/bmontenegrom/Quantify/issues/158)) ([a43ebfe](https://github.com/bmontenegrom/Quantify/commit/a43ebfe813a22c6bd3c055c6f8a5f3ea327d790b))
+* **formularios:** el alumno carga en la unidad que elija (F10, 3b/4) ([#157](https://github.com/bmontenegrom/Quantify/issues/157)) ([0d5c304](https://github.com/bmontenegrom/Quantify/commit/0d5c30469430169755d143bc41609c4a1260dfcd))
+* **incertidumbres:** agregados con el método por réplica (U analítica 4b) ([#169](https://github.com/bmontenegrom/Quantify/issues/169)) ([5ff106e](https://github.com/bmontenegrom/Quantify/commit/5ff106ef2c57550e6260b228d3428a1057531636))
+* **incertidumbres:** magnitudes compartidas dentro y fuera del ajuste (U analítica 5/5) ([#171](https://github.com/bmontenegrom/Quantify/issues/171)) ([93cf0b0](https://github.com/bmontenegrom/Quantify/commit/93cf0b0696af384759096bd3f8a0b02bbdb174aa))
+* **incertidumbres:** U de las derivadas por punto (U analítica 1/5) ([#165](https://github.com/bmontenegrom/Quantify/issues/165)) ([e4e6b04](https://github.com/bmontenegrom/Quantify/commit/e4e6b04bec5a26a0a44fc0bddc107cb7f06ff7c3))
+* **incertidumbres:** U de las intermedias por punto (U analítica 3/5) ([#167](https://github.com/bmontenegrom/Quantify/issues/167)) ([35213e8](https://github.com/bmontenegrom/Quantify/commit/35213e836d1c5835e65c0636bded76ca17b326ee))
+* **incertidumbres:** U de los ejes del ajuste y derivadas por punto (U analítica 4/5) ([#168](https://github.com/bmontenegrom/Quantify/issues/168)) ([de2e018](https://github.com/bmontenegrom/Quantify/commit/de2e018634aa748d0f9341bb2fe116da5c1fac77))
+* **incertidumbres:** U de los mensurandos agregados (U analítica 2/5) ([#166](https://github.com/bmontenegrom/Quantify/issues/166)) ([2638e2e](https://github.com/bmontenegrom/Quantify/commit/2638e2e8270fa607710c6a89366fa5111efb18c5))
+* **magnitudes:** sinónimos de magnitud física (F10 química, 1/5) ([#159](https://github.com/bmontenegrom/Quantify/issues/159)) ([45dd0f8](https://github.com/bmontenegrom/Quantify/commit/45dd0f8b42c05aa7682a9107475a801c92c2abc5))
+* **practicas:** dato de cátedra con valor fijo (F10 química, 2/5) ([#160](https://github.com/bmontenegrom/Quantify/issues/160)) ([e97ec9f](https://github.com/bmontenegrom/Quantify/commit/e97ec9f823b2c88405a3fef7f59dc5ce34656627))
+* **practicas:** determinaciones en el motor (F9, 1/5) ([#146](https://github.com/bmontenegrom/Quantify/issues/146)) ([06b979a](https://github.com/bmontenegrom/Quantify/commit/06b979acdb12488a241693f8e954af257bb99ce5))
+* **practicas:** el alumno carga determinaciones (F9, 2/5) ([#147](https://github.com/bmontenegrom/Quantify/issues/147)) ([e92d2a3](https://github.com/bmontenegrom/Quantify/commit/e92d2a3ca12ade4716db8dad36417fbb9070a5fe))
+* **practicas:** el docente configura determinaciones (F9, 3a/5) ([#148](https://github.com/bmontenegrom/Quantify/issues/148)) ([73b8470](https://github.com/bmontenegrom/Quantify/commit/73b84706d5a697835f6b278b27b3fb48ed429864))
+* **practicas:** el servidor resuelve partes y determinaciones (F9, 3b/5) ([#149](https://github.com/bmontenegrom/Quantify/issues/149)) ([9ef6def](https://github.com/bmontenegrom/Quantify/commit/9ef6def54833fe78cb610917c92ff8524c03cdb1))
+* **practicas:** P1 e Hidrostática con determinaciones (F9, 4/5) ([#150](https://github.com/bmontenegrom/Quantify/issues/150)) ([c1115ba](https://github.com/bmontenegrom/Quantify/commit/c1115ba537a64e7a98f3a510293ae0685f37293e))
+* **regresion:** interpolación inversa con la U de la recta (F10 química, 5/5) ([#164](https://github.com/bmontenegrom/Quantify/issues/164)) ([9ba5a41](https://github.com/bmontenegrom/Quantify/commit/9ba5a41490bec9d53cb15cd7f78c39166cbe410f))
+* **unidades:** el motor interpreta unidades (F10, 1/4) ([#153](https://github.com/bmontenegrom/Quantify/issues/153)) ([ca23e97](https://github.com/bmontenegrom/Quantify/commit/ca23e97c6b274093cf4534305c3c202dbbc02c6b))
+
+
+### Correcciones
+
+* **incertidumbres:** el tipo B convierte la escala a la unidad de la magnitud (F10, 2/4) ([#154](https://github.com/bmontenegrom/Quantify/issues/154)) ([6e9f849](https://github.com/bmontenegrom/Quantify/commit/6e9f849f5b46255b0843bc5d1cebf39c6a12a71d))
+
 ## [0.8.0](https://github.com/bmontenegrom/Quantify/compare/v0.7.0...v0.8.0) (2026-11-22)
 
 
