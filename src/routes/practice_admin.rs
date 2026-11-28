@@ -4225,13 +4225,7 @@ mod tests {
     async fn an_edit_route_without_an_id_fails_instead_of_skipping_the_lock() {
         use tower::ServiceExt;
         let (pool, dir) = crate::computation::tests::setup().await;
-        let state: SharedState = std::sync::Arc::new(db::AppState {
-            pool,
-            upload_dir: dir.path().to_path_buf(),
-            secret_key: "secreto".into(),
-            secure_cookies: false,
-            login_attempts: Default::default(),
-        });
+        let state = crate::routes::tests::test_state(pool, &dir);
         let app = axum::Router::new()
             .route(
                 "/practices/{practice_id}/x",
@@ -4278,13 +4272,7 @@ mod tests {
     async fn the_edit_lock_waits_for_a_teacher_and_a_complete_body() {
         use tower::ServiceExt;
         let (pool, dir) = crate::computation::tests::setup().await;
-        let state: SharedState = std::sync::Arc::new(db::AppState {
-            pool: pool.clone(),
-            upload_dir: dir.path().to_path_buf(),
-            secret_key: "secreto".into(),
-            secure_cookies: false,
-            login_attempts: Default::default(),
-        });
+        let state = crate::routes::tests::test_state(pool.clone(), &dir);
         let student = session_token(&pool, "estudiante").await;
         let teacher = session_token(&pool, "docente").await;
         let request = |token: Option<&str>, body: axum::body::Body| {
@@ -5801,13 +5789,7 @@ mod tests {
     #[tokio::test]
     async fn import_needs_a_teacher_and_valid_symbols() {
         let (pool, dir) = crate::computation::tests::setup().await;
-        let state: SharedState = std::sync::Arc::new(db::AppState {
-            pool: pool.clone(),
-            upload_dir: dir.path().to_path_buf(),
-            secret_key: "secreto".into(),
-            secure_cookies: false,
-            login_attempts: Default::default(),
-        });
+        let state = crate::routes::tests::test_state(pool.clone(), &dir);
         let session = |role: &'static str| {
             let pool = pool.clone();
             async move {
@@ -6034,13 +6016,7 @@ mod tests {
     #[tokio::test]
     async fn determinations_are_validated_and_guard_their_quantities() {
         let (pool, dir) = crate::computation::tests::setup().await;
-        let state: SharedState = std::sync::Arc::new(db::AppState {
-            pool: pool.clone(),
-            upload_dir: dir.path().to_path_buf(),
-            secret_key: "secreto".into(),
-            secure_cookies: false,
-            login_attempts: Default::default(),
-        });
+        let state = crate::routes::tests::test_state(pool.clone(), &dir);
         let mut headers = HeaderMap::new();
         headers.insert(
             axum::http::header::COOKIE,
