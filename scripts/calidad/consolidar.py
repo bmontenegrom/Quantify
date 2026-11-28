@@ -106,8 +106,9 @@ def complejidad(c):
             "cogn_gt15": sum(f[4] > COGN for f in fs),
             "ciclo_max": max(f[3] for f in fs),
             "cogn_max": max(f[4] for f in fs),
-            "peores": [{"archivo": Path(a).as_posix(), "funcion": n, "linea": l, "ciclomatica": cy, "cognitiva": co}
-                       for a, n, l, cy, co in sorted(fs, key=lambda f: -f[4])[:10]],
+            "sobre_umbral": [{"archivo": Path(a).as_posix(), "funcion": n, "linea": l, "ciclomatica": cy, "cognitiva": co}
+                             for a, n, l, cy, co in sorted(fs, key=lambda f: (-f[4], -f[3]))
+                             if cy > CICLO or co > COGN],
         }
     return out or None
 

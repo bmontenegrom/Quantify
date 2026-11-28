@@ -114,7 +114,7 @@ Del proyecto: el toolchain Rust estable y Node de la máquina (se anotan en el i
 - **Complejidad.** `rust-code-analysis` calcula ciclomática y cognitiva por función con el mismo
   criterio para Rust y JS. Cada función cuenta solo su propio cuerpo: se le resta lo de las
   clausuras y funciones anidadas, que se cuentan aparte. Se informan la cantidad de funciones por
-  encima de 10 y 15, el máximo y las 10 de mayor complejidad cognitiva.
+  encima de 10 y 15, el máximo y la lista de todas las que superan algún umbral.
 - **Duplicación.** La da Sonar, que la calcula para Rust y JS. No se usa `jscpd`.
 - **Clippy.** No bloquea: se cuentan avisos por lint con la configuración del repo (`clippy.toml`) y,
   aparte, sumando `-W clippy::pedantic`. Sonar importa el reporte por defecto, no corre clippy por

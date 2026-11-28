@@ -27,7 +27,7 @@
    "cogn_gt15": 13,
    "ciclo_max": 93,
    "cogn_max": 66,
-   "peores": [
+   "sobre_umbral": [
     {
      "archivo": "src/computation/engines.rs",
      "funcion": "compute_regresion",
@@ -97,6 +97,286 @@
      "linea": 422,
      "ciclomatica": 7,
      "cognitiva": 19
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "validate_quantity",
+     "linea": 2576,
+     "ciclomatica": 20,
+     "cognitiva": 18
+    },
+    {
+     "archivo": "src/computation/engines.rs",
+     "funcion": "derive_results",
+     "linea": 2055,
+     "ciclomatica": 14,
+     "cognitiva": 17
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "save_determinations",
+     "linea": 1103,
+     "ciclomatica": 17,
+     "cognitiva": 16
+    },
+    {
+     "archivo": "src/practices/template.rs",
+     "funcion": "write_template",
+     "linea": 581,
+     "ciclomatica": 26,
+     "cognitiva": 15
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "formula_problems_in",
+     "linea": 1975,
+     "ciclomatica": 11,
+     "cognitiva": 15
+    },
+    {
+     "archivo": "src/computation/submission.rs",
+     "funcion": "check_student_result_symbols",
+     "linea": 325,
+     "ciclomatica": 12,
+     "cognitiva": 14
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "set_section",
+     "linea": 3118,
+     "ciclomatica": 16,
+     "cognitiva": 13
+    },
+    {
+     "archivo": "src/db/mod.rs",
+     "funcion": "insert_test_submissions",
+     "linea": 519,
+     "ciclomatica": 11,
+     "cognitiva": 13
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "with_updated_quantity",
+     "linea": 1226,
+     "ciclomatica": 14,
+     "cognitiva": 12
+    },
+    {
+     "archivo": "src/dimensions.rs",
+     "funcion": "combine",
+     "linea": 214,
+     "ciclomatica": 12,
+     "cognitiva": 12
+    },
+    {
+     "archivo": "src/instruments/seed.rs",
+     "funcion": "seed_instruments",
+     "linea": 6,
+     "ciclomatica": 12,
+     "cognitiva": 12
+    },
+    {
+     "archivo": "src/units.rs",
+     "funcion": "parse",
+     "linea": 244,
+     "ciclomatica": 17,
+     "cognitiva": 11
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "set_practice_status",
+     "linea": 746,
+     "ciclomatica": 17,
+     "cognitiva": 11
+    },
+    {
+     "archivo": "src/practices/versions.rs",
+     "funcion": "publish_checked",
+     "linea": 245,
+     "ciclomatica": 18,
+     "cognitiva": 10
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "located_structure_problems",
+     "linea": 667,
+     "ciclomatica": 12,
+     "cognitiva": 10
+    },
+    {
+     "archivo": "src/practices/lifecycle.rs",
+     "funcion": "duplicate_practice",
+     "linea": 126,
+     "ciclomatica": 20,
+     "cognitiva": 9
+    },
+    {
+     "archivo": "src/practices/changes.rs",
+     "funcion": "diff_items",
+     "linea": 160,
+     "ciclomatica": 14,
+     "cognitiva": 9
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "validate_quantity_in",
+     "linea": 2642,
+     "ciclomatica": 12,
+     "cognitiva": 9
+    },
+    {
+     "archivo": "src/computation/dual.rs",
+     "funcion": "eval_dual",
+     "linea": 72,
+     "ciclomatica": 19,
+     "cognitiva": 7
+    },
+    {
+     "archivo": "src/practices/template.rs",
+     "funcion": "seed_library",
+     "linea": 552,
+     "ciclomatica": 13,
+     "cognitiva": 6
+    },
+    {
+     "archivo": "src/practices/versions.rs",
+     "funcion": "remove_quantity",
+     "linea": 357,
+     "ciclomatica": 12,
+     "cognitiva": 5
+    },
+    {
+     "archivo": "src/routes/auth.rs",
+     "funcion": "update_profile",
+     "linea": 123,
+     "ciclomatica": 12,
+     "cognitiva": 5
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "update_section",
+     "linea": 3052,
+     "ciclomatica": 12,
+     "cognitiva": 5
+    },
+    {
+     "archivo": "src/db/schema.rs",
+     "funcion": "migrate",
+     "linea": 4,
+     "ciclomatica": 93,
+     "cognitiva": 4
+    },
+    {
+     "archivo": "src/routes/submissions.rs",
+     "funcion": "create_submission",
+     "linea": 70,
+     "ciclomatica": 24,
+     "cognitiva": 4
+    },
+    {
+     "archivo": "src/main.rs",
+     "funcion": "main",
+     "linea": 15,
+     "ciclomatica": 16,
+     "cognitiva": 4
+    },
+    {
+     "archivo": "src/dimensions.rs",
+     "funcion": "walk",
+     "linea": 93,
+     "ciclomatica": 13,
+     "cognitiva": 4
+    },
+    {
+     "archivo": "src/db/mod.rs",
+     "funcion": "seed_initial_accounts",
+     "linea": 265,
+     "ciclomatica": 12,
+     "cognitiva": 4
+    },
+    {
+     "archivo": "src/practices/changes.rs",
+     "funcion": "list_changes",
+     "linea": 210,
+     "ciclomatica": 12,
+     "cognitiva": 4
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "delete_quantity",
+     "linea": 1313,
+     "ciclomatica": 12,
+     "cognitiva": 4
+    },
+    {
+     "archivo": "src/computation/submission.rs",
+     "funcion": "update_form_submission",
+     "linea": 410,
+     "ciclomatica": 19,
+     "cognitiva": 3
+    },
+    {
+     "archivo": "src/submissions/mod.rs",
+     "funcion": "submission_detail",
+     "linea": 700,
+     "ciclomatica": 14,
+     "cognitiva": 3
+    },
+    {
+     "archivo": "src/units.rs",
+     "funcion": "<anonymous>",
+     "linea": 295,
+     "ciclomatica": 18,
+     "cognitiva": 2
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "preview_definition",
+     "linea": 1003,
+     "ciclomatica": 17,
+     "cognitiva": 2
+    },
+    {
+     "archivo": "src/routes/submissions.rs",
+     "funcion": "set_student_results",
+     "linea": 284,
+     "ciclomatica": 13,
+     "cognitiva": 2
+    },
+    {
+     "archivo": "src/dimensions.rs",
+     "funcion": "<anonymous>",
+     "linea": 77,
+     "ciclomatica": 12,
+     "cognitiva": 2
+    },
+    {
+     "archivo": "src/computation/dual.rs",
+     "funcion": "function",
+     "linea": 184,
+     "ciclomatica": 30,
+     "cognitiva": 1
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "move_guarded",
+     "linea": 2940,
+     "ciclomatica": 12,
+     "cognitiva": 1
+    },
+    {
+     "archivo": "src/practices/crud.rs",
+     "funcion": "definition_in",
+     "linea": 28,
+     "ciclomatica": 11,
+     "cognitiva": 1
+    },
+    {
+     "archivo": "src/routes/practice_admin.rs",
+     "funcion": "update_result",
+     "linea": 2399,
+     "ciclomatica": 11,
+     "cognitiva": 0
     }
    ]
   },
@@ -106,19 +386,19 @@
    "cogn_gt15": 12,
    "ciclo_max": 44,
    "cogn_max": 56,
-   "peores": [
-    {
-     "archivo": "static/analysis.js",
-     "funcion": "renderAnalysis",
-     "linea": 11,
-     "ciclomatica": 23,
-     "cognitiva": 56
-    },
+   "sobre_umbral": [
     {
      "archivo": "static/lib.js",
      "funcion": "validateMeasurements",
      "linea": 626,
      "ciclomatica": 28,
+     "cognitiva": 56
+    },
+    {
+     "archivo": "static/analysis.js",
+     "funcion": "renderAnalysis",
+     "linea": 11,
+     "ciclomatica": 23,
      "cognitiva": 56
     },
     {
@@ -164,6 +444,13 @@
      "cognitiva": 18
     },
     {
+     "archivo": "static/practices-admin.js",
+     "funcion": "goToProblem",
+     "linea": 1006,
+     "ciclomatica": 19,
+     "cognitiva": 17
+    },
+    {
      "archivo": "static/forms.js",
      "funcion": "measurementRowHtml",
      "linea": 387,
@@ -171,11 +458,67 @@
      "cognitiva": 17
     },
     {
+     "archivo": "static/forms.js",
+     "funcion": "fillExampleData",
+     "linea": 975,
+     "ciclomatica": 13,
+     "cognitiva": 16
+    },
+    {
+     "archivo": "static/forms.js",
+     "funcion": "collectStandaloneRow",
+     "linea": 780,
+     "ciclomatica": 12,
+     "cognitiva": 16
+    },
+    {
      "archivo": "static/practices-admin.js",
-     "funcion": "goToProblem",
-     "linea": 1006,
-     "ciclomatica": 19,
-     "cognitiva": 17
+     "funcion": "renderQuantityForm",
+     "linea": 1374,
+     "ciclomatica": 14,
+     "cognitiva": 14
+    },
+    {
+     "archivo": "static/forms-chrono.js",
+     "funcion": "renderSeriesDebug",
+     "linea": 200,
+     "ciclomatica": 13,
+     "cognitiva": 12
+    },
+    {
+     "archivo": "static/forms.js",
+     "funcion": "submitFormSubmission",
+     "linea": 868,
+     "ciclomatica": 13,
+     "cognitiva": 12
+    },
+    {
+     "archivo": "static/practices-admin.js",
+     "funcion": "quantityPayloadFromForm",
+     "linea": 1676,
+     "ciclomatica": 13,
+     "cognitiva": 12
+    },
+    {
+     "archivo": "static/practices-admin.js",
+     "funcion": "runPracticeAction",
+     "linea": 272,
+     "ciclomatica": 11,
+     "cognitiva": 12
+    },
+    {
+     "archivo": "static/practices-admin.js",
+     "funcion": "renderResultForm",
+     "linea": 1494,
+     "ciclomatica": 11,
+     "cognitiva": 11
+    },
+    {
+     "archivo": "static/lib.js",
+     "funcion": "roleFlags",
+     "linea": 377,
+     "ciclomatica": 11,
+     "cognitiva": 7
     }
    ]
   }
