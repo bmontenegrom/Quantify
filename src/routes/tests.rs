@@ -90,7 +90,10 @@ impl TestApp {
         self.send(Method::DELETE, uri, Some(session), None).await
     }
 
-    async fn try_login(&self, (email, password): (&str, &str)) -> (StatusCode, Option<String>) {
+    async fn try_login(
+        &self,
+        (email, password): (&str, &str),
+    ) -> (StatusCode, Option<String>, Value) {
         let request = axum::http::Request::post("/auth/login")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
@@ -104,20 +107,24 @@ impl TestApp {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.split(';').next())
             .map(str::to_string);
-        (response.status(), cookie)
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (
+            status,
+            cookie,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     async fn login(&self, credentials: (&str, &str)) -> Session {
-        let (status, cookie) = self.try_login(credentials).await;
+        let (status, cookie, body) = self.try_login(credentials).await;
         assert_eq!(status, StatusCode::OK, "login de {}", credentials.0);
-        let mut session = Session {
+        Session {
             cookie: cookie.unwrap(),
-            csrf: String::new(),
-        };
-        let (status, me) = self.get("/auth/me", Some(&session)).await;
-        assert_eq!(status, StatusCode::OK);
-        session.csrf = me["csrf_token"].as_str().unwrap().to_string();
-        session
+            csrf: body["csrf_token"].as_str().unwrap().to_string(),
+        }
     }
 
     async fn user_id(&self, teacher: &Session, email: &str) -> String {
@@ -270,13 +277,13 @@ async fn login_sets_a_session_and_me_returns_the_csrf_token() {
 async fn repeated_wrong_passwords_block_the_email() {
     let app = TestApp::new().await;
     for _ in 0..db::MAX_LOGIN_ATTEMPTS {
-        let (status, cookie) = app.try_login((STUDENT.0, "incorrecta")).await;
+        let (status, cookie, _) = app.try_login((STUDENT.0, "incorrecta")).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert!(cookie.is_none());
     }
-    let (status, _) = app.try_login(STUDENT).await;
+    let (status, _, _) = app.try_login(STUDENT).await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
-    let (status, _) = app.try_login(TEACHER).await;
+    let (status, _, _) = app.try_login(TEACHER).await;
     assert_eq!(status, StatusCode::OK);
 }
 
@@ -332,7 +339,7 @@ async fn a_user_changes_the_profile_and_the_password() {
         .post("/auth/password", &session, change(STUDENT.1, "nueva-clave"))
         .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, _) = app.try_login(STUDENT).await;
+    let (status, _, _) = app.try_login(STUDENT).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     app.login((STUDENT.0, "nueva-clave")).await;
 }
@@ -436,10 +443,12 @@ async fn a_teacher_manages_courses_groups_and_members() {
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
-    let (_, context) = app.get("/academic/context", Some(&teacher)).await;
+    let (status, context) = app.get("/academic/context", Some(&teacher)).await;
+    assert_eq!(status, StatusCode::OK);
     assert!(context.to_string().contains(&course_id));
     let student = app.login(STUDENT).await;
-    let (_, context) = app.get("/academic/context", Some(&student)).await;
+    let (status, context) = app.get("/academic/context", Some(&student)).await;
+    assert_eq!(status, StatusCode::OK);
     assert!(context.to_string().contains(&course_id));
 
     let (status, table) = app
@@ -658,7 +667,13 @@ async fn a_teacher_grades_and_the_gradebook_shows_it() {
     let student = app.login(STUDENT).await;
     let (status, grades) = app.get("/grades", Some(&student)).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(grades.to_string().contains("7.5"), "{grades}");
+    let score = &grades[0]["students"][0]["scores"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["component_id"] == component_id)
+        .unwrap()["raw_points"];
+    assert_eq!(score.as_f64(), Some(7.5), "{grades}");
 }
 
 #[tokio::test]
@@ -1025,7 +1040,8 @@ async fn report_members_are_invited_accepted_declined_and_removed() {
         .post(&format!("/submissions/{id}/decline"), &third, json!({}))
         .await;
     assert_eq!(status, StatusCode::OK);
-    let (_, invitations) = app.get("/submissions/invitations", Some(&third)).await;
+    let (status, invitations) = app.get("/submissions/invitations", Some(&third)).await;
+    assert_eq!(status, StatusCode::OK);
     assert!(!invitations.to_string().contains(&id));
 
     let (status, members) = app.get(&members_uri, Some(&teacher)).await;
