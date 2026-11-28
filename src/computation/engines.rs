@@ -350,7 +350,7 @@ fn per_replica_points(
     }
     let mut groups_of: HashMap<&str, Vec<usize>> = HashMap::new();
     for (&g, leaves) in &points {
-        for (l, _) in leaves {
+        for (l, _) in leaves.iter().filter(|(_, r)| !r.is_empty()) {
             groups_of.entry(l).or_default().push(g);
         }
     }

@@ -1458,7 +1458,9 @@ calcula sin incertidumbre usa el mismo evaluador:
    el ajuste, el extremo de una intermedia se propaga desde el punto de su corrida (como su valor),
    y dos extremos que nombran el mismo punto (`x_first` y `x_last2` con dos puntos) cuentan una vez.
    Desde el ítem 4b la U de un agregado sale con el método por réplica (ver 4b), así el extremo
-   de una intermedia da la U de esa intermedia en su corrida.
+   de una intermedia da la U de esa intermedia en su corrida. El tipo B sigue saliendo de las
+   derivadas en los promedios: si la fórmula diverge justo en los promedios, el valor es finito y
+   la U no se puede calcular, con su aviso.
    Como los mensurandos, un agregado puede ir **sin incertidumbre** (`has_uncertainty = false`):
    se entrega solo el valor y es exacto para los agregados siguientes. Así van los cuatro de
    Fluidos II (`Re_max`, `Re_min`, `Re_medio`, `M_teorico`), como en la hoja de resultados.

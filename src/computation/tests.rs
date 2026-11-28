@@ -5627,3 +5627,44 @@ fn an_endpoint_past_a_short_series_pairs_like_the_point_result() {
         aggregate_u(&a, "ql")
     );
 }
+
+#[test]
+fn a_single_reading_shared_by_two_endpoints_does_not_force_the_means() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let (v1, v2) = ([20.0, 20.4, 19.6], [30.0, 30.6, 29.7]);
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale("V", vec![vec![10.0, 10.2, 9.8], v1.to_vec(), v2.to_vec()]),
+        MeasurementInput {
+            instrument_id: Some("i1".into()),
+            scale_id: Some("s1".into()),
+            ..measurement("t", &[5.0, 5.0])
+        },
+    ];
+    let a = with_aggregates(
+        &quantities,
+        &[intermediate("Q", "V*V/t", false)],
+        &[aggregate("s", "Q_last + Q_last2")],
+        &scales,
+        &measurements,
+    );
+    let t = 5.0;
+    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+    let (m1, m2) = (mean(&v1), mean(&v2));
+    let a_of =
+        |v: &[f64]| crate::uncertainty::type_a(&v.iter().map(|x| x * x / t).collect::<Vec<_>>()).2;
+    let (ub1, _) = type_b_in(&fab_scale(), "A", m1);
+    let (ub2, _) = type_b_in(&fab_scale(), "A", m2);
+    let (ut, _) = type_b_in(&fab_scale(), "A", t);
+    let b = [
+        2.0 * m1 * ub1 / t,
+        2.0 * m2 * ub2 / t,
+        (m1 * m1 + m2 * m2) / (t * t) * ut,
+    ];
+    let textbook =
+        (b.iter().map(|x| x * x).sum::<f64>() + a_of(&v1).powi(2) + a_of(&v2).powi(2)).sqrt();
+    let u = aggregate_u(&a, "s");
+    assert!(close(u, textbook, 1e-9), "{u} vs {textbook}");
+}
