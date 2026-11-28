@@ -1499,9 +1499,11 @@ calcula sin incertidumbre usa el mismo evaluador:
      cambia. Una magnitud que solo entra en un eje ahora tiene u por punto (y su aviso de escala,
      si no la tiene). Las curvas no llevan barras. Golden: los de regresión ganan `u_points`;
      Fluidos I y Viscosidad cambian levemente la U de `Re` (no el valor).
-   - **4b** ✅: los agregados con el mismo método. Cada hoja de punto (`px__p{k}`) pertenece a su
-     punto `k`; las réplicas de un punto se tomaron juntas y las de puntos distintos son
-     independientes. Por cada punto alcanzado, el tipo A sale de evaluar el agregado réplica por
+   - **4b** ✅: los agregados con el mismo método. Las hojas de punto se agrupan por corrida: la
+     de un extremo directo (`px__p{k}`) en su punto `k`, y la que se alcanza por la intermedia de la
+     corrida `i` en esa corrida (aunque una serie corta la haya fijado en su último punto, como en
+     el ajuste); si una misma hoja cae en dos grupos, esos grupos vuelven a los promedios. Las
+     réplicas de un grupo se tomaron juntas y las de grupos distintos son independientes. Por cada punto alcanzado, el tipo A sale de evaluar el agregado réplica por
      réplica con las magnitudes de ese punto (lo demás en su valor), y el tipo B de propagar con
      `u_b` para las hojas de esos puntos que varían; la U combina el tipo B con el tipo A de cada
      punto. Un punto vuelve a los promedios (u completa, sin tipo A) si alcanza una intermedia sobre

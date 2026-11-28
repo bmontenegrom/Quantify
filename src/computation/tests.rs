@@ -5590,3 +5590,40 @@ fn an_endpoint_on_means_past_a_short_series_stays_on_the_means() {
         v.u[1]
     );
 }
+
+#[test]
+fn an_endpoint_past_a_short_series_pairs_like_the_point_result() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale(
+            "V",
+            vec![
+                vec![10.0, 10.2, 9.8],
+                vec![20.0, 20.4, 19.6],
+                vec![30.0, 30.6, 29.7],
+            ],
+        ),
+        on_scale("t", vec![vec![5.0, 5.1, 4.9], vec![5.0, 5.2, 4.8]]),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[intermediate("Q", "V/t", false)],
+        &[],
+        &[point_result("P", "V/t")],
+        &[aggregate("ql", "Q_last")],
+        &scales,
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let p = a.point_results[0].u[2];
+    assert!(
+        close(aggregate_u(&a, "ql"), p, 1e-12),
+        "{} vs {p}",
+        aggregate_u(&a, "ql")
+    );
+}
