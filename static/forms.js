@@ -5,7 +5,7 @@ import {
   practicaTitle, practicaSubtitle, practicePartTabs, submissionForm, studentComment,
 } from "./dom.js";
 import { fetchJson, postJson, deleteJson } from "./api.js";
-import { showToast } from "./toast.js";
+import { showToast, showError } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
   validateMeasurements,
@@ -74,7 +74,7 @@ export function updateStudentSelectors({ autoLoad = true } = {}) {
     : `<option value="">Sin practicas habilitadas</option>`;
   if (state.draftPreviewPracticeId) selectDraftPreviewPractice();
   updateTableSelector();
-  if (autoLoad) loadSubmissionForm();
+  if (autoLoad) loadSubmissionForm().catch(showError);
 }
 
 export function updateTableSelector() {
@@ -217,7 +217,7 @@ async function checkExistingReport(practiceId) {
         const id = e.currentTarget.dataset.id;
         import("./submissions.js").then(({ openSubmissionWorkspace }) =>
           openSubmissionWorkspace(id),
-        );
+        ).catch(showError);
       });
       return true;
     }
@@ -899,7 +899,7 @@ export async function submitFormSubmission() {
       showToast("Cambios guardados", "success");
       exitEditMode();
       await loadSubmissions();
-      openSubmissionWorkspace(editingId);
+      openSubmissionWorkspace(editingId).catch(showError);
       return;
     }
     saveDraft();
@@ -1061,7 +1061,7 @@ export function startEditSubmission(submission) {
   state.editPrefill = submission.measurements ?? [];
   state.editPrefillStudentResults = submission.student_results ?? [];
   state.editPrefillComment = submission.student_comment ?? "";
-  import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id, submission.course_id));
+  import("./navigation.js").then(({ selectPracticeFromNav }) => selectPracticeFromNav(submission.practice_id, submission.course_id)).catch(showError);
 }
 
 export function exitEditMode() {
@@ -1326,7 +1326,7 @@ function fillReplicaRow(row, values) {
 
 submissionForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  submitFormSubmission();
+  submitFormSubmission().catch(showError);
 });
 measurementFields.addEventListener("input", scheduleDraftSave);
 measurementFields.addEventListener("change", scheduleDraftSave);
@@ -1335,5 +1335,5 @@ courseSelect.addEventListener("change", updateStudentSelectors);
 groupSelect.addEventListener("change", updateTableSelector);
 practiceSelect.addEventListener("change", () => {
   updateTableSelector();
-  loadSubmissionForm();
+  loadSubmissionForm().catch(showError);
 });

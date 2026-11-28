@@ -1,3 +1,4 @@
+import { showError } from "./toast.js";
 import { state } from "./state.js";
 import { loginScreen, appShell } from "./dom.js";
 import { fetchJson, setCsrfToken } from "./api.js";
@@ -52,4 +53,4 @@ async function startApp() {
 }
 
 setupAuth(startApp);
-init();
+init().catch(showError);

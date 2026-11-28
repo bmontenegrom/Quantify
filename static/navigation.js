@@ -1,3 +1,4 @@
+import { showError } from "./toast.js";
 import { state } from "./state.js";
 import { sidebar, navToggle, practiceNavChildren, courseSelect, practiceSelect } from "./dom.js";
 import { escapeHtml, canReview } from "./lib.js";
@@ -14,16 +15,16 @@ export function selectView(view) {
   document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
   document.querySelector(`#${view}-view`).classList.add("active");
-  if (view === "submissions") import("./submissions.js").then(({ loadSubmissions }) => loadSubmissions());
-  if (view === "gradebook") loadGrades().then(renderGradebookAdmin);
+  if (view === "submissions") import("./submissions.js").then(({ loadSubmissions }) => loadSubmissions()).catch(showError);
+  if (view === "gradebook") loadGrades().then(renderGradebookAdmin).catch(showError);
   if (view === "students") {
-    loadGrades().then(renderStudentsPage);
+    loadGrades().then(renderStudentsPage).catch(showError);
     renderStudentsPage();
   }
   if (view === "groups") renderGroupsPage();
   if (view === "courses") renderCoursesPage();
-  if (view === "instruments") import("./instruments.js").then(({ renderInstrumentsPage, refreshInstruments }) => { renderInstrumentsPage(); refreshInstruments(); });
-  if (view === "practices") import("./practices-admin.js").then(({ renderPracticesPage }) => renderPracticesPage());
+  if (view === "instruments") import("./instruments.js").then(({ renderInstrumentsPage, refreshInstruments }) => { renderInstrumentsPage(); return refreshInstruments(); }).catch(showError);
+  if (view === "practices") import("./practices-admin.js").then(({ renderPracticesPage }) => renderPracticesPage()).catch(showError);
   if (view === "practica") highlightPracticeNav();
   if (view === "account") renderAccount();
 }
@@ -59,8 +60,8 @@ export function renderPracticeNav() {
   practiceNavChildren.querySelectorAll(".nav-child").forEach((btn) => {
     btn.addEventListener("click", () => {
       closeSidebarOnMobile();
-      import("./forms.js").then(({ exitEditMode }) => exitEditMode());
-      selectPracticeFromNav(btn.dataset.practiceId);
+      import("./forms.js").then(({ exitEditMode }) => exitEditMode()).catch(showError);
+      selectPracticeFromNav(btn.dataset.practiceId).catch(showError);
     });
   });
 }
@@ -94,7 +95,7 @@ export function highlightPracticeNav() {
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     closeSidebarOnMobile();
-    import("./forms.js").then(({ exitEditMode }) => exitEditMode());
+    import("./forms.js").then(({ exitEditMode }) => exitEditMode()).catch(showError);
     if (tab.dataset.view === "students" && state.activeStudentId) {
       closeStudentWorkspace();
       selectView("students");
@@ -111,7 +112,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
       return;
     }
     if (tab.dataset.view === "instruments" && state.activeInstrumentId) {
-      import("./instruments.js").then(({ closeInstrumentWorkspace }) => closeInstrumentWorkspace());
+      import("./instruments.js").then(({ closeInstrumentWorkspace }) => closeInstrumentWorkspace()).catch(showError);
       selectView("instruments");
       return;
     }
@@ -120,11 +121,11 @@ document.querySelectorAll(".tab").forEach((tab) => {
       import("./practices-admin.js").then(({ resetPracticeWorkspace, confirmDiscardForms }) => {
         if (onPractices && confirmDiscardForms()) resetPracticeWorkspace();
         selectView("practices");
-      });
+      }).catch(showError);
       return;
     }
     if (tab.dataset.view === "submissions" && state.activeSubmissionId) {
-      import("./submissions.js").then(({ closeSubmissionWorkspace }) => closeSubmissionWorkspace());
+      import("./submissions.js").then(({ closeSubmissionWorkspace }) => closeSubmissionWorkspace()).catch(showError);
       selectView("submissions");
       return;
     }
