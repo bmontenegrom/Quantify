@@ -101,7 +101,7 @@ async fn symbol_formula_rows_for<T: SymbolFormulaRow>(
         flag_columns::<T>(),
         T::TABLE
     );
-    Ok(sqlx::query_as::<_, T>(&query)
+    Ok(sqlx::query_as::<_, T>(sqlx::AssertSqlSafe(query))
         .bind(practice_id)
         .fetch_all(conn)
         .await?)
@@ -116,7 +116,7 @@ async fn fetch_symbol_formula_row<T: SymbolFormulaRow>(
         flag_columns::<T>(),
         T::TABLE
     );
-    Ok(sqlx::query_as::<_, T>(&query)
+    Ok(sqlx::query_as::<_, T>(sqlx::AssertSqlSafe(query))
         .bind(id)
         .fetch_one(pool)
         .await?)
@@ -155,7 +155,7 @@ async fn insert_symbol_formula_row<T: SymbolFormulaRow>(
             .map(|k| format!(", ?{}", k + 9))
             .collect::<String>(),
     );
-    let mut insert = sqlx::query(&query)
+    let mut insert = sqlx::query(sqlx::AssertSqlSafe(query))
         .bind(&id)
         .bind(practice_id)
         .bind(position)
@@ -228,7 +228,7 @@ async fn update_symbol_formula_row<T: SymbolFormulaRow>(
             .map(|(k, f)| format!(", {f} = ?{}", k + 8))
             .collect::<String>(),
     );
-    let mut update = sqlx::query(&query)
+    let mut update = sqlx::query(sqlx::AssertSqlSafe(query))
         .bind(row_id)
         .bind(practice_id)
         .bind(symbol)
@@ -255,7 +255,7 @@ async fn delete_symbol_formula_row<T: SymbolFormulaRow>(
         "DELETE FROM {} WHERE id = ?1 AND practice_id = ?2",
         T::TABLE
     );
-    let result = sqlx::query(&query)
+    let result = sqlx::query(sqlx::AssertSqlSafe(query))
         .bind(row_id)
         .bind(practice_id)
         .execute(pool)
@@ -638,9 +638,9 @@ pub async fn move_item_in(
     up: bool,
 ) -> anyhow::Result<Option<bool>> {
     let (table, filter, order) = list.table_filter_and_order();
-    let mut ids: Vec<String> = sqlx::query_scalar(&format!(
+    let mut ids: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT id FROM {table} WHERE practice_id = ?1 {filter} ORDER BY {order}"
-    ))
+    )))
     .bind(practice_id)
     .fetch_all(&mut *conn)
     .await?;
@@ -657,11 +657,13 @@ pub async fn move_item_in(
     };
     ids.swap(idx, j);
     for (position, id) in ids.iter().enumerate() {
-        sqlx::query(&format!("UPDATE {table} SET position = ?2 WHERE id = ?1"))
-            .bind(id)
-            .bind(position as i64)
-            .execute(&mut *conn)
-            .await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE {table} SET position = ?2 WHERE id = ?1"
+        )))
+        .bind(id)
+        .bind(position as i64)
+        .execute(&mut *conn)
+        .await?;
     }
     Ok(Some(true))
 }
@@ -877,7 +879,7 @@ pub async fn symbol_taken_in_practice(
         let practice_id = practice_id.to_string();
         let sym = sym.to_string();
         async move {
-            let row: (i64,) = sqlx::query_as(&q)
+            let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(q))
                 .bind(practice_id)
                 .bind(sym)
                 .bind(exclude)

@@ -36,9 +36,9 @@ async fn set_display_symbol(
 ) -> anyhow::Result<bool> {
     let mut updated = 0;
     for table in db::DISPLAY_SYMBOL_TABLES {
-        updated += sqlx::query(&format!(
+        updated += sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE {table} SET display_symbol = ?1 WHERE practice_id = ?2 AND symbol = ?3"
-        ))
+        )))
         .bind(display_symbol)
         .bind(practice_id)
         .bind(symbol)

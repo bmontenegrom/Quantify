@@ -160,7 +160,7 @@ tests de siempre. Las funciones de complejidad son las 69 de
 
 | # | PR | Alcance | Hecho cuando |
 |---|---|---|---|
-| M1 | `fix(deps): actualizar dependencias con avisos de RustSec` | `cargo update` y revisión de `sqlx` (`libsqlite3-sys`, `url`, `webpki-roots`). `rsa` solo está en el lockfile, por `sqlx-mysql`, y no se compila: se declara. | `cargo audit` sin vulnerabilidades salvo `rsa`, justificada. |
+| M1 | `fix(deps): actualizar dependencias con avisos de RustSec` | `cargo update` y sqlx 0.8 → 0.9, que permite `libsqlite3-sys` ≥ 0.39 (cierra `libsqlite3-sys`, `url`, `webpki-roots` y saca `rsa` del lockfile). Las consultas con SQL armado en el código pasan por `AssertSqlSafe`. | `cargo audit` sin vulnerabilidades. |
 | M2 | `chore: política de comentarios y doctest faltante` | `comments.py --fix` en `src/practices/mod.rs`, `src/practices/parts.rs` y `src/routes/practice_admin.rs`; doctest para `validate_student_results`. | `comments.py --check` sin hallazgos y ninguna `pub fn` del motor sin doctest. |
 | M3 | `fix(frontend): manejar promesas sin capturar y etiquetas de index.html` | Las 26 promesas sin manejar (S9383) de `navigation.js`, `forms.js`, `practices-admin.js` y otros, con un `.catch` que avisa con `toast.js`; las 2 etiquetas de `index.html` (`:90` y `:291`). | Sonar con 0 bugs y fiabilidad A. |
 | M4 | `test(rutas): tests de integración de auth, entregas, cursos e instrumentos` | Router en memoria con `tower::ServiceExt::oneshot`, el mismo patrón que los tests de `src/routes/practice_admin.rs`. | Cobertura de líneas ≥ 70 % en `routes/auth.rs`, `routes/submissions.rs`, `routes/courses.rs` y `routes/instruments.rs`. |

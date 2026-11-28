@@ -76,9 +76,9 @@ pub async fn practice_in(
     conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Option<Practice>> {
-    Ok(sqlx::query_as::<_, Practice>(&format!(
+    Ok(sqlx::query_as::<_, Practice>(sqlx::AssertSqlSafe(format!(
         "SELECT {PRACTICE_COLS} FROM practices WHERE id = ?1"
-    ))
+    )))
     .bind(practice_id)
     .fetch_optional(conn)
     .await?)
@@ -146,10 +146,10 @@ pub async fn duplicate_practice(
     .fetch_all(&mut *tx)
     .await?;
     let copied = copied.join(", ");
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT INTO practices (id, name, status, created_by, created_at, {copied}) \
          SELECT ?2, ?3, 'borrador', ?4, ?5, {copied} FROM practices WHERE id = ?1"
-    ))
+    )))
     .bind(source_id)
     .bind(&id)
     .bind(name.trim())
@@ -158,9 +158,9 @@ pub async fn duplicate_practice(
     .execute(&mut *tx)
     .await?;
     for table in DEFINITION_TABLES {
-        let columns: Vec<String> = sqlx::query_scalar(&format!(
+        let columns: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('id', 'practice_id')"
-        ))
+        )))
         .fetch_all(&mut *tx)
         .await?;
         let list = columns.join(", ");
@@ -169,10 +169,10 @@ pub async fn duplicate_practice(
         } else {
             ""
         };
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO {table} (id, practice_id, {list}) \
              SELECT lower(hex(randomblob(16))), ?2, {list} FROM {table} WHERE practice_id = ?1 {live}"
-        ))
+        )))
         .bind(source_id)
         .bind(&id)
         .execute(&mut *tx)
@@ -218,9 +218,9 @@ pub async fn duplicate_practice(
         .execute(&mut *tx)
         .await?;
         for table in ["practice_quantities", "practice_results"] {
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE {table} SET section_id = ?1 WHERE practice_id = ?2 AND section_id = ?3"
-            ))
+            )))
             .bind(&new)
             .bind(&id)
             .bind(&old)

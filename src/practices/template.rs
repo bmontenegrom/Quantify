@@ -674,9 +674,9 @@ async fn write_template(
             ("practice_results", &section.results),
         ] {
             for symbol in symbols {
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "UPDATE {table} SET section_id = ?1 WHERE practice_id = ?2 AND symbol = ?3"
-                ))
+                )))
                 .bind(&section_id)
                 .bind(id)
                 .bind(symbol.trim())

@@ -307,9 +307,9 @@ async fn golden_practices_match() {
             "practice_parts",
             "practice_sections",
         ] {
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE {table} SET position = -position WHERE practice_id = ?1"
-            ))
+            )))
             .bind(&input.practice_id)
             .execute(&pool)
             .await

@@ -195,10 +195,10 @@ pub(super) async fn subgroups_for_course(
 
     let mut summaries = Vec::with_capacity(subgroups.len());
     for subgroup in subgroups {
-        let practice = sqlx::query_as::<_, Practice>(&format!(
+        let practice = sqlx::query_as::<_, Practice>(sqlx::AssertSqlSafe(format!(
             "SELECT {} FROM practices WHERE id = ?1",
             crate::db::PRACTICE_COLS
-        ))
+        )))
         .bind(&subgroup.practice_id)
         .fetch_one(pool)
         .await?;

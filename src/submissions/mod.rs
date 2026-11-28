@@ -277,11 +277,11 @@ pub async fn submission_list_for_user(
     };
 
     let rows = if is_teacher {
-        sqlx::query_as::<_, SubmissionListItem>(&query)
+        sqlx::query_as::<_, SubmissionListItem>(sqlx::AssertSqlSafe(query))
             .fetch_all(pool)
             .await?
     } else {
-        sqlx::query_as::<_, SubmissionListItem>(&query)
+        sqlx::query_as::<_, SubmissionListItem>(sqlx::AssertSqlSafe(query))
             .bind(&user.id)
             .fetch_all(pool)
             .await?
