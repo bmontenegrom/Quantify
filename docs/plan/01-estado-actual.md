@@ -4,7 +4,7 @@ Snapshot del MVP tal como está en `main` al 29-05-2026 (post Fases 0–2.5).
 
 ## Stack
 
-- **Backend**: Rust + Axum 0.8, SQLite vía `sqlx` 0.8, Tokio.
+- **Backend**: Rust + Axum 0.8, SQLite vía `sqlx` 0.9, Tokio.
 - **Frontend**: HTML/CSS/JS estático (`static/`) servido por el backend con `ServeDir`.
   Lógica pura/selectores extraída a `static/lib.js` (ES module) para poder testearla.
 - **Auth**: sesiones por cookie `quantify_session` (12 h), hash de contraseña SHA-256 con salt.
