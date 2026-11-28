@@ -60,8 +60,12 @@ export function renderPracticeNav() {
   practiceNavChildren.querySelectorAll(".nav-child").forEach((btn) => {
     btn.addEventListener("click", () => {
       closeSidebarOnMobile();
-      import("./forms.js").then(({ exitEditMode }) => exitEditMode()).catch(showError);
-      selectPracticeFromNav(btn.dataset.practiceId).catch(showError);
+      import("./forms.js")
+        .then(({ exitEditMode }) => {
+          exitEditMode();
+          return selectPracticeFromNav(btn.dataset.practiceId);
+        })
+        .catch(showError);
     });
   });
 }

@@ -52,5 +52,6 @@ async function startApp() {
   await loadInvitations();
 }
 
+window.addEventListener("unhandledrejection", (event) => showError(event.reason));
 setupAuth(startApp);
 init().catch(showError);

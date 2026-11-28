@@ -10,7 +10,7 @@ function getRegion() {
   return region;
 }
 
-export const showError = (error) => showToast(error.message, "error");
+export const showError = (error) => showToast(error?.message || String(error), "error");
 
 export function showToast(message, kind = "info", duration = 4000) {
   const el = document.createElement("div");

@@ -215,9 +215,7 @@ async function checkExistingReport(practiceId) {
         </div>`;
       measurementFields.querySelector(".view-existing-btn")?.addEventListener("click", (e) => {
         const id = e.currentTarget.dataset.id;
-        import("./submissions.js").then(({ openSubmissionWorkspace }) =>
-          openSubmissionWorkspace(id),
-        ).catch(showError);
+        openSubmissionWorkspace(id).catch(showError);
       });
       return true;
     }
@@ -899,7 +897,7 @@ export async function submitFormSubmission() {
       showToast("Cambios guardados", "success");
       exitEditMode();
       await loadSubmissions();
-      openSubmissionWorkspace(editingId).catch(showError);
+      await openSubmissionWorkspace(editingId);
       return;
     }
     saveDraft();
