@@ -5431,8 +5431,11 @@ fn aggregate_u(a: &FormAnalysis, symbol: &str) -> f64 {
     a.aggregates.iter().find(|g| g.symbol == symbol).unwrap().u
 }
 
-#[test]
-fn an_endpoint_of_a_per_replica_intermediate_takes_its_u() {
+fn v_over_t() -> (
+    Vec<PracticeQuantity>,
+    HashMap<String, InstrumentScale>,
+    Vec<MeasurementInput>,
+) {
     let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
     let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
     let measurements = vec![
@@ -5455,6 +5458,12 @@ fn an_endpoint_of_a_per_replica_intermediate_takes_its_u() {
             ],
         ),
     ];
+    (quantities, scales, measurements)
+}
+
+#[test]
+fn an_endpoint_of_a_per_replica_intermediate_takes_its_u() {
+    let (quantities, scales, measurements) = v_over_t();
     let a = with_aggregates(
         &quantities,
         &[intermediate("Q", "V/t", false)],
@@ -5479,28 +5488,7 @@ fn an_endpoint_of_a_per_replica_intermediate_takes_its_u() {
 
 #[test]
 fn an_endpoint_of_an_intermediate_on_means_propagates_on_the_means() {
-    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
-    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
-    let measurements = vec![
-        measurement("px", &[1.0, 2.0, 3.0]),
-        measurement("py", &[2.0, 4.1, 5.9]),
-        on_scale(
-            "V",
-            vec![
-                vec![10.0, 10.2, 9.8],
-                vec![20.0, 20.4, 19.6],
-                vec![30.0, 30.1, 29.9],
-            ],
-        ),
-        on_scale(
-            "t",
-            vec![
-                vec![5.0, 5.1, 4.9],
-                vec![5.0, 5.2, 4.9],
-                vec![5.0, 5.0, 5.1],
-            ],
-        ),
-    ];
+    let (quantities, scales, measurements) = v_over_t();
     let a = with_aggregates(
         &quantities,
         &[intermediate("v", "V/t", true)],
@@ -5539,6 +5527,66 @@ fn an_endpoint_with_uneven_replicas_falls_back_to_the_means() {
         &HashMap::new(),
         &measurements,
     );
+    let u_v = crate::uncertainty::type_a(&[10.0, 10.2, 9.8]).2;
+    let u_t = crate::uncertainty::type_a(&[5.0, 5.2]).2;
+    let textbook = 10.0 / 5.1 * f64::hypot(u_v / 10.0, u_t / 5.1);
     let u = aggregate_u(&a, "r");
-    assert!(u.is_finite() && u > 0.0, "{u}");
+    assert!(close(u, textbook, 1e-12), "{u} vs {textbook}");
+}
+
+#[test]
+fn an_endpoint_with_a_single_reading_matches_the_point_result() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale("V", vec![vec![10.0, 10.2, 9.8]; 3]),
+        on_scale("t", vec![vec![5.0]; 3]),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[point_result("P", "V*V/t")],
+        &[aggregate("pf", "V_first*V_first/t_first")],
+        &scales,
+        "px",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let p = a.point_results[0].u[0];
+    assert!(p.is_finite());
+    assert!(
+        close(aggregate_u(&a, "pf"), p, 1e-12),
+        "{} vs {p}",
+        aggregate_u(&a, "pf")
+    );
+}
+
+#[test]
+fn an_endpoint_on_means_past_a_short_series_stays_on_the_means() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale("V", vec![vec![10.0, 10.2, 9.8], vec![20.0, 20.4, 19.6]]),
+        on_scale("t", vec![vec![5.0, 5.1, 4.9], vec![5.0, 5.2, 4.9]]),
+    ];
+    let a = with_aggregates(
+        &quantities,
+        &[intermediate("v", "V/t", true)],
+        &[aggregate("vl", "v_last")],
+        &scales,
+        &measurements,
+    );
+    let v = intermediate_u(&a, "v");
+    assert!(
+        close(aggregate_u(&a, "vl"), v.u[1], 1e-12),
+        "{} vs {}",
+        aggregate_u(&a, "vl"),
+        v.u[1]
+    );
 }

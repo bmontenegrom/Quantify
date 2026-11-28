@@ -304,32 +304,39 @@ fn per_replica_points(
     tree: &Node,
     deps: &HashMap<&str, &Node>,
     leaf_point: &HashMap<String, (&str, usize, f64)>,
-    on_means_runs: &HashMap<String, usize>,
+    on_means_runs: &std::collections::HashSet<String>,
     inputs: &PointInputs,
     leaf: &dyn Fn(&str) -> (f64, f64),
 ) -> std::collections::BTreeMap<usize, f64> {
-    let mut stack: Vec<&str> = tree.iter_variable_identifiers().collect();
+    let mut stack: Vec<(&str, bool)> = tree
+        .iter_variable_identifiers()
+        .map(|v| (v, false))
+        .collect();
     let mut seen = std::collections::HashSet::new();
     let mut points: std::collections::BTreeMap<usize, Vec<(&str, &[f64])>> = Default::default();
     let mut on_means = std::collections::HashSet::new();
-    while let Some(s) = stack.pop() {
-        if !seen.insert(s) {
+    while let Some((s, under_means)) = stack.pop() {
+        if !seen.insert((s, under_means)) {
             continue;
         }
         if let Some(&(id, k, _)) = leaf_point.get(s) {
+            if under_means {
+                on_means.insert(k);
+            }
             let reps = inputs
                 .point_matrix
                 .get(id)
                 .and_then(|m| m.get(k))
                 .filter(|_| !inputs.broadcastable.contains(id))
                 .map_or(&[][..], Vec::as_slice);
-            points.entry(k).or_default().push((s, reps));
+            let group = points.entry(k).or_default();
+            if !group.iter().any(|(l, _)| *l == s) {
+                group.push((s, reps));
+            }
         }
-        if let Some(&i) = on_means_runs.get(s) {
-            on_means.insert(i);
-        }
+        let under_means = under_means || on_means_runs.contains(s);
         if let Some(t) = deps.get(s) {
-            stack.extend(t.iter_variable_identifiers());
+            stack.extend(t.iter_variable_identifiers().map(|v| (v, under_means)));
         }
     }
     points
@@ -337,16 +344,13 @@ fn per_replica_points(
         .filter(|(k, _)| !on_means.contains(k))
         .filter_map(|(k, leaves)| {
             let n = leaves.iter().map(|(_, r)| r.len()).max().unwrap_or(0);
-            if leaves.iter().any(|(_, r)| r.len() > 1 && r.len() != n) {
+            if leaves.iter().any(|(_, r)| !r.is_empty() && r.len() != n) {
                 return None;
             }
             let values: Vec<f64> = (0..n.max(1))
                 .map(|r| {
                     let at_r = |s: &str| match leaves.iter().find(|(l, _)| *l == s) {
-                        Some((_, reps)) if !reps.is_empty() => (
-                            reps.get(r).or(reps.first()).copied().unwrap_or(f64::NAN),
-                            0.0,
-                        ),
+                        Some((_, reps)) if !reps.is_empty() => (reps[r], 0.0),
                         _ => (leaf(s).0, 0.0),
                     };
                     propagate(tree, deps, &at_r, &[]).value
@@ -1490,7 +1494,7 @@ pub fn compute_regresion(
         }
     };
     let mut owned_trees: Vec<(String, Node)> = Vec::new();
-    let mut on_means_runs: HashMap<String, usize> = HashMap::new();
+    let mut on_means_runs: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut runs: Vec<usize> = vec![0, 1, last - 1, last];
     runs.sort_unstable();
     runs.dedup();
@@ -1498,7 +1502,7 @@ pub fn compute_regresion(
         for &i in &runs {
             let renamed = rename_symbols(&it.formula, |s| at_run(s, i));
             if it.on_means {
-                on_means_runs.insert(run_leaf(&it.symbol, i), i);
+                on_means_runs.insert(run_leaf(&it.symbol, i));
             }
             match super::parse(&renamed) {
                 Ok(tree) => owned_trees.push((run_leaf(&it.symbol, i), tree)),
