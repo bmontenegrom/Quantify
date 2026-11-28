@@ -1304,13 +1304,52 @@ pub fn compute_regresion(
     let mut allowed: Vec<String> = shared.iter().map(|q| q.symbol.clone()).collect();
     allowed.push("slope".into());
     allowed.push("intercept".into());
-    let line = [
+    let quantity_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
+    let (compiled_intermediates, _) = compile_intermediates(quantity_symbols, intermediates)?;
+    let axis_formulas: HashMap<&str, &Node> = compiled_intermediates
+        .iter()
+        .map(|(it, tree)| (it.symbol.as_str(), tree))
+        .collect();
+    let loads: Vec<(&str, f64, f64, f64)> = shared
+        .iter()
+        .map(|q| q.symbol.as_str())
+        .filter_map(|m| {
+            let u_m = us.get(m).copied().filter(|u| u.is_finite() && *u > 0.0)?;
+            axis_trees
+                .iter()
+                .any(|t| dependencies(t, &axis_formulas).1.contains(&m))
+                .then_some(())?;
+            let d_points: Vec<(f64, f64)> = contexts
+                .iter()
+                .map(|ctx| {
+                    let d = |t: &Node| derivative(t, &axis_formulas, ctx, m);
+                    (d(&axis_trees[0]), d(&axis_trees[1]))
+                })
+                .collect();
+            let (db, da) = analysis::line_sensitivity(&points, &d_points);
+            (db.is_finite() && da.is_finite()).then_some((m, u_m, db, da))
+        })
+        .collect();
+    let mut line = vec![
         vec![
             ("slope", fit.u_slope),
             ("intercept", -fit.mean_x * fit.u_slope),
         ],
         vec![("intercept", fit.u_mean_y)],
     ];
+    for &(m, u_m, db, da) in &loads {
+        line.push(vec![("slope", db * u_m), ("intercept", da * u_m), (m, u_m)]);
+        us.insert(m.to_string(), 0.0);
+    }
+    let total = |u: f64, pick: fn(&(&str, f64, f64, f64)) -> f64| {
+        (!loads.is_empty()).then(|| {
+            loads
+                .iter()
+                .fold(u, |acc, l| uncertainty::combine(acc, pick(l) * l.1))
+        })
+    };
+    let u_slope_total = total(fit.u_slope, |l| l.2);
+    let u_intercept_total = total(fit.u_intercept, |l| l.3);
     let (derived, result_trees) =
         derive_results(results, &allowed, &means, &us, &line, &mut warnings)?;
 
@@ -1325,8 +1364,6 @@ pub fn compute_regresion(
     pr_allowed.extend(derived.iter().map(|d| d.symbol.clone()));
     pr_allowed.push("slope".into());
     pr_allowed.push("intercept".into());
-    let quantity_symbols: Vec<String> = quantities.iter().map(|q| q.symbol.clone()).collect();
-    let (compiled_intermediates, _) = compile_intermediates(quantity_symbols, intermediates)?;
     let exact: HashMap<&str, f64> = derived
         .iter()
         .filter(|d| !d.has_uncertainty)
@@ -1689,6 +1726,9 @@ pub fn compute_regresion(
             intercept: fit.intercept,
             u_slope: fit.u_slope,
             u_intercept: fit.u_intercept,
+            u_slope_total,
+            u_intercept_total,
+            shared: loads.iter().map(|l| l.0.to_string()).collect(),
             r_squared: fit.r_squared,
             u_points,
             x_label: x_formula.to_string(),
@@ -1831,6 +1871,29 @@ fn dependencies<'a>(
         .into_iter()
         .collect();
     (order, vars)
+}
+
+fn derivative(tree: &Node, formulas: &HashMap<&str, &Node>, ctx: &PointContext, wrt: &str) -> f64 {
+    let (order, vars) = dependencies(tree, formulas);
+    let mut duals: HashMap<&str, Dual> = vars
+        .iter()
+        .map(|&s| {
+            let v = ctx.get(s).copied().unwrap_or(f64::NAN);
+            (
+                s,
+                if s == wrt {
+                    Dual::variable(v, 0, 1)
+                } else {
+                    Dual::constant(v, 1)
+                },
+            )
+        })
+        .collect();
+    let weigh = |d: &[f64]| d[0].abs();
+    for &name in &order {
+        duals.insert(name, eval_dual(formulas[name], &duals, 1, &weigh));
+    }
+    eval_dual(tree, &duals, 1, &weigh).d[0]
 }
 
 fn propagate(

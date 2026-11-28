@@ -152,6 +152,12 @@ pub struct RegressionResult {
     pub intercept: f64,
     pub u_slope: f64,
     pub u_intercept: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub u_slope_total: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub u_intercept_total: Option<f64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shared: Vec<String>,
     pub r_squared: f64,
     pub u_points: Vec<(f64, f64)>,
     pub x_label: String,

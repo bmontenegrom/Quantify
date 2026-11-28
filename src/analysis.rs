@@ -249,6 +249,36 @@ pub fn linear_regression(
     })
 }
 
+/// Derivadas de la pendiente y la ordenada del ajuste respecto de un parámetro, dadas las derivadas de cada punto.
+///
+/// ```
+/// let (db, da) = quantify::analysis::line_sensitivity(&[(1.0, 2.0), (2.0, 4.0), (3.0, 6.0)], &[(0.0, 1.0), (0.0, 2.0), (0.0, 3.0)]);
+/// assert!((db - 1.0).abs() < 1e-12 && da.abs() < 1e-12);
+/// ```
+pub fn line_sensitivity(points: &[(f64, f64)], d_points: &[(f64, f64)]) -> (f64, f64) {
+    let n = points.len() as f64;
+    let mean = |v: &mut dyn Iterator<Item = f64>| v.sum::<f64>() / n;
+    let (mx, my) = (
+        mean(&mut points.iter().map(|p| p.0)),
+        mean(&mut points.iter().map(|p| p.1)),
+    );
+    let (mdx, mdy) = (
+        mean(&mut d_points.iter().map(|p| p.0)),
+        mean(&mut d_points.iter().map(|p| p.1)),
+    );
+    let (mut sxx, mut sxy, mut dsxx, mut dsxy) = (0.0, 0.0, 0.0, 0.0);
+    for (&(x, y), &(dx, dy)) in points.iter().zip(d_points) {
+        let (cx, cy, cdx, cdy) = (x - mx, y - my, dx - mdx, dy - mdy);
+        sxx += cx * cx;
+        sxy += cx * cy;
+        dsxx += 2.0 * cx * cdx;
+        dsxy += cdx * cy + cx * cdy;
+    }
+    let slope = sxy / sxx;
+    let db = (dsxy - slope * dsxx) / sxx;
+    (db, mdy - db * mx - slope * mdx)
+}
+
 /// Ajuste de relajacion exponencial V(t) = V0 * exp(-t / tau).
 ///
 /// ```

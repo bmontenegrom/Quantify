@@ -557,7 +557,11 @@ fn line_correlation_warnings(def: &practices::PracticeDefinition) -> Vec<Problem
         .collect();
     let on_axes: Vec<String> = reach(axes)
         .into_iter()
-        .filter(|s| def.quantities.iter().any(|q| q.symbol == *s))
+        .filter(|s| {
+            def.quantities
+                .iter()
+                .any(|q| q.symbol == *s && q.per_point && !q.is_given)
+        })
         .collect();
     let point_results = def.point_results.iter().map(|pr| {
         (
@@ -4058,7 +4062,7 @@ mod tests {
             "{}",
             fluidos[0].message
         );
-        assert!(warned("viscosidad").await[0].message.contains("(R, dx, t)"));
+        assert!(warned("viscosidad").await[0].message.contains("(R, t)"));
         assert!(warned("p1-estadistica").await.is_empty());
         let mut def = practices::definition(&pool, "fluidos-1")
             .await
