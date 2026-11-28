@@ -171,9 +171,10 @@ tests de siempre. Las funciones de complejidad son las 69 de
 | M9 | `refactor(frontend): romper ciclos de navigation.js y borrar exports sin uso` | Las vistas se registran en `navigation.js` en vez de que él las importe; la clausura de las pestañas (`navigation.js:95`) y las 6 funciones de `practices-admin.js`; los 35 *exports* sin uso que marca knip. | `madge` sin ciclos, knip sin *exports* sin uso y esos archivos sin funciones sobre los umbrales. |
 | M10 | `refactor(practicas): complejidad de src/practices/` | `template.rs` (3), `versions.rs` (2), `changes.rs` (2), `lifecycle.rs` y `crud.rs`. | Esos archivos sin funciones sobre los umbrales. |
 | M11 | `refactor: complejidad restante de Rust` | `dimensions.rs` (3), `units.rs` (2), `db/mod.rs` (2), `routes/submissions.rs` (2), `instruments/seed.rs`, `routes/auth.rs`, `submissions/mod.rs`, `main.rs` y `db/schema.rs` (`migrate`, con un paso por versión). | Ninguna función de Rust sobre los umbrales. |
+| M12 | `refactor(deps): reemplazar chrono por jiff` | `chrono` no tiene mantenimiento ([RUSTSEC-2026-0543](https://rustsec.org/advisories/RUSTSEC-2026-0543), [chrono#1768](https://github.com/chronotope/chrono/issues/1768)); su mantenedor y RustSec recomiendan `jiff`. Se usa `jiff` con serde y `jiff-sqlx` 1.0 (SQLite, sqlx 0.9) para `Utc::now()`, las sumas de duraciones y los 21 campos `DateTime<Utc>`. Hay que probar: que lea las fechas que guardó chrono en una copia de una base vieja, que el JSON siga en RFC 3339 y cómo se integran los tipos de `jiff-sqlx` con `FromRow`. | `chrono` fuera de `Cargo.lock` y `cargo audit` sin avisos; la app arranca sobre una base vieja y los E2E pasan sin cambios en el frontend. |
 
 **Orden.** Primero lo barato y lo que corrige riesgos (M1–M3). Después M4, porque los tests de rutas
-cubren los refactors de M7 y M11. Los refactors del motor (M5 y M6) agregan sus tests de mutantes
+cubren los refactors de M7 y M11. M12 va después de M4, por la misma razón. Los refactors del motor (M5 y M6) agregan sus tests de mutantes
 antes de tocar el código.
 
 **Reglas de los refactors:**
