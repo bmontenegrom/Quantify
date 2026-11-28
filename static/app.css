@@ -1619,6 +1619,12 @@ button.back-link {
   fill: var(--muted);
 }
 
+.reg-point-nou {
+  fill: var(--panel);
+  stroke: var(--accent-strong);
+  stroke-width: 1.5;
+}
+
 .reg-label {
   fill: var(--muted);
   font-size: 11px;

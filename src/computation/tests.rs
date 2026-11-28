@@ -5343,3 +5343,65 @@ fn a_single_valued_intermediate_stays_per_replica() {
         );
     }
 }
+
+#[test]
+fn an_axis_that_is_not_derivable_names_the_axis() {
+    let quantities = vec![quantity("px"), quantity("py")];
+    let measurements = vec![
+        MeasurementInput {
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.9, 2.1], vec![2.9, 3.1]]),
+            ..measurement("px", &[])
+        },
+        measurement("py", &[2.0, 4.1, 5.9]),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[],
+        &[],
+        &HashMap::new(),
+        "math::sqrt(px - 1)",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    assert!(
+        a.warnings
+            .iter()
+            .any(|w| w.starts_with("La incertidumbre del eje x")),
+        "{:?}",
+        a.warnings
+    );
+}
+
+#[test]
+fn a_failing_intermediate_warns_once() {
+    let quantities = vec![quantity("V"), quantity("py")];
+    let measurements = vec![
+        MeasurementInput {
+            point_replicas: Some(vec![vec![0.9, 1.1], vec![1.9, 2.1], vec![2.9, 3.1]]),
+            ..measurement("V", &[])
+        },
+        measurement("py", &[2.0, 4.1, 5.9]),
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[intermediate("Q", "math::sqrt(V - 1)", true)],
+        &[],
+        &[point_result("P", "Q")],
+        &[],
+        &HashMap::new(),
+        "Q",
+        "py",
+        &measurements,
+    )
+    .unwrap();
+    let failing: Vec<&String> = a
+        .warnings
+        .iter()
+        .filter(|w| w.contains("no se puede calcular"))
+        .collect();
+    assert_eq!(failing.len(), 1, "{:?}", a.warnings);
+    assert!(failing[0].contains("intermedia"), "{failing:?}");
+}

@@ -176,7 +176,11 @@ struct RunCtx<'a> {
     factors: &'a [Vec<(&'a str, f64)>],
 }
 
-type RunReps<'a> = HashMap<&'a str, Vec<f64>>;
+#[derive(Default)]
+struct RunState<'a> {
+    reps: HashMap<&'a str, Vec<f64>>,
+    failed: std::collections::HashSet<&'a str>,
+}
 
 struct RunU {
     u: f64,
@@ -224,23 +228,23 @@ impl<'a> RunCtx<'a> {
         }
     }
 
-    fn reaches_unpaired(&self, tree: &Node, reps: &RunReps, n_reps: usize) -> bool {
+    fn reached(&self, tree: &Node, state: &RunState, n_reps: usize) -> (bool, bool) {
         let mut stack: Vec<&str> = tree.iter_variable_identifiers().collect();
         let mut seen = std::collections::HashSet::new();
+        let (mut unpaired, mut failed) = (false, false);
         while let Some(s) = stack.pop() {
             if !seen.insert(s) {
                 continue;
             }
-            if let (Some(&on_means), Some(r)) = (self.on_means.get(s), reps.get(s)) {
-                if on_means || (r.len() != n_reps && r.len() != 1) {
-                    return true;
-                }
+            if let (Some(&on_means), Some(r)) = (self.on_means.get(s), state.reps.get(s)) {
+                unpaired |= on_means || (r.len() != n_reps && r.len() != 1);
+                failed |= state.failed.contains(s);
             }
             if let Some(t) = self.formulas.get(s) {
                 stack.extend(t.iter_variable_identifiers());
             }
         }
-        false
+        (unpaired, failed)
     }
 
     fn run_u(
@@ -249,13 +253,12 @@ impl<'a> RunCtx<'a> {
         on_means: bool,
         i: usize,
         ctx: &PointContext,
-        reps: &RunReps,
+        state: &RunState,
     ) -> RunU {
-        let replicas = point_intermediate(on_means, tree, &self.inputs, reps, i);
-        let per_replica = !on_means
-            && replicas.iter().all(|v| v.is_finite())
-            && !self.reaches_unpaired(tree, reps, replicas.len());
-        let missing = std::cell::Cell::new(false);
+        let replicas = point_intermediate(on_means, tree, &self.inputs, &state.reps, i);
+        let (unpaired, failed) = self.reached(tree, state, replicas.len());
+        let per_replica = !on_means && replicas.iter().all(|v| v.is_finite()) && !unpaired;
+        let missing = std::cell::Cell::new(failed);
         let varies = |s: &str| {
             per_replica
                 && self
@@ -300,8 +303,11 @@ impl<'a> RunCtx<'a> {
 
 fn u_warning(what: &str, not_derivable: bool, on_kink: bool) -> Option<String> {
     if not_derivable {
+        let of = what
+            .strip_prefix("el ")
+            .map_or_else(|| format!("de {what}"), |rest| format!("del {rest}"));
         Some(format!(
-            "La incertidumbre de {what} no se puede calcular en alguna corrida: la fórmula no es derivable ahí (p. ej. una raíz en 0) o falta la de una magnitud."
+            "La incertidumbre {of} no se puede calcular en alguna corrida: la fórmula no es derivable ahí (p. ej. una raíz en 0) o falta la de una magnitud."
         ))
     } else if on_kink {
         Some(format!(
@@ -316,7 +322,7 @@ fn intermediate_uncertainties<'a>(
     run: &RunCtx<'a>,
     contexts: &[PointContext],
     warnings: &mut Vec<String>,
-) -> (Vec<PointResultComputation>, Vec<RunReps<'a>>) {
+) -> (Vec<PointResultComputation>, Vec<RunState<'a>>) {
     let compiled = run.compiled;
     let mut out: Vec<PointResultComputation> = compiled
         .iter()
@@ -352,25 +358,28 @@ fn intermediate_uncertainties<'a>(
     }
     let mut states = Vec::with_capacity(contexts.len());
     for (i, ctx) in contexts.iter().enumerate() {
-        let mut reps = RunReps::new();
+        let mut state = RunState::default();
         for (k, (it, tree)) in compiled.iter().enumerate() {
             let symbol = it.symbol.as_str();
             if i >= runs[symbol] {
-                let replicas = point_intermediate(it.on_means, tree, &run.inputs, &reps, i);
-                reps.insert(symbol, replicas);
+                let replicas = point_intermediate(it.on_means, tree, &run.inputs, &state.reps, i);
+                state.reps.insert(symbol, replicas);
                 continue;
             }
-            let r = run.run_u(tree, it.on_means, i, ctx, &reps);
+            let r = run.run_u(tree, it.on_means, i, ctx, &state);
             let value = ctx.get(&it.symbol).copied().unwrap_or(f64::NAN);
             let u = r.checked(value, &mut not_derivable[k], &mut on_kink[k]);
-            reps.insert(symbol, r.replicas);
+            if !u.is_finite() {
+                state.failed.insert(symbol);
+            }
+            state.reps.insert(symbol, r.replicas);
             out[k].values.push(value);
             out[k].u.push(u);
             out[k]
                 .u_expanded
                 .push(uncertainty::expand(u, uncertainty::EXPANSION_K));
         }
-        states.push(reps);
+        states.push(state);
     }
     for (k, (it, _)) in compiled.iter().enumerate() {
         let what = format!(
@@ -1295,24 +1304,21 @@ pub fn compute_regresion(
     };
     let (intermediates_out, mut states) =
         intermediate_uncertainties(&run, &contexts, &mut warnings);
-    for reps in &mut states {
-        reps.extend(extras.iter().map(|(&s, &v)| (s, vec![v])));
+    for state in &mut states {
+        state
+            .reps
+            .extend(extras.iter().map(|(&s, &v)| (s, vec![v])));
     }
     let mut axis_flags = [(false, false); 2];
-    let u_points: Vec<(f64, f64)> = contexts
-        .iter()
-        .zip(&states)
-        .enumerate()
-        .map(|(i, (ctx, state))| {
-            let [ux, uy] = [0, 1].map(|a| {
-                let r = run.run_u(&axis_trees[a], false, i, ctx, state);
-                let (nd, kink) = &mut axis_flags[a];
-                let value = if a == 0 { points[i].0 } else { points[i].1 };
-                uncertainty::expand(r.checked(value, nd, kink), uncertainty::EXPANSION_K)
-            });
-            (ux, uy)
-        })
-        .collect();
+    let mut u_points = Vec::with_capacity(points.len());
+    for (i, ((ctx, state), &(x, y))) in contexts.iter().zip(&states).zip(&points).enumerate() {
+        let axis_u = |tree: &Node, value: f64, (nd, kink): &mut (bool, bool)| {
+            let r = run.run_u(tree, false, i, ctx, state);
+            uncertainty::expand(r.checked(value, nd, kink), uncertainty::EXPANSION_K)
+        };
+        let [fx, fy] = &mut axis_flags;
+        u_points.push((axis_u(&axis_trees[0], x, fx), axis_u(&axis_trees[1], y, fy)));
+    }
     for ((axis, formula), (not_derivable, on_kink)) in [("x", x_formula), ("y", y_formula)]
         .into_iter()
         .zip(axis_flags)

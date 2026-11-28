@@ -382,15 +382,16 @@ test("regressionPlot extiende el rango Y para incluir la recta", () => {
 test("regressionPlot amplía el rango para las barras, hasta la mitad del rango de los datos", () => {
   const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1, { uPoints: [[0.5, 0], [0, 1], [null, 100]] });
   assert.deepEqual(plot.bounds, { minX: -0.5, maxX: 2, minY: -1, maxY: 7 });
-  assert.deepEqual(plot.scatter[0].ex, [32, plot.scatter[0].cx + (plot.scatter[0].cx - 32)]);
-  const [, mid, last] = plot.scatter;
-  assert.deepEqual(mid.ex, [mid.cx, mid.cx]);
-  assert.ok(mid.ey[0] > mid.cy && mid.ey[1] < mid.cy);
-  assert.deepEqual(last.ey, [188, 32]);
-  assert.deepEqual(last.clipped, [false, false, true, true]);
-  assert.deepEqual(mid.clipped, [false, false, false, false]);
-  assert.deepEqual(plot.scatter[0].clipped, [false, false, false, false]);
-  assert.equal(plot.line.x1, plot.scatter[0].cx);
+  const [first, mid, last] = plot.scatter;
+  assert.deepEqual(first.ex, { ends: [32, first.cx + (first.cx - 32)], clipped: [false, false] });
+  assert.equal(first.ey, undefined);
+  assert.equal(mid.ex, undefined);
+  assert.ok(mid.ey.ends[0] > mid.cy && mid.ey.ends[1] < mid.cy);
+  assert.deepEqual(mid.ey.clipped, [false, false]);
+  assert.deepEqual(last.ey, { ends: [188, 32], clipped: [true, true] });
+  assert.equal(last.noU, true);
+  assert.equal(first.noU, undefined);
+  assert.equal(plot.line.x1, first.cx);
 });
 
 test("regressionPlot devuelve null con <2 puntos o rango nulo", () => {

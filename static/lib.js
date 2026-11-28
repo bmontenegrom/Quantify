@@ -268,11 +268,12 @@ export function regressionPlot(points, slope, intercept, { uPoints = [], width =
     pad,
     scatter: points.map((p, i) => {
       const point = { cx: sx(p[0]), cy: sy(p[1]) };
+      if (Array.isArray(uPoints?.[i]) && uPoints[i].some((u) => !Number.isFinite(u))) point.noU = true;
+      const bar = (lo, hi, fit) => ({ ends: [fit(lo), fit(hi)], clipped: [fit(lo) !== lo, fit(hi) !== hi] });
       const [ux, uy] = [half(i, 0), half(i, 1)];
-      if (!ux && !uy) return point;
-      const ends = [sx(p[0] - ux), sx(p[0] + ux), sy(p[1] - uy), sy(p[1] + uy)];
-      const clipped = ends.map((v, k) => (k < 2 ? bx(v) : by(v)) !== v);
-      return { ...point, ex: [bx(ends[0]), bx(ends[1])], ey: [by(ends[2]), by(ends[3])], clipped };
+      if (ux) point.ex = bar(sx(p[0] - ux), sx(p[0] + ux), bx);
+      if (uy) point.ey = bar(sy(p[1] - uy), sy(p[1] + uy), by);
+      return point;
     }),
     line: { x1: sx(dataMinX), y1: sy(lineYmin), x2: sx(dataMaxX), y2: sy(lineYmax) },
     bounds: { minX, maxX, minY, maxY },
