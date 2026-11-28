@@ -16,6 +16,7 @@ Escrito el 2026-11-28, con `development` en `142ef86` (después de #172).
 5. [Estructura en el repo](#5-estructura-en-el-repo)
 6. [PRs](#6-prs)
 7. [Riesgos y decisiones abiertas](#7-riesgos-y-decisiones-abiertas)
+8. [Plan de mejoras](#8-plan-de-mejoras)
 
 ## 1. Objetivo y decisiones
 
@@ -128,9 +129,9 @@ en `metodo.md`.
 2. **`docs(calidad): primera medición de development` (2/3).** Corre el método v1 sobre
    `development`, agrega `historial.csv`, las figuras y el informe con el estado actual: resumen por
    característica, tabla contra referencias, hallazgos principales y recomendaciones.
-3. **`docs(calidad): plan de mejoras` (3/3, opcional).** Si la medición muestra deudas concretas
-   (cobertura baja en un módulo, funciones demasiado complejas, duplicación), se suman como ítems a
-   este plan, cada uno con su PR.
+3. **`docs(calidad): plan de mejoras` (3/3).** Las recomendaciones de la línea base
+   ([informe](../calidad/2026-11-28-02e6ce8.md#5-recomendaciones)) pasan a ítems de este plan, cada
+   uno con su PR: ver [§8](#8-plan-de-mejoras).
 
 Después: cuando se quiera una medición nueva, se corre `scripts/calidad/medir.sh` y se suma su
 informe.
@@ -147,3 +148,41 @@ informe.
 - **`cargo-mutants`:** puede tardar mucho; se limita al motor y a un tiempo máximo fijo, y el informe
   dice cuántos mutantes quedaron sin evaluar.
 - **Lighthouse:** varía entre corridas; mediana de 3 en la misma máquina.
+
+## 8. Plan de mejoras
+
+Sale de la línea base del 2026-11-28 sobre `02e6ce8`
+([informe](../calidad/2026-11-28-02e6ce8.md)). Cada ítem es una PR squash a `development`, con su
+criterio de hecho medido con el método v1: se corre
+`PASOS=<pasos> bash scripts/calidad/medir.sh <commit de la rama>` y se consolida, además de los
+tests de siempre. Las funciones de complejidad son las 69 de
+[Funciones sobre los umbrales](../calidad/2026-11-28-02e6ce8.md#funciones-sobre-los-umbrales).
+
+| # | PR | Alcance | Hecho cuando |
+|---|---|---|---|
+| M1 | `fix(deps): actualizar dependencias con avisos de RustSec` | `cargo update` y revisión de `sqlx` (`libsqlite3-sys`, `url`, `webpki-roots`). `rsa` solo está en el lockfile, por `sqlx-mysql`, y no se compila: se declara. | `cargo audit` sin vulnerabilidades salvo `rsa`, justificada. |
+| M2 | `chore: política de comentarios y doctest faltante` | `comments.py --fix` en `src/practices/mod.rs`, `src/practices/parts.rs` y `src/routes/practice_admin.rs`; doctest para `validate_student_results`. | `comments.py --check` sin hallazgos y ninguna `pub fn` del motor sin doctest. |
+| M3 | `fix(frontend): manejar promesas sin capturar y etiquetas de index.html` | Las 26 promesas sin manejar (S9383) de `navigation.js`, `forms.js`, `practices-admin.js` y otros, con un `.catch` que avisa con `toast.js`; las 2 etiquetas de `index.html` (`:90` y `:291`). | Sonar con 0 bugs y fiabilidad A. |
+| M4 | `test(rutas): tests de integración de auth, entregas, cursos e instrumentos` | Router en memoria con `tower::ServiceExt::oneshot`, el mismo patrón que los tests de `src/routes/practice_admin.rs`. | Cobertura de líneas ≥ 70 % en `routes/auth.rs`, `routes/submissions.rs`, `routes/courses.rs` y `routes/instruments.rs`. |
+| M5 | `refactor(motor): bajar la complejidad de engines.rs` | Las 8 funciones de prioridad 1: `compute_regresion`, `analyze_definition`, `run_kind_raw`, `build_points`, `compute_determinations`, `per_replica_points`, `compute_quantities` y `derive_results`. Antes del refactor, tests que maten los mutantes no detectados de `engines.rs`. | Ninguna función de `engines.rs` sobre los umbrales y `cargo mutants --file src/computation/engines.rs` sin mutantes no detectados nuevos. |
+| M6 | `refactor(motor): complejidad de submission.rs y dual.rs` | `create_form_submission`, `check_student_result_symbols`, `update_form_submission`, `eval_dual` y `function`, con tests para los mutantes no detectados de esos archivos. | Esos archivos sin funciones sobre los umbrales. |
+| M7 | `refactor(practicas): complejidad de routes/practice_admin.rs` | Las 14 funciones (3 de prioridad 1 y 11 de prioridad 2). Si el diff crece mucho, se parte en dos PRs por prioridad. | El archivo sin funciones sobre los umbrales. |
+| M8 | `refactor(frontend): complejidad de formularios y análisis` | `forms.js` (5), `lib.js` (4), `analysis.js`, `forms-draft.js` y `forms-chrono.js`. | Esos archivos sin funciones sobre los umbrales. |
+| M9 | `refactor(frontend): romper ciclos de navigation.js y borrar exports sin uso` | Las vistas se registran en `navigation.js` en vez de que él las importe; la clausura de las pestañas (`navigation.js:95`) y las 6 funciones de `practices-admin.js`; los 35 *exports* sin uso que marca knip. | `madge` sin ciclos, knip sin *exports* sin uso y esos archivos sin funciones sobre los umbrales. |
+| M10 | `refactor(practicas): complejidad de src/practices/` | `template.rs` (3), `versions.rs` (2), `changes.rs` (2), `lifecycle.rs` y `crud.rs`. | Esos archivos sin funciones sobre los umbrales. |
+| M11 | `refactor: complejidad restante de Rust` | `dimensions.rs` (3), `units.rs` (2), `db/mod.rs` (2), `routes/submissions.rs` (2), `instruments/seed.rs`, `routes/auth.rs`, `submissions/mod.rs`, `main.rs` y `db/schema.rs` (`migrate`, con un paso por versión). | Ninguna función de Rust sobre los umbrales. |
+
+**Orden.** Primero lo barato y lo que corrige riesgos (M1–M3). Después M4, porque los tests de rutas
+cubren los refactors de M7 y M11. Los refactors del motor (M5 y M6) agregan sus tests de mutantes
+antes de tocar el código.
+
+**Reglas de los refactors:**
+
+- No cambian comportamiento: tests, E2E y golden sin cambios.
+- No suman comentarios (política del repo) ni jobs de CI.
+- Si una función no baja de los umbrales sin empeorar la lectura (por ejemplo, un `match` de
+  despacho plano), se deja y se justifica en la PR y en la próxima medición: la cognitiva es mejor
+  guía que la ciclomática.
+
+**Cierre.** Cuando terminen los ítems se hace una medición nueva con el método v1 y su informe
+compara contra la línea base en `historial.csv`.
