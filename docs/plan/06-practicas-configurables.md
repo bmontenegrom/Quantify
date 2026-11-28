@@ -1457,9 +1457,8 @@ calcula sin incertidumbre usa el mismo evaluador:
    agregado usa la recta y magnitudes de los ejes. Si una magnitud por punto tiene otro largo que
    el ajuste, el extremo de una intermedia se propaga desde el punto de su corrida (como su valor),
    y dos extremos que nombran el mismo punto (`x_first` y `x_last2` con dos puntos) cuentan una vez.
-   Vale la misma **aproximación** del ítem 1: el extremo de una intermedia muestra el promedio de
-   `f(réplicas)` y su U sale de las derivadas en `f(promedios)`; en un caso extremo (una fórmula
-   que diverge justo en los promedios) el valor es finito y la U no se puede calcular, con su aviso.
+   Desde el ítem 4b la U de un agregado sale con el método por réplica (ver 4b), así el extremo
+   de una intermedia da la U de esa intermedia en su corrida.
    Como los mensurandos, un agregado puede ir **sin incertidumbre** (`has_uncertainty = false`):
    se entrega solo el valor y es exacto para los agregados siguientes. Así van los cuatro de
    Fluidos II (`Re_max`, `Re_min`, `Re_medio`, `M_teorico`), como en la hoja de resultados.
@@ -1500,7 +1499,16 @@ calcula sin incertidumbre usa el mismo evaluador:
      cambia. Una magnitud que solo entra en un eje ahora tiene u por punto (y su aviso de escala,
      si no la tiene). Las curvas no llevan barras. Golden: los de regresión ganan `u_points`;
      Fluidos I y Viscosidad cambian levemente la U de `Re` (no el valor).
-   - **4b**: los agregados con el mismo método (combinan varias corridas: `q_first`, `px_last`).
+   - **4b** ✅: los agregados con el mismo método. Cada hoja de punto (`px__p{k}`) pertenece a su
+     punto `k`; las réplicas de un punto se tomaron juntas y las de puntos distintos son
+     independientes. Por cada punto alcanzado, el tipo A sale de evaluar el agregado réplica por
+     réplica con las magnitudes de ese punto (lo demás en su valor), y el tipo B de propagar con
+     `u_b` para las hojas de esos puntos que varían; la U combina el tipo B con el tipo A de cada
+     punto. Un punto vuelve a los promedios (u completa, sin tipo A) si alcanza una intermedia sobre
+     promedios en esa corrida, si sus magnitudes tienen distinta cantidad de réplicas o si una
+     evaluación no es finita. Así `q_first` da la U de `q` en la corrida 0 y `q_first - 2*px_first`
+     sigue en 0. Ningún golden cambia: los únicos agregados de la biblioteca (Fluidos II) van sin
+     incertidumbre.
    Es la base de una regresión ponderada (ítem de "General").
 5. **Magnitudes compartidas dentro y fuera del ajuste**: una magnitud compartida que entra en
    una fórmula de eje y también en un mensurando se trata hoy como independiente de la recta.

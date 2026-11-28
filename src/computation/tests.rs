@@ -5405,3 +5405,140 @@ fn a_failing_intermediate_warns_once() {
     assert_eq!(failing.len(), 1, "{:?}", a.warnings);
     assert!(failing[0].contains("intermedia"), "{failing:?}");
 }
+
+fn with_aggregates(
+    quantities: &[PracticeQuantity],
+    intermediates: &[PracticeIntermediate],
+    aggregates: &[PracticeAggregate],
+    scales: &HashMap<String, InstrumentScale>,
+    measurements: &[MeasurementInput],
+) -> FormAnalysis {
+    compute_regresion(
+        quantities,
+        intermediates,
+        &[],
+        &[],
+        aggregates,
+        scales,
+        "px",
+        "py",
+        measurements,
+    )
+    .unwrap()
+}
+
+fn aggregate_u(a: &FormAnalysis, symbol: &str) -> f64 {
+    a.aggregates.iter().find(|g| g.symbol == symbol).unwrap().u
+}
+
+#[test]
+fn an_endpoint_of_a_per_replica_intermediate_takes_its_u() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale(
+            "V",
+            vec![
+                vec![10.0, 10.2, 9.8],
+                vec![20.0, 20.4, 19.6],
+                vec![30.0, 30.1, 29.9],
+            ],
+        ),
+        on_scale(
+            "t",
+            vec![
+                vec![5.0, 5.1, 4.9],
+                vec![5.0, 5.2, 4.9],
+                vec![5.0, 5.0, 5.1],
+            ],
+        ),
+    ];
+    let a = with_aggregates(
+        &quantities,
+        &[intermediate("Q", "V/t", false)],
+        &[aggregate("qf", "Q_first"), aggregate("ql", "Q_last")],
+        &scales,
+        &measurements,
+    );
+    let q = intermediate_u(&a, "Q");
+    assert!(
+        close(aggregate_u(&a, "qf"), q.u[0], 1e-12),
+        "{} vs {}",
+        aggregate_u(&a, "qf"),
+        q.u[0]
+    );
+    assert!(
+        close(aggregate_u(&a, "ql"), q.u[2], 1e-12),
+        "{} vs {}",
+        aggregate_u(&a, "ql"),
+        q.u[2]
+    );
+}
+
+#[test]
+fn an_endpoint_of_an_intermediate_on_means_propagates_on_the_means() {
+    let quantities = vec![quantity("px"), quantity("py"), amp("V"), amp("t")];
+    let scales: HashMap<String, InstrumentScale> = [("s1".to_string(), fab_scale())].into();
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        on_scale(
+            "V",
+            vec![
+                vec![10.0, 10.2, 9.8],
+                vec![20.0, 20.4, 19.6],
+                vec![30.0, 30.1, 29.9],
+            ],
+        ),
+        on_scale(
+            "t",
+            vec![
+                vec![5.0, 5.1, 4.9],
+                vec![5.0, 5.2, 4.9],
+                vec![5.0, 5.0, 5.1],
+            ],
+        ),
+    ];
+    let a = with_aggregates(
+        &quantities,
+        &[intermediate("v", "V/t", true)],
+        &[aggregate("vf", "v_first")],
+        &scales,
+        &measurements,
+    );
+    let v = intermediate_u(&a, "v");
+    assert!(
+        close(aggregate_u(&a, "vf"), v.u[0], 1e-12),
+        "{} vs {}",
+        aggregate_u(&a, "vf"),
+        v.u[0]
+    );
+}
+
+#[test]
+fn an_endpoint_with_uneven_replicas_falls_back_to_the_means() {
+    let quantities = vec![quantity("px"), quantity("py"), quantity("V"), quantity("t")];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        MeasurementInput {
+            point_replicas: Some(vec![vec![10.0, 10.2, 9.8]; 3]),
+            ..measurement("V", &[])
+        },
+        MeasurementInput {
+            point_replicas: Some(vec![vec![5.0, 5.2]; 3]),
+            ..measurement("t", &[])
+        },
+    ];
+    let a = with_aggregates(
+        &quantities,
+        &[],
+        &[aggregate("r", "V_first/t_first")],
+        &HashMap::new(),
+        &measurements,
+    );
+    let u = aggregate_u(&a, "r");
+    assert!(u.is_finite() && u > 0.0, "{u}");
+}

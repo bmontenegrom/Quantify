@@ -300,6 +300,66 @@ impl<'a> RunCtx<'a> {
     }
 }
 
+fn per_replica_points(
+    tree: &Node,
+    deps: &HashMap<&str, &Node>,
+    leaf_point: &HashMap<String, (&str, usize, f64)>,
+    on_means_runs: &HashMap<String, usize>,
+    inputs: &PointInputs,
+    leaf: &dyn Fn(&str) -> (f64, f64),
+) -> std::collections::BTreeMap<usize, f64> {
+    let mut stack: Vec<&str> = tree.iter_variable_identifiers().collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut points: std::collections::BTreeMap<usize, Vec<(&str, &[f64])>> = Default::default();
+    let mut on_means = std::collections::HashSet::new();
+    while let Some(s) = stack.pop() {
+        if !seen.insert(s) {
+            continue;
+        }
+        if let Some(&(id, k, _)) = leaf_point.get(s) {
+            let reps = inputs
+                .point_matrix
+                .get(id)
+                .and_then(|m| m.get(k))
+                .filter(|_| !inputs.broadcastable.contains(id))
+                .map_or(&[][..], Vec::as_slice);
+            points.entry(k).or_default().push((s, reps));
+        }
+        if let Some(&i) = on_means_runs.get(s) {
+            on_means.insert(i);
+        }
+        if let Some(t) = deps.get(s) {
+            stack.extend(t.iter_variable_identifiers());
+        }
+    }
+    points
+        .into_iter()
+        .filter(|(k, _)| !on_means.contains(k))
+        .filter_map(|(k, leaves)| {
+            let n = leaves.iter().map(|(_, r)| r.len()).max().unwrap_or(0);
+            if leaves.iter().any(|(_, r)| r.len() > 1 && r.len() != n) {
+                return None;
+            }
+            let values: Vec<f64> = (0..n.max(1))
+                .map(|r| {
+                    let at_r = |s: &str| match leaves.iter().find(|(l, _)| *l == s) {
+                        Some((_, reps)) if !reps.is_empty() => (
+                            reps.get(r).or(reps.first()).copied().unwrap_or(f64::NAN),
+                            0.0,
+                        ),
+                        _ => (leaf(s).0, 0.0),
+                    };
+                    propagate(tree, deps, &at_r, &[]).value
+                })
+                .collect();
+            values
+                .iter()
+                .all(|v| v.is_finite())
+                .then(|| (k, uncertainty::type_a(&values).2))
+        })
+        .collect()
+}
+
 fn u_warning(
     (the, of_the): (&str, &str),
     subject: &str,
@@ -1407,14 +1467,16 @@ pub fn compute_regresion(
         _ => n.checked_sub(2),
     };
     let mut point_leaves: HashMap<String, (f64, f64)> = HashMap::new();
+    let mut leaf_point: HashMap<String, (&str, usize, f64)> = HashMap::new();
     for q in &per_point {
         let series = by_quantity
             .get(q.id.as_str())
             .map(|m| m.point_values())
             .unwrap_or_default();
         for (k, &value) in series.iter().enumerate() {
-            let u = u_at(&point_us, &q.symbol, k).0;
-            point_leaves.insert(point_leaf(&q.symbol, k), (value, u));
+            let (u_c, u_b) = u_at(&point_us, &q.symbol, k);
+            point_leaves.insert(point_leaf(&q.symbol, k), (value, u_c));
+            leaf_point.insert(point_leaf(&q.symbol, k), (q.id.as_str(), k, u_b));
         }
         if series.is_empty() {
             point_leaves.insert(point_leaf(&q.symbol, 0), (f64::NAN, f64::NAN));
@@ -1428,12 +1490,16 @@ pub fn compute_regresion(
         }
     };
     let mut owned_trees: Vec<(String, Node)> = Vec::new();
+    let mut on_means_runs: HashMap<String, usize> = HashMap::new();
     let mut runs: Vec<usize> = vec![0, 1, last - 1, last];
     runs.sort_unstable();
     runs.dedup();
     for (it, _) in &compiled_intermediates {
         for &i in &runs {
             let renamed = rename_symbols(&it.formula, |s| at_run(s, i));
+            if it.on_means {
+                on_means_runs.insert(run_leaf(&it.symbol, i), i);
+            }
             match super::parse(&renamed) {
                 Ok(tree) => owned_trees.push((run_leaf(&it.symbol, i), tree)),
                 Err(_) => {
@@ -1496,7 +1562,29 @@ pub fn compute_regresion(
                 u: 0.0,
                 kink: false,
             },
-            (Some(canonical_tree), true) => propagate(canonical_tree, &deps, &leaf, &line),
+            (Some(canonical_tree), true) => {
+                let by_point = per_replica_points(
+                    canonical_tree,
+                    &deps,
+                    &leaf_point,
+                    &on_means_runs,
+                    &run.inputs,
+                    &leaf,
+                );
+                let leaf_b = |s: &str| match leaf_point.get(s) {
+                    Some(&(id, k, u_b))
+                        if by_point.contains_key(&k) && !run.inputs.broadcastable.contains(id) =>
+                    {
+                        (leaf(s).0, u_b)
+                    }
+                    _ => leaf(s),
+                };
+                let mut propagated = propagate(canonical_tree, &deps, &leaf_b, &line);
+                propagated.u = by_point
+                    .values()
+                    .fold(propagated.u, |u, &a| uncertainty::combine(u, a));
+                propagated
+            }
             (None, true) => Propagated {
                 value,
                 u: f64::NAN,
