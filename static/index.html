@@ -87,9 +87,9 @@
             </label>
           </div>
 
-          <label class="hidden">
-            <select name="practice_id" id="practice-select"></select>
-          </label>
+          <div class="hidden">
+            <select name="practice_id" id="practice-select" aria-label="Práctica"></select>
+          </div>
 
           <div id="practice-part-tabs" class="practice-part-tabs hidden"></div>
 
@@ -288,7 +288,7 @@
             <h3>Catálogo de prácticas</h3>
             <span id="practice-status" class="submission-meta"></span>
             <button type="button" id="practice-import-btn">Importar práctica</button>
-            <input type="file" id="practice-import-file" accept=".json,application/json" class="hidden" />
+            <input type="file" id="practice-import-file" accept=".json,application/json" class="hidden" aria-label="Archivo de práctica para importar" />
           </div>
           <div id="practice-catalog" class="directory-list"></div>
         </section>

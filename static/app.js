@@ -1,3 +1,4 @@
+import { showError } from "./toast.js";
 import { state } from "./state.js";
 import { loginScreen, appShell } from "./dom.js";
 import { fetchJson, setCsrfToken } from "./api.js";
@@ -24,11 +25,12 @@ async function init() {
     const body = await fetchJson("/api/auth/me");
     state.user = body.user;
     setCsrfToken(body.csrf_token);
-    await startApp();
   } catch {
     loginScreen.classList.remove("hidden");
     appShell.classList.add("hidden");
+    return;
   }
+  await startApp();
 }
 
 async function startApp() {
@@ -51,5 +53,6 @@ async function startApp() {
   await loadInvitations();
 }
 
+window.addEventListener("unhandledrejection", (event) => showError(event.reason));
 setupAuth(startApp);
-init();
+init().catch(showError);

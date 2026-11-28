@@ -27,7 +27,7 @@ import {
   determinationsFor,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
-import { showToast } from "./toast.js";
+import { showToast, showError } from "./toast.js";
 
 const importFile = document.querySelector("#practice-import-file");
 document.querySelector("#practice-import-btn")?.addEventListener("click", () => importFile.click());
@@ -477,13 +477,13 @@ export function renderPracticesPage() {
     const { openDraftPreview } = await import("./forms.js");
     await openDraftPreview(practiceId);
   });
-  renderProblems(practice.id);
-  if (def?.current_version) renderDraftChanges(practice.id);
+  renderProblems(practice.id).catch(showError);
+  if (def?.current_version) renderDraftChanges(practice.id).catch(showError);
   practiceWorkspace.querySelectorAll("[data-practice-export]").forEach((btn) => {
     btn.addEventListener("click", () => exportPractice(practice.id, btn.dataset.practiceExport));
   });
   practiceWorkspace.querySelector("[data-practice-delete]")?.addEventListener("click", (e) => {
-    deletePractice(e.currentTarget.dataset.practiceId);
+    deletePractice(e.currentTarget.dataset.practiceId).catch(showError);
   });
   practiceWorkspace.querySelector("#practice-kind-form")?.addEventListener("submit", savePracticeKind);
   practiceWorkspace.querySelector("#practice-regression-form")?.addEventListener("submit", savePracticeRegressionFormulas);
@@ -823,7 +823,7 @@ function renderPracticeDirectory() {
     btn.addEventListener("click", () => duplicatePractice(btn.dataset.practiceId));
   });
   practiceCatalog.querySelector('[data-add-panel="template"]')?.addEventListener("toggle", (e) => {
-    if (e.target.open) renderLibrary();
+    if (e.target.open) renderLibrary().catch(showError);
   });
   if (libraryOpen) practiceCatalog.querySelector('details[data-add-panel="template"]').open = true;
 }
@@ -1088,7 +1088,7 @@ function paintDraftChanges(box, practiceId, changes) {
   const pending = changes.kind === "none" ? "" : draftChangesMarkup(practiceId, changes);
   box.innerHTML = versionUpdateMarkup(changes) + pending;
   box.querySelector("[data-practice-publish-version]")?.addEventListener("click", () => {
-    publishPracticeVersion(practiceId, changes.fingerprint);
+    publishPracticeVersion(practiceId, changes.fingerprint).catch(showError);
   });
 }
 
@@ -1103,7 +1103,7 @@ async function renderDraftChanges(practiceId) {
     lastDraftChanges = { practiceId, changes };
     paintDraftChanges(box, practiceId, changes);
   } catch (error) {
-    box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+    if (request === draftChangesRequest) box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
   }
 }
 

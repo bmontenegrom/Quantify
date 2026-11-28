@@ -1,3 +1,4 @@
+import { showError } from "./toast.js";
 import { state } from "./state.js";
 import { instrumentCatalog, instrumentWorkspace, instrumentCourseFilter, instrumentStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
@@ -467,5 +468,5 @@ instrumentCourseFilter.addEventListener("change", () => {
   state.instrumentCourseId = instrumentCourseFilter.value;
   state.activeInstrumentId = null;
   state.editingScaleId = null;
-  refreshInstruments();
+  refreshInstruments().catch(showError);
 });

@@ -1,3 +1,4 @@
+import { showError } from "./toast.js";
 import { state } from "./state.js";
 import { measurementFields, practiceSelect } from "./dom.js";
 import { postJson } from "./api.js";
@@ -132,7 +133,7 @@ export function renderSeriesTable(definition, quantityRowHtml) {
 export function refreshSeries() {
   updateSeriesMeans();
   updateSeriesLive();
-  updateRegressionPreview();
+  updateRegressionPreview().catch(showError);
 }
 
 function pointCount(measurements) {
