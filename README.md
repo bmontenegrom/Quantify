@@ -1,5 +1,12 @@
 # Quantify
 
+[![CI](https://github.com/bmontenegrom/Quantify/actions/workflows/ci.yml/badge.svg?branch=development)](https://github.com/bmontenegrom/Quantify/actions/workflows/ci.yml)
+[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
+![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
+![Axum](https://img.shields.io/badge/Axum-0.8-8A2BE2)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)
+
 Web app para cursos de laboratorio de cualquier disciplina experimental (física, química, biología,
 ingeniería…). El docente define cada práctica en un editor: qué se mide, con qué instrumentos, qué
 fórmulas derivan los resultados y qué análisis se hace (estadístico, ajuste lineal o curva). Los
