@@ -163,6 +163,8 @@ pub struct ResultInput {
 }
 
 impl ResultInput {
+    /// El mensurando con el que se compara, sin espacios alrededor.
+    ///
     /// ```
     /// use quantify::practices::ResultInput;
     /// let input: ResultInput = serde_json::from_value(serde_json::json!({

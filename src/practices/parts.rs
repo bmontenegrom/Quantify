@@ -41,8 +41,6 @@ pub struct Comparison {
 
 /// Cuánto multiplica lo medido (en `quantity_unit`) para pasarlo a la unidad del mensurando.
 ///
-/// Sin desplazamiento: °C contra K no se compara (en un ΔT sumaría 273,15).
-///
 /// ```
 /// use quantify::practices::comparison_conversion;
 /// assert_eq!(comparison_conversion("V", " V "), Some(1.0));

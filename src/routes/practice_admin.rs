@@ -27,7 +27,6 @@ async fn ensure_practice(state: &SharedState, practice_id: &str) -> Result<(), A
         .ok_or_else(|| AppError::not_found("practica no encontrada"))
 }
 
-// ponytail: lock en memoria, vale con un solo proceso; con varios, leer y validar dentro de begin_write.
 type PracticeMutex = std::sync::Arc<tokio::sync::Mutex<()>>;
 
 static PRACTICE_LOCKS: std::sync::LazyLock<
