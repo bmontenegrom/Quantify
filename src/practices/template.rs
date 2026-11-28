@@ -3,8 +3,8 @@ use super::crud::{
     insert_result,
 };
 use super::{
-    AggregateInput, CurveInput, IntermediateInput, PointResultInput, PracticeDefinition,
-    QuantityInput, ResultInput,
+    AggregateInput, CurveInput, Determinations, IntermediateInput, PointResultInput,
+    PracticeDefinition, QuantityInput, ResultInput,
 };
 use crate::db::Practice;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 pub const TEMPLATE_VERSION: u32 = 1;
 pub const ANALYSIS_KINDS: [&str; 3] = ["estadistico", "regresion_lineal", "curva"];
-pub const MAX_OPERATORS: i64 = 20;
+pub const MAX_DETERMINATIONS: i64 = 20;
 const MAX_PART_KEY: usize = 40;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,8 +30,8 @@ pub struct PracticeTemplate {
     pub x_formula: Option<String>,
     #[serde(default)]
     pub y_formula: Option<String>,
-    #[serde(default)]
-    pub operator_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
     #[serde(default)]
     pub parts: Vec<TemplatePart>,
     #[serde(default)]
@@ -53,6 +53,8 @@ pub struct PracticeTemplate {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TemplatePart {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     pub title: String,
@@ -169,7 +171,7 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
         analysis_kind: def.analysis_kind.clone(),
         x_formula: def.x_formula.clone(),
         y_formula: def.y_formula.clone(),
-        operator_count: def.operator_count,
+        determinations: def.determinations.clone(),
         parts: def
             .parts
             .iter()
@@ -182,6 +184,7 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
                 title: p.title.clone(),
                 analysis_kind: p.analysis_kind.clone(),
                 help_text: p.help_text.clone(),
+                determinations: p.determinations.clone(),
             })
             .collect(),
         sections: def
@@ -217,6 +220,9 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
                 slot_count: q.slot_count,
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
+                per_determination: q.per_determination,
+                fixed: q.fixed,
+                default_u: q.default_u.map(Some),
             })
             .collect(),
         results: def
@@ -268,6 +274,7 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
                 unit: a.unit.clone(),
                 formula: a.formula.clone(),
                 is_final: a.is_final,
+                has_uncertainty: a.has_uncertainty,
             })
             .collect(),
         curves: def
@@ -284,6 +291,67 @@ fn template_from(def: &PracticeDefinition, name: String) -> PracticeTemplate {
 
 pub fn version_error(found: u64) -> String {
     format!("El archivo usa la versión {found} del formato y esta versión de Quantify lee la {TEMPLATE_VERSION}.")
+}
+
+fn stored_kinds(t: &PracticeTemplate) -> (Option<String>, Vec<Option<String>>) {
+    let trimmed = |k: &Option<String>| k.as_deref().map(|k| k.trim().to_string());
+    let has_part_kinds = t.parts.iter().any(|p| p.analysis_kind.is_some());
+    let part_kinds: Vec<Option<String>> = t
+        .parts
+        .iter()
+        .map(|p| match trimmed(&p.analysis_kind) {
+            None if has_part_kinds => Some("estadistico".into()),
+            kind => kind,
+        })
+        .collect();
+    let kind = if has_part_kinds {
+        part_kinds
+            .iter()
+            .flatten()
+            .find(|k| super::is_point_based(Some(k)))
+            .cloned()
+            .or_else(|| Some("estadistico".into()))
+    } else {
+        trimmed(&t.analysis_kind)
+    };
+    (kind, part_kinds)
+}
+
+fn effective_part_kinds(t: &PracticeTemplate) -> Vec<String> {
+    let (analysis_kind, part_kinds) = stored_kinds(t);
+    PracticeDefinition {
+        analysis_kind,
+        parts: part_kinds
+            .into_iter()
+            .enumerate()
+            .map(|(i, analysis_kind)| super::PracticePart {
+                id: i.to_string(),
+                analysis_kind,
+                ..Default::default()
+            })
+            .collect(),
+        quantities: t
+            .quantities
+            .iter()
+            .map(|q| crate::db::PracticeQuantity {
+                symbol: q.symbol.clone(),
+                per_point: q.per_point,
+                is_given: q.is_given,
+                ..Default::default()
+            })
+            .collect(),
+        sections: t
+            .sections
+            .iter()
+            .map(|s| super::PracticeSection {
+                part_id: s.part.map(|i| i.to_string()),
+                quantities: s.quantities.clone(),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    }
+    .part_kinds()
 }
 
 /// Lo que impide escribir una plantilla; el resto lo muestra el panel de problemas del borrador.
@@ -334,10 +402,49 @@ pub fn check_template(t: &PracticeTemplate) -> Result<(), String> {
             ));
         }
     }
-    if t.operator_count.is_some_and(|n| n > MAX_OPERATORS) {
-        return Err(format!(
-            "La cantidad de operadores no puede superar {MAX_OPERATORS}."
-        ));
+    for d in std::iter::once(&t.determinations)
+        .chain(t.parts.iter().map(|p| &p.determinations))
+        .flatten()
+    {
+        d.validate()?;
+    }
+    if t.determinations.is_some() && !t.parts.is_empty() {
+        return Err("Una práctica con partes configura las determinaciones en cada parte.".into());
+    }
+    let point_based = |kind: &Option<String>| super::is_point_based(kind.as_deref().map(str::trim));
+    let kinds = effective_part_kinds(t);
+    if (t.determinations.is_some() && point_based(&t.analysis_kind))
+        || t.parts
+            .iter()
+            .zip(&kinds)
+            .any(|(p, kind)| p.determinations.is_some() && kind != "estadistico")
+    {
+        return Err("Las determinaciones son para una práctica o parte estadística.".into());
+    }
+    if let Some((q, problem)) = t
+        .quantities
+        .iter()
+        .find_map(|q| Some((q, q.fixed_problem()?)))
+    {
+        return Err(format!("La magnitud \"{}\": {problem}", q.symbol));
+    }
+    for q in t.quantities.iter().filter(|q| q.per_determination) {
+        let has_determinations = if t.parts.is_empty() {
+            t.determinations.is_some()
+        } else {
+            t.sections
+                .iter()
+                .find(|s| s.quantities.contains(&q.symbol))
+                .and_then(|s| s.part)
+                .and_then(|i| t.parts.get(i))
+                .is_some_and(|p| p.determinations.is_some())
+        };
+        if !has_determinations {
+            return Err(format!(
+                "La magnitud \"{}\" se repite por determinación, pero no está en una práctica o parte con determinaciones.",
+                q.symbol
+            ));
+        }
     }
     let titles = t
         .parts
@@ -460,6 +567,17 @@ pub async fn seed_library(pool: &SqlitePool) -> anyhow::Result<bool> {
     Ok(imported)
 }
 
+#[cfg(test)]
+pub(crate) async fn seed_fixture(pool: &SqlitePool, json: &str, id: &str) {
+    let template: PracticeTemplate = serde_json::from_str(json).unwrap();
+    let mut tx = crate::db::begin_write(pool).await.unwrap();
+    write_template(&mut tx, &template, id, "publicada", None)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    super::ensure_versions(pool).await.unwrap();
+}
+
 async fn write_template(
     tx: &mut SqliteConnection,
     t: &PracticeTemplate,
@@ -468,29 +586,10 @@ async fn write_template(
     created_by: Option<&str>,
 ) -> anyhow::Result<()> {
     check_template(t).map_err(anyhow::Error::msg)?;
-    let trimmed = |k: &Option<String>| k.as_deref().map(|k| k.trim().to_string());
-    let has_part_kinds = t.parts.iter().any(|p| p.analysis_kind.is_some());
-    let part_kinds: Vec<Option<String>> = t
-        .parts
-        .iter()
-        .map(|p| match trimmed(&p.analysis_kind) {
-            None if has_part_kinds => Some("estadistico".into()),
-            kind => kind,
-        })
-        .collect();
-    let kind = if has_part_kinds {
-        part_kinds
-            .iter()
-            .flatten()
-            .find(|k| super::is_point_based(Some(k)))
-            .cloned()
-            .or_else(|| Some("estadistico".into()))
-    } else {
-        trimmed(&t.analysis_kind)
-    };
+    let (kind, part_kinds) = stored_kinds(t);
     sqlx::query(
         "INSERT INTO practices (id, name, description, analysis_kind, x_formula, y_formula, \
-         operator_count, status, created_by, created_at) \
+         status, created_by, created_at, config_json) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
     .bind(id)
@@ -499,10 +598,15 @@ async fn write_template(
     .bind(&kind)
     .bind(axis(t.x_formula.as_deref()))
     .bind(axis(t.y_formula.as_deref()))
-    .bind(t.operator_count.filter(|n| *n > 1))
     .bind(status)
     .bind(created_by)
     .bind(chrono::Utc::now())
+    .bind(
+        super::PracticeConfig {
+            determinations: t.determinations.clone(),
+        }
+        .to_json(),
+    )
     .execute(&mut *tx)
     .await?;
     let mut parts = Vec::new();
@@ -513,8 +617,9 @@ async fn write_template(
             _ => Uuid::new_v4().to_string(),
         };
         sqlx::query(
-            "INSERT INTO practice_parts (id, practice_id, title, position, analysis_kind, help_text) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO practice_parts \
+             (id, practice_id, title, position, analysis_kind, help_text, config_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .bind(&part_id)
         .bind(id)
@@ -522,6 +627,12 @@ async fn write_template(
         .bind(position as i64)
         .bind(part_kind)
         .bind(part.help_text.trim())
+        .bind(
+            super::PracticeConfig {
+                determinations: part.determinations.clone(),
+            }
+            .to_json(),
+        )
         .execute(&mut *tx)
         .await?;
         parts.push(part_id);

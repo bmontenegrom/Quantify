@@ -5,7 +5,6 @@
   "analysis_kind": "regresion_lineal",
   "x_formula": "R^2",
   "y_formula": "dx/t",
-  "operator_count": null,
   "parts": [],
   "sections": [],
   "quantities": [
@@ -115,7 +114,7 @@
       "display_symbol": null,
       "symbol": "Temp",
       "name": "Temperatura de la glicerina (referencia)",
-      "unit": "C",
+      "unit": "°C",
       "repeated": false,
       "quantity": "temperatura",
       "is_given": false,

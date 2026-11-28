@@ -161,6 +161,7 @@ pub fn api_router(state: SharedState) -> Router {
             "/instruments",
             get(list_instruments).post(create_instrument),
         )
+        .route("/magnitudes", get(list_magnitudes))
         .route("/instruments/export", get(export_instruments))
         .route("/instruments/import", post(import_instruments))
         .route(
@@ -247,8 +248,12 @@ fn practice_edit_routes(state: SharedState) -> Router<SharedState> {
             post(set_practice_regression_formulas),
         )
         .route(
-            "/practices/{id}/operator-count",
-            post(set_practice_operator_count),
+            "/practices/{id}/determinations",
+            post(set_practice_determinations),
+        )
+        .route(
+            "/practices/{id}/parts/{pid}/determinations",
+            post(set_part_determinations),
         )
         .route("/practices/{id}/quantities", post(create_quantity))
         .route(

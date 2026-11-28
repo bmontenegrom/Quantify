@@ -1,0 +1,29 @@
+name: Pedir una funcionalidad
+description: Una idea para que Quantify sirva mejor en un curso de laboratorio.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: necesidad
+    attributes:
+      label: Qué necesitás
+      description: El problema o la situación del curso que esto resolvería.
+    validations:
+      required: true
+  - type: textarea
+    id: propuesta
+    attributes:
+      label: Cómo te lo imaginás
+      description: Cómo lo usaría un docente o un estudiante. Si es un cálculo, la fórmula o la referencia (GUM, un libro, una norma).
+    validations:
+      required: true
+  - type: textarea
+    id: ejemplo
+    attributes:
+      label: Ejemplo
+      description: Una práctica, unas medidas o una captura que lo muestren.
+  - type: input
+    id: disciplina
+    attributes:
+      label: Disciplina o curso
+      placeholder: Física 103, Química General, ...

@@ -143,8 +143,20 @@ pub fn expand(u: f64, k: f64) -> f64 {
 /// assert!((r.u_expanded - 2.0 / 3.0_f64.sqrt()).abs() < 1e-12);
 /// ```
 pub fn measured_quantity(values: &[f64], spec: Option<&ScaleSpec>) -> QuantityResult {
+    measured_with(values, |mean| {
+        spec.map(|sp| type_b(sp, mean)).unwrap_or(0.0)
+    })
+}
+
+/// Como [`measured_quantity`], con el tipo B calculado por `u_b` a partir de la media.
+///
+/// ```
+/// let r = quantify::uncertainty::measured_with(&[2.0, 2.0], |media| media / 100.0);
+/// assert_eq!((r.mean, r.u_b), (2.0, 0.02));
+/// ```
+pub fn measured_with(values: &[f64], u_b: impl Fn(f64) -> f64) -> QuantityResult {
     let (mean, s, u_a) = type_a(values);
-    let u_b = spec.map(|sp| type_b(sp, mean)).unwrap_or(0.0);
+    let u_b = u_b(mean);
     let u_c = combine(u_a, u_b);
     QuantityResult {
         n: values.len(),
@@ -180,37 +192,40 @@ pub fn measured_given(value: f64, u_expanded: f64) -> QuantityResult {
     }
 }
 
-/// Propagacion de varianzas para `Q = f(x_1, ..., x_n)` por diferencias finitas
+/// La u combinada de un gradiente, con las entradas independientes y cada fuente compartida sumada en cuadratura.
 ///
 /// ```
-/// // Q = l * a ; con incertidumbres nulas, u_Q = 0 y el valor es el producto.
-/// let (valor, u_q) = quantify::uncertainty::propagate(|x| x[0] * x[1], &[2.0, 3.0], &[0.0, 0.0]);
-/// assert_eq!(valor, 6.0);
-/// assert!(u_q.abs() < 1e-9);
+/// use quantify::uncertainty::propagated_u;
+/// assert!((propagated_u(&[3.0, 2.0], &[0.1, 0.2], &[]) - 0.5).abs() < 1e-12);
+/// let shared = [vec![(0, 1.0), (1, 1.0)]];
+/// assert_eq!(propagated_u(&[1.0, -1.0], &[0.0, 0.0], &shared), 0.0);
+/// assert_eq!(propagated_u(&[1.0, 1.0], &[0.0, 0.0], &shared), 2.0);
 /// ```
-pub fn propagate<F>(f: F, means: &[f64], us: &[f64]) -> (f64, f64)
-where
-    F: Fn(&[f64]) -> f64,
-{
-    let value = f(means);
-    let mut variance = 0.0;
-    let mut x = means.to_vec();
-    for i in 0..means.len() {
-        let h = if means[i] == 0.0 {
-            1e-6
-        } else {
-            means[i].abs() * 1e-6
-        };
-        let original = x[i];
-        x[i] = original + h;
-        let f_plus = f(&x);
-        x[i] = original - h;
-        let f_minus = f(&x);
-        x[i] = original;
-        let derivative = (f_plus - f_minus) / (2.0 * h);
-        variance += (derivative * us[i]).powi(2);
+pub fn propagated_u(gradient: &[f64], us: &[f64], factors: &[Vec<(usize, f64)>]) -> f64 {
+    let independent = gradient
+        .iter()
+        .zip(us)
+        .map(|(&g, &u)| unless_zero(g, u).powi(2))
+        .sum::<f64>();
+    let shared = factors
+        .iter()
+        .map(|factor| {
+            factor
+                .iter()
+                .map(|&(i, l)| unless_zero(gradient[i], l))
+                .sum::<f64>()
+                .powi(2)
+        })
+        .sum::<f64>();
+    (independent + shared).sqrt()
+}
+
+pub(crate) fn unless_zero(w: f64, x: f64) -> f64 {
+    if x == 0.0 || w == 0.0 {
+        0.0
+    } else {
+        w * x
     }
-    (value, variance.sqrt())
 }
 
 #[cfg(test)]
@@ -339,20 +354,9 @@ mod tests {
     }
 
     #[test]
-    fn propagate_matches_analytic_for_product_sum() {
-        let f = |x: &[f64]| x[0] * x[1] + x[0] * x[2];
-        let means = [2.0, 3.0, 4.0];
-        let us = [0.1, 0.2, 0.2];
-        let (value, u_q) = propagate(f, &means, &us);
-        assert!(close(value, 14.0, 1e-9));
-        assert!(close(u_q, 0.9, 1e-6));
-    }
-
-    #[test]
-    fn propagate_is_accurate_for_tiny_nonlinear_magnitudes() {
-        let (value, u_q) = propagate(|x| 1.0 / x[0], &[1e-8], &[1e-10]);
-        assert!(close(value, 1e8, 1.0));
-        assert!((u_q - 1e6).abs() / 1e6 < 1e-3);
+    fn an_input_without_u_does_not_spoil_the_rest() {
+        let u = propagated_u(&[f64::INFINITY, 2.0], &[0.0, 0.5], &[]);
+        assert_eq!(u, 1.0);
     }
 
     #[test]

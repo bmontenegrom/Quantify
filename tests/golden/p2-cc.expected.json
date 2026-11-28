@@ -1,7 +1,6 @@
 {
   "aggregates": [],
   "derived": [],
-  "operators": [],
   "parts": [
     {
       "analysis": {
@@ -48,7 +47,6 @@
             "value": 5.086047940995698
           }
         ],
-        "operators": [],
         "point_results": [],
         "quantities": [
           {
@@ -200,7 +198,6 @@
             "value": 5.666346176394719
           }
         ],
-        "operators": [],
         "point_results": [],
         "quantities": [
           {
@@ -342,7 +339,37 @@
             "value": 1500.0
           }
         ],
-        "operators": [],
+        "intermediates": [
+          {
+            "name": "Potencia disipada en R",
+            "symbol": "P",
+            "u": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "u_expanded": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "unit": "W",
+            "values": [
+              0.0021359648000000005,
+              0.003731912,
+              0.004605315999999999,
+              0.0046834335,
+              0.0045120080000000005,
+              0.004002075
+            ]
+          }
+        ],
         "point_results": [],
         "quantities": [
           {

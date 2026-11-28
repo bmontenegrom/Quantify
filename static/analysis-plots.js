@@ -1,16 +1,19 @@
 import { escapeHtml, format, measureText, regressionPlot, scatterPlot } from "./lib.js";
 
+let plotCount = 0;
+const isClipped = (p) => [p.ex, p.ey].some((bar) => bar?.clipped.some(Boolean));
+
 export function regressionMarkup(regression) {
-  const plot = regressionPlot(regression.points ?? [], regression.slope, regression.intercept);
+  const plot = regressionPlot(regression.points ?? [], regression.slope, regression.intercept, { uPoints: regression.u_points ?? [] });
   return `
     <div class="metrics">
       <div class="metric">
         <div class="metric-label">Pendiente</div>
-        <div class="metric-value metric-text">${escapeHtml(measureText(regression.slope, regression.u_slope))}</div>
+        ${lineUncertainty(regression, regression.slope, regression.u_slope, regression.u_slope_total)}
       </div>
       <div class="metric">
         <div class="metric-label">Intercepto</div>
-        <div class="metric-value metric-text">${escapeHtml(measureText(regression.intercept, regression.u_intercept))}</div>
+        ${lineUncertainty(regression, regression.intercept, regression.u_intercept, regression.u_intercept_total)}
       </div>
       <div class="metric">
         <div class="metric-label">R²</div>
@@ -22,20 +25,46 @@ export function regressionMarkup(regression) {
       </div>
     </div>
     ${plot ? regressionSvg(plot, regression.x_label, regression.y_label) : `<p class="submission-meta">No se puede graficar: el rango de los datos es nulo.</p>`}
+    ${plot?.scatter.some(isClipped) ? `<p class="submission-meta">Las barras con flecha siguen fuera del gráfico: su incertidumbre es mayor que lo dibujado.</p>` : ""}
+    ${plot?.scatter.some((p) => p.noU) ? `<p class="submission-meta">Los puntos huecos no tienen incertidumbre en al menos un eje (el que no lleva barra): falta la de alguna magnitud o la fórmula no es derivable ahí (ver avisos).</p>` : ""}
   `;
+}
+
+function lineUncertainty(regression, value, uFit, uTotal) {
+  const fit = `<div class="metric-value metric-text">${escapeHtml(measureText(value, uFit))}</div>`;
+  if (uTotal == null) return fit;
+  const names = (regression.shared ?? []).map(escapeHtml).join(", ");
+  return `${fit}<div class="submission-meta">ajuste</div>
+        <div class="metric-value metric-text">${escapeHtml(measureText(value, uTotal))}</div><div class="submission-meta">total (incluye ${names})</div>`;
 }
 
 function plotSvg(plot, { ariaLabel, lineMarkup = "", xText, yLabel }) {
   const f = (n) => n.toFixed(1);
+  const markerId = `reg-clip-${++plotCount}`;
+  const half = (p, x, y, clipped) =>
+    `<line class="reg-errbar" x1="${f(p.cx)}" y1="${f(p.cy)}" x2="${f(x)}" y2="${f(y)}"${clipped ? ` marker-end="url(#${markerId})"` : ""} />`;
+  const bars = plot.scatter
+    .map((p) =>
+      [
+        ...(p.ex ? p.ex.ends.map((x, k) => half(p, x, p.cy, p.ex.clipped[k])) : []),
+        ...(p.ey ? p.ey.ends.map((y, k) => half(p, p.cx, y, p.ey.clipped[k])) : []),
+      ].join(""),
+    )
+    .join("");
+  const clipMarker = plot.scatter.some(isClipped)
+    ? `<defs><marker id="${markerId}" viewBox="0 0 6 6" refX="6" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path class="reg-clip-arrow" d="M0,0 L6,3 L0,6 z" /></marker></defs>`
+    : "";
   const points = plot.scatter
-    .map((p) => `<circle cx="${f(p.cx)}" cy="${f(p.cy)}" r="3" class="reg-point" />`)
+    .map((p) => `<circle cx="${f(p.cx)}" cy="${f(p.cy)}" r="3" class="reg-point${p.noU ? " reg-point-nou" : ""}" />`)
     .join("");
   const axisY = plot.height - plot.pad;
   return `
     <svg class="reg-plot" viewBox="0 0 ${plot.width} ${plot.height}" role="img" aria-label="${ariaLabel}">
       <line class="reg-axis" x1="${plot.pad}" y1="${axisY}" x2="${plot.width - plot.pad}" y2="${axisY}" />
       <line class="reg-axis" x1="${plot.pad}" y1="${plot.pad}" x2="${plot.pad}" y2="${axisY}" />
+      ${clipMarker}
       ${lineMarkup}
+      ${bars}
       ${points}
       <text class="reg-label" x="${plot.width - plot.pad}" y="${plot.height - 8}" text-anchor="end">${xText}</text>
       <text class="reg-label" x="${plot.pad}" y="${plot.pad - 12}" text-anchor="start">y: ${yLabel}</text>

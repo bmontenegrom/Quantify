@@ -25,6 +25,10 @@ pub struct LinearRegression {
     pub u_slope: f64,
     #[serde(default)]
     pub u_intercept: f64,
+    #[serde(default)]
+    pub mean_x: f64,
+    #[serde(default)]
+    pub u_mean_y: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,10 +220,7 @@ pub fn linear_regression(
         .sum::<f64>();
     let ss_res = points
         .iter()
-        .map(|(x, y)| {
-            let predicted = slope * x + intercept;
-            (y - predicted).powi(2)
-        })
+        .map(|(x, y)| (y - mean_y - slope * (x - mean_x)).powi(2))
         .sum::<f64>();
     let r_squared = if ss_tot == 0.0 {
         1.0
@@ -227,13 +228,13 @@ pub fn linear_regression(
         1.0 - ss_res / ss_tot
     };
 
-    let (u_slope, u_intercept) = if n >= 3 {
+    let (u_slope, u_mean_y) = if n >= 3 {
         let s2 = ss_res / (n_f - 2.0);
-        let sum_x2 = points.iter().map(|(x, _)| x * x).sum::<f64>();
-        ((s2 / ss_xx).sqrt(), (s2 * sum_x2 / (n_f * ss_xx)).sqrt())
+        ((s2 / ss_xx).sqrt(), (s2 / n_f).sqrt())
     } else {
         (0.0, 0.0)
     };
+    let u_intercept = u_mean_y.hypot(mean_x * u_slope);
 
     Some(LinearRegression {
         x_column: x_name.to_string(),
@@ -243,7 +244,37 @@ pub fn linear_regression(
         r_squared,
         u_slope,
         u_intercept,
+        mean_x,
+        u_mean_y,
     })
+}
+
+/// Derivadas de la pendiente y la ordenada del ajuste respecto de un parámetro, dadas las derivadas de cada punto.
+///
+/// ```
+/// let (db, da) = quantify::analysis::line_sensitivity(&[(1.0, 2.0), (2.0, 4.0), (3.0, 6.0)], &[(0.0, 1.0), (0.0, 2.0), (0.0, 3.0)]);
+/// assert!((db - 1.0).abs() < 1e-12 && da.abs() < 1e-12);
+/// ```
+pub fn line_sensitivity(points: &[(f64, f64)], d_points: &[(f64, f64)]) -> (f64, f64) {
+    let n = points.len() as f64;
+    let mean = |pairs: &[(f64, f64)]| {
+        let (sx, sy) = pairs
+            .iter()
+            .fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
+        (sx / n, sy / n)
+    };
+    let ((mx, my), (mdx, mdy)) = (mean(points), mean(d_points));
+    let (mut sxx, mut sxy, mut dsxx, mut dsxy) = (0.0, 0.0, 0.0, 0.0);
+    for (&(x, y), &(dx, dy)) in points.iter().zip(d_points) {
+        let (cx, cy, cdx, cdy) = (x - mx, y - my, dx - mdx, dy - mdy);
+        sxx += cx * cx;
+        sxy += cx * cy;
+        dsxx += 2.0 * cx * cdx;
+        dsxy += cdx * cy + cx * cdy;
+    }
+    let slope = sxy / sxx;
+    let db = (dsxy - slope * dsxx) / sxx;
+    (db, mdy - db * mx - slope * mdx)
 }
 
 /// Ajuste de relajacion exponencial V(t) = V0 * exp(-t / tau).
@@ -274,7 +305,41 @@ pub fn relaxation_tau(points: &[(f64, f64)]) -> Option<(f64, f64)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{analyze_csv, relaxation_tau};
+    use super::{analyze_csv, linear_regression, relaxation_tau};
+
+    #[test]
+    fn intercept_splits_into_mean_height_and_slope() {
+        let points = [(1.0, 1.1), (2.0, 1.9), (3.0, 3.2), (4.0, 3.9)];
+        let fit = linear_regression("x", "y", &points).unwrap();
+        assert_eq!(fit.mean_x, 2.5);
+        let s2 = points
+            .iter()
+            .map(|(x, y)| (y - fit.slope * x - fit.intercept).powi(2))
+            .sum::<f64>()
+            / 2.0;
+        assert!((fit.u_mean_y - (s2 / 4.0).sqrt()).abs() < 1e-12);
+        let rebuilt = fit.u_mean_y.powi(2) + (fit.mean_x * fit.u_slope).powi(2);
+        assert!((rebuilt - fit.u_intercept.powi(2)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn residuals_survive_a_large_x_offset() {
+        let ys = [0.21, 0.39, 0.62, 0.79, 1.02];
+        let near: Vec<(f64, f64)> = ys.iter().enumerate().map(|(i, &y)| (i as f64, y)).collect();
+        let far: Vec<(f64, f64)> = near.iter().map(|&(x, y)| (x + 1e12, y)).collect();
+        let (a, b) = (
+            linear_regression("x", "y", &near).unwrap(),
+            linear_regression("x", "y", &far).unwrap(),
+        );
+        assert!((a.u_mean_y - b.u_mean_y).abs() < 1e-9 * a.u_mean_y);
+        assert!((a.u_slope - b.u_slope).abs() < 1e-9 * a.u_slope);
+    }
+
+    #[test]
+    fn two_points_have_no_dispersion() {
+        let fit = linear_regression("x", "y", &[(0.0, 1.0), (1.0, 3.0)]).unwrap();
+        assert_eq!(fit.u_mean_y, 0.0);
+    }
 
     #[test]
     fn computes_basic_stats_and_regression() {

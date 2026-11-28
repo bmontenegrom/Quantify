@@ -7,6 +7,73 @@ pub struct CompareOptions {
     pub shared: Vec<String>,
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct ClientDefinition {
+    #[serde(flatten)]
+    pub definition: PracticeDefinition,
+    pub resolved: Resolved,
+}
+
+impl From<PracticeDefinition> for ClientDefinition {
+    fn from(definition: PracticeDefinition) -> Self {
+        let resolved = definition.resolved();
+        ClientDefinition {
+            definition,
+            resolved,
+        }
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+pub struct Resolved {
+    pub practice_determinations: Option<super::Determinations>,
+    pub symbol_parts: std::collections::BTreeMap<String, String>,
+    pub determinations: std::collections::BTreeMap<String, ScopedDeterminations>,
+    pub input_units: std::collections::BTreeMap<String, Vec<crate::units::InputUnit>>,
+    pub comparisons: std::collections::BTreeMap<String, Comparison>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Comparison {
+    pub with: String,
+    pub factor: f64,
+}
+
+/// Cuánto multiplica lo medido (en `quantity_unit`) para pasarlo a la unidad del mensurando.
+///
+/// Sin desplazamiento: °C contra K no se compara (en un ΔT sumaría 273,15).
+///
+/// ```
+/// use quantify::practices::comparison_conversion;
+/// assert_eq!(comparison_conversion("V", " V "), Some(1.0));
+/// assert_eq!(comparison_conversion("div", "div"), Some(1.0));
+/// assert_eq!(comparison_conversion("V", "mV").map(f64::round), Some(1000.0));
+/// assert_eq!(comparison_conversion("°C", "K"), None);
+/// assert_eq!(comparison_conversion("s", "g"), None);
+/// assert_eq!(comparison_conversion("", "%"), None);
+/// assert_eq!(comparison_conversion("div", "cm"), None);
+/// ```
+pub fn comparison_conversion(quantity_unit: &str, result_unit: &str) -> Option<f64> {
+    let (from, to) = (quantity_unit.trim(), result_unit.trim());
+    if from == to {
+        return Some(1.0);
+    }
+    if from.is_empty() || to.is_empty() {
+        return None;
+    }
+    match crate::units::conversion(from, to) {
+        Ok((factor, 0.0)) => Some(factor),
+        _ => None,
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ScopedDeterminations {
+    pub scope: String,
+    #[serde(flatten)]
+    pub determinations: super::Determinations,
+}
+
 fn symbols(view: &PracticeDefinition) -> Vec<String> {
     view.quantities.iter().map(|q| q.symbol.clone()).collect()
 }
@@ -209,6 +276,190 @@ impl PracticeDefinition {
         self
     }
 
+    /// Los mensurandos que se calculan en cada determinación, con las determinaciones de su parte.
+    ///
+    /// ```
+    /// use quantify::practices::{Determinations, PracticeDefinition};
+    /// let q = quantify::db::PracticeQuantity { symbol: "T".into(), per_determination: true, ..Default::default() };
+    /// let r = |s: &str, f: &str| quantify::db::PracticeResult { symbol: s.into(), formula: f.into(), ..Default::default() };
+    /// let d = Determinations { count: 3, label: "Medida".into(), average: true, display: Default::default() };
+    /// let def = PracticeDefinition { quantities: vec![q], results: vec![r("g", "2*T"), r("k", "3")], determinations: Some(d), ..Default::default() };
+    /// let found = def.determination_results();
+    /// assert_eq!(found.len(), 1);
+    /// assert_eq!((found[0].0.as_str(), found[0].1.count), ("g", 3));
+    /// ```
+    pub fn determination_results(&self) -> Vec<(String, super::Determinations)> {
+        let views: Vec<PracticeDefinition> = if self.parts.is_empty() {
+            vec![self.clone()]
+        } else {
+            self.parts.iter().map(|p| self.part_view(p)).collect()
+        };
+        views
+            .into_iter()
+            .filter(|v| !is_point_based(v.analysis_kind.as_deref()))
+            .flat_map(|v| {
+                let Some(d) = v.determinations.clone() else {
+                    return Vec::new();
+                };
+                let per = crate::computation::per_determination_symbols(&v.quantities, &v.results);
+                v.results
+                    .iter()
+                    .filter(|r| per.contains(&r.symbol))
+                    .map(|r| (r.symbol.clone(), d.clone()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    pub fn averaged_results(&self) -> Vec<String> {
+        self.determination_results()
+            .into_iter()
+            .filter(|(_, d)| d.average)
+            .map(|(s, _)| s)
+            .collect()
+    }
+
+    /// La parte de cada símbolo, y las determinaciones de la práctica, de cada magnitud y de cada mensurando que se repite.
+    ///
+    /// ```
+    /// use quantify::practices::{Determinations, PracticeDefinition};
+    /// let q = quantify::db::PracticeQuantity { symbol: "T".into(), per_determination: true, ..Default::default() };
+    /// let r = |s: &str, f: &str| quantify::db::PracticeResult { symbol: s.into(), formula: f.into(), ..Default::default() };
+    /// let d = Determinations { count: 3, label: "Medida".into(), average: true, display: Default::default() };
+    /// let def = PracticeDefinition { quantities: vec![q], results: vec![r("g", "2*T"), r("k", "3")], determinations: Some(d), ..Default::default() };
+    /// let resolved = def.resolved();
+    /// assert_eq!(resolved.determinations["g"].determinations.count, 3);
+    /// assert!(resolved.determinations.contains_key("T") && !resolved.determinations.contains_key("k"));
+    /// ```
+    pub fn resolved(&self) -> Resolved {
+        let symbols = self
+            .quantities
+            .iter()
+            .map(|q| q.symbol.as_str())
+            .chain(self.results.iter().map(|r| r.symbol.as_str()))
+            .chain(self.intermediates.iter().map(|i| i.symbol.as_str()))
+            .chain(self.aggregates.iter().map(|a| a.symbol.as_str()))
+            .chain(self.point_results.iter().map(|p| p.symbol.as_str()));
+        let symbol_parts: std::collections::BTreeMap<String, String> = symbols
+            .filter_map(|s| Some((s.to_string(), self.symbol_part(s)?.to_string())))
+            .collect();
+        let scoped = |symbol: &str, d: &super::Determinations| ScopedDeterminations {
+            scope: symbol_parts.get(symbol).cloned().unwrap_or_default(),
+            determinations: d.clone(),
+        };
+        let mut determinations: std::collections::BTreeMap<String, ScopedDeterminations> = self
+            .quantities
+            .iter()
+            .filter_map(|q| {
+                let d = self.quantity_determinations(&q.symbol)?;
+                Some((q.symbol.clone(), scoped(&q.symbol, d)))
+            })
+            .collect();
+        for (symbol, d) in self.determination_results() {
+            let entry = scoped(&symbol, &d);
+            determinations.insert(symbol, entry);
+        }
+        let quantity_units = self.quantities.iter().map(|q| {
+            let mut units = crate::units::input_units(&q.unit);
+            if q.slot_count.is_some() {
+                units.truncate(1);
+            }
+            (q.symbol.clone(), units)
+        });
+        let result_units = self.results.iter().filter(|r| r.is_final).map(|r| {
+            let mut units = crate::units::input_units(&r.unit);
+            units.retain(|u| u.offset == 0.0);
+            (r.symbol.clone(), units)
+        });
+        Resolved {
+            practice_determinations: self.determinations_in(None).cloned(),
+            symbol_parts,
+            determinations,
+            input_units: quantity_units.chain(result_units).collect(),
+            comparisons: self.comparisons(),
+        }
+    }
+
+    /// Cada mensurando con "Comparar con", con el factor que pasa lo medido a su unidad.
+    ///
+    /// ```
+    /// use quantify::db::{PracticeQuantity, PracticeResult};
+    /// use quantify::practices::PracticeDefinition;
+    /// let def = PracticeDefinition {
+    ///     quantities: vec![PracticeQuantity { symbol: "V".into(), unit: "V".into(), ..Default::default() }],
+    ///     results: vec![
+    ///         PracticeResult { symbol: "V_t".into(), unit: "mV".into(), compare_with: "V".into(), ..Default::default() },
+    ///         PracticeResult { symbol: "x".into(), unit: "mV".into(), ..Default::default() },
+    ///     ],
+    ///     ..Default::default()
+    /// };
+    /// let comparisons = def.comparisons();
+    /// assert_eq!(comparisons.len(), 1);
+    /// let v = &comparisons["V_t"];
+    /// assert_eq!((v.with.as_str(), v.factor.round()), ("V", 1000.0));
+    /// ```
+    pub fn comparisons(&self) -> std::collections::BTreeMap<String, Comparison> {
+        self.results
+            .iter()
+            .filter(|r| !r.compare_with.is_empty())
+            .filter_map(|r| {
+                let q = self
+                    .quantities
+                    .iter()
+                    .find(|q| q.symbol == r.compare_with)?;
+                Some((
+                    r.symbol.clone(),
+                    Comparison {
+                        with: r.compare_with.clone(),
+                        factor: comparison_conversion(&q.unit, &r.unit).unwrap_or(1.0),
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    pub fn part_of_quantity(&self, symbol: &str) -> Option<&PracticePart> {
+        let id = self.quantity_part(symbol)?;
+        self.parts.iter().find(|p| p.id == id)
+    }
+
+    /// Las determinaciones que valen donde está la magnitud, la repita o no.
+    ///
+    /// ```
+    /// use quantify::practices::{Determinations, PracticeDefinition};
+    /// let q = quantify::db::PracticeQuantity { symbol: "L".into(), ..Default::default() };
+    /// let d = Determinations { count: 2, label: "Medida".into(), average: false, display: Default::default() };
+    /// let def = PracticeDefinition { quantities: vec![q], determinations: Some(d), ..Default::default() };
+    /// assert_eq!(def.quantity_determinations("L").map(|d| d.count), Some(2));
+    /// ```
+    pub fn quantity_determinations(&self, symbol: &str) -> Option<&super::Determinations> {
+        self.determinations_in(self.part_of_quantity(symbol))
+    }
+
+    /// Las determinaciones que valen en una parte estadística, o en la práctica si no tiene partes.
+    ///
+    /// ```
+    /// use quantify::practices::{Determinations, PracticeDefinition};
+    /// let d = Determinations { count: 2, label: "Medida".into(), average: false, display: Default::default() };
+    /// let def = PracticeDefinition { determinations: Some(d), ..Default::default() };
+    /// assert_eq!(def.determinations_in(None).map(|d| d.count), Some(2));
+    /// ```
+    pub fn determinations_in<'a>(
+        &'a self,
+        part: Option<&'a PracticePart>,
+    ) -> Option<&'a super::Determinations> {
+        match part {
+            Some(part) => part
+                .determinations
+                .as_ref()
+                .filter(|_| self.part_kind(part) == "estadistico"),
+            None if self.parts.is_empty() && !is_point_based(self.analysis_kind.as_deref()) => {
+                self.determinations.as_ref()
+            }
+            None => None,
+        }
+    }
+
     pub fn part_kind(&self, part: &PracticePart) -> &str {
         self.kind_given_series(part, self.series_part().map(|p| p.id.as_str()))
     }
@@ -221,21 +472,13 @@ impl PracticeDefinition {
         }
     }
 
-    fn statistical_operators(&self) -> Option<i64> {
-        if is_point_based(self.analysis_kind.as_deref()) {
-            None
-        } else {
-            self.operator_count
-        }
-    }
-
     pub fn shared_view(&self) -> PracticeDefinition {
         let has_series = self.series_part().is_some();
         PracticeDefinition {
             analysis_kind: Some("estadistico".into()),
             x_formula: None,
             y_formula: None,
-            operator_count: self.statistical_operators(),
+            determinations: None,
             quantities: self
                 .quantities
                 .iter()
@@ -266,7 +509,10 @@ impl PracticeDefinition {
             analysis_kind: Some(self.part_kind(part).to_string()),
             x_formula: self.x_formula.clone().filter(|_| is_series),
             y_formula: self.y_formula.clone().filter(|_| is_series),
-            operator_count: self.statistical_operators(),
+            determinations: part
+                .determinations
+                .clone()
+                .filter(|_| self.part_kind(part) == "estadistico"),
             quantities: self
                 .quantities
                 .iter()
@@ -347,6 +593,28 @@ impl PracticeDefinition {
         }
         if self.results.iter().any(|r| r.symbol == symbol) {
             return self.result_part_in(symbol, seen);
+        }
+        if let Some(base) = symbol
+            .strip_suffix("_medio")
+            .filter(|_| {
+                let named = |s: &str| s == symbol;
+                !self.quantities.iter().any(|q| named(&q.symbol))
+                    && !self.intermediates.iter().any(|i| named(&i.symbol))
+                    && !self.aggregates.iter().any(|a| named(&a.symbol))
+                    && !self.point_results.iter().any(|p| named(&p.symbol))
+            })
+            .filter(|b| self.results.iter().any(|r| r.symbol == *b))
+        {
+            let part = self.result_part_in(base, seen);
+            let averaged = self
+                .determinations_in(part.and_then(|id| self.parts.iter().find(|p| p.id == id)))
+                .is_some_and(|d| d.average)
+                && crate::computation::per_determination_symbols(&self.quantities, &self.results)
+                    .iter()
+                    .any(|s| s == base);
+            if averaged {
+                return part;
+            }
         }
         let series_part = self.series_part()?;
         let series: Vec<&str> = self

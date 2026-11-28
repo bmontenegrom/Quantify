@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "name": "Tratamiento estadístico de Datos",
+  "description": "Medí el período de un péndulo simple y, con su largo, calculá la aceleración de la gravedad. Cada operador mide su propia serie de períodos.",
+  "analysis_kind": "estadistico",
+  "x_formula": null,
+  "y_formula": null,
+  "parts": [
+    {
+      "key": "op1",
+      "title": "Operador 1",
+      "analysis_kind": null,
+      "help_text": ""
+    },
+    {
+      "key": "op2",
+      "title": "Operador 2",
+      "analysis_kind": null,
+      "help_text": ""
+    },
+    {
+      "key": "op3",
+      "title": "Operador 3",
+      "analysis_kind": null,
+      "help_text": ""
+    }
+  ],
+  "sections": [
+    {
+      "title": "Operador 1 — Períodos",
+      "part": 0,
+      "help_text": "",
+      "quantities": [
+        "T1"
+      ],
+      "results": [
+        "Q",
+        "g1"
+      ]
+    },
+    {
+      "title": "Operador 2 — Períodos (opcional)",
+      "part": 1,
+      "help_text": "",
+      "quantities": [
+        "T2"
+      ],
+      "results": [
+        "g2"
+      ]
+    },
+    {
+      "title": "Operador 3 — Períodos (opcional)",
+      "part": 2,
+      "help_text": "",
+      "quantities": [
+        "T3"
+      ],
+      "results": [
+        "g3"
+      ]
+    },
+    {
+      "title": "Medidas",
+      "part": null,
+      "help_text": "",
+      "quantities": [
+        "L",
+        "t_med"
+      ],
+      "results": [
+        "gamma"
+      ]
+    }
+  ],
+  "quantities": [
+    {
+      "display_symbol": null,
+      "symbol": "L",
+      "name": "Longitud del pendulo",
+      "unit": "m",
+      "repeated": false,
+      "quantity": "longitud",
+      "is_given": true,
+      "replicas_per_point": null,
+      "per_point": false,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "teclado"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "t_med",
+      "name": "Tiempo de semiamplitud (t1/2)",
+      "unit": "s",
+      "repeated": false,
+      "quantity": "tiempo",
+      "is_given": true,
+      "replicas_per_point": null,
+      "per_point": false,
+      "has_uncertainty": false,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "teclado"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "T1",
+      "name": "Periodo - Operador 1",
+      "unit": "s",
+      "repeated": true,
+      "quantity": "tiempo",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": true,
+      "has_uncertainty": true,
+      "optional": false,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "cronometro"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "T2",
+      "name": "Periodo - Operador 2",
+      "unit": "s",
+      "repeated": true,
+      "quantity": "tiempo",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": true,
+      "has_uncertainty": true,
+      "optional": true,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "cronometro"
+    },
+    {
+      "display_symbol": null,
+      "symbol": "T3",
+      "name": "Periodo - Operador 3",
+      "unit": "s",
+      "repeated": true,
+      "quantity": "tiempo",
+      "is_given": false,
+      "replicas_per_point": null,
+      "per_point": true,
+      "has_uncertainty": true,
+      "optional": true,
+      "default_value": null,
+      "slot_count": null,
+      "label_mode": "nombre",
+      "input_widget": "cronometro"
+    }
+  ],
+  "results": [
+    {
+      "display_symbol": null,
+      "symbol": "gamma",
+      "name": "Coeficiente de amortiguamiento",
+      "unit": "1/s",
+      "formula": "2*math::ln(2)/t_med",
+      "tolerance": null,
+      "is_final": true,
+      "has_uncertainty": false,
+      "compare_with": null
+    },
+    {
+      "display_symbol": null,
+      "symbol": "Q",
+      "name": "Factor de calidad (usa el periodo del Operador 1)",
+      "unit": "",
+      "formula": "pi*t_med/(T1*math::ln(2))",
+      "tolerance": null,
+      "is_final": true,
+      "has_uncertainty": false,
+      "compare_with": null
+    },
+    {
+      "display_symbol": null,
+      "symbol": "g1",
+      "name": "Aceleracion de gravedad - Operador 1",
+      "unit": "m/s2",
+      "formula": "4*pi^2*L/T1^2",
+      "tolerance": null,
+      "is_final": true,
+      "has_uncertainty": true,
+      "compare_with": null
+    },
+    {
+      "display_symbol": null,
+      "symbol": "g2",
+      "name": "Aceleracion de gravedad - Operador 2",
+      "unit": "m/s2",
+      "formula": "4*pi^2*L/T2^2",
+      "tolerance": null,
+      "is_final": true,
+      "has_uncertainty": true,
+      "compare_with": null
+    },
+    {
+      "display_symbol": null,
+      "symbol": "g3",
+      "name": "Aceleracion de gravedad - Operador 3",
+      "unit": "m/s2",
+      "formula": "4*pi^2*L/T3^2",
+      "tolerance": null,
+      "is_final": true,
+      "has_uncertainty": true,
+      "compare_with": null
+    }
+  ],
+  "intermediates": [],
+  "point_results": [],
+  "aggregates": [],
+  "curves": []
+}

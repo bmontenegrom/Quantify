@@ -1,3 +1,4 @@
+mod dual;
 mod engines;
 mod formula;
 mod submission;
@@ -7,17 +8,18 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 pub use engines::analyze;
 pub use engines::{
-    analyze_definition, compute, compute_curva, compute_regresion, live_values, scale_spec,
-    PointContext,
+    analyze_definition, compute, compute_curva, compute_regresion, live_values, rename_symbols,
+    scale_spec, PointContext,
 };
-pub(crate) use formula::{chain_order, formula_symbols};
+pub(crate) use engines::{per_determination_symbols, ENDPOINT_SUFFIXES};
+pub(crate) use formula::{chain_order, formula_symbols, parse, CONSTANTS};
 pub use formula::{check_formula, FUNCTIONS};
 pub use submission::{
     check_student_result_symbols, create_form_submission, update_form_submission,
     validate_student_results, FormSubmissionInput,
 };
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct MeasurementInput {
     pub quantity_id: String,
     pub instrument_id: Option<String>,
@@ -28,9 +30,73 @@ pub struct MeasurementInput {
     pub point_replicas: Option<Vec<Vec<f64>>>,
     #[serde(default)]
     pub operator_replicas: Option<Vec<Vec<f64>>>,
+    #[serde(default)]
+    pub operator_instruments: Option<Vec<InstrumentChoice>>,
+}
+
+pub fn with_fixed_values(
+    quantities: &[crate::db::PracticeQuantity],
+    measurements: &[MeasurementInput],
+) -> Vec<MeasurementInput> {
+    let fixed: Vec<_> = quantities
+        .iter()
+        .filter(|q| q.is_given && q.fixed)
+        .filter_map(|q| {
+            Some(MeasurementInput {
+                quantity_id: q.id.clone(),
+                values: vec![q.default_value?],
+                given_u: q.default_u.filter(|_| q.has_uncertainty),
+                ..Default::default()
+            })
+        })
+        .collect();
+    let mut out: Vec<_> = measurements
+        .iter()
+        .filter(|m| !fixed.iter().any(|f| f.quantity_id == m.quantity_id))
+        .cloned()
+        .collect();
+    out.extend(fixed);
+    out
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InstrumentChoice {
+    pub instrument_id: Option<String>,
+    pub scale_id: Option<String>,
 }
 
 impl MeasurementInput {
+    /// Instrumento y escala de una determinación, o los de la magnitud si no se eligieron por determinación.
+    ///
+    /// ```
+    /// use quantify::computation::{InstrumentChoice, MeasurementInput};
+    /// let choice = |s: Option<&str>| InstrumentChoice { instrument_id: s.map(Into::into), scale_id: s.map(Into::into) };
+    /// let m = MeasurementInput {
+    ///     quantity_id: "m".into(), instrument_id: Some("comun".into()), scale_id: Some("comun".into()),
+    ///     values: vec![], given_u: None, point_replicas: None, operator_replicas: None,
+    ///     operator_instruments: Some(vec![choice(None), choice(Some("balanza"))]),
+    /// };
+    /// assert_eq!(m.instrument_for(Some(0)), (None, None));
+    /// assert_eq!(m.instrument_for(Some(1)), (Some("balanza"), Some("balanza")));
+    /// assert_eq!(m.instrument_for(Some(2)), (Some("comun"), Some("comun")));
+    /// assert_eq!(m.instrument_for(None), (Some("comun"), Some("comun")));
+    /// ```
+    pub fn instrument_for(&self, operator: Option<usize>) -> (Option<&str>, Option<&str>) {
+        match operator.and_then(|i| self.operator_instruments.as_ref()?.get(i)) {
+            Some(c) => (c.instrument_id.as_deref(), c.scale_id.as_deref()),
+            None => (self.instrument_id.as_deref(), self.scale_id.as_deref()),
+        }
+    }
+
+    fn all_instruments(&self) -> impl Iterator<Item = (Option<&str>, Option<&str>)> {
+        std::iter::once((self.instrument_id.as_deref(), self.scale_id.as_deref())).chain(
+            self.operator_instruments
+                .iter()
+                .flatten()
+                .map(|c| (c.instrument_id.as_deref(), c.scale_id.as_deref())),
+        )
+    }
+
     fn point_values(&self) -> Vec<f64> {
         match &self.point_replicas {
             Some(groups) => groups
@@ -86,7 +152,14 @@ pub struct RegressionResult {
     pub intercept: f64,
     pub u_slope: f64,
     pub u_intercept: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub u_slope_total: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub u_intercept_total: Option<f64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shared: Vec<String>,
     pub r_squared: f64,
+    pub u_points: Vec<(f64, f64)>,
     pub x_label: String,
     pub y_label: String,
 }
@@ -100,7 +173,7 @@ pub struct ScatterResult {
 }
 
 #[derive(Debug, Serialize)]
-pub struct OperatorComputation {
+pub struct DeterminationComputation {
     pub label: String,
     pub quantities: Vec<QuantityComputation>,
     pub derived: Vec<DerivedComputation>,
@@ -112,6 +185,8 @@ pub struct PointResultComputation {
     pub name: String,
     pub unit: String,
     pub values: Vec<f64>,
+    pub u: Vec<f64>,
+    pub u_expanded: Vec<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -120,6 +195,9 @@ pub struct AggregateComputation {
     pub name: String,
     pub unit: String,
     pub value: f64,
+    pub u: f64,
+    pub u_expanded: f64,
+    pub has_uncertainty: bool,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -135,8 +213,10 @@ pub struct FormAnalysis {
     pub regression: Option<RegressionResult>,
     pub scatters: Vec<ScatterResult>,
     pub derived: Vec<DerivedComputation>,
-    #[serde(default)]
-    pub operators: Vec<OperatorComputation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub determinations: Vec<DeterminationComputation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intermediates: Vec<PointResultComputation>,
     #[serde(default)]
     pub point_results: Vec<PointResultComputation>,
     #[serde(default)]

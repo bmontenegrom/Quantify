@@ -1,9 +1,64 @@
 # Quantify
 
-Web app para el laboratorio de Física 103 (Física Experimental I). Los estudiantes cargan sus
-medidas **a mano en un formulario**, el sistema calcula las incertidumbres (tipo A, tipo B,
-combinada y expandida) y los mensurandos derivados por propagación, y deja las entregas
-disponibles para revisión docente.
+[![CI](https://github.com/bmontenegrom/Quantify/actions/workflows/ci.yml/badge.svg?branch=development)](https://github.com/bmontenegrom/Quantify/actions/workflows/ci.yml)
+[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
+![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
+![Axum](https://img.shields.io/badge/Axum-0.8-8A2BE2)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)
+
+Web app para cursos de laboratorio de cualquier disciplina experimental (física, química, biología,
+ingeniería…). El docente define cada práctica en un editor: qué se mide, con qué instrumentos, qué
+fórmulas derivan los resultados y qué análisis se hace (estadístico, ajuste lineal o curva). Los
+estudiantes cargan sus medidas **a mano en un formulario**, y el sistema calcula los resultados con
+sus incertidumbres según la GUM (tipo A, tipo B por instrumento, combinada y expandida, propagadas
+analíticamente) y deja las entregas disponibles para revisión docente.
+
+Nada del motor es específico de una materia: las prácticas, las magnitudes, las unidades y los
+instrumentos son datos que configura el docente. Las prácticas de ejemplo que trae la biblioteca son
+las del curso de Física 103, y sirven como referencia para armar las propias.
+
+## Funcionalidades
+
+**Prácticas configurables**
+- Editor de prácticas: magnitudes medidas, datos de cátedra (con o sin incertidumbre), intermedias
+  calculadas por réplica o sobre los promedios, mensurandos, derivadas por punto y agregados.
+- Tres tipos de análisis: estadístico (réplicas por magnitud), regresión lineal (fórmulas de eje
+  sobre una serie de puntos) y curva (dispersión sin ajuste).
+- Prácticas en varias partes, cada una con su análisis, y determinaciones (la misma medida repetida
+  por operador, muestra o condición, cada una con su instrumento).
+- Borrador y publicación con versiones: las entregas quedan en la versión con que se hicieron.
+- Biblioteca de plantillas, "Nueva desde plantilla" y exportar/importar una práctica como archivo.
+- Modo guiado para armar una práctica paso a paso, y "Probar" con datos de ejemplo antes de publicar.
+- Avisos del editor: unidades no reconocidas, chequeo dimensional de las fórmulas y casos en que la
+  incertidumbre puede no ser exacta.
+- Catálogo de constantes físicas y químicas, y sinónimos de magnitudes físicas.
+
+**Carga de medidas**
+- Formulario por práctica, con filas de réplica, tabla de puntos para la regresión y columnas que se
+  calculan en vivo mientras el alumno carga.
+- Cronómetro integrado para medir tiempos desde el formulario.
+- Unidades estructuradas: el alumno carga en la unidad que elija del desplegable y el motor convierte.
+- Catálogo de instrumentos por curso, con escalas, modelo de incertidumbre tipo B (resolución,
+  apreciación o fabricante) y calibración; exportable e importable.
+
+**Incertidumbres**
+- Tipo A (`s/√n`), tipo B según la escala del instrumento, combinada y expandida (`k = 2`).
+- Propagación analítica con números duales (derivadas exactas, sin diferencias finitas), con las
+  correlaciones como fuentes compartidas: una magnitud que entra por varios caminos cuenta una vez.
+- U de los mensurandos, de las intermedias y derivadas por punto (tabla "Por corrida") y de los
+  agregados; las intermedias por réplica respetan que las lecturas de una réplica se tomaron juntas.
+- Regresión lineal con pendiente, ordenada, sus incertidumbres y R²; interpolación inversa con la U
+  de la recta; barras de error en el gráfico; las magnitudes compartidas de los ejes se suman a la U
+  de la recta (el panel muestra la U del ajuste y la total).
+- Avisos cuando una U no se puede calcular o cae en un quiebre de la fórmula.
+
+**Curso y revisión**
+- Cursos, grupos, mesas, estudiantes y prácticas habilitadas por curso; roles de admin, docente y
+  estudiante.
+- Revisión docente de cada entrega; el docente puede habilitar que el alumno vea el cálculo
+  automático y compare sus propios resultados, con una tolerancia por mensurando.
+- Notas por curso: preguntas, informes y parciales, con normalización a un total.
 
 ## Stack
 
@@ -12,9 +67,10 @@ disponibles para revisión docente.
   pura y los selectores se extraen a `static/lib.js` (ES module) para poder testearlos.
 - **Auth**: sesiones por cookie `quantify_session` (12 h); hash de contraseña Argon2id (re-hash
   transparente de hashes SHA-256 legacy en el primer login).
-- **Motor de cálculo**: `src/uncertainty.rs` (tipo A/B/combinada/expandida + propagación numérica)
+- **Motor de cálculo**: `src/uncertainty.rs` (tipo A/B/combinada/expandida y combinación de fuentes)
   y `src/computation.rs` (entrega por formulario: cablea la definición de la práctica, el catálogo
-  de instrumentos y las lecturas crudas, y evalúa las fórmulas con `evalexpr`).
+  de instrumentos y las lecturas crudas, evalúa las fórmulas con `evalexpr` y propaga las
+  incertidumbres con números duales).
 - **Tests**: backend con `cargo test`; frontend con `node --test` sobre `static/lib.js`.
 
 SQLite simplifica el arranque en Windows y el primer deploy local. La persistencia está concentrada
@@ -84,7 +140,8 @@ La carga es **por formulario**, no por archivo. En la pestaña **Entregas** el e
 2. Aparecen los campos de la práctica según su tipo de análisis:
 
    **Prácticas estadísticas** — un bloque por magnitud. Cada bloque tiene una o más filas de
-   réplica (el alumno agrega las que midió) y un selector de instrumento y escala del catálogo.
+   réplica (el alumno agrega las que midió) y un selector de instrumento y escala del catálogo;
+   una magnitud que se repite por determinación tiene un selector en cada determinación.
    Los campos `is_given` (dato aportado por la cátedra como `valor ± U`) se muestran pre-cargados
    y no requieren instrumento.
 
@@ -93,16 +150,20 @@ La carga es **por formulario**, no por archivo. En la pestaña **Entregas** el e
    eje `x_formula` / `y_formula` (definidas en la práctica) derivan las coordenadas `(x, y)` de
    cada punto; el ajuste lineal `y = m·x + b` se calcula sobre esa serie.
 
+   **Prácticas de curva** — la misma tabla de puntos, pero sin ajuste: el resultado es el gráfico de
+   dispersión de una o más curvas (con eje x logarítmico si la práctica lo pide).
+
 3. Al enviar (`POST /api/submissions/form`), el sistema calcula automáticamente:
    - por cada magnitud: media, **incertidumbre tipo A** (`s/√n`, solo si hay réplicas) y **tipo B**
      (según el modelo de la escala elegida: `resolución` → `paso/(2√3)`, `apreciación` →
      `apreciación/√6`, `fabricante` → `(pct·|v| + coef·paso + fijo) / 2`), combinada `u_c` y
      expandida `U = 2·u_c`;
-   - los **mensurandos derivados** evaluando la fórmula de la práctica con propagación numérica de
-     varianzas (diferencias finitas centradas);
-   - en regresión: **pendiente**, **intercepto**, sus incertidumbres (`u_slope`, `u_intercept`),
-     **R²**, y los mensurandos que dependan de `slope` o `intercept`; más un **gráfico SVG**
-     con la nube de puntos y la recta ajustada.
+   - los **mensurandos derivados** evaluando la fórmula de la práctica y propagando las
+     incertidumbres con números duales (derivadas exactas), con las correlaciones entre entradas;
+   - en regresión: **pendiente**, **intercepto**, sus incertidumbres (la del ajuste y, si un eje usa
+     magnitudes compartidas, la total), **R²**, los mensurandos que dependan de `slope` o
+     `intercept`, la U de cada intermedia y derivada por punto y de los agregados, y un **gráfico
+     SVG** con la nube de puntos, sus barras de error y la recta ajustada.
 
 El docente puede habilitar que el estudiante vea el cálculo automático desde la revisión.
 Una vez habilitado, el estudiante puede guardar sus propios resultados (`valor ± U`)
@@ -112,17 +173,18 @@ para **compararlos** con el cálculo automático (tabla de diferencias absolutas
 > calcula estadística básica por columna y una regresión entre las dos primeras columnas numéricas.
 > La UI actual usa el formulario; el CSV se mantiene por compatibilidad.
 
-## Prácticas de la biblioteca (Física 103)
+## Prácticas de la biblioteca (ejemplos de Física 103)
 
-Las prácticas de Física 103 son plantillas JSON en `templates/practices/<id>.json`. Una base nueva
-(sin prácticas) las importa al arrancar, publicadas y habilitadas en el curso de ejemplo; después
-cada práctica se edita desde el admin como cualquier otra. El docente también puede crear un
+Las prácticas de ejemplo son las del curso de Física 103: plantillas JSON
+en `templates/practices/<id>.json`. Una base nueva (sin prácticas) las importa al arrancar,
+publicadas y habilitadas en el curso de ejemplo; después cada práctica se edita desde el admin como
+cualquier otra. El docente también puede crear un
 borrador desde una plantilla ("Nueva desde plantilla") o exportar e importar una práctica como
 archivo.
 
 | id | Nombre | Tipo de análisis |
 |----|--------|------------------|
-| `p1-estadistica` | Tratamiento estadístico de Datos (tres operadores) | estadístico |
+| `p1-estadistica` | Tratamiento estadístico de Datos (péndulo, tres operadores) | estadístico |
 | `p2-cc` | Corriente continua (serie, paralelo y curva de potencia) | curva |
 | `p3-relajacion` | Relajación Exponencial (medida directa y desfasaje, en dos partes) | regresión lineal |
 | `fluidos-1` | Fluidos I | regresión lineal |
@@ -135,17 +197,15 @@ archivo.
 > Una base existente no vuelve a importar la biblioteca. Para empezar de cero en desarrollo, borrá
 > `data/quantify.db` antes de arrancar.
 
-### P1 — Tratamiento estadístico
+### P1 — Tratamiento estadístico (`p1-estadistica`)
 
-Magnitudes medidas (con réplicas):
+Péndulo simple medido por **3 operadores**, cada uno en su pestaña (determinaciones "Operador",
+sin promedio). Datos comunes: `L` (longitud del péndulo, dato de cátedra con U) y `t_med`
+(tiempo de semiamplitud, sin U). Cada operador mide su serie de períodos `T` con el cronómetro;
+ninguno es obligatorio.
 
-| símbolo | nombre | unidad |
-|---------|--------|--------|
-| `l` | Longitud del cordón | m |
-| `a` | Ancho del cordón | m |
-| `b` | Espesor del cordón | m |
-
-Mensurando derivado: `Q = l·a + l·b` (área de la sección transversal, m²).
+Mensurandos: `gamma = 2·ln2/t_med` (común), y por operador `g = 4π²·L/T²` y
+`Q = π·t_med/(T·ln2)`. El alumno informa `g` y `Q` de cada operador (`g#1`, `Q#1`, …).
 
 ### P2 — Corriente continua (`p2-cc`, una sola entrega)
 
@@ -239,12 +299,17 @@ E · b_E = Σ mᵢ · g · bᵢ        ⇒  E = (Σ mᵢ·bᵢ) · g / b_E
 E / P = ρ_f / ρ_goma           ⇒  ρ_goma = ρ_f · m_goma · b_E / (Σ mᵢ·bᵢ)
 ```
 
-El procedimiento se repite **3 veces** con pesas y posiciones distintas (`m1_i`, `m2_i`, `m3_i`):
-son determinaciones independientes, no réplicas. Salida: `E1..E3` y `rho1..rho3` por medida, más
-`E_medio` y `rho_medio` (su U sale por propagación desde las tres, como pide la técnica).
+El procedimiento se repite **3 veces** con pesas y posiciones distintas: son 3 determinaciones
+("Medida 1..3", en bloques), no réplicas. Las masas de las ranuras `m_1..m_9` se cargan en cada
+medida; la goma, el fluido y los brazos son comunes. Salida: `E` y `rho` por medida, más
+`E_medio` y `rho_medio`, que se calculan solos y propagan la U desde las tres medidas con los
+datos comunes una sola vez, como pide la técnica.
 
 Las 9 ranuras se cargan siempre: la que no se usó queda en **masa 0** (el formulario ya la trae en
-0) y sin instrumento, así que no aporta ni valor ni incertidumbre.
+0) y **sin instrumento**: cada medida elige su propio instrumento, así que una ranura vacía no
+aporta ni valor ni incertidumbre aunque otra medida use la balanza en esa misma ranura. El
+instrumento se guarda junto con las lecturas: una medida que se entrega vacía no lo conserva, y si
+después se edita la entrega para cargarla hay que volver a elegirlo.
 
 #### Parte 2 — Tensión superficial por el método de Wilhelmy
 
@@ -257,7 +322,7 @@ película se sustituye por el de la pesa:
 2·γ·l·d = mw·g·dw        ⇒  γ = mw·g·dw / (2·l·d)
 ```
 
-3 determinaciones (`gamma1..gamma3`) más `gamma_medio`. La técnica indica expresamente que esta
+`mw` y `dw` se cargan en cada una de las 3 medidas: `gamma` por medida más `gamma_medio`. La técnica indica expresamente que esta
 parte **no informa incertidumbre**, así que estos mensurandos se muestran sin ±U.
 
 > Unidades: masas en g y brazos/distancias en cm (como se leen). Las fórmulas de `E` y `γ` llevan
@@ -358,3 +423,9 @@ Los datos persistentes quedan en `./data`. Ver `deploy/ubuntu.md` para más deta
 - **Entregas**: `GET /submissions`, `POST /submissions` (CSV heredado),
   `POST /submissions/form` (formulario), `GET /submissions/{id}`,
   `POST /submissions/{id}/review`, `POST /submissions/{id}/student-results`
+
+## Contribuir y licencia
+
+Las contribuciones son bienvenidas: el flujo de trabajo, las convenciones y cómo agregar una
+práctica a la biblioteca están en [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md). Quantify se
+distribuye bajo la licencia [MIT](LICENSE).

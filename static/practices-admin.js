@@ -1,12 +1,15 @@
 import { state } from "./state.js";
 import { practiceCatalog, practiceWorkspace, practiceStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
+import { MAGNITUDES_LIST, ensureMagnitudesList } from "./magnitudes.js";
+import { constantPickerHtml, ensureConstants, applyConstant } from "./constants.js";
 import {
   escapeHtml,
   symbolHtml,
   setDisplaySymbols,
   inlineMathHtml,
   unitHtml,
+  unitText,
   analysisKindLabel,
   formatDate,
   compareOptionGroups,
@@ -21,6 +24,7 @@ import {
   POINT_KINDS,
   downloadJson,
   readJsonFile,
+  determinationsFor,
 } from "./lib.js";
 import { selectView } from "./navigation.js";
 import { showToast } from "./toast.js";
@@ -161,7 +165,10 @@ const SYMBOL_FORMULA_KINDS = {
     formulaPlaceholder: "(Re_max + Re_min) / 2",
     ...statusStrings("Mensurando agregado", false),
     confirmDelete: "¿Eliminar este mensurando agregado? Esta accion no se puede deshacer.",
-    flags: [{ field: "is_final", column: "Final", label: "Resultado final (comparable, sin incertidumbre)" }],
+    flags: [
+      { field: "is_final", column: "Final", label: "Resultado final (comparable)" },
+      { field: "has_uncertainty", column: "Con U", label: "Lleva incertidumbre (U); desmarcalo si se entrega solo el valor", defaultOn: true },
+    ],
   },
   intermediate: {
     kind: "intermediate",
@@ -198,7 +205,7 @@ function renderSymbolFormulaForm(kind, item, practiceId) {
       ${formulaFieldHtml("Fórmula", `<input name="formula" value="${v("formula")}" required placeholder="${kind.formulaPlaceholder}" />`, formulaScope(state.practiceDefinition, kind.scopeKind, { id: item?.id ?? "" }))}
       ${
         (kind.flags ?? [])
-          .map((f) => `<label class="checkbox-field"><input name="${f.field}" type="checkbox" ${item?.[f.field] ? "checked" : ""} /> ${f.label}</label>`)
+          .map((f) => `<label class="checkbox-field"><input name="${f.field}" type="checkbox" ${(item ? item[f.field] : f.defaultOn) ? "checked" : ""} /> ${f.label}</label>`)
           .join("")
       }
       <div class="detail-actions">
@@ -332,6 +339,8 @@ async function deleteSymbolFormulaRow(kind, id, practiceId) {
 }
 
 export function renderPracticesPage() {
+  ensureMagnitudesList();
+  ensureConstants();
   const discarded = dropped;
   dropped = new Set();
   renderPracticeDirectory();
@@ -363,6 +372,7 @@ export function renderPracticesPage() {
   }
 
   const kind = def?.analysis_kind;
+  const statistical = kind == null || kind === "estadistico";
   const pointBased = POINT_KINDS.includes(kind);
   const openPanels = new Set(
     [...practiceWorkspace.querySelectorAll("details[open][data-add-panel]")].map((d) => d.dataset.addPanel),
@@ -408,7 +418,7 @@ export function renderPracticesPage() {
       ${def?.parts?.length
         ? `<p class="submission-meta">El análisis se elige en cada parte, en «Partes».</p>`
         : renderAnalysisKindForm(practice, def)}
-      ${kind == null || kind === "estadistico" ? renderOperatorCountForm(practice, def) : ""}
+      ${!def?.parts?.length && statistical ? determinationsFormHtml(def, null, def?.determinations) : ""}
     </section>
 
     ${renderLayoutSection(practice, def)}
@@ -433,6 +443,9 @@ export function renderPracticesPage() {
       id: "result",
       title: "Mensurandos derivados",
       count: def?.results?.length ?? 0,
+      help: kind === "regresion_lineal"
+        ? "La fórmula puede usar <code>slope</code> e <code>intercept</code>; la incertidumbre tiene en cuenta la covarianza entre pendiente y ordenada. Interpolación inversa: <code>(A_m - intercept)/slope</code>, con <code>A_m</code> una magnitud compartida (la muestra). Una magnitud compartida que también entra en los ejes se toma como independiente de la recta."
+        : "",
       list: renderResultsList(def, practice.id),
       addLabel: "Nuevo mensurando",
       form: renderResultForm(null, practice.id, def),
@@ -474,7 +487,9 @@ export function renderPracticesPage() {
   });
   practiceWorkspace.querySelector("#practice-kind-form")?.addEventListener("submit", savePracticeKind);
   practiceWorkspace.querySelector("#practice-regression-form")?.addEventListener("submit", savePracticeRegressionFormulas);
-  practiceWorkspace.querySelector("#practice-operators-form")?.addEventListener("submit", savePracticeOperatorCount);
+  practiceWorkspace.querySelectorAll("[data-determinations-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => saveDeterminations(event, practice.id));
+  });
   practiceWorkspace.querySelector("#new-quantity-form")?.addEventListener("submit", saveNewQuantity);
   practiceWorkspace.querySelector("#new-result-form")?.addEventListener("submit", saveNewResult);
   practiceWorkspace.querySelector('#new-result-form [name="section_id"]')?.addEventListener("change", (e) => {
@@ -552,6 +567,12 @@ export function renderPracticesPage() {
   practiceWorkspace.querySelectorAll("#new-quantity-form, [data-edit-quantity-form]").forEach((form) => {
     syncQuantityForm(form, { initial: true });
     form.addEventListener("input", () => syncQuantityForm(form));
+  });
+  practiceWorkspace.querySelectorAll("[data-constant-picker]").forEach((select) => {
+    select.addEventListener("change", () => {
+      applyConstant(select.form, select.value);
+      select.value = "";
+    });
   });
   practiceWorkspace.querySelectorAll("[data-edit-result]").forEach((btn) => {
     btn.addEventListener("click", () => toggleEditing("result", btn.dataset.rid));
@@ -1027,17 +1048,24 @@ async function renderProblems(practiceId) {
 }
 
 function paintProblems(box, problems) {
-  if (!problems.length) {
-    box.innerHTML = `<p class="submission-meta practice-problems-ok">Sin problemas: la definición está completa.</p>`;
-    return;
-  }
-  box.innerHTML = `
+  const items = (warning) =>
+    problems.map((p, k) => [p, k]).filter(([p]) => Boolean(p.warning) === warning).map(([p, k]) => problemItemHtml(p, k));
+  const [blocking, warnings] = [items(false), items(true)];
+  const warningsHtml = warnings.length
+    ? `<div class="submission-meta practice-problems practice-warnings" role="status">
+        <strong>Avisos (${warnings.length})</strong>
+        <ul>${warnings.join("")}</ul>
+      </div>`
+    : "";
+  box.innerHTML = blocking.length
+    ? `
     <div class="edit-banner practice-problems" role="status">
       <div>
-        <strong>Para publicar falta resolver (${problems.length})</strong>
-        <ul>${problems.map(problemItemHtml).join("")}</ul>
+        <strong>Para publicar falta resolver (${blocking.length})</strong>
+        <ul>${blocking.join("")}</ul>
       </div>
-    </div>`;
+    </div>${warningsHtml}`
+    : `<p class="submission-meta practice-problems-ok">Sin problemas: la definición está completa.</p>${warningsHtml}`;
   box.querySelectorAll("[data-problem]").forEach((btn) => {
     btn.addEventListener("click", () => goToProblem(problems[Number(btn.dataset.problem)]));
   });
@@ -1169,19 +1197,28 @@ function renderRegressionFormulasForm(practice, def) {
   `;
 }
 
-function renderOperatorCountForm(practice, def) {
-  const count = def?.operator_count ?? "";
+function determinationsFormHtml(def, part, d) {
+  const partAttr = part ? ` data-part-id="${escapeHtml(part.id)}"` : "";
   return `
-    <form id="practice-operators-form" class="detail-form detail-form-grid">
-      <input name="practice_id" type="hidden" value="${escapeHtml(practice.id)}" />
-      <label>Operadores (estadística)
-        <input name="operator_count" type="number" min="0" step="1" value="${escapeHtml(String(count))}" placeholder="sin operadores" />
-      </label>
-      <p class="submission-meta">Con 2 o más operadores, cada uno carga su propia serie de las magnitudes repetidas (las dadas o de medida única se comparten) y se calculan los mensurandos por operador, sin promediar. 0 o 1 = comportamiento normal.</p>
-      <div class="detail-actions">
-        <button type="submit">Guardar operadores</button>
-      </div>
-    </form>
+    <details class="add-panel" data-add-panel="determinations-${escapeHtml(part?.id ?? "practice")}">
+      <summary>Determinaciones${d ? `: ${d.count} (${escapeHtml(d.label)})` : ""}</summary>
+      <form class="detail-form detail-form-grid" data-determinations-form${partAttr}${d ? " data-had-determinations" : ""}>
+        <label>Cantidad
+          <input name="count" type="number" min="2" step="1" value="${d?.count ?? ""}" placeholder="sin determinaciones" />
+        </label>
+        <label>Etiqueta <input name="label" maxlength="40" value="${escapeHtml(d?.label ?? "Medida")}" /></label>
+        ${selectFieldHtml("Mostrar en", "display", [
+          ["bloques", "Bloques (todas juntas)"],
+          ["pestanas", "Pestañas (una por determinación)"],
+        ], d?.display ?? "bloques")}
+        <label class="detail-form-checkbox">
+          <input type="checkbox" name="average" ${d?.average ? "checked" : ""} />
+          Promediar (cada mensurando suma &lt;símbolo&gt;_medio)
+        </label>
+        <p class="submission-meta">Las magnitudes marcadas «Se repite por determinación» se cargan una vez por determinación y sus mensurandos se calculan en cada una. Vacío = sin determinaciones.</p>
+        <div class="detail-actions"><button type="submit">Guardar determinaciones</button></div>
+      </form>
+    </details>
   `;
 }
 
@@ -1215,7 +1252,7 @@ function symbolFormulaSection(kindKey, practice, def, { title, help, addLabel })
 function renderPointResultsSection(practice, def) {
   return symbolFormulaSection("pointResult", practice, def, {
     title: "Magnitudes derivadas por punto",
-    help: "Se calculan tras el ajuste, una por corrida (p. ej. Reynolds). La fórmula puede usar las magnitudes y las intermedias del punto, <code>slope</code>/<code>intercept</code> y los mensurandos. Sin incertidumbre.",
+    help: "Se calculan tras el ajuste, una por corrida (p. ej. Reynolds). La fórmula puede usar las magnitudes y las intermedias del punto, <code>slope</code>/<code>intercept</code> y los mensurandos. Cada corrida lleva su U: la de las magnitudes del punto (tipo A de sus réplicas y tipo B de su escala), las compartidas, la recta y los mensurandos.",
     addLabel: "Nueva derivada por punto",
   });
 }
@@ -1223,7 +1260,7 @@ function renderPointResultsSection(practice, def) {
 function renderAggregatesSection(practice, def) {
   return symbolFormulaSection("aggregate", practice, def, {
     title: "Mensurandos agregados",
-    help: "Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Sin incertidumbre.",
+    help: "Se calculan una vez tras el ajuste, un valor escalar (p. ej. Reynolds medio). La fórmula puede usar los escalares compartidos, <code>slope</code>/<code>intercept</code>, los mensurandos, los agregados anteriores y los extremos de cada magnitud por punto: <code>x_first</code>, <code>x_first2</code>, <code>x_last</code>, <code>x_last2</code>. Llevan su U: la de los extremos (la u de ese punto), las compartidas, la recta, los mensurandos y los agregados anteriores, contando cada magnitud una sola vez, también una compartida que entra en un eje y en la recta, salvo la recta frente a las magnitudes por punto de los ejes (el editor avisa de ese caso). Si se desmarca \"Lleva incertidumbre\", se entrega solo el valor y los agregados siguientes lo toman como exacto.",
     addLabel: "Nuevo agregado",
   });
 }
@@ -1231,7 +1268,7 @@ function renderAggregatesSection(practice, def) {
 function renderIntermediatesSection(practice, def) {
   return symbolFormulaSection("intermediate", practice, def, {
     title: "Magnitudes intermedias por punto",
-    help: "Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio), o, con \"Calcular sobre los promedios\", una sola vez con las magnitudes ya promediadas (p. ej. v = dx/t con el tiempo medio). Una intermedia que usa otra anterior recibe su promedio. El símbolo queda disponible en las fórmulas de eje.",
+    help: "Se evalúan por réplica de cada punto y se promedian (p. ej. Q = V/t por réplica → Q medio), o, con \"Calcular sobre los promedios\", una sola vez con las magnitudes ya promediadas (p. ej. v = dx/t con el tiempo medio). Una intermedia que usa otra anterior toma su valor en la misma réplica (su promedio si alguna de las dos va sobre los promedios o tienen distinta cantidad de réplicas). El símbolo queda disponible en las fórmulas de eje.",
     addLabel: "Nueva intermedia",
   });
 }
@@ -1307,6 +1344,12 @@ function renderCurvesList(def, practiceId) {
   `;
 }
 
+function offersPerDetermination(qty) {
+  const def = state.practiceDefinition;
+  if (!qty) return Boolean(def?.resolved?.practice_determinations);
+  return qty.per_determination || Boolean(determinationsFor(def, qty.symbol));
+}
+
 function seriesPractice() {
   return POINT_KINDS.includes(state.practiceDefinition?.analysis_kind);
 }
@@ -1332,29 +1375,40 @@ function renderQuantityForm(qty, practiceId) {
   const v = (f) => qty ? escapeHtml(String(qty[f] ?? "")) : "";
   const formId = qty ? "edit-quantity-form" : "new-quantity-form";
   const formAttr = qty ? `data-edit-quantity-form data-qid="${escapeHtml(qty.id)}"` : "";
-  const kept = `data-per-point="${qty?.per_point === false ? 0 : 1}" data-repeated="${qty?.repeated ? 1 : 0}" data-given="${qty?.is_given ? 1 : 0}" data-replicas="${qty?.replicas_per_point ?? ""}"`;
+  const kept = `data-per-point="${qty?.per_point === false ? 0 : 1}" data-repeated="${qty?.repeated ? 1 : 0}" data-given="${qty?.is_given ? 1 : 0}" data-replicas="${qty?.replicas_per_point ?? ""}" data-per-determination="${qty?.per_determination ? 1 : 0}"`;
   return `
     <form id="${formId}" class="detail-form detail-form-grid" ${formAttr} ${kept}>
       <input name="practice_id" type="hidden" value="${escapeHtml(practiceId)}" />
-      ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : ""}
+      ${qty ? `<input name="qid" type="hidden" value="${escapeHtml(qty.id)}" />` : constantPickerHtml()}
       <label>Símbolo <input name="symbol" value="${v("symbol")}" required placeholder="l" /></label>
       ${displaySymbolFieldHtml(qty)}
       <label>Nombre <input name="name" value="${v("name")}" required placeholder="Longitud del cordón" /></label>
       <label>Unidad <input name="unit" value="${v("unit")}" placeholder="mm (vacío = adimensional)" /></label>
-      <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" /></label>
+      <label>Magnitud física <input name="quantity" value="${v("quantity")}" placeholder="longitud" list="${MAGNITUDES_LIST}" /></label>
       ${roleSelectHtml(qty)}
       <label data-for-roles="serie_replicas">Réplicas por punto
         <input name="replicas_per_point" type="number" min="1" step="1" required value="${v("replicas_per_point")}" placeholder="cantidad" />
       </label>
+      ${offersPerDetermination(qty) ? `<label class="detail-form-checkbox">
+        <input type="checkbox" name="per_determination" ${qty?.per_determination ? "checked" : ""} />
+        Se repite por determinación
+      </label>` : ""}
       <label class="detail-form-checkbox">
         <input type="checkbox" name="optional" ${qty?.optional ? "checked" : ""} />
         Opcional (puede quedar sin lecturas sin bloquear la entrega)
       </label>
       <label>Valor inicial
-        <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" title="Se precarga en el formulario del alumno" />
+        <input name="default_value" type="number" step="any" value="${v("default_value")}" placeholder="vacío" title="Se precarga en el formulario del alumno; con valor fijo, es el valor" />
       </label>
       <label data-for-roles="catedra constante">Ranuras
         <input name="slot_count" type="number" min="1" step="1" value="${v("slot_count")}" placeholder="sin restricción" title="El valor es un entero de 1 a N, en la unidad de la magnitud" />
+      </label>
+      <label class="detail-form-checkbox" data-for-roles="catedra constante">
+        <input type="checkbox" name="fixed" ${qty?.fixed ? "checked" : ""} />
+        Valor fijo (el alumno lo ve y no lo carga)
+      </label>
+      <label data-for-roles="catedra">U fija
+        <input name="default_u" type="number" min="0" step="any" value="${v("default_u")}" placeholder="solo con valor fijo" />
       </label>
       ${selectFieldHtml("Rótulo en el formulario", "label_mode", [
         ["nombre", "Nombre"],
@@ -1373,6 +1427,12 @@ function renderQuantityForm(qty, practiceId) {
   `;
 }
 
+function inputUnitsHint(def, symbol) {
+  const others = (def?.resolved?.input_units?.[symbol] ?? []).slice(1);
+  if (!others.length) return "";
+  return `<div class="submission-meta input-units-hint">el alumno también puede cargar en ${escapeHtml(others.map((u) => unitText(u.label)).join(", "))}</div>`;
+}
+
 function renderQuantitiesList(def, practiceId) {
   const quantities = def?.quantities ?? [];
   if (quantities.length === 0) return `<p class="submission-meta">Sin magnitudes. Agregá una con «Nueva magnitud».</p>`;
@@ -1383,9 +1443,9 @@ function renderQuantitiesList(def, practiceId) {
       <tr>
         <td class="directory-primary">${adminSymbolHtml(q.symbol)}</td>
         <td>${inlineMathHtml(q.name)}</td>
-        <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}</td>
+        <td>${q.unit ? unitHtml(q.unit) : '<span class="submission-meta">adimensional</span>'}${inputUnitsHint(def, q.symbol)}</td>
         <td>${q.quantity ? escapeHtml(q.quantity) : "-"}</td>
-        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedFor(q))).short}</td>
+        <td>${QUANTITY_ROLES.find((r) => r.id === quantityRole(q, pointBasedFor(q))).short}${q.per_determination ? " · por determinación" : ""}${q.fixed ? " · fijo" : ""}</td>
         <td>${sectionSelectHtml(def, "quantities", q)}</td>
         <td class="directory-actions">
           ${moveButtonsHtml("quantities", q.id, i, quantities.length)}
@@ -1482,7 +1542,7 @@ function renderResultsList(def, practiceId) {
       <tr>
         <td class="directory-primary">${adminSymbolHtml(r.symbol)}</td>
         <td>${inlineMathHtml(r.name)}</td>
-        <td>${r.unit ? unitHtml(r.unit) : '<span class="submission-meta">adimensional</span>'}</td>
+        <td>${r.unit ? unitHtml(r.unit) : '<span class="submission-meta">adimensional</span>'}${inputUnitsHint(def, r.symbol)}</td>
         <td><code>${escapeHtml(r.formula)}</code></td>
         <td>${tolLabel}</td>
         <td>${finalLabel}</td>
@@ -1559,14 +1619,26 @@ async function savePracticeKind(event) {
   }, "Tipo de análisis guardado");
 }
 
-async function savePracticeOperatorCount(event) {
+async function saveDeterminations(event, practiceId) {
   event.preventDefault();
-  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
-  const count = Number(payload.operator_count) || 0;
+  const form = event.currentTarget;
+  const raw = Object.fromEntries(new FormData(form).entries());
+  const count = Number(raw.count) || 0;
+  if (!count && !form.dataset.hadDeterminations) {
+    await runPracticeAction(async () => {}, "Sin determinaciones: no hay nada que guardar");
+    return;
+  }
+  const determinations = count
+    ? { count, label: raw.label.trim(), average: "average" in raw, display: raw.display }
+    : null;
+  const part = form.dataset.partId;
+  const url = part
+    ? `/api/practices/${practiceId}/parts/${part}/determinations`
+    : `/api/practices/${practiceId}/determinations`;
   await runPracticeAction(async () => {
-    await postJson(`/api/practices/${payload.practice_id}/operator-count`, { count });
-    await reloadDefinition(payload.practice_id);
-  }, "Operadores actualizados");
+    await postJson(url, { determinations });
+    await reloadDefinition(practiceId);
+  }, count ? "Determinaciones guardadas" : "Determinaciones quitadas");
 }
 
 async function savePracticeRegressionFormulas(event) {
@@ -1586,7 +1658,7 @@ function syncQuantityForm(form, { initial = false } = {}) {
   const role = elements.role.value;
   const given = roleFlags(role, seriesPractice()).is_given;
   const option = elements.input_widget.querySelector('option[value="cronometro"]');
-  option.disabled = elements.quantity.value !== "tiempo" || given;
+  option.disabled = elements.quantity.value.trim().toLowerCase() !== "tiempo" || given;
   if (option.disabled && option.selected) {
     elements.input_widget.value = "teclado";
     if (initial) {
@@ -1604,7 +1676,7 @@ function syncQuantityForm(form, { initial = false } = {}) {
 function quantityPayloadFromForm(form) {
   const raw = Object.fromEntries(new FormData(form).entries());
   const flags = roleFlags(raw.role, seriesPractice(), {
-    per_point: form.dataset.perPoint === "1",
+    per_point: form.dataset.perPoint === "1" || form.dataset.perDetermination === "1",
     repeated: form.dataset.repeated === "1",
     is_given: form.dataset.given === "1",
     replicas_per_point: Number(form.dataset.replicas) || null,
@@ -1622,11 +1694,14 @@ function quantityPayloadFromForm(form) {
     ...flags,
     replicas_per_point: raw.replicas_per_point && replicas > 0 ? replicas : null,
     optional: "optional" in raw,
+    per_determination: "per_determination" in raw,
     slot_count: slots,
     display_symbol: raw.display_symbol,
     label_mode: raw.label_mode,
     input_widget: raw.input_widget,
     default_value: raw.default_value === "" || raw.default_value == null ? null : Number(raw.default_value),
+    fixed: "fixed" in raw,
+    default_u: "default_u" in raw ? (raw.default_u === "" ? null : Number(raw.default_u)) : undefined,
   };
 }
 
@@ -1757,6 +1832,7 @@ function renderLayoutSection(practice, def) {
             `<option value="${k}" ${k === p.effective_kind ? "selected" : ""}>${escapeHtml(analysisKindLabel(k))}</option>`
           ).join("")}
         </select>
+        ${p.effective_kind === "estadistico" ? determinationsFormHtml(def, p, p.determinations) : ""}
       </td>
       <td class="directory-actions">
         ${moveButtonsHtml("parts", p.id, i, parts.length)}

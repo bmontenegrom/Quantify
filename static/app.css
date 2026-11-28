@@ -770,7 +770,7 @@ textarea {
   align-items: center;
   display: grid;
   gap: 4px;
-  grid-template-columns: 52px minmax(140px, 220px) minmax(22px, max-content) 30px;
+  grid-template-columns: minmax(140px, 220px) minmax(22px, max-content) 30px;
   justify-content: start;
 }
 
@@ -778,21 +778,19 @@ textarea {
   align-items: center;
   display: grid;
   gap: 4px;
-  grid-template-columns: 52px minmax(140px, 220px) minmax(22px, max-content);
+  grid-template-columns: minmax(140px, 220px) minmax(22px, max-content);
 }
 
 .measurement-row--given .form-grid {
   grid-template-columns: repeat(auto-fit, minmax(260px, max-content));
 }
 
-.prefix-select {
+.unit-select {
   font-size: 0.82rem;
-  padding: 5px 2px;
   height: 32px;
-  max-width: 52px;
-  min-width: 52px;
-  text-align: center;
-  width: 52px;
+  max-width: 120px;
+  padding: 5px 4px;
+  width: auto;
 }
 
 .replica .measure-value,
@@ -840,8 +838,7 @@ textarea {
   padding: 3px 8px;
 }
 
-.measurement-row--chrono .measure-selectors,
-.operator-quantity > .measure-selectors {
+.measurement-row--chrono .measure-selectors {
   grid-template-columns: minmax(150px, 220px) minmax(110px, 160px);
   width: fit-content;
   margin-bottom: 8px;
@@ -1569,8 +1566,7 @@ button.back-link {
     max-width: none;
   }
 
-  .measurement-row--chrono .measure-selectors,
-  .operator-quantity > .measure-selectors {
+  .measurement-row--chrono .measure-selectors {
     grid-template-columns: 1fr;
     width: 100%;
   }
@@ -1582,11 +1578,11 @@ button.back-link {
 
   .replica,
   .replica-input-wrap {
-    grid-template-columns: 52px minmax(0, 1fr) minmax(22px, max-content) 30px;
+    grid-template-columns: minmax(0, 1fr) minmax(22px, max-content) 30px;
   }
 
   .replica-input-wrap {
-    grid-template-columns: 52px minmax(0, 1fr) minmax(22px, max-content);
+    grid-template-columns: minmax(0, 1fr) minmax(22px, max-content);
   }
 }
 
@@ -1612,6 +1608,21 @@ button.back-link {
 
 .reg-point {
   fill: var(--accent-strong);
+}
+
+.reg-errbar {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.reg-clip-arrow {
+  fill: var(--muted);
+}
+
+.reg-point-nou {
+  fill: var(--panel);
+  stroke: var(--accent-strong);
+  stroke-width: 1.5;
 }
 
 .reg-label {
@@ -1642,12 +1653,12 @@ button.back-link {
   align-items: start;
   display: grid;
   gap: 4px;
-  grid-template-columns: 52px minmax(92px, 220px);
+  grid-template-columns: minmax(92px, 220px) max-content;
   justify-content: start;
 }
 
 .series-cell--replicas .series-input-wrap {
-  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) max-content;
 }
 
 .series-table input.series-value {
@@ -1671,6 +1682,11 @@ button.back-link {
   margin: 8px 0 4px;
   font-size: 0.9em;
   opacity: 0.8;
+}
+
+.det-hidden,
+.practice-part-tabs[hidden] {
+  display: none;
 }
 
 .operator-result {
@@ -2119,4 +2135,9 @@ button.back-link {
 .practice-guide-current {
   font-weight: 700;
   text-decoration: none;
+}
+
+.fixed-given {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
 }

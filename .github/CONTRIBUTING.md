@@ -1,5 +1,32 @@
 # Cómo contribuir
 
+Gracias por querer sumar a Quantify. Las contribuciones pueden ser código, prácticas para la
+biblioteca, correcciones de cálculo, documentación o reportes de errores. Al participar aceptás el
+[código de conducta](CODE_OF_CONDUCT.md).
+
+## Reportar un problema o pedir algo
+
+- **Un error** (un cálculo que no da, un formulario que falla): abrí un issue con la plantilla
+  "Reportar un error". Si es un cálculo, incluí las medidas o la práctica exportada, sin datos
+  personales de estudiantes.
+- **Una idea**: plantilla "Pedir una funcionalidad", contando la situación del curso que resolvería.
+- **Una vulnerabilidad**: no la reportes en un issue; seguí [SECURITY.md](SECURITY.md).
+
+## Entorno de desarrollo
+
+Requisitos: Rust stable (con `rustfmt` y `clippy`) y Node 24 para los tests del frontend y los E2E.
+
+```bash
+git clone https://github.com/bmontenegrom/Quantify.git
+cd Quantify
+npm ci
+npx playwright install --with-deps chromium
+SEED_DEMO_DATA=true cargo run
+```
+
+En PowerShell: `$env:SEED_DEMO_DATA="true"; cargo run`. La app queda en `http://localhost:8080`
+con las cuentas de prueba del README; `scripts/dev-reset` borra la base para empezar de cero.
+
 ## Ramas y flujo de trabajo
 
 ```
@@ -78,7 +105,10 @@ un cambio que de verdad rompa algo para quien usa la app.
   decisiones tomadas y lo que quedó afuera; si hay migraciones de base, cambios de API o de la
   siembra, se dicen explícitamente.
 - Un cambio por PR. Si una PR crece mucho, partila.
-- Sumá tests para lo que agregues o arregles.
+- Sumá tests para lo que agregues o arregles. Un cálculo nuevo lleva un test contra la fórmula de
+  libro.
+- Si la PR agrega o cambia algo que ve un docente o un estudiante, actualizá la lista de
+  **Funcionalidades** del README en la misma PR.
 - Antes de pushear corré lo mismo que corre CI, más el chequeo de comentarios:
 
   ```bash
@@ -89,6 +119,19 @@ un cambio que de verdad rompa algo para quien usa la app.
   npm run test:e2e
   python scripts/comments.py --check
   ```
+
+## Agregar una práctica a la biblioteca
+
+Las prácticas de la biblioteca son plantillas JSON en `templates/practices/<id>.json` y se importan
+en toda base nueva. Para sumar una:
+
+1. Armala en la app (editor de prácticas), probala con "Probar" y publicala.
+2. Exportala ("Exportar publicada") y guardá el archivo como `templates/practices/<id>.json`.
+3. Agregá su golden: `tests/golden/<id>.input.json` con unas medidas de ejemplo (mirá los que ya
+   están) y generá el resultado esperado con `QUANTIFY_UPDATE_GOLDEN=1 cargo test golden`. Revisá
+   a mano el `tests/golden/<id>.expected.json` que se crea: es la referencia de que los números
+   no cambian sin querer.
+4. Si la práctica es de otra materia, mejor: Quantify no es solo para física.
 
 ## Comentarios
 

@@ -2,17 +2,31 @@ use super::{PartInput, PracticePart, PracticeSection, SectionInput};
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
+#[derive(sqlx::FromRow)]
+struct PartRow {
+    #[sqlx(flatten)]
+    part: PracticePart,
+    config_json: String,
+}
+
 pub async fn parts_for(
     conn: &mut SqliteConnection,
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticePart>> {
-    Ok(sqlx::query_as::<_, PracticePart>(
-        "SELECT id, practice_id, title, position, analysis_kind, help_text FROM practice_parts \
-         WHERE practice_id = ?1 ORDER BY position, id",
+    let rows = sqlx::query_as::<_, PartRow>(
+        "SELECT id, practice_id, title, position, analysis_kind, help_text, config_json \
+         FROM practice_parts WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
-    .fetch_all(conn)
-    .await?)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| PracticePart {
+            determinations: super::PracticeConfig::parse(&row.config_json).determinations,
+            ..row.part
+        })
+        .collect())
 }
 
 pub async fn sections_for(
@@ -86,6 +100,7 @@ pub async fn create_part(
         analysis_kind,
         help_text: help_text.to_string(),
         effective_kind: "estadistico".into(),
+        determinations: None,
     })
 }
 

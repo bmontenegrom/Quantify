@@ -1,26 +1,38 @@
 {
   "aggregates": [
     {
+      "has_uncertainty": false,
       "name": "Numero de Reynolds maximo",
       "symbol": "Re_max",
+      "u": 0.0,
+      "u_expanded": 0.0,
       "unit": "",
       "value": 32967.032967032974
     },
     {
+      "has_uncertainty": false,
       "name": "Numero de Reynolds minimo",
       "symbol": "Re_min",
+      "u": 0.0,
+      "u_expanded": 0.0,
       "unit": "",
       "value": 23809.523809523824
     },
     {
+      "has_uncertainty": false,
       "name": "Numero de Reynolds medio",
       "symbol": "Re_medio",
+      "u": 0.0,
+      "u_expanded": 0.0,
       "unit": "",
       "value": 28388.2783882784
     },
     {
+      "has_uncertainty": false,
       "name": "Coeficiente de perdidas teorico",
       "symbol": "M_teorico",
+      "u": 0.0,
+      "u_expanded": 0.0,
       "unit": "",
       "value": 0.8927225806451613
     }
@@ -37,7 +49,6 @@
       "value": -1.975379032846273
     }
   ],
-  "operators": [],
   "point_results": [],
   "quantities": [],
   "regression": {
@@ -67,6 +78,28 @@
     "r_squared": 0.9999788855552793,
     "slope": 177.21256964148313,
     "u_intercept": 0.05799210927299435,
+    "u_points": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ]
+    ],
     "u_slope": 0.4701412015984004,
     "x_label": "math::sqrt(h_max) - math::sqrt(h)",
     "y_label": "t"

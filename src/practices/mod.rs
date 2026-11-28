@@ -41,6 +41,72 @@ pub struct QuantityInput {
     pub label_mode: Option<String>,
     #[serde(default)]
     pub input_widget: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub per_determination: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fixed: bool,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub default_u: Option<Option<f64>>,
+}
+
+impl QuantityInput {
+    /// Una magnitud por determinación no es por punto, aunque el JSON diga lo contrario.
+    ///
+    /// ```
+    /// let q = quantify::practices::QuantityInput { per_determination: true, ..Default::default() };
+    /// assert!(q.per_point && !q.stored_per_point());
+    /// ```
+    pub fn stored_per_point(&self) -> bool {
+        self.per_point && !self.per_determination
+    }
+
+    /// Por qué el valor fijo (o su U) no se puede guardar, o `None` si se puede.
+    ///
+    /// ```
+    /// let q = quantify::practices::QuantityInput { is_given: true, fixed: true, default_value: Some(Some(9.8)), default_u: Some(Some(0.1)), ..Default::default() };
+    /// assert_eq!(q.fixed_problem(), None);
+    /// assert!(quantify::practices::QuantityInput { is_given: false, ..q.clone() }.fixed_problem().is_some());
+    /// ```
+    pub fn fixed_problem(&self) -> Option<&'static str> {
+        let default_u = self.default_u.flatten();
+        if default_u.is_some_and(|u| !(u.is_finite() && u >= 0.0)) {
+            return Some("La U fija tiene que ser cero o positiva.");
+        }
+        if !self.fixed {
+            return None;
+        }
+        if !self.is_given {
+            return Some("Solo un dato de cátedra o una constante puede tener valor fijo.");
+        }
+        if self.slot_count.is_some() || self.per_determination {
+            return Some("Un valor fijo no puede tener ranuras ni repetirse por determinación.");
+        }
+        if !self.default_value.flatten().is_some_and(f64::is_finite) {
+            return Some("Un dato con valor fijo necesita el valor.");
+        }
+        if self.has_uncertainty && default_u.is_none() {
+            return Some("Un dato de cátedra con valor fijo necesita su U (cero o positiva).");
+        }
+        None
+    }
+
+    /// La magnitud física tal como se guarda: canónica, y vacía pasa a no declarada.
+    ///
+    /// ```
+    /// let q = |s: &str| quantify::practices::QuantityInput { quantity: Some(s.into()), ..Default::default() };
+    /// assert_eq!(q(" Tiempo ").magnitude().as_deref(), Some("tiempo"));
+    /// assert_eq!(q("  ").magnitude(), None);
+    /// ```
+    pub fn magnitude(&self) -> Option<String> {
+        self.quantity
+            .as_deref()
+            .map(crate::magnitudes::canonical)
+            .filter(|q| !q.is_empty())
+    }
 }
 
 impl Default for QuantityInput {
@@ -67,6 +133,9 @@ impl Default for QuantityInput {
             slot_count: None,
             label_mode: None,
             input_widget: None,
+            per_determination: false,
+            fixed: false,
+            default_u: None,
         }
     }
 }
@@ -118,7 +187,6 @@ pub struct PracticeDefinition {
     pub quantities: Vec<PracticeQuantity>,
     pub results: Vec<PracticeResult>,
     pub curves: Vec<PracticeCurve>,
-    pub operator_count: Option<i64>,
     pub intermediates: Vec<PracticeIntermediate>,
     pub point_results: Vec<PracticePointResult>,
     pub aggregates: Vec<PracticeAggregate>,
@@ -126,6 +194,78 @@ pub struct PracticeDefinition {
     pub sections: Vec<PracticeSection>,
     pub display_symbols: std::collections::BTreeMap<String, String>,
     pub current_version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeterminationDisplay {
+    #[default]
+    Bloques,
+    Pestanas,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Determinations {
+    pub count: i64,
+    pub label: String,
+    #[serde(default)]
+    pub average: bool,
+    #[serde(default)]
+    pub display: DeterminationDisplay,
+}
+
+impl Determinations {
+    /// Revisa la cantidad (de 2 a `MAX_DETERMINATIONS`) y el nombre (hasta 40 caracteres).
+    ///
+    /// ```
+    /// let d = |count| quantify::practices::Determinations { count, label: "Medida".into(), average: false, display: Default::default() };
+    /// assert!(d(3).validate().is_ok() && d(1).validate().is_err());
+    /// ```
+    pub fn validate(&self) -> Result<(), String> {
+        if !(2..=MAX_DETERMINATIONS).contains(&self.count) {
+            return Err(format!(
+                "La cantidad de determinaciones tiene que ser de 2 a {MAX_DETERMINATIONS}."
+            ));
+        }
+        let label = self.label.trim();
+        if label.is_empty() || label.chars().count() > 40 {
+            return Err(
+                "Las determinaciones necesitan un nombre de hasta 40 caracteres (p. ej. «Medida»)."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PracticeConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
+}
+
+impl PracticeConfig {
+    /// Lee el `config_json` guardado; uno vacío o ilegible queda sin configuración.
+    ///
+    /// ```
+    /// let c = quantify::practices::PracticeConfig::parse(r#"{"determinations":{"count":3,"label":"Medida"}}"#);
+    /// assert_eq!(c.determinations.unwrap().count, 3);
+    /// ```
+    pub fn parse(json: &str) -> Self {
+        serde_json::from_str(json).unwrap_or_default()
+    }
+
+    /// Lo escribe como `config_json`; sin configuración queda `{}`.
+    ///
+    /// ```
+    /// assert_eq!(quantify::practices::PracticeConfig::default().to_json(), "{}");
+    /// ```
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".into())
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
@@ -139,6 +279,9 @@ pub struct PracticePart {
     pub help_text: String,
     #[sqlx(skip)]
     pub effective_kind: String,
+    #[sqlx(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub determinations: Option<Determinations>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
@@ -239,7 +382,7 @@ pub struct PointResultInput {
     pub formula: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(default)]
 pub struct PracticeAggregate {
     pub id: String,
@@ -249,8 +392,30 @@ pub struct PracticeAggregate {
     pub name: String,
     pub unit: String,
     pub formula: String,
-    #[serde(default)]
     pub is_final: bool,
+    pub has_uncertainty: bool,
+}
+
+impl Default for PracticeAggregate {
+    /// Como en la base, un agregado lleva U salvo que se marque lo contrario.
+    ///
+    /// ```
+    /// let a = quantify::practices::PracticeAggregate::default();
+    /// assert!(a.has_uncertainty && !a.is_final);
+    /// ```
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            practice_id: String::new(),
+            position: 0,
+            symbol: String::new(),
+            name: String::new(),
+            unit: String::new(),
+            formula: String::new(),
+            is_final: false,
+            has_uncertainty: true,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -263,6 +428,8 @@ pub struct AggregateInput {
     pub formula: String,
     #[serde(default)]
     pub is_final: bool,
+    #[serde(default = "default_true")]
+    pub has_uncertainty: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -294,9 +461,13 @@ mod versions;
 
 pub use changes::*;
 pub use crud::*;
+pub use display::version_symbols;
 pub use layout::*;
 pub use library::*;
 pub use lifecycle::*;
-pub use parts::{is_point_based, CompareOptions};
+pub use parts::{
+    comparison_conversion, is_point_based, ClientDefinition, CompareOptions, Comparison, Resolved,
+    ScopedDeterminations,
+};
 pub use template::*;
 pub use versions::*;

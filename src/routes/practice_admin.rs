@@ -308,6 +308,304 @@ pub(super) struct Problem {
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    warning: bool,
+}
+
+fn unit_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
+    let quantities = def
+        .quantities
+        .iter()
+        .map(|q| ("la magnitud", &q.symbol, &q.unit, "quantity", &q.id));
+    let results = def
+        .results
+        .iter()
+        .filter(|r| r.is_final || !r.compare_with.is_empty())
+        .map(|r| ("el mensurando", &r.symbol, &r.unit, "result", &r.id));
+    quantities
+        .chain(results)
+        .filter(|(_, _, unit, _, _)| !crate::units::known(unit))
+        .map(|(what, symbol, unit, kind, id)| Problem {
+            message: format!(
+                "{what} {symbol}: la unidad \"{}\" no se reconoce, así que no se ofrecen \
+                 otras unidades ni se convierte.",
+                unit.trim()
+            ),
+            kind,
+            id: Some(id.clone()),
+            warning: true,
+        })
+        .collect()
+}
+
+fn dimension_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
+    use crate::dimensions::{divide, infer, of_unit, text, Dim, Inference};
+    use std::collections::HashMap;
+    let elements: Vec<(&str, &str, &str, &str, &'static str, &String)> = def
+        .results
+        .iter()
+        .map(|r| {
+            (
+                "el mensurando",
+                r.symbol.as_str(),
+                r.unit.as_str(),
+                r.formula.as_str(),
+                "result",
+                &r.id,
+            )
+        })
+        .chain(def.intermediates.iter().map(|i| {
+            (
+                "la intermedia",
+                i.symbol.as_str(),
+                i.unit.as_str(),
+                i.formula.as_str(),
+                "intermediate",
+                &i.id,
+            )
+        }))
+        .chain(def.point_results.iter().map(|p| {
+            (
+                "la derivada por punto",
+                p.symbol.as_str(),
+                p.unit.as_str(),
+                p.formula.as_str(),
+                "pointResult",
+                &p.id,
+            )
+        }))
+        .chain(def.aggregates.iter().map(|g| {
+            (
+                "el agregado",
+                g.symbol.as_str(),
+                g.unit.as_str(),
+                g.formula.as_str(),
+                "aggregate",
+                &g.id,
+            )
+        }))
+        .collect();
+    let declared: HashMap<&str, Dim> = def
+        .quantities
+        .iter()
+        .map(|q| (q.symbol.as_str(), q.unit.as_str()))
+        .chain(elements.iter().map(|e| (e.1, e.2)))
+        .map(|(symbol, unit)| (symbol, of_unit(unit)))
+        .collect();
+    let base = |name: &str| -> Dim {
+        if let Some(dim) = declared.get(name) {
+            return *dim;
+        }
+        let suffixed = ENDPOINT_SUFFIXES
+            .iter()
+            .chain(&["_medio", "_max"])
+            .find_map(|suffix| name.strip_suffix(suffix))
+            .and_then(|s| declared.get(s));
+        let at = || {
+            name.rmatch_indices("_at_")
+                .find_map(|(i, _)| declared.get(&name[..i]))
+        };
+        suffixed.or_else(at).copied().unwrap_or(Dim::Unknown)
+    };
+    let kinds = if def.parts.is_empty() {
+        vec![def.analysis_kind.clone().unwrap_or_default()]
+    } else {
+        def.part_kinds()
+    };
+    let regression = kinds.iter().any(|k| k == "regresion_lineal");
+    let curve = kinds.iter().any(|k| k == "curva");
+    let checked = |kind: &str| match kind {
+        "intermediate" => regression || curve,
+        "pointResult" | "aggregate" => regression,
+        _ => true,
+    };
+    let problems = |what: &str, symbol: &str, unit: Option<&str>, inferred: &Inference| {
+        let mut messages = Vec::new();
+        if let Some((a, b)) = inferred.mixed {
+            messages.push(format!(
+                "la fórmula suma o resta términos con dimensiones distintas ({} y {}).",
+                text(a),
+                text(b)
+            ));
+        }
+        if let Some((argument, d)) = &inferred.argument {
+            messages.push(format!("{argument} no es adimensional ({}).", text(*d)));
+        }
+        if let (Some(unit), Dim::Known(got)) = (unit, inferred.dim) {
+            if let Dim::Known(want) = of_unit(unit) {
+                if got != want {
+                    let shown = if unit.trim().is_empty() {
+                        "vacía"
+                    } else {
+                        unit.trim()
+                    };
+                    messages.push(format!(
+                        "la fórmula da {} y la unidad declarada ({shown}) es {}.",
+                        text(got),
+                        text(want)
+                    ));
+                }
+            }
+        }
+        messages
+            .into_iter()
+            .map(|m| format!("{what} {symbol}: {m}"))
+            .collect::<Vec<_>>()
+    };
+    let warning = |message: String, kind: &'static str, id: Option<&String>| Problem {
+        message,
+        kind,
+        id: id.cloned(),
+        warning: true,
+    };
+    let axis = |formula: &Option<String>| {
+        formula
+            .as_deref()
+            .filter(|_| regression)
+            .map(|f| infer(f, &base))
+    };
+    let (x, y) = (axis(&def.x_formula), axis(&def.y_formula));
+    let mut warnings: Vec<Problem> = [("lineal (eje x)", &x), ("lineal (eje y)", &y)]
+        .into_iter()
+        .filter_map(|(symbol, inferred)| inferred.as_ref().map(|i| (symbol, i)))
+        .flat_map(|(symbol, inferred)| problems("el ajuste", symbol, None, inferred))
+        .map(|m| warning(m, "axes", None))
+        .collect();
+    for c in def.curves.iter().filter(|_| curve) {
+        for (axis, formula) in [("eje x", &c.x_formula), ("eje y", &c.y_formula)] {
+            let label = format!("{} vs {} ({axis})", c.y_formula, c.x_formula);
+            warnings.extend(
+                problems("la curva", &label, None, &infer(formula, &base))
+                    .into_iter()
+                    .map(|m| warning(m, "curve", Some(&c.id))),
+            );
+        }
+    }
+    let dim_of = |a: &Option<Inference>| a.as_ref().map_or(Dim::Unknown, |a| a.dim);
+    let (x, y) = (dim_of(&x), dim_of(&y));
+    let slope = divide(y, x);
+    let lookup = |name: &str| match name {
+        "slope" => slope,
+        "intercept" => y,
+        _ => base(name),
+    };
+    for &(what, symbol, unit, formula, kind, id) in elements.iter().filter(|e| checked(e.4)) {
+        let inferred = infer(formula, &lookup);
+        warnings.extend(
+            problems(what, symbol, Some(unit), &inferred)
+                .into_iter()
+                .map(|m| warning(m, kind, Some(id))),
+        );
+    }
+    warnings
+}
+
+fn line_correlation_warnings(def: &practices::PracticeDefinition) -> Vec<Problem> {
+    use crate::computation::formula_symbols;
+    let regression = if def.parts.is_empty() {
+        def.analysis_kind.as_deref() == Some("regresion_lineal")
+    } else {
+        def.part_kinds().iter().any(|k| k == "regresion_lineal")
+    };
+    if !regression {
+        return Vec::new();
+    }
+    let formulas: std::collections::HashMap<&str, &str> = def
+        .intermediates
+        .iter()
+        .map(|i| (i.symbol.as_str(), i.formula.as_str()))
+        .chain(
+            def.results
+                .iter()
+                .filter(|r| r.has_uncertainty)
+                .map(|r| (r.symbol.as_str(), r.formula.as_str())),
+        )
+        .chain(
+            def.aggregates
+                .iter()
+                .filter(|a| a.has_uncertainty)
+                .map(|a| (a.symbol.as_str(), a.formula.as_str())),
+        )
+        .collect();
+    let base = |symbol: String| {
+        if formulas.contains_key(symbol.as_str()) {
+            return symbol;
+        }
+        ENDPOINT_SUFFIXES
+            .iter()
+            .find_map(|suffix| symbol.strip_suffix(suffix))
+            .map_or(symbol.clone(), str::to_string)
+    };
+    let reach = |roots: Vec<String>| {
+        let (mut stack, mut seen) = (roots, Vec::<String>::new());
+        while let Some(symbol) = stack.pop() {
+            let symbol = base(symbol);
+            if seen.contains(&symbol) {
+                continue;
+            }
+            if let Some(formula) = formulas.get(symbol.as_str()) {
+                stack.extend(formula_symbols(formula));
+            }
+            seen.push(symbol);
+        }
+        seen
+    };
+    let axes = [&def.x_formula, &def.y_formula]
+        .into_iter()
+        .flatten()
+        .flat_map(|f| formula_symbols(f))
+        .collect();
+    let on_axes: Vec<String> = reach(axes)
+        .into_iter()
+        .filter(|s| {
+            def.quantities
+                .iter()
+                .any(|q| q.symbol == *s && q.per_point && !q.is_given)
+        })
+        .collect();
+    let point_results = def.point_results.iter().map(|pr| {
+        (
+            "la derivada por punto",
+            &pr.symbol,
+            &pr.formula,
+            "pointResult",
+            &pr.id,
+        )
+    });
+    let aggregates = def
+        .aggregates
+        .iter()
+        .filter(|a| a.has_uncertainty)
+        .map(|a| ("el agregado", &a.symbol, &a.formula, "aggregate", &a.id));
+    point_results
+        .chain(aggregates)
+        .filter_map(|(what, symbol, formula, kind, id)| {
+            let leaves = reach(formula_symbols(formula));
+            if !leaves.iter().any(|s| s == "slope" || s == "intercept") {
+                return None;
+            }
+            let mut shared: Vec<&str> = on_axes
+                .iter()
+                .filter(|s| leaves.contains(s))
+                .map(String::as_str)
+                .collect();
+            if shared.is_empty() {
+                return None;
+            }
+            shared.sort_unstable();
+            Some(Problem {
+                message: format!(
+                    "{what} {symbol}: su incertidumbre toma la recta como independiente de las \
+                     magnitudes de los ejes que también usa ({}), así que puede no ser exacta \
+                     (en general la sobreestima).",
+                    shared.join(", ")
+                ),
+                kind,
+                id: Some(id.clone()),
+                warning: true,
+            })
+        })
+        .collect()
 }
 
 struct ElementProblem {
@@ -325,6 +623,7 @@ fn draft_problems(def: &practices::PracticeDefinition) -> Vec<Problem> {
             message,
             kind,
             id: None,
+            warning: false,
         });
     let mut seen = Vec::new();
     let elements = element_problems(def)
@@ -339,6 +638,7 @@ fn draft_problems(def: &practices::PracticeDefinition) -> Vec<Problem> {
             message: format!("{}: {}", p.element, p.message),
             kind: p.kind,
             id: p.id,
+            warning: false,
         });
     structure.chain(elements).collect()
 }
@@ -350,7 +650,11 @@ pub(super) async fn practice_problems(
 ) -> Result<Json<Vec<Problem>>, AppError> {
     require_teacher(&state, &headers).await?;
     let def = load_definition(&state, &id).await?;
-    Ok(Json(draft_problems(&def)))
+    let mut problems = draft_problems(&def);
+    problems.extend(unit_warnings(&def));
+    problems.extend(dimension_warnings(&def));
+    problems.extend(line_correlation_warnings(&def));
+    Ok(Json(problems))
 }
 
 fn structure_problems(def: &practices::PracticeDefinition) -> Vec<String> {
@@ -366,8 +670,27 @@ fn located_structure_problems(def: &practices::PracticeDefinition) -> Vec<(Strin
         problems.push(("no tiene magnitudes de entrada".to_string(), "quantity"));
     }
     if def.parts.is_empty() {
+        if def.determinations.is_some() && practices::is_point_based(def.analysis_kind.as_deref()) {
+            problems.push((
+                "tiene determinaciones pero ya no es estadística".to_string(),
+                "layout",
+            ));
+        }
         problems.extend(kind_problems(def));
         return problems;
+    }
+    for part in def
+        .parts
+        .iter()
+        .filter(|p| p.determinations.is_some() && def.part_kind(p) != "estadistico")
+    {
+        problems.push((
+            format!(
+                "la parte \"{}\" tiene determinaciones pero ya no es estadística",
+                part.title
+            ),
+            "layout",
+        ));
     }
     if def.results.is_empty()
         && def.curves.is_empty()
@@ -570,11 +893,11 @@ pub(super) async fn practice_definition(
         return Ok(Json(DefinitionView {
             compare_options: Some(definition.compare_options()),
             formula_scopes: Some(formula_scopes(&definition)),
-            definition,
+            definition: practices::ClientDefinition::from(definition),
         }));
     }
     Ok(Json(DefinitionView {
-        definition: published_definition(&state, &id).await?,
+        definition: published_definition(&state, &id).await?.into(),
         compare_options: None,
         formula_scopes: None,
     }))
@@ -583,7 +906,7 @@ pub(super) async fn practice_definition(
 #[derive(Debug, Serialize)]
 pub(super) struct DefinitionView {
     #[serde(flatten)]
-    definition: practices::PracticeDefinition,
+    definition: practices::ClientDefinition,
     #[serde(skip_serializing_if = "Option::is_none")]
     compare_options: Option<practices::CompareOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -604,7 +927,8 @@ pub(super) struct FormulaScopes {
 
 fn formula_scopes(def: &practices::PracticeDefinition) -> FormulaScopes {
     let views = view_scopes(def);
-    let uses = result_uses(def);
+    let averaged = def.averaged_results();
+    let uses = result_uses(def, &averaged);
     let view = def.point_view();
     let key = |id: Option<&str>| id.unwrap_or_default().to_string();
     FormulaScopes {
@@ -623,7 +947,7 @@ fn formula_scopes(def: &practices::PracticeDefinition) -> FormulaScopes {
             .map(|r| {
                 (
                     r.symbol.clone(),
-                    existing_result_scope(&views, &uses, &r.symbol),
+                    existing_result_scope(&views, &uses, &averaged, &r.symbol),
                 )
             })
             .collect(),
@@ -713,7 +1037,8 @@ pub(super) async fn analyze_preview(
     Json(body): Json<AnalyzePreviewBody>,
 ) -> Result<Json<computation::FormAnalysis>, AppError> {
     let definition = preview_definition(&state, &headers, &id, &body).await?;
-    let analysis = computation::analyze_definition(&state.pool, &definition, &body.measurements)
+    let measurements = computation::with_fixed_values(&definition.quantities, &body.measurements);
+    let analysis = computation::analyze_definition(&state.pool, &definition, &measurements)
         .await
         .map_err(AppError::from_domain_or_db)?;
     Ok(Json(analysis))
@@ -728,7 +1053,8 @@ pub(super) async fn live_values(
     let view = preview_definition(&state, &headers, &id, &body)
         .await?
         .point_view();
-    let rows = computation::live_values(&view.quantities, &view.intermediates, &body.measurements)
+    let measurements = computation::with_fixed_values(&view.quantities, &body.measurements);
+    let rows = computation::live_values(&view.quantities, &view.intermediates, &measurements)
         .map_err(|e| AppError::bad_request(e.to_string()))?;
     Ok(Json(rows))
 }
@@ -747,6 +1073,9 @@ pub(super) async fn set_practice_analysis_kind(
             "La práctica tiene partes: el tipo de análisis se elige en cada parte, en \"Partes\".",
         ));
     }
+    if practices::is_point_based(Some(kind)) && before.determinations.is_some() {
+        return Err(AppError::bad_request(DETERMINATIONS_ARE_STATISTICAL));
+    }
     let mut after = before.clone();
     after.analysis_kind = Some(kind.to_string());
     guard_change(&before, &after, "cambiar el tipo de analisis")?;
@@ -763,27 +1092,86 @@ pub(super) struct RegressionFormulasBody {
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct OperatorCountBody {
-    count: i64,
+pub(super) struct DeterminationsBody {
+    #[serde(default)]
+    determinations: Option<practices::Determinations>,
 }
 
-pub(super) async fn set_practice_operator_count(
-    State(state): State<SharedState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    Json(body): Json<OperatorCountBody>,
+const DETERMINATIONS_ARE_STATISTICAL: &str =
+    "Tiene determinaciones, que son solo para análisis estadístico: quitalas antes de cambiar el tipo.";
+
+async fn save_determinations(
+    state: &SharedState,
+    headers: &HeaderMap,
+    id: &str,
+    part_id: Option<&str>,
+    body: DeterminationsBody,
 ) -> Result<Json<Health>, AppError> {
-    require_teacher(&state, &headers).await?;
-    if body.count > practices::MAX_OPERATORS {
-        return Err(AppError::bad_request(format!(
-            "La cantidad de operadores no puede superar {}.",
-            practices::MAX_OPERATORS
-        )));
+    require_teacher(state, headers).await?;
+    let def = load_definition(state, id).await?;
+    let determinations = body.determinations.map(|d| practices::Determinations {
+        label: d.label.trim().to_string(),
+        ..d
+    });
+    if let Some(d) = &determinations {
+        d.validate().map_err(AppError::bad_request)?;
     }
-    if !practices::set_operator_count(&state.pool, &id, body.count).await? {
+    let mut after = def.clone();
+    match part_id {
+        None => {
+            if determinations.is_some() {
+                if !def.parts.is_empty() {
+                    return Err(AppError::bad_request(
+                        "La práctica tiene partes: las determinaciones se configuran en cada parte.",
+                    ));
+                }
+                if practices::is_point_based(def.analysis_kind.as_deref()) {
+                    return Err(AppError::bad_request(
+                        "Las determinaciones son para una práctica estadística.",
+                    ));
+                }
+            }
+            after.determinations = determinations.clone();
+        }
+        Some(pid) => {
+            let part = def
+                .parts
+                .iter()
+                .find(|p| p.id == pid)
+                .ok_or_else(|| AppError::not_found("parte no encontrada"))?;
+            if determinations.is_some() && def.part_kind(part) != "estadistico" {
+                return Err(AppError::bad_request(
+                    "Las determinaciones son para una parte estadística.",
+                ));
+            }
+            if let Some(p) = after.parts.iter_mut().find(|p| p.id == pid) {
+                p.determinations = determinations.clone();
+            }
+        }
+    }
+    guard_change(&def, &after, "guardar las determinaciones")?;
+    if !practices::set_determinations(&state.pool, id, part_id, determinations.as_ref()).await? {
         return Err(AppError::not_found("practica no encontrada"));
     }
     Ok(Json(Health { status: "ok" }))
+}
+
+pub(super) async fn set_practice_determinations(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<DeterminationsBody>,
+) -> Result<Json<Health>, AppError> {
+    save_determinations(&state, &headers, &id, None, body).await
+}
+
+pub(super) async fn set_part_determinations(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((id, pid)): Path<(String, String)>,
+    Json(body): Json<DeterminationsBody>,
+) -> Result<Json<Health>, AppError> {
+    save_determinations(&state, &headers, &id, Some(&pid), body).await
 }
 
 pub(super) async fn set_practice_regression_formulas(
@@ -814,9 +1202,10 @@ pub(super) async fn create_quantity(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Json(input): Json<QuantityInput>,
+    Json(mut input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
+    input.per_point = input.stored_per_point();
     validate_quantity_in(&load_definition(&state, &id).await?, &input, None)?;
     guard_symbol(
         &state.pool,
@@ -845,17 +1234,21 @@ fn with_updated_quantity(
     q.name = input.name.trim().to_string();
     q.unit = input.unit.trim().to_string();
     q.repeated = input.repeated;
-    q.quantity.clone_from(&input.quantity);
+    q.quantity = input.magnitude();
     q.per_point = input.per_point;
     q.is_given = input.is_given;
     q.has_uncertainty = input.has_uncertainty;
     q.optional = input.optional;
     q.slot_count = input.slot_count;
     q.replicas_per_point = input.replicas_per_point;
+    q.per_determination = input.per_determination;
+    q.fixed = input.fixed;
+    q.default_value = input.default_value.unwrap_or(q.default_value);
+    q.default_u = input.default_u.unwrap_or(q.default_u);
     if let Some(mode) = &input.label_mode {
         q.label_mode.clone_from(mode);
     }
-    let timed = input.quantity.as_deref() == Some("tiempo") && !input.is_given;
+    let timed = q.quantity.as_deref() == Some("tiempo") && !input.is_given;
     q.input_widget = match &input.input_widget {
         Some(widget) if timed => widget.clone(),
         _ if timed => q.input_widget.clone(),
@@ -881,10 +1274,15 @@ pub(super) async fn update_quantity(
     State(state): State<SharedState>,
     headers: HeaderMap,
     Path((practice_id, qid)): Path<(String, String)>,
-    Json(input): Json<QuantityInput>,
+    Json(mut input): Json<QuantityInput>,
 ) -> Result<Json<db::PracticeQuantity>, AppError> {
     require_teacher(&state, &headers).await?;
+    input.per_point = input.stored_per_point();
     let before = load_definition(&state, &practice_id).await?;
+    if let Some(saved) = before.quantities.iter().find(|q| q.id == qid) {
+        input.default_value.get_or_insert(saved.default_value);
+        input.default_u.get_or_insert(saved.default_u);
+    }
     let after = with_updated_quantity(&before, &qid, &input)
         .ok_or_else(|| AppError::not_found("magnitud no encontrada en la practica"))?;
     validate_quantity_in(&after, &input, Some(&qid))?;
@@ -1430,11 +1828,12 @@ fn validate_curve(def: &practices::PracticeDefinition, input: &CurveInput) -> Re
 }
 
 fn cycle_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
+    let averaged = def.averaged_results();
     let uses: Vec<Vec<usize>> = def
         .results
         .iter()
         .map(|r| {
-            computation::formula_symbols(&r.formula)
+            symbols_with_averages(&averaged, &r.formula)
                 .iter()
                 .filter_map(|s| def.results.iter().position(|o| o.symbol == *s))
                 .collect()
@@ -1470,10 +1869,13 @@ fn quantity_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem>
                 per_point: q.per_point,
                 has_uncertainty: q.has_uncertainty,
                 optional: q.optional,
-                default_value: None,
+                default_value: Some(q.default_value),
                 slot_count: q.slot_count,
                 label_mode: Some(q.label_mode.clone()),
                 input_widget: Some(q.input_widget.clone()),
+                per_determination: q.per_determination,
+                fixed: q.fixed,
+                default_u: Some(q.default_u),
             };
             let error = validate_quantity(&input).err()?;
             Some(ElementProblem {
@@ -1495,9 +1897,49 @@ fn formula_problems(def: &practices::PracticeDefinition) -> Vec<(String, String)
         .collect()
 }
 
+fn determination_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
+    let mut problems = Vec::new();
+    for q in def.quantities.iter().filter(|q| q.per_determination) {
+        if def.quantity_determinations(&q.symbol).is_none() {
+            let place = match def.part_of_quantity(&q.symbol) {
+                Some(part) => format!("la parte \"{}\"", part.title),
+                None if def.parts.is_empty() => "la práctica".to_string(),
+                None => "los datos compartidos".to_string(),
+            };
+            problems.push(ElementProblem {
+                check: "la determinación de",
+                element: format!("la magnitud {}", q.symbol),
+                message: format!(
+                    "se repite por determinación, pero {place} no tiene determinaciones"
+                ),
+                kind: "quantity",
+                id: Some(q.id.clone()),
+            });
+        }
+    }
+    let averaged = def.averaged_results();
+    let symbols: Vec<&str> = practices::version_symbols(def).collect();
+    for r in def.results.iter().filter(|r| averaged.contains(&r.symbol)) {
+        let average = format!("{}_medio", r.symbol);
+        if symbols.contains(&average.as_str()) {
+            problems.push(ElementProblem {
+                check: "el promedio de",
+                element: format!("el mensurando {}", r.symbol),
+                message: format!(
+                    "su promedio se llamaría {average}, que ya es otro símbolo de la práctica"
+                ),
+                kind: "result",
+                id: Some(r.id.clone()),
+            });
+        }
+    }
+    problems
+}
+
 fn element_problems(def: &practices::PracticeDefinition) -> Vec<ElementProblem> {
     let mut problems = cycle_problems(def);
     problems.extend(quantity_problems(def));
+    problems.extend(determination_problems(def));
     if def.parts.is_empty() {
         problems.extend(formula_problems_in(def));
         return problems;
@@ -1634,6 +2076,7 @@ fn formula_problems_in(def: &practices::PracticeDefinition) -> Vec<ElementProble
                 unit: a.unit.clone(),
                 formula: a.formula.clone(),
                 is_final: a.is_final,
+                has_uncertainty: a.has_uncertainty,
             };
             note(
                 "el agregado",
@@ -1831,6 +2274,11 @@ fn result_scope_in(def: &practices::PracticeDefinition) -> Vec<String> {
             .iter()
             .map(|q| q.symbol.clone())
             .chain(def.results.iter().map(|r| r.symbol.clone()))
+            .chain(
+                def.averaged_results()
+                    .into_iter()
+                    .map(|s| format!("{s}_medio")),
+            )
             .collect(),
     }
 }
@@ -2047,10 +2495,15 @@ fn validate_symbol_format(symbol: &str) -> Result<(), AppError> {
             s
         )));
     }
+    if s.contains("__") {
+        return Err(AppError::bad_request(format!(
+            "El simbolo \"{s}\" no es valido: el doble guion bajo (__) está reservado."
+        )));
+    }
     Ok(())
 }
 
-const ENDPOINT_SUFFIXES: [&str; 4] = ["_first", "_first2", "_last", "_last2"];
+use crate::computation::ENDPOINT_SUFFIXES;
 
 fn validate_symbol_not_reserved(symbol: &str) -> Result<(), AppError> {
     let s = symbol.trim();
@@ -2174,11 +2627,14 @@ fn validate_quantity(input: &QuantityInput) -> Result<(), AppError> {
         ));
     }
     if input.input_widget.as_deref() == Some("cronometro")
-        && (input.is_given || input.quantity.as_deref() != Some("tiempo"))
+        && (input.is_given || input.magnitude().as_deref() != Some("tiempo"))
     {
         return Err(AppError::bad_request(
             "El cronómetro solo aplica a una magnitud física \"tiempo\" que no sea un dato dado.",
         ));
+    }
+    if let Some(problem) = input.fixed_problem() {
+        return Err(AppError::bad_request(problem));
     }
     Ok(())
 }
@@ -2191,8 +2647,7 @@ fn validate_quantity_in(
     validate_quantity(input)?;
     let part = quantity_id
         .and_then(|id| def.quantities.iter().find(|q| q.id == id))
-        .and_then(|q| def.quantity_part(&q.symbol))
-        .and_then(|id| def.parts.iter().find(|p| p.id == id));
+        .and_then(|q| def.part_of_quantity(&q.symbol));
     let point_based = match part {
         Some(part) => practices::is_point_based(Some(def.part_kind(part))),
         None if !def.parts.is_empty() => def.series_part().is_some(),
@@ -2202,6 +2657,17 @@ fn validate_quantity_in(
         return Err(AppError::bad_request(
             "Las réplicas por punto solo aplican en una práctica con serie de puntos \
              (regresión lineal o curva); dejá las réplicas vacías.",
+        ));
+    }
+    if input.per_determination && def.determinations_in(part).is_none() {
+        return Err(AppError::bad_request(
+            if part.is_none() && !def.parts.is_empty() {
+                "Para repetir una magnitud por determinación, ubicala primero en una parte \
+             con determinaciones."
+            } else {
+                "Para repetir una magnitud por determinación, primero configurá las determinaciones \
+             de la práctica o de su parte."
+            },
         ));
     }
     Ok(())
@@ -2225,10 +2691,10 @@ fn check_compare(
                  de la misma parte que el mensurando o de los datos compartidos.",
             )
         })?;
-    let (unit, target_unit) = (result.unit.trim(), quantity.unit.trim());
-    if unit != target_unit {
+    if practices::comparison_conversion(&quantity.unit, &result.unit).is_none() {
+        let (unit, target_unit) = (result.unit.trim(), quantity.unit.trim());
         return Err(AppError::bad_request(format!(
-            "\"Comparar con\" necesita la misma unidad: el mensurando está en \"{unit}\" \
+            "\"Comparar con\" necesita unidades compatibles: el mensurando está en \"{unit}\" \
              y {target} en \"{target_unit}\"."
         )));
     }
@@ -2257,11 +2723,31 @@ fn validate_result(
         .map_err(|e| AppError::bad_request(e.to_string()))
 }
 
-fn result_uses(def: &practices::PracticeDefinition) -> Vec<(String, Vec<String>)> {
+fn result_uses(
+    def: &practices::PracticeDefinition,
+    averaged: &[String],
+) -> Vec<(String, Vec<String>)> {
     def.results
         .iter()
-        .map(|r| (r.symbol.clone(), computation::formula_symbols(&r.formula)))
+        .map(|r| {
+            (
+                r.symbol.clone(),
+                symbols_with_averages(averaged, &r.formula),
+            )
+        })
         .collect()
+}
+
+fn symbols_with_averages(averaged: &[String], formula: &str) -> Vec<String> {
+    let mut used = computation::formula_symbols(formula);
+    let bases: Vec<String> = used
+        .iter()
+        .filter_map(|s| s.strip_suffix("_medio"))
+        .filter(|b| averaged.iter().any(|a| a == b))
+        .map(str::to_string)
+        .collect();
+    used.extend(bases);
+    used
 }
 
 fn results_using(uses: &[(String, Vec<String>)], symbol: &str) -> Vec<String> {
@@ -2285,9 +2771,14 @@ fn check_no_cycle(
     input: &ResultInput,
 ) -> Result<(), AppError> {
     let symbol = input.symbol.trim();
-    let mut excluded = results_using(&result_uses(def), own);
+    let mut edited = def.clone();
+    if let Some(r) = edited.results.iter_mut().find(|r| r.symbol == own) {
+        r.formula = input.formula.trim().to_string();
+    }
+    let averaged = edited.averaged_results();
+    let mut excluded = results_using(&result_uses(&edited, &averaged), own);
     excluded.push(symbol.to_string());
-    let Some(used) = computation::formula_symbols(input.formula.trim())
+    let Some(used) = symbols_with_averages(&averaged, input.formula.trim())
         .into_iter()
         .find(|s| excluded.contains(s))
     else {
@@ -2303,6 +2794,7 @@ fn check_no_cycle(
 fn existing_result_scope(
     views: &[ViewScope],
     uses: &[(String, Vec<String>)],
+    averaged: &[String],
     symbol: &str,
 ) -> Vec<String> {
     let mut scope = views
@@ -2315,7 +2807,12 @@ fn existing_result_scope(
         })
         .unwrap_or_else(|| union_scope(views));
     let excluded = results_using(uses, symbol);
-    scope.retain(|s| !excluded.contains(s));
+    scope.retain(|s| {
+        !excluded.contains(s)
+            && !s.strip_suffix("_medio").is_some_and(|base| {
+                excluded.iter().any(|e| e == base) && averaged.iter().any(|a| a == base)
+            })
+    });
     scope
 }
 
@@ -2335,6 +2832,11 @@ pub(super) async fn create_part(
     require_teacher(&state, &headers).await?;
     require_title(&input.title)?;
     let before = load_definition(&state, &id).await?;
+    if before.determinations.is_some() {
+        return Err(AppError::bad_request(
+            "La práctica tiene determinaciones: quitalas antes de agregar partes.",
+        ));
+    }
     guard_change(&before, &with_new_part(&before), "agregar la parte")?;
     let mut created = practices::create_part(&state.pool, &id, &input).await?;
     let mut after = before;
@@ -2404,6 +2906,14 @@ pub(super) async fn set_part_kind(
     require_teacher(&state, &headers).await?;
     let kind = parse_analysis_kind(&body.analysis_kind)?;
     let before = load_definition(&state, &id).await?;
+    if practices::is_point_based(Some(kind))
+        && before
+            .parts
+            .iter()
+            .any(|p| p.id == pid && p.determinations.is_some())
+    {
+        return Err(AppError::bad_request(DETERMINATIONS_ARE_STATISTICAL));
+    }
     let after = with_part_kind(&before, &pid, kind)
         .ok_or_else(|| AppError::not_found("parte no encontrada"))?;
     guard_change(&before, &after, "cambiar el tipo de la parte")?;
@@ -2737,7 +3247,6 @@ mod tests {
             quantities: vec![qty("V"), qty("t")],
             results: vec![],
             curves: vec![],
-            operator_count: None,
             intermediates: vec![practices::PracticeIntermediate {
                 id: "i1".into(),
                 practice_id: "p".into(),
@@ -2755,6 +3264,7 @@ mod tests {
             sections: vec![],
             display_symbols: Default::default(),
             current_version: None,
+            determinations: None,
         };
         let input = |symbol: &str, formula: &str| IntermediateInput {
             display_symbol: None,
@@ -2805,6 +3315,7 @@ mod tests {
             unit: "".into(),
             formula: "slope".into(),
             is_final: false,
+            has_uncertainty: true,
         };
         let def = practices::PracticeDefinition {
             description: String::new(),
@@ -2828,7 +3339,6 @@ mod tests {
                 ..Default::default()
             }],
             curves: vec![],
-            operator_count: None,
             intermediates: vec![practices::PracticeIntermediate {
                 id: "i1".into(),
                 practice_id: "p".into(),
@@ -2846,6 +3356,7 @@ mod tests {
             sections: vec![],
             display_symbols: Default::default(),
             current_version: None,
+            determinations: None,
         };
         let input = |symbol: &str, formula: &str| AggregateInput {
             display_symbol: None,
@@ -2854,6 +3365,7 @@ mod tests {
             unit: "".into(),
             formula: formula.into(),
             is_final: false,
+            has_uncertainty: true,
         };
 
         assert!(validate_aggregate(
@@ -2884,6 +3396,8 @@ mod tests {
         assert!(validate_symbol_format("a b").is_err());
         assert!(validate_symbol_format("a+b").is_err());
         assert!(validate_symbol_format("a.b").is_err());
+        assert!(validate_symbol_format("T__1").is_err());
+        assert!(validate_symbol_format("__x").is_err());
     }
 
     #[test]
@@ -2904,6 +3418,46 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_quantity(&timed(false, "tiempo", "cronometro")).is_ok());
+        assert!(validate_quantity(&timed(false, " Tiempo ", "cronometro")).is_ok());
+        let fixed = |has_uncertainty: bool, default_u: Option<f64>| QuantityInput {
+            symbol: "g".into(),
+            name: "Gravedad".into(),
+            is_given: true,
+            has_uncertainty,
+            fixed: true,
+            default_value: Some(Some(9.8)),
+            default_u: Some(default_u),
+            ..Default::default()
+        };
+        assert!(validate_quantity(&fixed(true, Some(0.1))).is_ok());
+        assert!(validate_quantity(&fixed(false, None)).is_ok());
+        assert!(validate_quantity(&fixed(true, None)).is_err());
+        assert!(validate_quantity(&fixed(true, Some(-0.1))).is_err());
+        assert!(validate_quantity(&QuantityInput {
+            fixed: false,
+            ..fixed(true, Some(-0.1))
+        })
+        .is_err());
+        assert!(validate_quantity(&QuantityInput {
+            default_value: Some(None),
+            ..fixed(true, Some(0.1))
+        })
+        .is_err());
+        assert!(validate_quantity(&QuantityInput {
+            is_given: false,
+            ..fixed(true, Some(0.1))
+        })
+        .is_err());
+        assert!(validate_quantity(&QuantityInput {
+            slot_count: Some(3),
+            ..fixed(true, Some(0.1))
+        })
+        .is_err());
+        assert!(validate_quantity(&QuantityInput {
+            per_determination: true,
+            ..fixed(true, Some(0.1))
+        })
+        .is_err());
         assert!(validate_quantity(&timed(false, "longitud", "teclado")).is_ok());
         assert!(validate_quantity(&timed(false, "longitud", "cronometro")).is_err());
         assert!(validate_quantity(&timed(true, "tiempo", "cronometro")).is_err());
@@ -2949,6 +3503,131 @@ mod tests {
         };
         assert!(validate_quantity(&without_u(true)).is_ok());
         assert!(validate_quantity(&without_u(false)).is_err());
+    }
+
+    #[test]
+    fn only_averaged_results_can_collide_with_medio() {
+        let result = |symbol: &str, formula: &str| crate::db::PracticeResult {
+            id: symbol.into(),
+            symbol: symbol.into(),
+            formula: formula.into(),
+            ..Default::default()
+        };
+        let def = |extra: &str| practices::PracticeDefinition {
+            determinations: Some(practices::Determinations {
+                count: 2,
+                label: "Medida".into(),
+                average: true,
+                display: Default::default(),
+            }),
+            quantities: vec![crate::db::PracticeQuantity {
+                symbol: "T".into(),
+                per_determination: true,
+                ..Default::default()
+            }],
+            results: vec![result("g", "1/T"), result("doble", "2"), result(extra, "3")],
+            ..Default::default()
+        };
+        let collisions = |d: &practices::PracticeDefinition| {
+            determination_problems(d)
+                .into_iter()
+                .filter(|p| p.check == "el promedio de")
+                .count()
+        };
+        assert_eq!(collisions(&def("doble_medio")), 0);
+        assert_eq!(collisions(&def("g_medio")), 1);
+    }
+
+    #[test]
+    fn averages_can_be_used_in_formulas_without_cycles() {
+        let result = |symbol: &str, formula: &str| crate::db::PracticeResult {
+            id: symbol.into(),
+            symbol: symbol.into(),
+            name: symbol.into(),
+            formula: formula.into(),
+            ..Default::default()
+        };
+        let def = |average: bool, g: &str| practices::PracticeDefinition {
+            determinations: Some(practices::Determinations {
+                count: 2,
+                label: "Medida".into(),
+                average,
+                display: Default::default(),
+            }),
+            quantities: vec![crate::db::PracticeQuantity {
+                symbol: "T".into(),
+                per_determination: true,
+                ..Default::default()
+            }],
+            results: vec![result("g", g), result("rel", "g_medio/2")],
+            ..Default::default()
+        };
+        assert!(result_scope(&def(true, "1/T")).contains(&"g_medio".to_string()));
+        let views = view_scopes(&def(true, "1/T"));
+        let averaged_def = def(true, "1/T");
+        let averaged = averaged_def.averaged_results();
+        let uses = result_uses(&averaged_def, &averaged);
+        assert!(
+            !existing_result_scope(&views, &uses, &averaged, "g").contains(&"g_medio".to_string())
+        );
+        assert!(
+            existing_result_scope(&views, &uses, &averaged, "rel").contains(&"g_medio".to_string())
+        );
+        assert!(!result_scope(&def(false, "1/T")).contains(&"g_medio".to_string()));
+        let rel_problems = |d: &practices::PracticeDefinition| {
+            formula_problems(d)
+                .into_iter()
+                .filter(|(element, _)| element == "el mensurando rel")
+                .count()
+        };
+        assert_eq!(rel_problems(&def(true, "1/T")), 0);
+        assert_eq!(rel_problems(&def(false, "1/T")), 1);
+        let cyclic = def(true, "rel/T");
+        assert_eq!(cycle_problems(&cyclic).len(), 2);
+        let input = ResultInput {
+            display_symbol: None,
+            compare_with: None,
+            symbol: "g".into(),
+            name: "g".into(),
+            unit: String::new(),
+            formula: "rel/T".into(),
+            tolerance: None,
+            is_final: false,
+            has_uncertainty: true,
+        };
+        assert!(check_no_cycle(&def(true, "1/T"), "g", &input).is_err());
+        assert!(
+            check_no_cycle(&def(true, "2"), "g", &input).is_err(),
+            "g deja de ser constante con esta edición y rel*T forma un ciclo por g_medio"
+        );
+
+        let plain = practices::PracticeDefinition {
+            quantities: vec![crate::db::PracticeQuantity {
+                symbol: "x_medio".into(),
+                ..Default::default()
+            }],
+            results: vec![result("x", "2*x_medio")],
+            ..Default::default()
+        };
+        assert!(cycle_problems(&plain).is_empty());
+        let plain_with_y = practices::PracticeDefinition {
+            results: vec![result("y", "1"), result("x", "y + x_medio")],
+            ..plain.clone()
+        };
+        let plain_averaged = plain_with_y.averaged_results();
+        assert!(existing_result_scope(
+            &view_scopes(&plain_with_y),
+            &result_uses(&plain_with_y, &plain_averaged),
+            &plain_averaged,
+            "y"
+        )
+        .contains(&"x_medio".to_string()));
+        let input = ResultInput {
+            symbol: "x".into(),
+            formula: "2*x_medio".into(),
+            ..input
+        };
+        assert!(check_no_cycle(&plain, "x", &input).is_ok());
     }
 
     #[test]
@@ -3161,7 +3840,6 @@ mod tests {
             quantities: vec![],
             results: vec![],
             curves: vec![],
-            operator_count: None,
             intermediates: vec![],
             point_results: vec![],
             aggregates: vec![],
@@ -3169,6 +3847,7 @@ mod tests {
             sections: vec![],
             display_symbols: Default::default(),
             current_version: None,
+            determinations: None,
         };
         let r = |unit: &str| ResultInput {
             display_symbol: None,
@@ -3195,6 +3874,262 @@ mod tests {
     }
 
     #[test]
+    fn unit_warnings_flag_only_unrecognized_units_and_do_not_block_publishing() {
+        let quantity = |symbol: &str, unit: &str| db::PracticeQuantity {
+            id: format!("id-{symbol}"),
+            symbol: symbol.into(),
+            unit: unit.into(),
+            ..Default::default()
+        };
+        let def = practices::PracticeDefinition {
+            quantities: vec![
+                quantity("a", "div"),
+                quantity("b", "cm"),
+                quantity("c", ""),
+                quantity("d", "pH"),
+                quantity("e", "% m/m"),
+            ],
+            results: vec![
+                db::PracticeResult {
+                    id: "id-r".into(),
+                    symbol: "r".into(),
+                    unit: "cuentas/s".into(),
+                    is_final: true,
+                    ..Default::default()
+                },
+                db::PracticeResult {
+                    id: "id-paso".into(),
+                    symbol: "paso".into(),
+                    unit: "cuentas/s".into(),
+                    ..Default::default()
+                },
+            ],
+            intermediates: vec![practices::PracticeIntermediate {
+                id: "id-i".into(),
+                symbol: "i".into(),
+                unit: "div".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let warnings = unit_warnings(&def);
+        let flagged: Vec<_> = warnings.iter().map(|w| w.id.as_deref()).collect();
+        assert_eq!(flagged, [Some("id-a"), Some("id-r")]);
+        assert!(warnings.iter().all(|w| w.warning));
+        assert!(
+            warnings[0].message.contains("\"div\""),
+            "{}",
+            warnings[0].message
+        );
+        assert!(!publish_problems(&def)
+            .iter()
+            .any(|p| p.contains("no se reconoce")));
+    }
+
+    #[test]
+    fn dimension_warnings_compare_with_the_declared_unit_and_do_not_block_publishing() {
+        let quantity = |symbol: &str, unit: &str| db::PracticeQuantity {
+            id: format!("id-{symbol}"),
+            symbol: symbol.into(),
+            unit: unit.into(),
+            ..Default::default()
+        };
+        let result = |symbol: &str, unit: &str, formula: &str| db::PracticeResult {
+            id: format!("id-{symbol}"),
+            symbol: symbol.into(),
+            unit: unit.into(),
+            formula: formula.into(),
+            ..Default::default()
+        };
+        let def = practices::PracticeDefinition {
+            analysis_kind: Some("estadistico".into()),
+            quantities: vec![
+                quantity("L", "cm"),
+                quantity("T", "s"),
+                quantity("c", "div"),
+                quantity("v_at_0", "m"),
+            ],
+            results: vec![
+                result("g", "m/s2", "4*pi^2*L/T^2"),
+                result("Lm", "s", "L_at_T_max + L_first"),
+                result("v", "m/s2", "L/T"),
+                result("s", "m", "L + T"),
+                result("k", "", "math::ln(T)"),
+                result("n", "", "c/L"),
+                result("g0", "m/s2", "9.81"),
+                result("p", "", "2^L"),
+                result("Vm", "s", "v_at_0_at_T_max"),
+                result("Vf", "m", "v_at_0_first"),
+            ],
+            y_formula: Some("math::ln(T)".into()),
+            ..Default::default()
+        };
+        assert!(dimension_warnings(&def).iter().all(|w| w.kind != "axes"));
+        let def = practices::PracticeDefinition {
+            analysis_kind: Some("regresion_lineal".into()),
+            ..def
+        };
+        let warnings = dimension_warnings(&def);
+        assert_eq!(
+            (
+                warnings[0].kind,
+                warnings[0].id.as_deref(),
+                warnings[0].message.as_str()
+            ),
+            (
+                "axes",
+                None,
+                "el ajuste lineal (eje y): el argumento de ln no es adimensional (s)."
+            )
+        );
+        let warnings = &warnings[1..];
+        let by: Vec<_> = warnings
+            .iter()
+            .map(|w| (w.id.as_deref().unwrap(), w.message.as_str()))
+            .collect();
+        assert_eq!(
+            by,
+            [
+                (
+                    "id-Lm",
+                    "el mensurando Lm: la fórmula da m y la unidad declarada (s) es s."
+                ),
+                (
+                    "id-v",
+                    "el mensurando v: la fórmula da m·s⁻¹ y la unidad declarada (m/s2) es m·s⁻²."
+                ),
+                (
+                    "id-s",
+                    "el mensurando s: la fórmula suma o resta términos con dimensiones distintas (m y s)."
+                ),
+                (
+                    "id-k",
+                    "el mensurando k: el argumento de ln no es adimensional (s)."
+                ),
+                ("id-p", "el mensurando p: el exponente no es adimensional (m)."),
+                (
+                    "id-Vm",
+                    "el mensurando Vm: la fórmula da m y la unidad declarada (s) es s."
+                ),
+            ]
+        );
+        assert!(warnings.iter().all(|w| w.warning && w.kind == "result"));
+        let curve = practices::PracticeDefinition {
+            analysis_kind: Some("curva".into()),
+            curves: vec![practices::PracticeCurve {
+                id: "id-c".into(),
+                x_formula: "L".into(),
+                y_formula: "L + T".into(),
+                ..Default::default()
+            }],
+            ..def.clone()
+        };
+        let on_curve: Vec<_> = dimension_warnings(&curve)
+            .into_iter()
+            .filter(|w| w.kind == "curve")
+            .map(|w| (w.id, w.message))
+            .collect();
+        assert_eq!(
+            on_curve,
+            [(
+                Some("id-c".to_string()),
+                "la curva L + T vs L (eje y): la fórmula suma o resta términos con dimensiones distintas (m y s)."
+                    .to_string()
+            )]
+        );
+        assert!(!publish_problems(&def)
+            .iter()
+            .any(|p| p.contains("la fórmula da")
+                || p.contains("suma o resta")
+                || p.contains("argumento de")));
+    }
+
+    #[tokio::test]
+    async fn a_point_result_that_mixes_the_line_and_the_axes_warns_in_the_editor() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        let warned = |id: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let def = practices::definition(&pool, id).await.unwrap().unwrap();
+                line_correlation_warnings(&def)
+            }
+        };
+        let fluidos = warned("fluidos-1").await;
+        assert_eq!(fluidos.len(), 1);
+        assert!(fluidos[0].warning && fluidos[0].kind == "pointResult");
+        assert!(
+            fluidos[0].message.contains("(V, t)"),
+            "{}",
+            fluidos[0].message
+        );
+        assert!(warned("viscosidad").await[0].message.contains("(R, t)"));
+        assert!(warned("p1-estadistica").await.is_empty());
+        let mut def = practices::definition(&pool, "fluidos-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(warned("fluidos-2").await.is_empty());
+        let aggregate = |symbol: &str, formula: &str| practices::PracticeAggregate {
+            id: format!("ag-{symbol}"),
+            symbol: symbol.into(),
+            formula: formula.into(),
+            ..Default::default()
+        };
+        def.aggregates = vec![
+            aggregate("a1", "slope*V_first"),
+            aggregate("a2", "2*a1"),
+            aggregate("a3", "rho*2"),
+        ];
+        let on_aggregates: Vec<_> = line_correlation_warnings(&def)
+            .into_iter()
+            .filter(|w| w.kind == "aggregate")
+            .map(|w| w.id.unwrap())
+            .collect();
+        assert_eq!(on_aggregates, ["ag-a1", "ag-a2"]);
+        assert!(!publish_problems(&def)
+            .iter()
+            .any(|p| p.contains("ejes que también usa")));
+    }
+
+    #[tokio::test]
+    async fn seeded_practices_only_warn_about_div() {
+        let (pool, _dir) = crate::computation::tests::setup().await;
+        for practice in db::practices(&pool).await.unwrap() {
+            let def = practices::definition(&pool, &practice.id)
+                .await
+                .unwrap()
+                .unwrap();
+            for w in unit_warnings(&def) {
+                assert!(
+                    w.message.contains("\"div\""),
+                    "{}: {}",
+                    practice.id,
+                    w.message
+                );
+            }
+            let dimensional: Vec<_> = dimension_warnings(&def)
+                .into_iter()
+                .map(|w| w.message)
+                .collect();
+            assert!(dimensional.is_empty(), "{}: {dimensional:?}", practice.id);
+        }
+        for (practice, symbol) in [("p1-estadistica", "g"), ("fluidos-1", "mu")] {
+            let mut def = practices::definition(&pool, practice)
+                .await
+                .unwrap()
+                .unwrap();
+            let r = def.results.iter_mut().find(|r| r.symbol == symbol).unwrap();
+            r.unit = "s".into();
+            let warnings = dimension_warnings(&def);
+            assert!(
+                warnings.iter().any(|w| w.message.contains("la fórmula da")),
+                "{practice}: {:?}",
+                warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
     fn check_compare_needs_a_quantity_of_the_view_with_the_same_unit() {
         let def = practices::PracticeDefinition {
             quantities: vec![db::PracticeQuantity {
@@ -3213,9 +4148,20 @@ mod tests {
         assert!(check_compare(&def, &r("", "V")).is_ok());
         assert!(check_compare(&def, &r("V", " V ")).is_ok());
         assert!(check_compare(&def, &r("W", "V")).is_err());
-        let error = check_compare(&def, &r("V", "mV")).unwrap_err();
+        assert!(check_compare(&def, &r("V", "mV")).is_ok());
+        let celsius = practices::PracticeDefinition {
+            quantities: vec![db::PracticeQuantity {
+                symbol: "T".into(),
+                unit: "°C".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(check_compare(&celsius, &r("T", "K")).is_err());
+        assert!(check_compare(&def, &r("V", "")).is_err());
+        let error = check_compare(&def, &r("V", "g")).unwrap_err();
         assert!(
-            error.message().contains("misma unidad"),
+            error.message().contains("unidades compatibles"),
             "{}",
             error.message()
         );
@@ -3519,6 +4465,7 @@ mod tests {
                         unit: String::new(),
                         formula: c.into(),
                         is_final: false,
+                        has_uncertainty: true,
                     };
                     validate_aggregate(&def, &input, exclude).is_ok()
                 });
@@ -4060,15 +5007,15 @@ mod tests {
         let broken_r = broken.results.iter_mut().find(|r| r.symbol == "VR1_s_t");
         broken_r.unwrap().formula = "no_existe * 2".into();
         let vr1_s = cc.quantities.iter().find(|q| q.symbol == "VR1_s").unwrap();
-        let in_mv = QuantityInput {
+        let in_amperes = QuantityInput {
             symbol: "VR1_s".into(),
             name: vr1_s.name.clone(),
-            unit: "mV".into(),
+            unit: "A".into(),
             per_point: vr1_s.per_point,
             is_given: vr1_s.is_given,
             ..Default::default()
         };
-        let after = with_updated_quantity(&broken, &vr1_s.id, &in_mv).unwrap();
+        let after = with_updated_quantity(&broken, &vr1_s.id, &in_amperes).unwrap();
         let error = guard_change(&broken, &after, "guardar la magnitud").unwrap_err();
         assert!(
             error.message().contains("la comparación de VR1_s_t"),
@@ -4090,9 +5037,10 @@ mod tests {
             guard_change(&cc, &after, "guardar la magnitud")
         };
         assert!(edit(" V ").is_ok());
-        let error = edit("mV").unwrap_err();
+        assert!(edit("mV").is_ok(), "mV es compatible con V");
+        let error = edit("A").unwrap_err();
         assert!(
-            error.message().contains("misma unidad"),
+            error.message().contains("unidades compatibles"),
             "{}",
             error.message()
         );
@@ -4100,13 +5048,13 @@ mod tests {
         let vr1_s_t = cc.results.iter().find(|r| r.symbol == "VR1_s_t").unwrap();
         let only_unit = ResultInput {
             compare_with: None,
-            unit: "mV".into(),
+            unit: "A".into(),
             ..input("VR1_s_t", &vr1_s_t.formula, "")
         };
         let after = with_updated_result(&cc, &vr1_s_t.id, &only_unit).unwrap();
         let error = guard_change(&cc, &after, "guardar el mensurando").unwrap_err();
         assert!(
-            error.message().contains("misma unidad"),
+            error.message().contains("unidades compatibles"),
             "{}",
             error.message()
         );
@@ -4122,8 +5070,11 @@ mod tests {
         assert_eq!(hidro.status, "publicada");
         let mut after = hidro.clone();
         after.analysis_kind = Some("regresion_lineal".into());
-        let err = guard_change(&hidro, &after, "x").unwrap_err();
-        assert!(format!("{err:?}").contains("ejes"), "{err:?}");
+        let err = format!("{:?}", guard_change(&hidro, &after, "x").unwrap_err());
+        assert!(
+            err.contains("Arquimedes") && err.contains("ya no es estadística"),
+            "{err}"
+        );
     }
 
     #[tokio::test]
@@ -4662,6 +5613,7 @@ mod tests {
     #[tokio::test]
     async fn result_formulas_respect_the_engine_scope() {
         let (pool, _dir) = crate::computation::tests::setup().await;
+        crate::computation::tests::p1_partes(&pool).await;
         let def = |id: &'static str| {
             let pool = pool.clone();
             async move { practices::definition(&pool, id).await.unwrap().unwrap() }
@@ -4669,7 +5621,7 @@ mod tests {
         let check = |def: &practices::PracticeDefinition, formula: &str| {
             computation::check_formula(formula, &result_scope(def)).is_ok()
         };
-        let p1 = def("p1-estadistica").await;
+        let p1 = def("p1-partes").await;
         assert!(check(&p1, "4*pi^2*L/T1^2"));
         assert!(!check(&p1, "slope"));
         assert!(!check(&p1, "L*zzz"));
@@ -4686,6 +5638,7 @@ mod tests {
     #[tokio::test]
     async fn results_can_use_other_results() {
         let (pool, _dir) = crate::computation::tests::setup().await;
+        crate::computation::tests::p1_partes(&pool).await;
         let input = |symbol: &str, formula: &str| ResultInput {
             display_symbol: None,
             compare_with: None,
@@ -4697,7 +5650,7 @@ mod tests {
             is_final: false,
             has_uncertainty: true,
         };
-        let p1 = practices::definition(&pool, "p1-estadistica")
+        let p1 = practices::definition(&pool, "p1-partes")
             .await
             .unwrap()
             .unwrap();
@@ -4714,13 +5667,13 @@ mod tests {
         let crossing = with_new_result(&with_g1, &input("K", "G1 + T2"), None);
         assert!(guard_change(&with_g1, &crossing, "x").is_err());
 
-        let l2 = practices::create_result(&pool, "p1-estadistica", input("L2", "L*2"), None)
+        let l2 = practices::create_result(&pool, "p1-partes", input("L2", "L*2"), None)
             .await
             .unwrap();
-        practices::create_result(&pool, "p1-estadistica", input("G1", "L2 + T1"), None)
+        practices::create_result(&pool, "p1-partes", input("G1", "L2 + T1"), None)
             .await
             .unwrap();
-        let def = practices::definition(&pool, "p1-estadistica")
+        let def = practices::definition(&pool, "p1-partes")
             .await
             .unwrap()
             .unwrap();
@@ -4766,10 +5719,11 @@ mod tests {
                 given_u,
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             };
         let analysis = computation::analyze(
             &pool,
-            "p1-estadistica",
+            "p1-partes",
             &[
                 measurement("L", vec![1.0], Some(0.002)),
                 measurement("t_med", vec![95.3], None),
@@ -4781,7 +5735,6 @@ mod tests {
         let mut all: Vec<&computation::DerivedComputation> = analysis.derived.iter().collect();
         for part in &analysis.parts {
             all.extend(&part.analysis.derived);
-            all.extend(part.analysis.operators.iter().flat_map(|o| &o.derived));
         }
         assert_eq!(all.iter().filter(|d| d.symbol == "L2").count(), 1);
         assert!(analysis.derived.iter().any(|d| d.symbol == "L2"));
@@ -4790,6 +5743,43 @@ mod tests {
         let l2 = all.iter().find(|d| d.symbol == "L2").unwrap();
         assert!(l2.u > 0.0);
         assert!((g1.u - l2.u).abs() < 1e-12, "{} {}", g1.u, l2.u);
+    }
+
+    #[test]
+    fn every_constant_of_the_catalog_can_be_saved() {
+        let catalog: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../static/constants.json")).unwrap();
+        for c in &catalog {
+            let symbol = c["symbol"].as_str().unwrap();
+            assert!(validate_symbol_format(symbol).is_ok(), "{symbol}");
+            assert!(validate_symbol_not_reserved(symbol).is_ok(), "{symbol}");
+            let unit = c["unit"].as_str().unwrap();
+            assert!(crate::units::parse(unit).is_some(), "no reconoce {unit:?}");
+            if let Some(q) = c["quantity"].as_str() {
+                assert!(
+                    crate::magnitudes::MAGNITUDES
+                        .iter()
+                        .any(|(name, _)| *name == q),
+                    "{q:?} no está en el catálogo de magnitudes"
+                );
+            }
+            assert!(c["value"].as_f64().is_some_and(f64::is_finite), "{c}");
+            assert!(
+                c["u"].is_null() || c["u"].as_f64().is_some_and(|u| u >= 0.0),
+                "{c}"
+            );
+            assert!(!c["source"].as_str().unwrap().trim().is_empty(), "{c}");
+        }
+        let value = |symbol: &str| {
+            catalog
+                .iter()
+                .find(|c| c["symbol"] == symbol)
+                .and_then(|c| c["value"].as_f64())
+                .unwrap()
+        };
+        let exact = |derived: f64, product: f64| ((derived - product) / product).abs() < 1e-15;
+        assert!(exact(value("R"), value("N_A") * value("k_B")));
+        assert!(exact(value("F"), value("N_A") * value("q_e")));
     }
 
     #[test]
@@ -5040,5 +6030,234 @@ mod tests {
             });
             assert_eq!(imported.0.status, "borrador");
         }
+    }
+
+    #[tokio::test]
+    async fn determinations_are_validated_and_guard_their_quantities() {
+        let (pool, dir) = crate::computation::tests::setup().await;
+        let state: SharedState = std::sync::Arc::new(db::AppState {
+            pool: pool.clone(),
+            upload_dir: dir.path().to_path_buf(),
+            secret_key: "secreto".into(),
+            secure_cookies: false,
+            login_attempts: Default::default(),
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::COOKIE,
+            format!("quantify_session={}", session_token(&pool, "docente").await)
+                .parse()
+                .unwrap(),
+        );
+        let template: practices::PracticeTemplate = serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "name": "Sin partes", "analysis_kind": "estadistico"
+        }))
+        .unwrap();
+        let id = practices::import_template(&pool, &template, "u1")
+            .await
+            .unwrap()
+            .id;
+        let save = |body: serde_json::Value| {
+            let state = state.clone();
+            let headers = headers.clone();
+            let id = id.clone();
+            async move {
+                set_practice_determinations(
+                    State(state),
+                    headers,
+                    Path(id),
+                    Json(serde_json::from_value(body).unwrap()),
+                )
+                .await
+                .err()
+                .map(|e| e.message().to_string())
+            }
+        };
+        let quantity = |per_determination: bool| QuantityInput {
+            symbol: "T".into(),
+            name: "T".into(),
+            unit: "s".into(),
+            repeated: true,
+            per_determination,
+            ..Default::default()
+        };
+
+        let early = create_quantity(
+            State(state.clone()),
+            headers.clone(),
+            Path(id.clone()),
+            Json(quantity(true)),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            early.message().contains("primero configurá"),
+            "{}",
+            early.message()
+        );
+
+        let bad =
+            save(serde_json::json!({"determinations": {"count": 1, "label": "Medida"}})).await;
+        assert!(bad.unwrap_or_default().contains("de 2 a"));
+        let unnamed = save(serde_json::json!({"determinations": {"count": 3, "label": " "}})).await;
+        assert!(unnamed.unwrap_or_default().contains("nombre"));
+        assert_eq!(
+            save(serde_json::json!({"determinations": {"count": 3, "label": "Medida", "average": true}})).await,
+            None
+        );
+        let def = load_definition(&state, &id).await.unwrap();
+        assert_eq!(def.determinations.as_ref().unwrap().count, 3);
+
+        let _ = create_quantity(
+            State(state.clone()),
+            headers.clone(),
+            Path(id.clone()),
+            Json(quantity(true)),
+        )
+        .await
+        .unwrap();
+        let removal = save(serde_json::json!({"determinations": null})).await;
+        assert!(
+            removal
+                .unwrap_or_default()
+                .contains("no tiene determinaciones"),
+            "quitar las determinaciones no debía dejar magnitudes repetidas sueltas"
+        );
+
+        let with_parts = set_practice_determinations(
+            State(state.clone()),
+            headers.clone(),
+            Path("p2-cc".into()),
+            Json(
+                serde_json::from_value(
+                    serde_json::json!({"determinations": {"count": 2, "label": "Medida"}}),
+                )
+                .unwrap(),
+            ),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(with_parts.message().contains("tiene partes"));
+
+        let def = load_definition(&state, "p2-cc").await.unwrap();
+        let part = def
+            .parts
+            .iter()
+            .find(|p| def.part_kind(p) == "estadistico")
+            .unwrap()
+            .id
+            .clone();
+        let part_determinations = || {
+            set_part_determinations(
+                State(state.clone()),
+                headers.clone(),
+                Path(("p2-cc".to_string(), part.clone())),
+                Json(
+                    serde_json::from_value(
+                        serde_json::json!({"determinations": {"count": 2, "label": "Medida"}}),
+                    )
+                    .unwrap(),
+                ),
+            )
+        };
+        let _ = part_determinations().await.unwrap();
+
+        let to_curve = set_part_kind(
+            State(state.clone()),
+            headers.clone(),
+            Path(("p2-cc".to_string(), part.clone())),
+            Json(PartKindBody {
+                analysis_kind: "curva".into(),
+            }),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(to_curve
+            .message()
+            .contains("solo para análisis estadístico"));
+        let copy = practices::duplicate_practice(&pool, "p2-cc", "Copia", "u1")
+            .await
+            .unwrap()
+            .unwrap();
+        let copied = load_definition(&state, &copy.id).await.unwrap();
+        assert_eq!(
+            copied
+                .parts
+                .iter()
+                .filter_map(|p| p.determinations.as_ref())
+                .count(),
+            1,
+            "la copia conserva las determinaciones de la parte"
+        );
+
+        let practice_to_curve = set_practice_analysis_kind(
+            State(state.clone()),
+            headers.clone(),
+            Path(id.clone()),
+            Json(SetAnalysisKindBody {
+                analysis_kind: "curva".into(),
+            }),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(practice_to_curve
+            .message()
+            .contains("solo para análisis estadístico"));
+        let new_part = create_part(
+            State(state.clone()),
+            headers.clone(),
+            Path(id.clone()),
+            Json(practices::PartInput {
+                title: "Otra".into(),
+                help_text: None,
+            }),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(new_part.message().contains("antes de agregar partes"));
+
+        let unplaced = create_quantity(
+            State(state.clone()),
+            headers.clone(),
+            Path("p2-cc".into()),
+            Json(quantity(true)),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(unplaced.message().contains("ubicala primero"));
+    }
+
+    #[test]
+    fn a_part_that_stops_being_statistical_keeps_no_silent_determinations() {
+        let def = practices::PracticeDefinition {
+            analysis_kind: Some("curva".into()),
+            parts: vec![
+                practices::PracticePart {
+                    id: "a".into(),
+                    title: "A".into(),
+                    determinations: Some(practices::Determinations {
+                        count: 2,
+                        label: "Medida".into(),
+                        average: false,
+                        display: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+                practices::PracticePart {
+                    id: "b".into(),
+                    title: "B".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(located_structure_problems(&def)
+            .iter()
+            .any(|(m, _)| m.contains("\"A\" tiene determinaciones pero ya no es estadística")));
     }
 }

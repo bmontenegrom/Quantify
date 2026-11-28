@@ -134,6 +134,7 @@ pub(super) async fn import_instruments(
     if request.course_id.trim().is_empty() {
         return Err(AppError::bad_request("course_id requerido"));
     }
+    validate_import(&request.instruments)?;
     instruments::import_course(
         &state.pool,
         &request.course_id,
@@ -149,8 +150,19 @@ fn validate_instrument(kind: &str, name: &str, quantity: &str, unit: &str) -> Re
     if !matches!(kind.trim(), "analogico" | "digital") {
         return Err(AppError::bad_request("kind debe ser analogico o digital"));
     }
-    if name.trim().is_empty() || quantity.trim().is_empty() || unit.trim().is_empty() {
+    if name.trim().is_empty()
+        || crate::magnitudes::canonical(quantity).is_empty()
+        || unit.trim().is_empty()
+    {
         return Err(AppError::bad_request("datos de instrumento invalidos"));
+    }
+    Ok(())
+}
+
+fn validate_import(items: &[instruments::InstrumentExport]) -> Result<(), AppError> {
+    for item in items {
+        validate_instrument(&item.kind, &item.name, &item.quantity, &item.unit)?;
+        item.scales.iter().try_for_each(validate_scale)?;
     }
     Ok(())
 }
@@ -184,6 +196,19 @@ fn validate_scale(input: &ScaleInput) -> Result<(), AppError> {
     Ok(())
 }
 
+pub(super) async fn list_magnitudes(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<&'static str>>, AppError> {
+    require_teacher(&state, &headers).await?;
+    Ok(Json(
+        crate::magnitudes::MAGNITUDES
+            .iter()
+            .map(|(name, _)| *name)
+            .collect(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +237,7 @@ mod tests {
         assert!(validate_instrument("analogico", "Regla", "longitud", "mm").is_ok());
         assert!(validate_instrument("otro", "X", "q", "u").is_err());
         assert!(validate_instrument("digital", "  ", "q", "u").is_err());
+        assert!(validate_instrument("digital", "X", "\u{301}", "u").is_err());
     }
 
     #[test]
@@ -220,6 +246,22 @@ mod tests {
         assert!(validate_scale(&scale("apreciacion", 0.5)).is_ok());
         assert!(validate_scale(&scale("raro", 1.0)).is_err());
         assert!(validate_scale(&scale("resolucion", 0.0)).is_err());
+    }
+
+    #[test]
+    fn validate_import_checks_every_instrument_and_scale() {
+        let item = |scales| instruments::InstrumentExport {
+            name: "Tester".into(),
+            kind: "digital".into(),
+            quantity: "voltaje".into(),
+            unit: "V".into(),
+            scales,
+        };
+        assert!(validate_import(&[item(vec![scale("resolucion", 0.1)])]).is_ok());
+        assert!(validate_import(&[item(vec![scale("resolucion", 0.0)])]).is_err());
+        let mut nameless = item(vec![]);
+        nameless.quantity = "  ".into();
+        assert!(validate_import(&[item(vec![]), nameless]).is_err());
     }
 
     #[test]

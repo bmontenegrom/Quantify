@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections } from "./lib.js";
+import { escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, format, canReview, measureText, cssEscape, hasUncertainty, analysisSections, expandDeterminationResults } from "./lib.js";
 import { postJson } from "./api.js";
 import { submissionHeader, teacherCommentMarkup, studentCommentMarkup, editBannerMarkup, renderReviewForm, saveReview } from "./submissions.js";
 import { openSubmissionWorkspace } from "./submissions.js";
@@ -17,25 +17,37 @@ export function renderAnalysis(target, submission, includeReview = false, defini
     const isTeacher = canReview(state.user);
     const studentResults = submission.student_results ?? [];
     const sections = submission.analysis ? analysisSections(submission.analysis) : [];
-    const hasOperators = sections.some((s) => (s.analysis.operators?.length ?? 0) > 0);
     let body = "";
     if (submission.analysis) {
       body += formAnalysisMarkup(submission.analysis, pairs);
       if (studentResults.length) {
+        const tolerances = { ...(submission.result_tolerances ?? {}) };
+        for (const r of expandDeterminationResults(definition, definition?.results ?? [])) {
+          if (r.base && !r.determination && tolerances[r.base] != null) tolerances[r.symbol] ??= tolerances[r.base];
+        }
         const finalAggregateSymbols = new Set(
           (definition?.aggregates ?? []).filter((a) => a.is_final).map((a) => a.symbol),
         );
         for (const { title, analysis } of sections) {
-          if (analysis.operators?.length) continue;
           const comparableAggregates = (analysis.aggregates ?? [])
             .filter((a) => finalAggregateSymbols.has(a.symbol))
-            .map((a) => ({ ...a, u_expanded: 0, has_uncertainty: false }));
+            .map((a) => ("u_expanded" in a ? a : { ...a, has_uncertainty: false }));
           body += comparisonMarkup(
             [...(analysis.derived ?? []), ...comparableAggregates],
             studentResults,
-            submission.result_tolerances ?? {},
+            tolerances,
             title,
           );
+          for (const [k, det] of (analysis.determinations ?? []).entries()) {
+            const suffix = `#${k + 1}`;
+            const own = new Set((det.derived ?? []).map((d) => d.symbol));
+            const mine = studentResults
+              .filter((s) => s.symbol.endsWith(suffix) && own.has(s.symbol.slice(0, -suffix.length)))
+              .map((s) => ({ ...s, symbol: s.symbol.slice(0, -suffix.length) }));
+            if (mine.length) {
+              body += comparisonMarkup(det.derived ?? [], mine, tolerances, title ? `${title} — ${det.label}` : det.label);
+            }
+          }
           body += pointResultsComparisonMarkup(analysis, studentResults, title);
         }
       }
@@ -43,13 +55,7 @@ export function renderAnalysis(target, submission, includeReview = false, defini
       body += `<p class="submission-meta">El docente todavia no habilito los resultados de esta entrega.</p>`;
     }
     body += measurementMetaMarkup(submission, definition);
-    if (hasOperators) {
-      if (!isTeacher) {
-        body += `<p class="submission-meta">Los mensurandos se calculan por operador para comparar las determinaciones; no hay carga de cálculos propios en esta práctica.</p>`;
-      }
-    } else {
-      body += studentResultsFormMarkup(submission, definition, isTeacher);
-    }
+    body += studentResultsFormMarkup(submission, definition, isTeacher);
     target.innerHTML = `
       ${submissionHeader(submission)}
       ${teacherCommentMarkup(submission)}
@@ -240,7 +246,14 @@ function pointResultsMarkup(pointResults) {
     .map((p) => `<th>${symbolHtml(p.symbol)} <span class="submission-meta">${unitHtml(p.unit)}</span></th>`)
     .join("");
   const rows = Array.from({ length: n }, (_, i) => {
-    const cells = pointResults.map((p) => `<td>${p.values[i] != null ? format(p.values[i]) : ""}</td>`).join("");
+    const cell = (p) => {
+      const value = p.values[i];
+      if (value == null) return "";
+      const u = p.u_expanded?.[i];
+      if (Array.isArray(p.u_expanded) && u == null && Number.isFinite(value)) return `${measureText(value, null)} ± ?`;
+      return measureText(value, u);
+    };
+    const cells = pointResults.map((p) => `<td>${cell(p)}</td>`).join("");
     return `<tr><td>${i + 1}</td>${cells}</tr>`;
   }).join("");
   return `
@@ -255,11 +268,17 @@ function pointResultsMarkup(pointResults) {
 
 function aggregatesMarkup(aggregates) {
   if (!aggregates.length) return "";
+  const valueText = (a) => {
+    if (!Number.isFinite(a.value)) return '<span class="error-inline">—</span>';
+    if (!hasUncertainty(a)) return measureText(a.value, null);
+    if ("u_expanded" in a && a.u_expanded == null) return `${measureText(a.value, null)} ± ?`;
+    return measureText(a.value, a.u_expanded);
+  };
   const rows = aggregates
     .map(
       (a) =>
         `<tr><td>${symbolHtml(a.symbol)}</td><td>${inlineMathHtml(a.name)}</td>` +
-        `<td>${Number.isFinite(a.value) ? format(a.value) : '<span class="error-inline">—</span>'} <span class="submission-meta">${unitHtml(a.unit)}</span></td></tr>`,
+        `<td>${valueText(a)} <span class="submission-meta">${unitHtml(a.unit)}</span></td></tr>`,
     )
     .join("");
   return `
@@ -278,9 +297,7 @@ export function formAnalysisMarkup(analysis, pairs) {
   const [shared, ...parts] = sections;
   const sharedQuantities = shared.analysis.quantities ?? [];
   const sharedHasData =
-    (shared.analysis.quantities?.length ?? 0) +
-      (shared.analysis.derived?.length ?? 0) +
-      (shared.analysis.operators?.length ?? 0) > 0;
+    (shared.analysis.quantities?.length ?? 0) + (shared.analysis.derived?.length ?? 0) > 0;
   return [...(sharedHasData ? [shared] : []), ...parts]
     .map(
       (s) => `
@@ -303,7 +320,7 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
       <h3>Ajuste lineal</h3>
       ${regressionMarkup(analysis.regression)}
       ${derivedBlock}
-      ${pointResultsMarkup(analysis.point_results ?? [])}
+      ${pointResultsMarkup([...(analysis.intermediates ?? []), ...(analysis.point_results ?? [])])}
       ${aggregatesMarkup(analysis.aggregates ?? [])}
       ${renderWarnings(analysis.warnings ?? [])}
     `;
@@ -326,6 +343,7 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
     return `
       <h3>${title}</h3>
       ${blocks}
+      ${pointResultsMarkup(analysis.intermediates ?? [])}
       ${quantitiesSection}
       ${derivedBlock}
       ${measuredVsTheoreticalMarkup(measured, derived, pairs)}
@@ -333,32 +351,22 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
     `;
   }
 
-  const operators = analysis.operators ?? [];
-  if (operators.length) {
-    const sharedTable = quantities.length
-      ? `<h4>Magnitudes comunes a los operadores</h4>${quantitiesTable}`
-      : "";
-    const opBlocks = operators
-      .map(
-        (op) => `
+  const determinationBlocks = (analysis.determinations ?? [])
+    .map(
+      (det) => `
         <section class="operator-result panel">
-          <h4>${escapeHtml(op.label)}</h4>
-          ${quantitiesTableMarkup(op.quantities ?? [])}
-          ${derivedBlockMarkup(op.derived ?? [], "")}
+          <h4>${escapeHtml(det.label)}</h4>
+          ${quantitiesTableMarkup(det.quantities ?? [])}
+          ${derivedBlockMarkup(det.derived ?? [], "")}
+          ${measuredVsTheoreticalMarkup([...measured, ...(det.quantities ?? [])], det.derived ?? [], pairs)}
         </section>`,
-      )
-      .join("");
-    return `
-      <h3>Incertidumbres por operador</h3>
-      ${sharedTable}
-      ${opBlocks}
-      ${renderWarnings(analysis.warnings ?? [])}
-    `;
-  }
+    )
+    .join("");
 
   return `
     <h3>Incertidumbres por magnitud</h3>
-    ${quantitiesTable}
+    ${quantities.length || !determinationBlocks ? quantitiesTable : ""}
+    ${determinationBlocks}
     ${derivedBlock}
     ${measuredVsTheoreticalMarkup(measured, derived, pairs)}
     ${renderWarnings(analysis.warnings ?? [])}
@@ -366,11 +374,9 @@ function singleAnalysisMarkup(analysis, pairs, measured = analysis.quantities ??
 }
 
 function studentResultsFormMarkup(submission, definition, isTeacher = false) {
-  const finalAggregates = (definition?.aggregates ?? [])
-    .filter((a) => a.is_final)
-    .map((a) => ({ ...a, has_uncertainty: false }));
+  const finalAggregates = (definition?.aggregates ?? []).filter((a) => a.is_final);
   const measurands = [
-    ...(definition?.results ?? []).filter((r) => r.is_final),
+    ...expandDeterminationResults(definition, (definition?.results ?? []).filter((r) => r.is_final)),
     ...finalAggregates,
   ];
   if (!measurands.length) return "";
@@ -387,7 +393,7 @@ function studentResultsFormMarkup(submission, definition, isTeacher = false) {
         : `<td class="submission-meta">sin U</td>`;
       return `
         <tr>
-          <td class="directory-primary"><strong>${symbolHtml(m.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(m.name)}${m.unit ? ` (${unitHtml(m.unit)})` : ""}</span></td>
+          <td class="directory-primary"><strong>${symbolHtml(m.determination ? m.base : m.symbol)}</strong> <span class="submission-meta">${inlineMathHtml(m.name)}${m.unit ? ` (${unitHtml(m.unit)})` : ""}</span></td>
           <td><input class="student-value" data-symbol="${escapeHtml(m.symbol)}" type="number" step="any" value="${v}" ${dis} placeholder="valor" /></td>
           ${uCell}
         </tr>`;

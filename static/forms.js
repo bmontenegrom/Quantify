@@ -8,12 +8,13 @@ import { fetchJson, postJson, deleteJson } from "./api.js";
 import { showToast } from "./toast.js";
 import {
   escapeHtml, symbolHtml, setDisplaySymbols, inlineMathHtml, unitHtml, canReview,
-  prefixFactor, validateMeasurements,
+  validateMeasurements,
   draftMeasurementsByQuantity, draftedQuantityIds, hasUncertainty, comparisonPairs, exampleMeasurements, POINT_KINDS,
+  determinationsFor, expandDeterminationResults, cssEscape, symbolPart, groupError,
 } from "./lib.js";
 import { loadSubmissions, openSubmissionWorkspace } from "./submissions.js";
 import {
-  givenValueInputHtml, groupBySections, prefixSelectHtml, renderReplicaInput, populateScaleOptions,
+  givenValueInputHtml, fixedGivenHtml, isFixedGiven, groupBySections, renderReplicaInput, quantityUnits, inputUnits, unitSelectHtml, toDeclaredUnit, restoreUnitChoices, populateScaleOptions,
   replicaInputHtml, cellReplicaValues, definitionSections, definitionParts, formPracticeVersion,
   formHelpHtml, partHelpHtml, columnSections, instrumentSelectorsHtml, wireInstrumentSelectors,
   retiredInstrumentNote,
@@ -184,6 +185,7 @@ export async function loadSubmissionForm() {
     renderMeasurementFields(draft);
     applyPrefill();
     applyDraftPrefill(draft);
+    restoreUnitChoices(measurementFields, draft?.units);
     if (carried) applyMeasurementPrefill(draftMeasurementsByQuantity(carried.measurements), carried.finalResults, "");
     applyPartVisibility();
     if (fillButton && previewing) fillButton.disabled = false;
@@ -262,13 +264,7 @@ export function renderPartTabs(practiceId) {
       )
       .join("");
     practicePartTabs.querySelectorAll(".part-tab").forEach((tab) => {
-      tab.addEventListener("click", () => {
-        activePart = tab.dataset.partId;
-        practicePartTabs
-          .querySelectorAll(".part-tab")
-          .forEach((t) => t.classList.toggle("active", t === tab));
-        applyPartVisibility();
-      });
+      tab.addEventListener("click", () => activatePart(tab.dataset.partId));
     });
     return;
   }
@@ -277,11 +273,207 @@ export function renderPartTabs(practiceId) {
   practicePartTabs.innerHTML = "";
 }
 
+const activeDetermination = new Map();
+let determinationPractice = null;
+
+function determinationTabsHtml(definition) {
+  const scopes = new Map(
+    definition.quantities
+      .filter((q) => q.per_determination)
+      .map((q) => determinationsFor(definition, q.symbol))
+      .filter((d) => d?.display === "pestanas")
+      .map((d) => [d.scope, d]),
+  );
+  return [...scopes]
+    .map(([scope, d]) => {
+      const buttons = Array.from(
+        { length: d.count },
+        (_, i) => `<button type="button" class="part-tab" data-determination="${i}">${escapeHtml(d.label.trim())} ${i + 1}</button>`,
+      ).join("");
+      const section = scope ? ` data-section="${escapeHtml(scope)}"` : "";
+      return `<div class="practice-part-tabs determination-tabs" data-det-tabs="${escapeHtml(scope)}"${section}>${buttons}</div>`;
+    })
+    .join("");
+}
+
+function applyDeterminationVisibility() {
+  measurementFields.querySelectorAll("[data-det-tabs]").forEach((strip) => {
+    const scope = strip.dataset.detTabs;
+    const count = strip.querySelectorAll(".part-tab").length;
+    const active = Math.min(activeDetermination.get(scope) ?? 0, count - 1);
+    strip.querySelectorAll(".part-tab").forEach((tab) => {
+      tab.classList.toggle("active", Number(tab.dataset.determination) === active);
+    });
+    measurementFields.querySelectorAll(`[data-det-scope="${cssEscape(scope)}"]`).forEach((el) => {
+      el.classList.toggle("det-hidden", Number(el.dataset.determination) !== active);
+    });
+  });
+}
+
+function wireDeterminationTabs() {
+  const practice = state.practiceForm?.definition?.practice_id ?? null;
+  if (practice !== determinationPractice) {
+    activeDetermination.clear();
+    determinationPractice = practice;
+  }
+  measurementFields.querySelectorAll("[data-det-tabs] .part-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      activeDetermination.set(tab.closest("[data-det-tabs]").dataset.detTabs, Number(tab.dataset.determination));
+      applyDeterminationVisibility();
+    });
+  });
+  applyDeterminationVisibility();
+}
+
+function revealField(field) {
+  const block = field.closest("[data-det-scope]");
+  if (block) {
+    activeDetermination.set(block.dataset.detScope, Number(block.dataset.determination));
+    applyDeterminationVisibility();
+  }
+  const section = field.closest("[data-section][hidden]")?.dataset.section;
+  if (section && practicePartTabs) activatePart(section);
+}
+
+function activatePart(id) {
+  activePart = id;
+  practicePartTabs.querySelectorAll(".part-tab").forEach((t) => t.classList.toggle("active", t.dataset.partId === id));
+  applyPartVisibility();
+}
+
+function revealEmptyGroup(measurements, metaMap, error) {
+  const m = measurements.find((m) => m.operator_replicas && groupError(m, metaMap[m.quantity_id] ?? {}) === error);
+  const empty = m?.operator_replicas.findIndex((reps) => reps.length === 0);
+  if (empty == null || empty === -1) return;
+  const row = measurementFields.querySelector(
+    `.operator-quantity[data-quantity-id="${cssEscape(m.quantity_id)}"] [data-operator-index="${empty}"]`,
+  );
+  if (row) revealField(row);
+}
+
+measurementFields.addEventListener(
+  "invalid",
+  (event) => {
+    if (measurementFields.querySelector("input:invalid, select:invalid, textarea:invalid") === event.target) {
+      revealField(event.target);
+    }
+  },
+  true,
+);
+
 function applyPartVisibility() {
   if (!definitionParts(state.practiceForm?.definition).length) return;
   measurementFields.querySelectorAll("[data-section]").forEach((el) => {
     el.hidden = el.dataset.section !== activePart;
   });
+}
+
+function quantityRowRenderer(definition, instruments, draft) {
+  const groupOf = (q) => {
+    const d = q.per_determination ? determinationsFor(definition, q.symbol) : null;
+    return d ? { count: d.count, label: d.label.trim(), scope: d.display === "pestanas" ? d.scope : null } : null;
+  };
+  const legendHtml = (q) => quantityNameHtml(q);
+  const drafted = state.editPrefill
+    ? new Set(state.editPrefill.map((m) => m.quantity_id))
+    : draftedQuantityIds(draft?.measurements);
+
+  const rendersChrono = (q, opIndex) =>
+    q.repeated &&
+    q.input_widget === "cronometro" &&
+    !state.editingSubmissionId &&
+    (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id));
+
+  const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
+    const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
+    if (isFixedGiven(q)) return fixedGivenHtml(q, legendHtml(q));
+    if (q.is_given) {
+      const uField = !hasUncertainty(q)
+        ? ""
+        : `<label>Incertidumbre U (expandida)
+              <div class="replica-input-wrap">
+                <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
+                ${unitSelectHtml(quantityUnits(q))}
+              </div>
+            </label>`;
+      return `
+        <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
+          <legend>${legendHtml(q)}</legend>
+          <div class="form-grid">
+            <label>Valor
+              <div class="replica-input-wrap">
+                ${givenValueInputHtml(q)}
+                ${unitSelectHtml(quantityUnits(q))}
+              </div>
+            </label>
+            ${uField}
+          </div>
+        </fieldset>
+      `;
+    }
+    if (chrono) {
+      return `
+        <fieldset class="measurement-row measurement-row--chrono"
+                  data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
+          <legend>${legendHtml(q)}</legend>
+          ${instrumentSelectorsHtml(instruments, q, true)}
+          ${chronoWidgetInnerHtml()}
+          <div class="series-debug"></div>
+        </fieldset>
+      `;
+    }
+    return `
+      <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
+        <legend>${legendHtml(q)}</legend>
+        <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
+          ${instrumentSelectorsHtml(instruments, q)}<div class="measure-sep"></div>
+          <div class="measure-right">
+            <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
+              ${renderReplicaInput(quantityUnits(q), q.default_value)}
+            </div>
+            ${q.repeated ? `<button type="button" class="add-replica">＋ agregar réplica</button>` : ""}
+          </div>
+        </div>
+      </fieldset>
+    `;
+  };
+
+  const quantityRowHtml = (q) => {
+    const group = groupOf(q);
+    if (!group) return measurementRowHtml(q, null);
+    const chrono = Array.from({ length: group.count }, (_, i) => !q.is_given && rendersChrono(q, i));
+    const givenRow = (i) => `
+      <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}" data-operator-index="${i}">
+        <legend>${quantityNameHtml(q)}</legend>
+        <div class="measure-values" data-repeated="0">
+          <div class="replica">${givenValueInputHtml(q, "measure-value")}${unitSelectHtml(quantityUnits(q))}</div>
+        </div>
+      </fieldset>`;
+    const row = (i) => (q.is_given ? givenRow(i) : measurementRowHtml(q, i, chrono[i]));
+    const tab = (i) =>
+      group.scope != null ? ` data-det-scope="${escapeHtml(group.scope)}" data-determination="${i}"` : "";
+    const blocks = chrono
+      .map((_, i) => `<div class="operator-block"${tab(i)}><h5 class="operator-label">${escapeHtml(group.label)} ${i + 1}</h5>${row(i)}</div>`)
+      .join("");
+    const sharedU = !hasUncertainty(q)
+      ? ""
+      : `<label>Incertidumbre U (expandida, la misma en todas)
+          <div class="replica-input-wrap">
+            <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
+            ${unitSelectHtml(quantityUnits(q))}
+          </div>
+        </label>`;
+    const per = group.label.toLowerCase();
+    const labelAttr = ` data-group-label="${escapeHtml(group.label)}"`;
+    return `
+      <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}"${labelAttr}>
+        <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por ${escapeHtml(per)}</span></h4>
+        ${q.is_given ? sharedU : ""}
+        ${blocks}
+      </div>
+    `;
+  };
+  return quantityRowHtml;
 }
 
 export function renderMeasurementFields(draft) {
@@ -303,97 +495,14 @@ export function renderMeasurementFields(draft) {
     return;
   }
 
+  const quantityRowHtml = quantityRowRenderer(definition, instruments, draft);
   if (POINT_KINDS.includes(definition.analysis_kind)) {
-    renderSeriesTable(definition);
+    renderSeriesTable(definition, quantityRowHtml);
+    measurementFields.insertAdjacentHTML("afterbegin", determinationTabsHtml(definition));
     measurementFields.insertAdjacentHTML("beforeend", seriesFinalResultsHtml(definition));
+    wireDeterminationTabs();
     return;
   }
-
-  const operatorCount =
-    definition.analysis_kind == null || definition.analysis_kind === "estadistico"
-      ? definition.operator_count ?? 0
-      : 0;
-  const useOperators = operatorCount >= 2;
-  const isPerOperator = (q) => useOperators && q.repeated && !q.is_given;
-  const legendHtml = (q) => quantityNameHtml(q);
-  const drafted = state.editPrefill
-    ? new Set(state.editPrefill.map((m) => m.quantity_id))
-    : draftedQuantityIds(draft?.measurements);
-
-  const rendersChrono = (q, opIndex) =>
-    q.repeated &&
-    q.input_widget === "cronometro" &&
-    !state.editingSubmissionId &&
-    (!drafted.has(q.id) || state.chronometers.has(opIndex != null ? `${q.id}#${opIndex}` : q.id));
-
-  const measurementRowHtml = (q, opIndex, chrono = rendersChrono(q, opIndex)) => {
-    const opAttr = opIndex != null ? ` data-operator-index="${opIndex}"` : "";
-    if (q.is_given) {
-      const uField = !hasUncertainty(q)
-        ? ""
-        : `<label>Incertidumbre U (expandida)
-              <div class="replica-input-wrap">
-                ${prefixSelectHtml()}
-                <input class="measure-given-u" type="number" step="any" min="0" placeholder="U" />
-                <span class="replica-unit">${unitHtml(q.unit)}</span>
-              </div>
-            </label>`;
-      return `
-        <fieldset class="measurement-row measurement-row--given" data-quantity-id="${escapeHtml(q.id)}" data-is-given="1">
-          <legend>${legendHtml(q)}</legend>
-          <div class="form-grid">
-            <label>Valor
-              <div class="replica-input-wrap">
-                ${givenValueInputHtml(q)}
-                <span class="replica-unit">${unitHtml(q.unit)}</span>
-              </div>
-            </label>
-            ${uField}
-          </div>
-        </fieldset>
-      `;
-    }
-    if (chrono) {
-      return `
-        <fieldset class="measurement-row measurement-row--chrono"
-                  data-quantity-id="${escapeHtml(q.id)}" data-is-chrono="1"${opAttr}>
-          <legend>${legendHtml(q)}</legend>
-          ${opIndex == null ? instrumentSelectorsHtml(instruments, q, true) : ""}
-          ${chronoWidgetInnerHtml()}
-          <div class="series-debug"></div>
-        </fieldset>
-      `;
-    }
-    return `
-      <fieldset class="measurement-row" data-quantity-id="${escapeHtml(q.id)}"${opAttr}>
-        <legend>${legendHtml(q)}</legend>
-        <div class="measure-body${q.repeated ? " measure-body--stacked" : ""}">
-          ${opIndex == null ? `${instrumentSelectorsHtml(instruments, q)}<div class="measure-sep"></div>` : ""}
-          <div class="measure-right">
-            <div class="measure-values" data-repeated="${q.repeated ? "1" : "0"}">
-              ${renderReplicaInput(q.unit, q.default_value)}
-            </div>
-            ${q.repeated ? `<button type="button" class="add-replica">＋ agregar réplica</button>` : ""}
-          </div>
-        </div>
-      </fieldset>
-    `;
-  };
-
-  const quantityRowHtml = (q) => {
-    if (!isPerOperator(q)) return measurementRowHtml(q, null);
-    const chrono = Array.from({ length: operatorCount }, (_, i) => rendersChrono(q, i));
-    const blocks = chrono
-      .map((isChrono, i) => `<div class="operator-block"><h5 class="operator-label">Operador ${i + 1}</h5>${measurementRowHtml(q, i, isChrono)}</div>`)
-      .join("");
-    return `
-      <div class="operator-quantity" data-quantity-id="${escapeHtml(q.id)}">
-        <h4 class="measurement-section-title">${quantityNameHtml(q)} <span class="submission-meta">— por operador</span></h4>
-        ${instrumentSelectorsHtml(instruments, q, chrono.some(Boolean))}
-        ${blocks}
-      </div>
-    `;
-  };
 
   const sections = definitionSections(definition);
   if (sections) {
@@ -408,7 +517,7 @@ export function renderMeasurementFields(draft) {
       const secAttr = sec.id ? ` data-section="${escapeHtml(sec.id)}"` : "";
       const finalsHtml = secFinals.length
         ? `<h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>
-           ${secFinals.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
+           ${expandDeterminationResults(definition, secFinals).map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}`
         : "";
       return `<div class="measurement-section"${secAttr}>
           <h4 class="measurement-section-title">${escapeHtml(sec.title)}</h4>
@@ -420,24 +529,45 @@ export function renderMeasurementFields(draft) {
     });
     const leftoverFinals = allFinals.filter((r) => !embedded.has(r.symbol));
     measurementFields.innerHTML =
-      partHelpHtml(definition) + blocks.join("") + rest.map(quantityRowHtml).join("") + finalResultSectionHtml(definition, leftoverFinals);
+      determinationTabsHtml(definition) +
+      partHelpHtml(definition) +
+      blocks.join("") +
+      rest.map(quantityRowHtml).join("") +
+      finalsByPartHtml(definition, leftoverFinals);
   } else {
     const helper = definition.quantities.some(needsChronoHelper) ? chronoHelperSectionHtml() : "";
     measurementFields.innerHTML =
-      definition.quantities.map(quantityRowHtml).join("") + helper + finalResultSectionHtml(definition);
+      determinationTabsHtml(definition) +
+      definition.quantities.map(quantityRowHtml).join("") +
+      helper +
+      finalResultSectionHtml(definition);
   }
+  wireDeterminationTabs();
   wireChronoHelpers();
 
   wireInstrumentSelectors(measurementFields);
 
-  measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach((row) => {
-    if (row.dataset.isChrono === "1") {
-      wireChronometerWidget(row, chronoKeyFor(row));
-      return;
-    }
-    if (row.dataset.isGiven === "1") return;
-    wireReplicaRow(row);
-  });
+  measurementFields.querySelectorAll(".measurement-row:not([data-final-result])").forEach(wireMeasurementRow);
+}
+
+export function wireMeasurementRow(row) {
+  if (row.dataset.isChrono === "1") {
+    wireChronometerWidget(row, chronoKeyFor(row));
+    return;
+  }
+  if (row.dataset.isGiven === "1") return;
+  wireReplicaRow(row);
+}
+
+function finalsByPartHtml(definition, finals) {
+  const parts = finals.map((r) => finalPart(definition, r));
+  const byPart = new Map();
+  finals.forEach((r, i) => byPart.set(parts[i], [...(byPart.get(parts[i]) ?? []), r]));
+  return [...byPart].map(([part, rows]) => finalResultSectionHtml(definition, rows, part)).join("");
+}
+
+function finalPart(definition, r) {
+  return partForResult(r.symbol) ?? symbolPart(definition, r.symbol);
 }
 
 function partForResult(symbol) {
@@ -446,26 +576,32 @@ function partForResult(symbol) {
 }
 
 export function finalResultRowHtml(r, sectionId) {
-  const part = sectionId !== undefined ? sectionId : partForResult(r.symbol);
+  const part =
+    sectionId !== undefined
+      ? sectionId
+      : r.part !== undefined
+        ? r.part
+        : partForResult(r.symbol) ?? symbolPart(state.practiceForm?.definition, r.symbol);
+  const tab = r.determination?.tabs
+    ? ` data-det-scope="${escapeHtml(r.determination.scope)}" data-determination="${r.determination.index}"`
+    : "";
   const uField = !hasUncertainty(r)
     ? ""
     : `
         <label>Incertidumbre U (expandida)
           <div class="replica-input-wrap">
-            ${prefixSelectHtml()}
             <input class="final-result-u" type="number" step="any" min="0" placeholder="U" />
-            <span class="replica-unit">${unitHtml(r.unit)}</span>
+            ${unitSelectHtml(inputUnits(r.base ?? r.symbol, r.unit))}
           </div>
         </label>`;
   return `
-    <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}>
-      <legend>${symbolHtml(r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
+    <fieldset class="measurement-row" data-final-result="1" data-symbol="${escapeHtml(r.symbol)}"${part ? ` data-section="${escapeHtml(part)}"` : ""}${tab}>
+      <legend>${symbolHtml(r.determination ? r.base : r.symbol)} <span class="submission-meta">${inlineMathHtml(r.name)}${r.unit ? ` (${unitHtml(r.unit)})` : ""}</span></legend>
       <div class="form-grid">
         <label>Valor
           <div class="replica-input-wrap">
-            ${prefixSelectHtml()}
             <input class="final-result-value" type="number" step="any" placeholder="valor" />
-            <span class="replica-unit">${unitHtml(r.unit)}</span>
+            ${unitSelectHtml(inputUnits(r.base ?? r.symbol, r.unit))}
           </div>
         </label>${uField}
       </div>
@@ -494,16 +630,10 @@ function seriesFinalResultsHtml(definition) {
         <h5 class="measurement-section-subtitle">Resultado final <span class="submission-meta">— opcional</span></h5>`;
     return `<div class="measurement-section"${secAttr}>
         ${heading}
-        ${rows.map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
+        ${expandDeterminationResults(definition, rows).map((r) => finalResultRowHtml(r, sec.id ?? null)).join("")}
       </div>`;
   });
-  const byPart = new Map();
-  for (const r of finals.filter((r) => !embedded.has(r.symbol))) {
-    const part = partForResult(r.symbol);
-    byPart.set(part, [...(byPart.get(part) ?? []), r]);
-  }
-  const partHtml = [...byPart].map(([part, rows]) => finalResultSectionHtml(definition, rows, part));
-  return titledHtml.join("") + partHtml.join("");
+  return titledHtml.join("") + finalsByPartHtml(definition, finals.filter((r) => !embedded.has(r.symbol)));
 }
 
 function finalResultSectionHtml(definition, finals, part = null) {
@@ -514,20 +644,21 @@ function finalResultSectionHtml(definition, finals, part = null) {
     <div class="measurement-section final-results-section"${partAttr}>
       <h4 class="measurement-section-title">Resultado final <span class="submission-meta">— opcional</span></h4>
       <p class="submission-meta">Si ya calculaste tu resultado, cargalo acá. Podés dejarlo para más adelante; el docente puede cargarlo después.</p>
-      ${rows.map((r) => finalResultRowHtml(r)).join("")}
+      ${expandDeterminationResults(definition, rows).map((r) => finalResultRowHtml(r)).join("")}
     </div>
   `;
 }
 
 export function collectFinalResults() {
   const scalar = [...measurementFields.querySelectorAll('[data-final-result="1"]')].reduce((acc, row) => {
-    const [valPrefix, uPrefix] = [...row.querySelectorAll(".prefix-select")].map((s) => s.value);
-    const rawVal = row.querySelector(".final-result-value").value.trim();
+    const valInput = row.querySelector(".final-result-value");
+    const uInput = row.querySelector(".final-result-u");
+    const rawVal = valInput.value.trim();
     if (rawVal === "") return acc;
-    const value = Number(rawVal) * prefixFactor(valPrefix);
+    const value = toDeclaredUnit(rawVal, valInput.closest(".replica-input-wrap"));
     if (!Number.isFinite(value)) return acc;
-    const rawU = row.querySelector(".final-result-u")?.value.trim() ?? "";
-    const u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
+    const rawU = uInput?.value.trim() ?? "";
+    const u = rawU === "" ? null : toDeclaredUnit(rawU, uInput.closest(".replica-input-wrap"), { uncertainty: true });
     acc.push({ symbol: row.dataset.symbol, value, u_expanded: u != null && Number.isFinite(u) ? u : null });
     return acc;
   }, []);
@@ -536,8 +667,10 @@ export function collectFinalResults() {
 
 export function wireReplicaRow(row) {
   row.querySelector(".add-replica")?.addEventListener("click", () => {
-    const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
-    row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+    const previous = [...row.querySelectorAll(".replica .unit-select")].at(-1);
+    row.querySelector(".measure-values").insertAdjacentHTML("beforeend", renderReplicaInput(rowUnits(row)));
+    const added = [...row.querySelectorAll(".replica .unit-select")].at(-1);
+    if (previous && added) added.selectedIndex = previous.selectedIndex;
     wireRemoveReplica(row);
   });
   wireRemoveReplica(row);
@@ -584,8 +717,7 @@ export function collectMeasurements() {
         }
         const input = cell.querySelector(".series-value");
         const raw = input.value.trim();
-        const factor = prefixFactor(cell.querySelector(".prefix-select").value);
-        const v = raw === "" ? NaN : Number(raw) * factor;
+        const v = raw === "" ? NaN : toDeclaredUnit(raw, cell);
         return { id: input.dataset.quantityId, value: v, ok: Number.isFinite(v) };
       });
       if (parsed.some((p) => !p.ok)) return;
@@ -599,21 +731,25 @@ export function collectMeasurements() {
         ? { quantity_id: id, instrument_id: null, scale_id: null, values: [], given_u: null, point_replicas: replicaPoints.get(id) }
         : { quantity_id: id, instrument_id: null, scale_id: null, values: singleValues.get(id), given_u: null },
     );
-    const shared = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].map(collectStandaloneRow);
-    return [...series, ...shared];
+    return [...series, ...collectGroupsAndStandalone()];
   }
+  return collectGroupsAndStandalone();
+}
 
+function collectGroupsAndStandalone() {
   const out = [...measurementFields.querySelectorAll(".operator-quantity")].map((container) => {
     const rows = [...container.querySelectorAll(".measurement-row")].sort(
       (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
     );
+    const own = rows.map((row) => row.querySelector(".measure-selectors"));
     return {
       quantity_id: container.dataset.quantityId,
-      instrument_id: container.querySelector(".measure-instrument")?.value || null,
-      scale_id: container.querySelector(".measure-scale")?.value || null,
+      instrument_id: null,
+      scale_id: null,
       values: [],
-      given_u: null,
+      given_u: sharedGivenU(container),
       operator_replicas: rows.map(rowSeriesValues),
+      operator_instruments: own.every(Boolean) ? own.map(selectedInstrument) : null,
     };
   });
 
@@ -626,16 +762,33 @@ export function collectMeasurements() {
   return out;
 }
 
+function selectedInstrument(selectors) {
+  return {
+    instrument_id: selectors.querySelector(".measure-instrument").value || null,
+    scale_id: selectors.querySelector(".measure-scale").value || null,
+  };
+}
+
+function sharedGivenU(container) {
+  const input = container.querySelector(".measure-given-u");
+  const raw = input?.value.trim() ?? "";
+  if (raw === "") return null;
+  const u = toDeclaredUnit(raw, input.closest(".replica-input-wrap"), { uncertainty: true });
+  return Number.isFinite(u) ? u : null;
+}
+
 function collectStandaloneRow(row) {
+  if (row.dataset.fixedValue != null) {
+    const { quantityId, fixedValue, fixedU } = row.dataset;
+    return { quantity_id: quantityId, instrument_id: null, scale_id: null, values: [Number(fixedValue)], given_u: fixedU === "" ? null : Number(fixedU) };
+  }
   if (row.dataset.isGiven === "1") {
     const valInput = row.querySelector(".measure-given-value");
     const uInput = row.querySelector(".measure-given-u");
-    const prefixOf = (input) => input?.closest(".replica-input-wrap")?.querySelector(".prefix-select")?.value;
-    const [valPrefix, uPrefix] = [prefixOf(valInput), prefixOf(uInput)];
     const rawVal = valInput.value.trim();
     const rawU = uInput?.value.trim() ?? "";
-    const value = rawVal === "" ? null : Number(rawVal) * prefixFactor(valPrefix);
-    const given_u = rawU === "" ? null : Number(rawU) * prefixFactor(uPrefix);
+    const value = rawVal === "" ? null : toDeclaredUnit(rawVal, valInput.closest(".replica-input-wrap"));
+    const given_u = rawU === "" ? null : toDeclaredUnit(rawU, uInput.closest(".replica-input-wrap"), { uncertainty: true });
     return {
       quantity_id: row.dataset.quantityId,
       instrument_id: null,
@@ -665,8 +818,7 @@ function rowSeriesValues(row) {
   return [...row.querySelectorAll(".replica")].reduce((acc, replica) => {
     const raw = replica.querySelector(".measure-value").value.trim();
     if (raw === "") return acc;
-    const factor = prefixFactor(replica.querySelector(".prefix-select").value);
-    const n = Number(raw) * factor;
+    const n = toDeclaredUnit(raw, replica);
     if (Number.isFinite(n)) acc.push(n);
     return acc;
   }, []);
@@ -697,7 +849,11 @@ function buildMetaMap(measurements) {
     const row = measurementFields.querySelector(
       `.measurement-row[data-quantity-id="${CSS.escape(m.quantity_id)}"]`
     );
+    const group = measurementFields.querySelector(
+      `.operator-quantity[data-quantity-id="${CSS.escape(m.quantity_id)}"]`
+    );
     map[m.quantity_id] = {
+      groupLabel: group?.dataset.groupLabel ?? null,
       name: def?.name ?? row?.querySelector("legend")?.textContent?.trim() ?? m.quantity_id,
       isGiven: def?.is_given ?? row?.dataset.isGiven === "1",
       isChrono: row?.dataset.isChrono === "1",
@@ -715,9 +871,11 @@ export async function submitFormSubmission() {
 
   const measurements = collectMeasurements();
   const analysisKind = state.practiceForm?.definition?.analysis_kind ?? "";
-  const validationError = validateMeasurements(measurements, analysisKind, buildMetaMap(measurements));
+  const metaMap = buildMetaMap(measurements);
+  const validationError = validateMeasurements(measurements, analysisKind, metaMap);
   if (validationError) {
     submitStatus.textContent = validationError;
+    revealEmptyGroup(measurements, metaMap, validationError);
     return;
   }
 
@@ -823,12 +981,28 @@ function fillExampleData() {
     if (!select.value && !changedFromRender(select)) continue;
     const instrument = instruments.find((i) => i.id === select.value);
     const scale = select.closest(".measure-selectors").querySelector(".measure-scale").value;
-    chosen.set(select.closest("[data-quantity-id]").dataset.quantityId, {
+    const choice = {
       instrument_id: instrument?.id ?? null,
       scale_id: instrument ? scale || instrument.scales?.[0]?.id || null : null,
-    });
+    };
+    const id = select.closest("[data-quantity-id]").dataset.quantityId;
+    const op = select.closest(".operator-quantity [data-operator-index]")?.dataset.operatorIndex;
+    if (op == null) {
+      chosen.set(id, { ...chosen.get(id), ...choice });
+    } else {
+      const c = chosen.get(id) ?? {};
+      (c.operator_instruments ??= [])[Number(op)] = choice;
+      chosen.set(id, c);
+    }
   }
-  const measurements = exampleMeasurements(definition, { instruments }).map((m) => ({ ...m, ...chosen.get(m.quantity_id) }));
+  const measurements = exampleMeasurements(definition, { instruments }).map((m) => {
+    const c = chosen.get(m.quantity_id);
+    const ops = c?.operator_instruments;
+    if (!ops) return { ...m, ...c };
+    const fallback = { instrument_id: m.instrument_id, scale_id: m.scale_id };
+    const length = m.operator_replicas?.length ?? 0;
+    return { ...m, ...c, operator_instruments: Array.from({ length }, (_, i) => ops[i] ?? fallback) };
+  });
   const draft = { measurements, finalResults: [] };
   draftPreviewRequest++;
   latestResult.classList.add("hidden");
@@ -953,6 +1127,7 @@ function editPrefillByQuantity() {
       e = {
         points: new Map(),
         operators: new Map(),
+        operatorInstruments: [],
         instrument_id: m.instrument_id,
         scale_id: m.scale_id,
         value_u: m.value_u,
@@ -963,6 +1138,7 @@ function editPrefillByQuantity() {
     if (!e.points.has(pidx)) e.points.set(pidx, []);
     e.points.get(pidx).push(m.value);
     const oidx = m.operator_index ?? 0;
+    e.operatorInstruments[oidx] = { instrument_id: m.instrument_id, scale_id: m.scale_id };
     if (!e.operators.has(oidx)) e.operators.set(oidx, []);
     e.operators.get(oidx).push(m.value);
     if (m.value_u != null) e.value_u = m.value_u;
@@ -970,8 +1146,7 @@ function editPrefillByQuantity() {
   for (const e of map.values()) {
     const pIdx = [...e.points.keys()].sort((a, b) => a - b);
     e.pointGroups = pIdx.map((i) => e.points.get(i));
-    const oIdx = [...e.operators.keys()].sort((a, b) => a - b);
-    e.operatorGroups = oIdx.map((i) => e.operators.get(i));
+    e.operatorGroups = Array.from({ length: Math.max(-1, ...e.operators.keys()) + 1 }, (_, i) => e.operators.get(i) ?? []);
     e.values = e.pointGroups.flat();
     delete e.points;
     delete e.operators;
@@ -1053,23 +1228,17 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
       });
     });
     measurementFields
-      .querySelectorAll(".shared-quantities .measurement-row")
-      .forEach((row) => prefillStandaloneRow(row, byQ));
+      .querySelectorAll(".shared-quantities .measurement-row:not([data-final-result])")
+      .forEach((row) => {
+        if (!row.closest(".operator-quantity")) prefillStandaloneRow(row, byQ);
+      });
+    prefillGroups(byQ);
     applyFinalResultsPrefillFrom(finalResults);
     refreshSeries();
     return;
   }
 
-  measurementFields.querySelectorAll(".operator-quantity").forEach((groupEl) => {
-    const e = byQ.get(groupEl.dataset.quantityId);
-    if (!e) return;
-    fillInstrument(groupEl, e);
-    const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(
-      (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
-    );
-    blocks.forEach((row, i) => fillReplicaRow(row, e.operatorGroups[i] ?? []));
-  });
-
+  prefillGroups(byQ);
   const standalone = [...measurementFields.querySelectorAll(".measurement-row:not([data-final-result])")].filter(
     (row) => !row.closest(".operator-quantity")
   );
@@ -1077,6 +1246,26 @@ function applyMeasurementPrefill(byQ, finalResults, comment) {
     prefillStandaloneRow(row, byQ);
   }
   applyFinalResultsPrefillFrom(finalResults);
+}
+
+function prefillGroups(byQ) {
+  measurementFields.querySelectorAll(".operator-quantity").forEach((groupEl) => {
+    const e = byQ.get(groupEl.dataset.quantityId);
+    if (!e) return;
+    const u = groupEl.querySelector(".measure-given-u");
+    if (u && e.value_u != null) u.value = e.value_u;
+    const blocks = [...groupEl.querySelectorAll(".measurement-row")].sort(
+      (a, b) => Number(a.dataset.operatorIndex) - Number(b.dataset.operatorIndex)
+    );
+    blocks.forEach((row, i) => {
+      const values = e.operatorGroups[i] ?? [];
+      if (!values.length && e.operatorGroups.length) row.querySelectorAll(".measure-value").forEach((input) => (input.value = ""));
+      fillReplicaRow(row, values);
+      const own = row.querySelector(".measure-selectors");
+      const choice = e.operatorInstruments?.length ? e.operatorInstruments[i] : e;
+      if (own && choice) fillInstrument(own, choice);
+    });
+  });
 }
 
 function prefillStandaloneRow(row, byQ) {
@@ -1117,12 +1306,17 @@ function fillInstrument(el, e) {
   selectors.addEventListener("change", () => p.remove(), { once: true });
 }
 
+function rowUnits(row) {
+  const id = row.closest("[data-quantity-id]")?.dataset.quantityId;
+  const q = state.practiceForm?.definition?.quantities?.find((quantity) => quantity.id === id);
+  return q ? quantityUnits(q) : [{ label: "", factor: 1, offset: 0 }];
+}
+
 function fillReplicaRow(row, values) {
   const container = row.querySelector(".measure-values");
   if (!container) return;
-  const unit = row.querySelector(".measure-value")?.dataset.unit ?? "";
   while (container.querySelectorAll(".replica").length < values.length) {
-    container.insertAdjacentHTML("beforeend", renderReplicaInput(unit));
+    container.insertAdjacentHTML("beforeend", renderReplicaInput(rowUnits(row)));
   }
   wireRemoveReplica(row);
   container.querySelectorAll(".measure-value").forEach((input, i) => {

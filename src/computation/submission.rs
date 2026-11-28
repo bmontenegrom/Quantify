@@ -46,13 +46,14 @@ async fn insert_measurements(
     for measurement in measurements {
         let rows: Vec<(i64, i64, i64, f64, Option<f64>)> =
             if let Some(operators) = &measurement.operator_replicas {
+                let u = measurement.given_u;
                 operators
                     .iter()
                     .enumerate()
                     .flat_map(|(o, reps)| {
                         reps.iter()
                             .enumerate()
-                            .map(move |(r, &v)| (o as i64, 0i64, r as i64, v, None))
+                            .map(move |(r, &v)| (o as i64, 0i64, r as i64, v, u))
                     })
                     .collect()
             } else if let Some(groups) = &measurement.point_replicas {
@@ -87,6 +88,12 @@ async fn insert_measurements(
                     .collect()
             };
         for (operator_index, point_index, replicate_index, value, value_u) in rows {
+            let (instrument_id, scale_id) = measurement.instrument_for(
+                measurement
+                    .operator_replicas
+                    .as_ref()
+                    .map(|_| operator_index as usize),
+            );
             sqlx::query(
                 "INSERT INTO submission_measurements \
                  (id, submission_id, quantity_id, instrument_id, scale_id, \
@@ -96,8 +103,8 @@ async fn insert_measurements(
             .bind(Uuid::new_v4().to_string())
             .bind(submission_id)
             .bind(&measurement.quantity_id)
-            .bind(measurement.instrument_id.as_deref())
-            .bind(measurement.scale_id.as_deref())
+            .bind(instrument_id)
+            .bind(scale_id)
             .bind(operator_index)
             .bind(point_index)
             .bind(replicate_index)
@@ -165,7 +172,9 @@ pub async fn create_form_submission(
     } = version;
     validate_student_results(&definition, &input.student_results)?;
 
-    let analysis = analyze_definition(pool, &definition, &input.measurements).await?;
+    let measurements = super::with_fixed_values(&definition.quantities, &input.measurements);
+    let analysis = analyze_definition(pool, &definition, &measurements).await?;
+    check_determination_groups(&definition, &measurements)?;
     let series = series_quantity_ids(&definition);
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match &input.meta {
@@ -265,7 +274,7 @@ pub async fn create_form_submission(
     .execute(&mut *tx)
     .await?;
 
-    insert_measurements(&mut tx, &id, &input.measurements, &series).await?;
+    insert_measurements(&mut tx, &id, &measurements, &series).await?;
     if !input.student_results.is_empty() {
         db::save_student_results_in(&mut tx, &id, &input.student_results).await?;
     }
@@ -296,7 +305,7 @@ pub fn validate_student_results(
     check_student_result_symbols(definition, results).map_err(|e| anyhow::anyhow!(e))
 }
 
-/// Acepta solo resultados del alumno que sean mensurandos o agregados finales, o `Re#k` por punto.
+/// Acepta mensurandos y agregados finales, `Re#k` por punto, y `g#k` o `g_medio` de un final que se repite.
 ///
 /// ```
 /// use quantify::computation::check_student_result_symbols;
@@ -317,10 +326,15 @@ pub fn check_student_result_symbols(
     definition: &crate::practices::PracticeDefinition,
     results: &[db::StudentResultInput],
 ) -> Result<(), String> {
-    let valid: std::collections::HashSet<&str> = definition
+    let finals: std::collections::HashSet<&str> = definition
         .results
         .iter()
+        .filter(|r| r.is_final)
         .map(|r| r.symbol.as_str())
+        .collect();
+    let valid: std::collections::HashSet<&str> = finals
+        .iter()
+        .copied()
         .chain(
             definition
                 .aggregates
@@ -334,18 +348,61 @@ pub fn check_student_result_symbols(
         .iter()
         .map(|p| p.symbol.as_str())
         .collect();
+    let repeated = definition.determination_results();
+    let averaged = definition.averaged_results();
     for result in results {
         let symbol = result.symbol.trim();
         if let Some((base, idx)) = symbol.split_once('#') {
-            if point_symbols.contains(base) && idx.parse::<usize>().is_ok() {
+            let Ok(k) = idx.parse::<i64>() else {
+                return Err(format!(
+                    "el simbolo \"{symbol}\" no es un mensurando de esta practica"
+                ));
+            };
+            if point_symbols.contains(base) && k >= 0 && k.to_string() == idx {
                 continue;
             }
-        } else if valid.contains(symbol) {
+            if k.to_string() == idx
+                && finals.contains(base)
+                && repeated
+                    .iter()
+                    .any(|(s, d)| s == base && (1..=d.count).contains(&k))
+            {
+                continue;
+            }
+        } else if valid.contains(symbol) && !repeated.iter().any(|(s, _)| s == symbol)
+            || symbol
+                .strip_suffix("_medio")
+                .is_some_and(|b| finals.contains(b) && averaged.iter().any(|a| a == b))
+        {
             continue;
         }
         return Err(format!(
             "el simbolo \"{symbol}\" no es un mensurando de esta practica"
         ));
+    }
+    Ok(())
+}
+
+pub(crate) fn check_determination_groups(
+    definition: &crate::practices::PracticeDefinition,
+    measurements: &[MeasurementInput],
+) -> anyhow::Result<()> {
+    for q in definition
+        .quantities
+        .iter()
+        .filter(|q| q.per_determination && !q.optional)
+    {
+        let Some(d) = definition.quantity_determinations(&q.symbol) else {
+            continue;
+        };
+        let groups = measurements
+            .iter()
+            .find(|m| m.quantity_id == q.id)
+            .and_then(|m| m.operator_replicas.as_deref())
+            .unwrap_or_default();
+        if let Some(k) = (0..d.count as usize).find(|&k| groups.get(k).is_none_or(Vec::is_empty)) {
+            anyhow::bail!("\"{}\": falta cargar {} {}.", q.name, d.label.trim(), k + 1);
+        }
     }
     Ok(())
 }
@@ -365,7 +422,9 @@ pub async fn update_form_submission(
         validate_student_results(&definition, results)?;
     }
 
+    let measurements = &super::with_fixed_values(&definition.quantities, measurements);
     let analysis = analyze_definition(pool, &definition, measurements).await?;
+    check_determination_groups(&definition, measurements)?;
     let series = series_quantity_ids(&definition);
     let analysis_json = serde_json::to_string(&analysis)?;
     let meta_json = match meta {
