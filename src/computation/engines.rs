@@ -202,8 +202,8 @@ impl RunU {
 
 impl<'a> RunCtx<'a> {
     fn new(
+        inputs: PointInputs<'a>,
         quantities: &'a [PracticeQuantity],
-        measurements: &'a [MeasurementInput],
         compiled: &'a CompiledIntermediates<'a>,
         formulas: &'a HashMap<&'a str, &'a Node>,
         point_us: &'a PointUs<'a>,
@@ -211,7 +211,7 @@ impl<'a> RunCtx<'a> {
     ) -> Self {
         Self {
             compiled,
-            inputs: PointInputs::new(quantities, measurements),
+            inputs,
             per_point: per_point_quantity_symbols(quantities).collect(),
             on_means: compiled
                 .iter()
@@ -395,6 +395,13 @@ fn per_replica_points(
         }
     }
     out
+}
+
+struct Load<'a> {
+    symbol: &'a str,
+    u: f64,
+    slope: f64,
+    intercept: f64,
 }
 
 fn u_warning(
@@ -1108,13 +1115,19 @@ fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
 }
 
-fn point_intermediate(
+enum Source<'a> {
+    Value(&'a str, f64),
+    Earlier(&'a str, Option<usize>),
+    Missing(&'a str),
+}
+
+fn replica_sources<'a>(
     on_means: bool,
-    tree: &Node,
+    tree: &'a Node,
     inputs: &PointInputs,
-    earlier: &HashMap<&str, Vec<f64>>,
+    earlier_len: &dyn Fn(&str) -> Option<usize>,
     i: usize,
-) -> Vec<f64> {
+) -> Vec<Vec<Source<'a>>> {
     let PointInputs {
         point_values,
         point_matrix,
@@ -1144,35 +1157,120 @@ fn point_intermediate(
             .filter(|v| symbol_to_id.contains_key(v) && !is_broadcastable(v))
             .map(|v| reps_at(v).len())
             .max()
-            .or_else(|| vars().filter_map(|v| earlier.get(v).map(Vec::len)).max())
+            .or_else(|| vars().filter_map(earlier_len).max())
             .unwrap_or(0)
             .max(1)
     };
     (0..n_reps)
         .map(|r| {
-            let bound: HashMap<&str, f64> = tree
-                .iter_variable_identifiers()
+            tree.iter_variable_identifiers()
                 .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
                 .map(|v| {
-                    let value = if !symbol_to_id.contains_key(v) {
-                        match earlier.get(v) {
-                            Some(reps) if !on_means && reps.len() == n_reps => reps[r],
-                            Some(reps) => mean(reps),
-                            None => f64::NAN,
+                    if !symbol_to_id.contains_key(v) {
+                        match earlier_len(v) {
+                            Some(len) if !on_means && len == n_reps => Source::Earlier(v, Some(r)),
+                            Some(_) => Source::Earlier(v, None),
+                            None => Source::Missing(v),
                         }
                     } else if on_means {
-                        mean_at(v)
+                        Source::Value(v, mean_at(v))
                     } else if is_broadcastable(v) {
-                        reps_at(v).first().copied().unwrap_or(f64::NAN)
+                        Source::Value(v, reps_at(v).first().copied().unwrap_or(f64::NAN))
                     } else {
-                        reps_at(v).get(r).copied().unwrap_or(f64::NAN)
-                    };
-                    (v, value)
+                        Source::Value(v, reps_at(v).get(r).copied().unwrap_or(f64::NAN))
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn point_intermediate(
+    on_means: bool,
+    tree: &Node,
+    inputs: &PointInputs,
+    earlier: &HashMap<&str, Vec<f64>>,
+    i: usize,
+) -> Vec<f64> {
+    replica_sources(on_means, tree, inputs, &|v| earlier.get(v).map(Vec::len), i)
+        .into_iter()
+        .map(|sources| {
+            let bound: HashMap<&str, f64> = sources
+                .into_iter()
+                .map(|source| match source {
+                    Source::Value(v, x) => (v, x),
+                    Source::Earlier(v, Some(r)) => (v, earlier[v][r]),
+                    Source::Earlier(v, None) => (v, mean(&earlier[v])),
+                    Source::Missing(v) => (v, f64::NAN),
                 })
                 .collect();
             eval_compiled(tree, &bound)
         })
         .collect()
+}
+
+fn mean_dual(duals: &[Dual]) -> Dual {
+    let n = duals.len() as f64;
+    Dual {
+        v: duals.iter().map(|d| d.v).sum::<f64>() / n,
+        d: vec![duals.iter().map(|d| d.d[0]).sum::<f64>() / n],
+        kink: duals.iter().any(|d| d.kink),
+    }
+}
+
+fn axis_derivatives(
+    axes: &[Node; 2],
+    compiled: &CompiledIntermediates,
+    inputs: &PointInputs,
+    ctx: &PointContext,
+    i: usize,
+    wrt: &str,
+) -> (f64, f64) {
+    let weigh = |d: &[f64]| d[0].abs();
+    let seed = |v: &str, x: f64| {
+        if v == wrt {
+            Dual::variable(x, 0, 1)
+        } else {
+            Dual::constant(x, 1)
+        }
+    };
+    let mut earlier: HashMap<&str, Vec<Dual>> = HashMap::new();
+    for (it, tree) in compiled {
+        let reps: Vec<Dual> = replica_sources(
+            it.on_means,
+            tree,
+            inputs,
+            &|v| earlier.get(v).map(Vec::len),
+            i,
+        )
+        .into_iter()
+        .map(|sources| {
+            let bound: HashMap<&str, Dual> = sources
+                .into_iter()
+                .map(|source| match source {
+                    Source::Value(v, x) => (v, seed(v, x)),
+                    Source::Earlier(v, Some(r)) => (v, earlier[v][r].clone()),
+                    Source::Earlier(v, None) => (v, mean_dual(&earlier[v])),
+                    Source::Missing(v) => (v, Dual::constant(f64::NAN, 1)),
+                })
+                .collect();
+            eval_dual(tree, &bound, 1, &weigh)
+        })
+        .collect();
+        earlier.insert(it.symbol.as_str(), reps);
+    }
+    let d = |axis: &Node| {
+        let bound: HashMap<&str, Dual> = axis
+            .iter_variable_identifiers()
+            .filter(|v| !CONSTANTS.iter().any(|(name, _)| name == v))
+            .map(|v| match earlier.get(v) {
+                Some(reps) => (v, mean_dual(reps)),
+                None => (v, seed(v, ctx.get(v).copied().unwrap_or(f64::NAN))),
+            })
+            .collect();
+        eval_dual(axis, &bound, 1, &weigh).d[0]
+    };
+    (d(&axes[0]), d(&axes[1]))
 }
 
 /// Valores por réplica y promedio de los intermedios con `show_live`, calculados como en el ajuste.
@@ -1310,26 +1408,47 @@ pub fn compute_regresion(
         .iter()
         .map(|(it, tree)| (it.symbol.as_str(), tree))
         .collect();
-    let loads: Vec<(&str, f64, f64, f64)> = shared
+    let point_inputs = PointInputs::new(quantities, measurements);
+    let on_axes: std::collections::HashSet<&str> = axis_trees
         .iter()
-        .map(|q| q.symbol.as_str())
-        .filter_map(|m| {
-            let u_m = us.get(m).copied().filter(|u| u.is_finite() && *u > 0.0)?;
-            axis_trees
-                .iter()
-                .any(|t| dependencies(t, &axis_formulas).1.contains(&m))
-                .then_some(())?;
-            let d_points: Vec<(f64, f64)> = contexts
-                .iter()
-                .map(|ctx| {
-                    let d = |t: &Node| derivative(t, &axis_formulas, ctx, m);
-                    (d(&axis_trees[0]), d(&axis_trees[1]))
-                })
-                .collect();
-            let (db, da) = analysis::line_sensitivity(&points, &d_points);
-            (db.is_finite() && da.is_finite()).then_some((m, u_m, db, da))
-        })
+        .flat_map(|t| dependencies(t, &axis_formulas).1)
         .collect();
+    let mut loads: Vec<Load> = Vec::new();
+    for m in shared.iter().map(|q| q.symbol.as_str()) {
+        let Some(u_m) = us.get(m).copied().filter(|u| u.is_finite() && *u > 0.0) else {
+            continue;
+        };
+        if !on_axes.contains(m) {
+            continue;
+        }
+        let d_points: Vec<(f64, f64)> = contexts
+            .iter()
+            .enumerate()
+            .map(|(i, ctx)| {
+                axis_derivatives(
+                    &axis_trees,
+                    &compiled_intermediates,
+                    &point_inputs,
+                    ctx,
+                    i,
+                    m,
+                )
+            })
+            .collect();
+        let (slope, intercept) = analysis::line_sensitivity(&points, &d_points);
+        if slope.is_finite() && intercept.is_finite() {
+            loads.push(Load {
+                symbol: m,
+                u: u_m,
+                slope,
+                intercept,
+            });
+        } else {
+            warnings.push(format!(
+                "No se puede calcular cuánto mueve \"{m}\" la recta (la fórmula de un eje no es derivable ahí); su incertidumbre se toma como independiente de la pendiente y la ordenada."
+            ));
+        }
+    }
     let mut line = vec![
         vec![
             ("slope", fit.u_slope),
@@ -1337,19 +1456,24 @@ pub fn compute_regresion(
         ],
         vec![("intercept", fit.u_mean_y)],
     ];
-    for &(m, u_m, db, da) in &loads {
-        line.push(vec![("slope", db * u_m), ("intercept", da * u_m), (m, u_m)]);
-        us.insert(m.to_string(), 0.0);
+    for l in &loads {
+        line.push(vec![
+            ("slope", l.slope * l.u),
+            ("intercept", l.intercept * l.u),
+            (l.symbol, l.u),
+        ]);
+        us.insert(l.symbol.to_string(), 0.0);
     }
-    let total = |u: f64, pick: fn(&(&str, f64, f64, f64)) -> f64| {
-        (!loads.is_empty()).then(|| {
-            loads
-                .iter()
-                .fold(u, |acc, l| uncertainty::combine(acc, pick(l) * l.1))
+    let u_slope_total = (!loads.is_empty()).then(|| {
+        loads.iter().fold(fit.u_slope, |acc, l| {
+            uncertainty::combine(acc, l.slope * l.u)
         })
-    };
-    let u_slope_total = total(fit.u_slope, |l| l.2);
-    let u_intercept_total = total(fit.u_intercept, |l| l.3);
+    });
+    let u_intercept_total = (!loads.is_empty()).then(|| {
+        loads.iter().fold(fit.u_intercept, |acc, l| {
+            uncertainty::combine(acc, l.intercept * l.u)
+        })
+    });
     let (derived, result_trees) =
         derive_results(results, &allowed, &means, &us, &line, &mut warnings)?;
 
@@ -1434,8 +1558,8 @@ pub fn compute_regresion(
         exact: Some(&exact),
         factors: &line,
         ..RunCtx::new(
+            point_inputs,
             quantities,
-            measurements,
             &compiled_intermediates,
             &formulas,
             &point_us,
@@ -1728,7 +1852,7 @@ pub fn compute_regresion(
             u_intercept: fit.u_intercept,
             u_slope_total,
             u_intercept_total,
-            shared: loads.iter().map(|l| l.0.to_string()).collect(),
+            shared: loads.iter().map(|l| l.symbol.to_string()).collect(),
             r_squared: fit.r_squared,
             u_points,
             x_label: x_formula.to_string(),
@@ -1871,29 +1995,6 @@ fn dependencies<'a>(
         .into_iter()
         .collect();
     (order, vars)
-}
-
-fn derivative(tree: &Node, formulas: &HashMap<&str, &Node>, ctx: &PointContext, wrt: &str) -> f64 {
-    let (order, vars) = dependencies(tree, formulas);
-    let mut duals: HashMap<&str, Dual> = vars
-        .iter()
-        .map(|&s| {
-            let v = ctx.get(s).copied().unwrap_or(f64::NAN);
-            (
-                s,
-                if s == wrt {
-                    Dual::variable(v, 0, 1)
-                } else {
-                    Dual::constant(v, 1)
-                },
-            )
-        })
-        .collect();
-    let weigh = |d: &[f64]| d[0].abs();
-    for &name in &order {
-        duals.insert(name, eval_dual(formulas[name], &duals, 1, &weigh));
-    }
-    eval_dual(tree, &duals, 1, &weigh).d[0]
 }
 
 fn propagate(
@@ -2356,8 +2457,8 @@ fn run_kind_raw(
             .map(|(it, tree)| (it.symbol.as_str(), tree))
             .collect();
         let run = RunCtx::new(
+            PointInputs::new(&definition.quantities, measurements),
             &definition.quantities,
-            measurements,
             &compiled_intermediates,
             &formulas,
             &point_us,

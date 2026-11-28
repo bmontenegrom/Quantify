@@ -32,8 +32,8 @@ export function regressionMarkup(regression) {
 
 function lineUncertainty(regression, value, uFit, uTotal) {
   const fit = `<div class="metric-value metric-text">${escapeHtml(measureText(value, uFit))}</div>`;
-  if (uTotal == null || !(regression.shared ?? []).length) return fit;
-  const names = regression.shared.map(escapeHtml).join(", ");
+  if (uTotal == null) return fit;
+  const names = (regression.shared ?? []).map(escapeHtml).join(", ");
   return `${fit}<div class="submission-meta">ajuste</div>
         <div class="metric-value metric-text">${escapeHtml(measureText(value, uTotal))}</div><div class="submission-meta">total (incluye ${names})</div>`;
 }
