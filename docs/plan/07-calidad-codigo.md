@@ -20,8 +20,8 @@ Escrito el 2026-11-28, con `development` en `142ef86` (después de #172).
 ## 1. Objetivo y decisiones
 
 - **Primera medición:** solo el estado actual de `development` (no se reconstruye la historia).
-- **Mediciones periódicas:** una por cada promoción `development` → `staging`, sobre el commit que
-  se promueve. Cada medición agrega una fila al historial y un informe.
+- **Mediciones periódicas:** cada tanto (por ejemplo, alrededor de una promoción a `staging`), sin
+  una regla fija. Cada medición agrega una fila al historial y un informe.
 - **Todo en el repo:** el método (`docs/calidad/metodo.md`), los scripts (`scripts/calidad/`) y los
   resultados (`docs/calidad/`), versionados y entrando por PR.
 - **Informes en Markdown:** un `.md` por medición, con tablas y gráficos PNG generados por script;
@@ -123,9 +123,9 @@ en `metodo.md`.
 
 ## 6. PRs
 
-1. **`docs(calidad): método de medición y scripts` (1/3).** `metodo.md` (v1), `scripts/calidad/`,
-   `sonar-project.properties` y una regla en `CONTRIBUTING.md`: cada promoción a `staging` lleva su
-   medición. Incluye la verificación de Sonar con Rust (§7) y la elección final de herramientas.
+1. **`docs(calidad): método de medición y scripts` (1/3).** `metodo.md` (v1), `scripts/calidad/` y
+   `sonar-project.properties`. Incluye la verificación de Sonar con Rust (§7) y la elección final de
+   herramientas.
 2. **`docs(calidad): primera medición de development` (2/3).** Corre el método v1 sobre
    `development`, agrega `historial.csv`, las figuras y el informe con el estado actual: resumen por
    característica, tabla contra referencias, hallazgos principales y recomendaciones.
@@ -133,7 +133,8 @@ en `metodo.md`.
    (cobertura baja en un módulo, funciones demasiado complejas, duplicación), se suman como ítems a
    este plan, cada uno con su PR.
 
-Después: cada promoción a `staging` corre `scripts/calidad/medir.sh` y suma su informe.
+Después: cuando se quiera una medición nueva, se corre `scripts/calidad/medir.sh` y se suma su
+informe.
 
 ## 7. Riesgos y decisiones abiertas
 
