@@ -26,8 +26,8 @@ Escrito el 2026-11-28, con `development` en `142ef86` (después de #172).
   resultados (`docs/calidad/`), versionados y entrando por PR.
 - **Informes en Markdown:** un `.md` por medición, con tablas y gráficos PNG generados por script;
   se leen en GitHub y el diff entre mediciones se ve en la PR.
-- **Con SonarQube** (Community Build, local): notas A–E, deuda técnica, *code smells* e historial.
-  Hay que verificar primero qué analiza de Rust (ver §7).
+- **Con SonarQube** (Community Build 26.10, local): notas A–E, deuda técnica, *code smells* e
+  historial, para Rust y JS (ver §7).
 - **Sin cambios de comportamiento:** medir no toca el código de la app. Las herramientas que no son
   dependencias del proyecto se instalan aparte (`cargo install`, `npx -y`, Docker), con versión fija.
 
@@ -67,9 +67,9 @@ Cada una con su comando fijo (en `scripts/calidad/`) y su versión anotada en `d
 | Tamaño | `tokei` | Excluye `tests/`, `target/`, `node_modules/`, `tests/golden/`, `templates/`. |
 | Tests | `cargo test` / `node --test` / `npm run test:e2e` | Se cuentan desde la salida (no con grep). |
 | Complejidad | `rust-code-analysis-cli` (Mozilla) | Ciclomática y cognitiva por función para Rust y JS con el mismo criterio. |
-| Duplicación | `jscpd` | Rust y JS juntos; mínimo de tokens fijo. |
+| Duplicación | SonarQube | Rust y JS con el mismo criterio; no se usa `jscpd`. |
 | Lint | `cargo clippy --message-format=json` | Por defecto y con `-W clippy::pedantic`; se cuentan avisos por lint, no bloquea. |
-| Deuda, smells, bugs, hotspots | SonarQube Community Build (Docker) | Importa la cobertura (`lcov`) de Rust y JS. |
+| Deuda, smells, bugs, hotspots | SonarQube Community Build 26.10 (Docker) | Analiza Rust y JS; importa clippy y la cobertura (`lcov`) de ambos. |
 | Dependencias sin uso | `cargo-machete`, `knip` | knip con entrada `static/app.js` e `index.html`. |
 | Ciclos JS | `madge --circular static/` | |
 | Política del repo | `scripts/comments.py --check`, chequeo de doctests | Reglas de `CONTRIBUTING.md`. |
@@ -107,7 +107,7 @@ docs/calidad/
   metodo.md              qué se mide, cómo, versión del método, versiones de herramientas
   historial.csv          una fila por medición
   2026-11-29-<commit>.md informe de cada medición
-  datos/<fecha>-<commit>/ salida cruda de cada herramienta
+  datos/<fecha>-<commit>/ resumen.json versionado; crudo/ con la salida de cada herramienta, local
   figuras/               gráficos generados desde historial.csv
 scripts/calidad/
   medir.sh               worktree + todas las métricas locales + Sonar
@@ -115,7 +115,6 @@ scripts/calidad/
   consolidar.py          datos crudos → fila de historial.csv
   graficos.py            historial.csv → figuras/
   proceso.py             métricas de GitHub entre dos mediciones
-sonar-project.properties claves y exclusiones de Sonar
 ```
 
 Los scripts siguen la política de comentarios del repo (sin comentarios); lo que explica cada paso va
@@ -123,9 +122,9 @@ en `metodo.md`.
 
 ## 6. PRs
 
-1. **`docs(calidad): método de medición y scripts` (1/3).** `metodo.md` (v1), `scripts/calidad/` y
-   `sonar-project.properties`. Incluye la verificación de Sonar con Rust (§7) y la elección final de
-   herramientas.
+1. **`docs(calidad): método de medición y scripts` (1/3).** `metodo.md` (v1) y `scripts/calidad/`
+   (la configuración de Sonar va en `medir.sh`). Incluye la verificación de Sonar con Rust (§7) y
+   la elección final de herramientas.
 2. **`docs(calidad): primera medición de development` (2/3).** Corre el método v1 sobre
    `development`, agrega `historial.csv`, las figuras y el informe con el estado actual: resumen por
    característica, tabla contra referencias, hallazgos principales y recomendaciones.
@@ -138,9 +137,9 @@ informe.
 
 ## 7. Riesgos y decisiones abiertas
 
-- **Sonar y Rust:** confirmar si SonarQube Community Build analiza Rust (reglas propias o importando
-  el JSON de clippy). Si no, Sonar mide solo el JS y la mantenibilidad de Rust sale de clippy,
-  `rust-code-analysis` y `jscpd`; se declara en el método.
+- **Sonar y Rust (resuelto):** la Community Build 26.10 trae `sonar-rust-plugin` (reglas propias,
+  importa el JSON de clippy y `lcov`); la 26.11 ya no lo trae, así que la versión queda fija en 26.10
+  y subirla exige comprobarlo de nuevo.
 - **Sonar y el orden cronológico:** solo acepta análisis posteriores al último; las mediciones
   periódicas van en orden, pero rehacer una vieja exige recrear el proyecto.
 - **`cargo-llvm-cov` en Windows:** necesita `llvm-tools-preview`; si da problemas se mide en
