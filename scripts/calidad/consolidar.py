@@ -272,7 +272,7 @@ def fila(r):
         "codeql": _sum(g("seguridad", "codeql_rust", "total"), g("seguridad", "codeql_javascript", "total")),
         "lh_perf_min": min((p.get("performance") for p in lh.values()), default=None),
         "lh_a11y_min": min((p.get("accessibility") for p in lh.values()), default=None),
-        "axe_criticas_serias": _sum(axe.get("critical"), axe.get("serious")) if axe else None,
+        "axe_criticas_serias": axe.get("critical", 0) + axe.get("serious", 0) if "axe" in (r.get("ux") or {}) else None,
         "sonar_coverage": g("sonar", "coverage"), "sonar_duplicacion": g("sonar", "duplicated_lines_density"),
         "sonar_code_smells": g("sonar", "code_smells"), "sonar_bugs": g("sonar", "bugs"),
         "sonar_vulnerabilidades": g("sonar", "vulnerabilities"), "sonar_hotspots": g("sonar", "security_hotspots"),
