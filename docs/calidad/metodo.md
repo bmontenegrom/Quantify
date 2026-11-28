@@ -106,14 +106,15 @@ Del proyecto: el toolchain Rust estable y Node de la máquina (se anotan en el i
   (`--shuffle`), así que si el máximo corta la corrida los evaluados son una muestra al azar y el
   *score* es una estimación; el total sale de `cargo mutants --list`. El *score* es
   `caught / (caught + missed)`; los mutantes con *timeout*, los no viables y los que no llegaron a
-  evaluarse se informan aparte.
+  evaluarse se informan aparte. Al cumplirse el máximo, `medir.sh` mata todo el árbol de procesos de
+  `cargo mutants` (en Windows, matar solo el proceso padre deja vivos los tests en curso).
 - **Funciones `pub` sin doctest.** Se cuentan las `pub fn` de `src/uncertainty.rs` y
   `src/computation/` (fuera de módulos de test) que no tienen un `///` con un bloque de código
   inmediatamente antes. Usa el mismo lector de comentarios que `scripts/comments.py`.
 - **Complejidad.** `rust-code-analysis` calcula ciclomática y cognitiva por función con el mismo
   criterio para Rust y JS. Cada función cuenta solo su propio cuerpo: se le resta lo de las
   clausuras y funciones anidadas, que se cuentan aparte. Se informan la cantidad de funciones por
-  encima de 10 y 15, el máximo y las 10 de mayor complejidad cognitiva.
+  encima de 10 y 15, el máximo y la lista de todas las que superan algún umbral.
 - **Duplicación.** La da Sonar, que la calcula para Rust y JS. No se usa `jscpd`.
 - **Clippy.** No bloquea: se cuentan avisos por lint con la configuración del repo (`clippy.toml`) y,
   aparte, sumando `-W clippy::pedantic`. Sonar importa el reporte por defecto, no corre clippy por

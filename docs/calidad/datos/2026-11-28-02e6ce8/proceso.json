@@ -1,0 +1,9 @@
+{
+ "desde": null,
+ "hasta": "2026-11-28T12:46:01-03:00",
+ "prs_mergeadas": 71,
+ "horas_merge_mediana": 1.5,
+ "lineas_cambiadas": 56169,
+ "ci_corridas": 684,
+ "ci_verde_pct": 96.5
+}

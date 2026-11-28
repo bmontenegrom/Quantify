@@ -93,8 +93,13 @@ fi
 if paso mutantes; then
   echo ">> mutantes (hasta $MUTANTS_MAX)"
   cargo mutants --list --file src/uncertainty.rs --file 'src/computation/**' > "$CRUDO/mutants-list.txt" 2>&1
-  timeout "$MUTANTS_MAX" cargo mutants --file src/uncertainty.rs --file 'src/computation/**' \
-    --shuffle --cargo-test-arg=--lib --timeout-multiplier 3 --jobs "$MUTANTS_JOBS" --output "$CRUDO" > "$CRUDO/mutants.log" 2>&1
+  cargo mutants --file src/uncertainty.rs --file 'src/computation/**' \
+    --shuffle --cargo-test-arg=--lib --timeout-multiplier 3 --jobs "$MUTANTS_JOBS" --output "$CRUDO" > "$CRUDO/mutants.log" 2>&1 &
+  mutants=$!
+  ( sleep "$MUTANTS_MAX"; taskkill //F //T //PID "$(cat /proc/$mutants/winpid)" > /dev/null 2>&1 ) &
+  vigia=$!
+  wait $mutants
+  kill $vigia 2> /dev/null
 fi
 
 if paso deps; then
