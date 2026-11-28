@@ -174,8 +174,8 @@ tests de siempre. Las funciones de complejidad son las 69 de
 | M12 | `refactor(deps): reemplazar chrono por jiff` | `chrono` no tiene mantenimiento ([RUSTSEC-2026-0543](https://rustsec.org/advisories/RUSTSEC-2026-0543), [chrono#1768](https://github.com/chronotope/chrono/issues/1768)); su mantenedor y RustSec recomiendan `jiff`. Se usa `jiff` con serde y `jiff-sqlx` 1.0 (SQLite, sqlx 0.9) para `Utc::now()`, las sumas de duraciones y los 21 campos `DateTime<Utc>`. Hay que probar: que lea las fechas que guardó chrono en una copia de una base vieja, que el JSON siga en RFC 3339 y cómo se integran los tipos de `jiff-sqlx` con `FromRow`. | `chrono` fuera de `Cargo.lock` y `cargo audit` sin avisos; la app arranca sobre una base vieja y los E2E pasan sin cambios en el frontend. |
 
 **Orden.** Primero lo barato y lo que corrige riesgos (M1–M3). Después M4, porque los tests de rutas
-cubren los refactors de M7 y M11. M12 va después de M4, por la misma razón. Los refactors del motor (M5 y M6) agregan sus tests de mutantes
-antes de tocar el código.
+cubren los refactors de M7, M11 y M12. Los refactors del motor (M5 y M6) agregan sus tests de
+mutantes antes de tocar el código.
 
 **Reglas de los refactors:**
 
