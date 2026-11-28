@@ -25,11 +25,12 @@ async function init() {
     const body = await fetchJson("/api/auth/me");
     state.user = body.user;
     setCsrfToken(body.csrf_token);
-    await startApp();
   } catch {
     loginScreen.classList.remove("hidden");
     appShell.classList.add("hidden");
+    return;
   }
+  await startApp();
 }
 
 async function startApp() {

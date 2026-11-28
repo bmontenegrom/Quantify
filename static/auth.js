@@ -7,7 +7,7 @@ import {
 } from "./dom.js";
 import { send, readJson, postJson, setCsrfToken, errorText } from "./api.js";
 import { escapeHtml, canReview } from "./lib.js";
-import { showToast } from "./toast.js";
+import { showToast, showError } from "./toast.js";
 
 const accountDefaultGroup = () => document.querySelector("#account-default-group");
 const accountDefaultTable = () => document.querySelector("#account-default-table");
@@ -95,7 +95,7 @@ export function setupAuth(onLogin) {
       await onLogin();
     } catch (error) {
       loginStatus.textContent = error.message;
-      showToast(error.message, "error");
+      showError(error);
     }
   });
 
@@ -104,7 +104,7 @@ export function setupAuth(onLogin) {
       await send("/api/auth/logout", { method: "POST" });
       location.reload();
     } catch (error) {
-      showToast(error.message, "error");
+      showError(error);
     }
   });
 
@@ -117,7 +117,7 @@ export function setupAuth(onLogin) {
       showToast("Contrasena actualizada", "success");
     } catch (error) {
       passwordStatus.textContent = error.message;
-      showToast(error.message, "error");
+      showError(error);
     }
   });
 
@@ -146,7 +146,7 @@ export function setupAuth(onLogin) {
       showToast("Cambios guardados", "success");
     } catch (error) {
       accountStatus.textContent = error.message;
-      showToast(error.message, "error");
+      showError(error);
     }
   });
 }

@@ -1103,7 +1103,7 @@ async function renderDraftChanges(practiceId) {
     lastDraftChanges = { practiceId, changes };
     paintDraftChanges(box, practiceId, changes);
   } catch (error) {
-    box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
+    if (request === draftChangesRequest) box.innerHTML = `<p class="submission-meta">${escapeHtml(error.message)}</p>`;
   }
 }
 

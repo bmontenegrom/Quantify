@@ -897,7 +897,7 @@ export async function submitFormSubmission() {
       showToast("Cambios guardados", "success");
       exitEditMode();
       await loadSubmissions();
-      await openSubmissionWorkspace(editingId);
+      openSubmissionWorkspace(editingId).catch(showError);
       return;
     }
     saveDraft();
@@ -927,7 +927,7 @@ export async function submitFormSubmission() {
     await loadSubmissions();
   } catch (error) {
     submitStatus.textContent = error.message;
-    showToast(error.message, "error");
+    showError(error);
   } finally {
     if (submitButton) submitButton.disabled = false;
   }

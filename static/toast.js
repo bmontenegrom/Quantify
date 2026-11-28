@@ -10,7 +10,7 @@ function getRegion() {
   return region;
 }
 
-export const showError = (error) => showToast(error?.message || String(error), "error");
+export const showError = (error) => showToast(error?.message || "Ocurrió un error inesperado.", "error");
 
 export function showToast(message, kind = "info", duration = 4000) {
   const el = document.createElement("div");
