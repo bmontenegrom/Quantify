@@ -16,3 +16,4 @@ ss-*.png
 tests/e2e/artifacts/
 graphify-out/cache/
 graphify-out/.graphify_*
+docs/calidad/datos/*/crudo/
