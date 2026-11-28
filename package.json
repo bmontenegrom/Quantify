@@ -1,6 +1,7 @@
 {
   "name": "quantify-frontend",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "test": "node --test",

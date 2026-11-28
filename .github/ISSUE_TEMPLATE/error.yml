@@ -1,0 +1,42 @@
+name: Reportar un error
+description: Algo no funciona como debería (un cálculo, un formulario, una vista).
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportarlo. Si es una vulnerabilidad de seguridad, no la cuentes acá: seguí `.github/SECURITY.md`.
+  - type: textarea
+    id: que-pasa
+    attributes:
+      label: Qué pasa
+      description: Qué ves y qué esperabas ver.
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Cómo reproducirlo
+      description: Rol con el que entraste (admin, docente, estudiante), práctica, vista y pasos.
+      placeholder: |
+        1. Entrar como docente
+        2. Abrir la práctica ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: datos
+    attributes:
+      label: Datos de la entrega
+      description: Si es un cálculo, las medidas cargadas y el resultado que da (o una práctica exportada). No incluyas datos personales de estudiantes.
+  - type: input
+    id: version
+    attributes:
+      label: Versión o commit
+      placeholder: v0.1.0, o el hash del commit
+  - type: textarea
+    id: capturas
+    attributes:
+      label: Capturas
+      description: Si ayudan, pegalas acá.
