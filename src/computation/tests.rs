@@ -5819,3 +5819,34 @@ fn a_shared_quantity_the_line_cannot_follow_warns() {
     );
     assert!(a.regression.unwrap().shared.is_empty());
 }
+
+#[test]
+fn a_shared_quantity_at_a_kink_of_an_axis_warns() {
+    let (m, m_m) = shared_on_axis("m", &[1.9, 2.1]);
+    let quantities = vec![quantity("px"), quantity("py"), m];
+    let measurements = vec![
+        measurement("px", &[1.0, 2.0, 3.0]),
+        measurement("py", &[2.0, 4.1, 5.9]),
+        m_m,
+    ];
+    let a = compute_regresion(
+        &quantities,
+        &[],
+        &[],
+        &[],
+        &[],
+        &HashMap::new(),
+        "px",
+        "math::abs(py - m)",
+        &measurements,
+    )
+    .unwrap();
+    assert!(
+        a.warnings
+            .iter()
+            .any(|w| w.contains("quiebre de su fórmula respecto de \"m\"")),
+        "{:?}",
+        a.warnings
+    );
+    assert_eq!(a.regression.unwrap().shared, ["m"]);
+}

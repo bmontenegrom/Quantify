@@ -1225,7 +1225,7 @@ fn axis_derivatives(
     ctx: &PointContext,
     i: usize,
     wrt: &str,
-) -> (f64, f64) {
+) -> ((f64, f64), bool) {
     let weigh = |d: &[f64]| d[0].abs();
     let seed = |v: &str, x: f64| {
         if v == wrt {
@@ -1268,9 +1268,10 @@ fn axis_derivatives(
                 None => (v, seed(v, ctx.get(v).copied().unwrap_or(f64::NAN))),
             })
             .collect();
-        eval_dual(axis, &bound, 1, &weigh).d[0]
+        eval_dual(axis, &bound, 1, &weigh)
     };
-    (d(&axes[0]), d(&axes[1]))
+    let (x, y) = (d(&axes[0]), d(&axes[1]));
+    ((x.d[0], y.d[0]), x.kink || y.kink)
 }
 
 /// Valores por réplica y promedio de los intermedios con `show_live`, calculados como en el ajuste.
@@ -1421,7 +1422,7 @@ pub fn compute_regresion(
         if !on_axes.contains(m) {
             continue;
         }
-        let d_points: Vec<(f64, f64)> = contexts
+        let (d_points, kinks): (Vec<(f64, f64)>, Vec<bool>) = contexts
             .iter()
             .enumerate()
             .map(|(i, ctx)| {
@@ -1434,9 +1435,14 @@ pub fn compute_regresion(
                     m,
                 )
             })
-            .collect();
+            .unzip();
         let (slope, intercept) = analysis::line_sensitivity(&points, &d_points);
         if slope.is_finite() && intercept.is_finite() {
+            if kinks.contains(&true) {
+                warnings.push(format!(
+                    "En algún punto, un eje cae justo en un quiebre de su fórmula respecto de \"{m}\" (un valor absoluto en 0 o un mínimo/máximo empatado): cuánto mueve \"{m}\" la recta se calculó con una sola de las ramas, así que puede no ser exacto."
+                ));
+            }
             loads.push(Load {
                 symbol: m,
                 u: u_m,
@@ -1445,7 +1451,7 @@ pub fn compute_regresion(
             });
         } else {
             warnings.push(format!(
-                "No se puede calcular cuánto mueve \"{m}\" la recta (la fórmula de un eje no es derivable ahí); su incertidumbre se toma como independiente de la pendiente y la ordenada."
+                "No se puede calcular cuánto mueve \"{m}\" la recta (la fórmula de un eje no es derivable ahí o le falta un valor en algún punto); su incertidumbre se toma como independiente de la pendiente y la ordenada."
             ));
         }
     }
@@ -1456,6 +1462,7 @@ pub fn compute_regresion(
         ],
         vec![("intercept", fit.u_mean_y)],
     ];
+    let (mut u_slope_total, mut u_intercept_total) = (fit.u_slope, fit.u_intercept);
     for l in &loads {
         line.push(vec![
             ("slope", l.slope * l.u),
@@ -1463,17 +1470,14 @@ pub fn compute_regresion(
             (l.symbol, l.u),
         ]);
         us.insert(l.symbol.to_string(), 0.0);
+        u_slope_total = uncertainty::combine(u_slope_total, l.slope * l.u);
+        u_intercept_total = uncertainty::combine(u_intercept_total, l.intercept * l.u);
     }
-    let u_slope_total = (!loads.is_empty()).then(|| {
-        loads.iter().fold(fit.u_slope, |acc, l| {
-            uncertainty::combine(acc, l.slope * l.u)
-        })
-    });
-    let u_intercept_total = (!loads.is_empty()).then(|| {
-        loads.iter().fold(fit.u_intercept, |acc, l| {
-            uncertainty::combine(acc, l.intercept * l.u)
-        })
-    });
+    let (u_slope_total, u_intercept_total) = if loads.is_empty() {
+        (None, None)
+    } else {
+        (Some(u_slope_total), Some(u_intercept_total))
+    };
     let (derived, result_trees) =
         derive_results(results, &allowed, &means, &us, &line, &mut warnings)?;
 

@@ -257,15 +257,13 @@ pub fn linear_regression(
 /// ```
 pub fn line_sensitivity(points: &[(f64, f64)], d_points: &[(f64, f64)]) -> (f64, f64) {
     let n = points.len() as f64;
-    let mean = |v: &mut dyn Iterator<Item = f64>| v.sum::<f64>() / n;
-    let (mx, my) = (
-        mean(&mut points.iter().map(|p| p.0)),
-        mean(&mut points.iter().map(|p| p.1)),
-    );
-    let (mdx, mdy) = (
-        mean(&mut d_points.iter().map(|p| p.0)),
-        mean(&mut d_points.iter().map(|p| p.1)),
-    );
+    let mean = |pairs: &[(f64, f64)]| {
+        let (sx, sy) = pairs
+            .iter()
+            .fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
+        (sx / n, sy / n)
+    };
+    let ((mx, my), (mdx, mdy)) = (mean(points), mean(d_points));
     let (mut sxx, mut sxy, mut dsxx, mut dsxy) = (0.0, 0.0, 0.0, 0.0);
     for (&(x, y), &(dx, dy)) in points.iter().zip(d_points) {
         let (cx, cy, cdx, cdy) = (x - mx, y - my, dx - mdx, dy - mdy);
