@@ -13,6 +13,7 @@ las próximas iteraciones.
 4. [`04-roadmap-fases.md`](04-roadmap-fases.md) — fases con tareas concretas, archivos a tocar y criterios de aceptación.
 5. [`05-refactor-modularizacion.md`](05-refactor-modularizacion.md) — plan de refactor modularizar+dedup (frontend primero, luego motor Rust, luego data/routes).
 6. [`06-practicas-configurables.md`](06-practicas-configurables.md) — roadmap para que el docente cree y edite prácticas desde la UI (partes con su propio análisis, datos compartidos, versionado, plantillas).
+7. [`07-calidad-codigo.md`](07-calidad-codigo.md) — medición de la calidad del código: indicadores, herramientas, regla de coherencia entre mediciones y PRs (primera medición de `development` y una por cada promoción a `staging`).
 
 ## Decisiones tomadas (29-05-2026)
 
