@@ -14,8 +14,8 @@ struct PracticeConfigRow {
     analysis_kind: Option<String>,
     x_formula: Option<String>,
     y_formula: Option<String>,
-    operator_count: Option<i64>,
     current_version: Option<i64>,
+    config_json: String,
 }
 
 pub async fn definition(
@@ -30,9 +30,9 @@ pub async fn definition_in(
     practice_id: &str,
 ) -> anyhow::Result<Option<PracticeDefinition>> {
     let row: Option<PracticeConfigRow> = sqlx::query_as(
-        "SELECT description, status, analysis_kind, x_formula, y_formula, operator_count, \
+        "SELECT description, status, analysis_kind, x_formula, y_formula, \
          (SELECT number FROM practice_versions WHERE id = practices.current_version_id) \
-         AS current_version FROM practices WHERE id = ?1",
+         AS current_version, config_json FROM practices WHERE id = ?1",
     )
     .bind(practice_id)
     .fetch_optional(&mut *conn)
@@ -60,7 +60,6 @@ pub async fn definition_in(
             quantities,
             results,
             curves,
-            operator_count: row.operator_count,
             intermediates,
             point_results,
             aggregates,
@@ -68,6 +67,7 @@ pub async fn definition_in(
             sections,
             display_symbols,
             current_version: row.current_version,
+            determinations: super::PracticeConfig::parse(&row.config_json).determinations,
         }
         .with_effective_kinds(),
     ))
@@ -329,7 +329,7 @@ pub async fn aggregates_for(
     practice_id: &str,
 ) -> anyhow::Result<Vec<PracticeAggregate>> {
     Ok(sqlx::query_as::<_, PracticeAggregate>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final \
+        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final, has_uncertainty \
          FROM practice_aggregates WHERE practice_id = ?1 ORDER BY position, id",
     )
     .bind(practice_id)
@@ -339,7 +339,7 @@ pub async fn aggregates_for(
 
 async fn fetch_aggregate(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeAggregate> {
     Ok(sqlx::query_as::<_, PracticeAggregate>(
-        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final \
+        "SELECT id, practice_id, position, symbol, name, unit, formula, is_final, has_uncertainty \
          FROM practice_aggregates WHERE id = ?1",
     )
     .bind(id)
@@ -372,8 +372,9 @@ pub(super) async fn insert_aggregate(
     let id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO practice_aggregates \
-         (id, practice_id, position, symbol, name, unit, formula, is_final, display_symbol) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         (id, practice_id, position, symbol, name, unit, formula, is_final, display_symbol, \
+          has_uncertainty) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -384,6 +385,7 @@ pub(super) async fn insert_aggregate(
     .bind(input.formula.trim())
     .bind(input.is_final)
     .bind(display_symbol(&input.display_symbol).unwrap_or(""))
+    .bind(input.has_uncertainty)
     .execute(&mut *conn)
     .await?;
     Ok(id)
@@ -403,7 +405,7 @@ pub async fn update_aggregate(
     let result = sqlx::query(
         "UPDATE practice_aggregates \
          SET symbol = ?3, name = ?4, unit = ?5, formula = ?6, is_final = ?7, \
-             display_symbol = COALESCE(?8, display_symbol) \
+             display_symbol = COALESCE(?8, display_symbol), has_uncertainty = ?9 \
          WHERE id = ?1 AND practice_id = ?2",
     )
     .bind(aggregate_id)
@@ -414,6 +416,7 @@ pub async fn update_aggregate(
     .bind(formula)
     .bind(input.is_final)
     .bind(display_symbol(&input.display_symbol))
+    .bind(input.has_uncertainty)
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -719,7 +722,9 @@ pub async fn update_quantity(
              display_symbol = COALESCE(?15, display_symbol), \
              label_mode = COALESCE(?16, label_mode), \
              input_widget = CASE WHEN ?6 = 'tiempo' AND NOT ?7 \
-                 THEN COALESCE(?17, input_widget) ELSE 'teclado' END \
+                 THEN COALESCE(?17, input_widget) ELSE 'teclado' END, \
+             per_determination = ?18, fixed = ?19, \
+             default_u = CASE WHEN ?20 THEN ?21 ELSE default_u END \
          WHERE id = ?1 AND removed = 0",
     )
     .bind(quantity_id)
@@ -727,10 +732,10 @@ pub async fn update_quantity(
     .bind(input.name.trim())
     .bind(input.unit.trim())
     .bind(input.repeated)
-    .bind(input.quantity.as_deref())
+    .bind(input.magnitude())
     .bind(input.is_given)
     .bind(input.replicas_per_point)
-    .bind(input.per_point)
+    .bind(input.stored_per_point())
     .bind(input.has_uncertainty)
     .bind(input.optional)
     .bind(input.slot_count)
@@ -739,6 +744,10 @@ pub async fn update_quantity(
     .bind(display_symbol(&input.display_symbol))
     .bind(input.label_mode.as_deref())
     .bind(input.input_widget.as_deref())
+    .bind(input.per_determination)
+    .bind(input.fixed)
+    .bind(input.default_u.is_some())
+    .bind(input.default_u.flatten())
     .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
@@ -897,17 +906,35 @@ pub async fn set_analysis_kind(
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn set_operator_count(
+pub async fn set_determinations(
     pool: &SqlitePool,
     practice_id: &str,
-    count: i64,
+    part_id: Option<&str>,
+    determinations: Option<&super::Determinations>,
 ) -> anyhow::Result<bool> {
-    let stored: Option<i64> = if count <= 1 { None } else { Some(count) };
-    let result = sqlx::query("UPDATE practices SET operator_count = ?2 WHERE id = ?1")
-        .bind(practice_id)
-        .bind(stored)
-        .execute(pool)
-        .await?;
+    let json = super::PracticeConfig {
+        determinations: determinations.cloned(),
+    }
+    .to_json();
+    let result = match part_id {
+        Some(part_id) => {
+            sqlx::query(
+                "UPDATE practice_parts SET config_json = ?3 WHERE id = ?2 AND practice_id = ?1",
+            )
+            .bind(practice_id)
+            .bind(part_id)
+            .bind(&json)
+            .execute(pool)
+            .await?
+        }
+        None => {
+            sqlx::query("UPDATE practices SET config_json = ?2 WHERE id = ?1")
+                .bind(practice_id)
+                .bind(&json)
+                .execute(pool)
+                .await?
+        }
+    };
     Ok(result.rows_affected() > 0)
 }
 
@@ -958,7 +985,7 @@ async fn quantities_for(
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-         label_mode, input_widget \
+         label_mode, input_widget, per_determination, fixed, default_u \
          FROM practice_quantities WHERE practice_id = ?1 AND removed = 0 ORDER BY position, symbol",
     )
     .bind(practice_id)
@@ -983,7 +1010,7 @@ async fn fetch_quantity(pool: &SqlitePool, id: &str) -> anyhow::Result<PracticeQ
     Ok(sqlx::query_as::<_, PracticeQuantity>(
         "SELECT id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
          replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-         label_mode, input_widget \
+         label_mode, input_widget, per_determination, fixed, default_u \
          FROM practice_quantities WHERE id = ?1",
     )
     .bind(id)
@@ -1012,8 +1039,9 @@ pub(super) async fn insert_quantity(
         "INSERT INTO practice_quantities \
          (id, practice_id, symbol, name, unit, repeated, quantity, position, is_given, \
           replicas_per_point, per_point, has_uncertainty, optional, default_value, slot_count, \
-          display_symbol, label_mode, input_widget) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+          display_symbol, label_mode, input_widget, per_determination, fixed, default_u) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, \
+                 ?20, ?21)",
     )
     .bind(&id)
     .bind(practice_id)
@@ -1021,11 +1049,11 @@ pub(super) async fn insert_quantity(
     .bind(input.name.trim())
     .bind(input.unit.trim())
     .bind(input.repeated)
-    .bind(input.quantity.as_deref())
+    .bind(input.magnitude())
     .bind(position)
     .bind(input.is_given)
     .bind(input.replicas_per_point)
-    .bind(input.per_point)
+    .bind(input.stored_per_point())
     .bind(input.has_uncertainty)
     .bind(input.optional)
     .bind(input.default_value.flatten())
@@ -1033,6 +1061,9 @@ pub(super) async fn insert_quantity(
     .bind(display_symbol(&input.display_symbol).unwrap_or(""))
     .bind(label_mode(input))
     .bind(input_widget(input))
+    .bind(input.per_determination)
+    .bind(input.fixed)
+    .bind(input.default_u.flatten())
     .execute(&mut *conn)
     .await?;
     Ok(id)

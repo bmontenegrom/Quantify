@@ -1,6 +1,7 @@
 import { state } from "./state.js";
 import { instrumentCatalog, instrumentWorkspace, instrumentCourseFilter, instrumentStatus } from "./dom.js";
 import { fetchJson, postJson, deleteJson, errorText } from "./api.js";
+import { MAGNITUDES_LIST, ensureMagnitudesList } from "./magnitudes.js";
 import { escapeHtml, format, scalePayload, downloadJson, readJsonFile } from "./lib.js";
 import { selectView } from "./navigation.js";
 
@@ -34,6 +35,7 @@ export async function refreshInstruments() {
 }
 
 export function renderInstrumentsPage() {
+  ensureMagnitudesList();
   renderInstrumentDirectory();
   if (!instrumentWorkspace) return;
 
@@ -146,7 +148,7 @@ function renderInstrumentDirectory() {
             <option value="analogico">analogico</option>
           </select>
         </label>
-        <label>Magnitud <input name="quantity" required placeholder="corriente" /></label>
+        <label>Magnitud <input name="quantity" required list="${MAGNITUDES_LIST}" placeholder="corriente" /></label>
         <label>Unidad <input name="unit" required placeholder="A" /></label>
         <div class="detail-actions">
           <button type="submit">Crear instrumento</button>
@@ -200,7 +202,7 @@ function renderInstrumentProfileForm(item) {
           ${["digital", "analogico"].map((k) => `<option value="${k}" ${k === item.kind ? "selected" : ""}>${k}</option>`).join("")}
         </select>
       </label>
-      <label>Magnitud <input name="quantity" value="${escapeHtml(item.quantity)}" required /></label>
+      <label>Magnitud <input name="quantity" value="${escapeHtml(item.quantity)}" required list="${MAGNITUDES_LIST}" /></label>
       <label>Unidad <input name="unit" value="${escapeHtml(item.unit)}" required /></label>
       <div class="detail-actions">
         <button type="submit">Guardar cambios</button>

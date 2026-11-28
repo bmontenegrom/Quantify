@@ -1,7 +1,6 @@
 {
   "aggregates": [],
   "derived": [],
-  "operators": [],
   "parts": [
     {
       "analysis": {
@@ -28,7 +27,6 @@
             "value": 0.47608936349335795
           }
         ],
-        "operators": [],
         "point_results": [],
         "quantities": [
           {
@@ -140,7 +138,6 @@
             "value": 0.0009943636333428563
           }
         ],
-        "operators": [],
         "point_results": [],
         "quantities": [],
         "regression": {
@@ -166,6 +163,24 @@
           "r_squared": 0.9999499702584531,
           "slope": 0.0009943636333428563,
           "u_intercept": 0.007202521583268458,
+          "u_points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
           "u_slope": 4.9734210535596445e-6,
           "x_label": "2*pi*f",
           "y_label": "b / math::sqrt(a*a - b*b)"

@@ -109,7 +109,7 @@ await withE2E({ port: PORT, dbName: "quantify-modo-guiado.db" }, async ({ login 
   step("Fluidos I: cambiar de paso conserva lo escrito; cerrar una edición con cambios pide confirmación");
   await page.locator(`${row("h")} [data-edit-quantity]`).click();
   await page.locator('#edit-quantity-form [name="unit"]').fill("cm");
-  await addQuantity(page, { symbol: "T", name: "Temperatura", unit: "C", role: "catedra" });
+  await addQuantity(page, { symbol: "T", name: "Temperatura", unit: "°C", role: "catedra" });
   assert(
     (await page.locator('#edit-quantity-form [name="unit"]').inputValue()) === "cm",
     "agregar otra magnitud no debía cerrar la edición con cambios",

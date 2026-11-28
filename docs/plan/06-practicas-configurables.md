@@ -119,7 +119,7 @@ No hay ningún concepto de parte ni de sección en la base ni en Rust. Todo vive
 | `fluidos-2` | regresión | 4 agregados encadenados con `_first`/`_last`. |
 | `filtros` | curva | 2 curvas con `x_log`; 3 intermedias. |
 | `ca-rlc` | estadístico | 15 medidas únicas; 17 resultados con **fórmulas expandidas** (no hay encadenamiento). |
-| `hidrostatica` | estadístico | 48 magnitudes; ranuras con `slot_count`; 3 determinaciones como símbolos separados + promedio; 2 pestañas vía JS. |
+| `hidrostatica` | estadístico | 48 magnitudes; ranuras con `slot_count`; 3 determinaciones como símbolos separados + promedio; 2 pestañas vía JS. (F9: 26 magnitudes, determinaciones en bloques.) |
 
 ### 2.5 Casos especiales que bloquean la creación genérica
 
@@ -554,7 +554,9 @@ con distinto análisis.
 **Estado (2026-11-03)**: hecho en dos PRs. Los detalles:
 - **Composición sin reescribir texto.** Cada mensurando se propaga con una sola llamada a
   `propagate` sobre sus hojas (magnitudes, `slope`/`intercept`, escalares de curva). El closure
-  evalúa las dependencias en orden topológico. La `u` es la de la fórmula expandida.
+  evalúa las dependencias en orden topológico. La `u` es la de la fórmula expandida. (Desde F10
+  química 5/5, `propagate` no existe: derivadas exactas con `computation/dual.rs` y
+  `uncertainty::propagated_u`.)
 - **Sin `part_id` en los resultados**, igual que en F2. Un mensurando sin sección que usa uno de
   una parte va a esa parte. Los compartidos se recalculan en cada parte y se sacan de su salida.
 - **Motor tolerante.** Un ciclo, o depender de un mensurando que no compila, deja un aviso y
@@ -583,7 +585,7 @@ que la fórmula expandida).
 1. **`feat(analisis)`: resultados que usan otros resultados (F4, 1/2).**
    - **Motor** (`derive_results` en `engines.rs`): grafo de los símbolos de resultado de cada
      fórmula y orden topológico. Un ciclo deja un aviso y saltea los resultados involucrados.
-     Cada resultado se propaga con una sola llamada a `propagate` sobre sus hojas (magnitudes,
+     Cada resultado se propaga (hoy con `eval_dual` + `propagated_u`) sobre sus hojas (magnitudes,
      `slope`/`intercept`, escalares de curva). El closure evalúa las dependencias en orden y
      después la fórmula propia, sin reescribir texto, así se conservan las correlaciones. Sirve
      para estadística, regresión, curva y operadores.
@@ -735,8 +737,9 @@ ejemplo la habilita; después el arranque no toca las prácticas ni sus habilita
 **Estado (2026-11-12)**: hecho en #115, #116, #119 y la PR de columnas en vivo. Cambios respecto
 de lo planeado:
 - **La columna en vivo calcula exactamente lo mismo que el ajuste**: el promedio que se ve es el
-  valor que usa el análisis. Un intermedio que usa otro anterior recibe su promedio, como en el
-  ajuste, así que muestra un solo valor.
+  valor que usa el análisis. Un intermedio que usa otro anterior toma su valor en la misma
+  réplica (desde la U de las intermedias, ítem 3 de "Pasaje a analítico del resto"; antes recibía
+  su promedio).
 - **Intermedios "sobre los promedios"** (`on_means`, estructural). Por defecto un intermedio se
   evalúa réplica por réplica y después se promedia: promedio(f(x_k)). Con `on_means` se evalúa una
   sola vez sobre las magnitudes ya promediadas del punto: f(promedio(x)). Para fórmulas no lineales
@@ -1086,7 +1089,7 @@ cada respuesta compara antes de tocar el estado), en un PR aparte, para que los 
 tengan que acordarse; hoy `savePracticeKind` y `deleteLayoutItem` todavía escriben
 `state.practices` sin esa comprobación.
 
-### F9 — Determinaciones repetidas con promedio
+### F9 — Determinaciones repetidas con promedio ✅ HECHA
 
 Generaliza el motor D (operadores) y el patrón de Hidrostática (3 determinaciones independientes,
 derivado por determinación y promedio con propagación):
@@ -1100,8 +1103,119 @@ derivado por determinación y promedio con propagación):
 3. Migrar P1 (3 operadores, sin promedio, **en pestañas**) e Hidrostática (3 determinaciones con
    promedio, en bloques) a este modelo.
 
-**Aceptación**: golden idénticos para P1 e Hidrostática con el modelo nuevo; Hidrostática pasa de
-48 magnitudes a ~16.
+**Aceptación**: golden con los mismos números para P1 e Hidrostática con el modelo nuevo;
+Hidrostática pasa de 48 magnitudes a 26. (El plan decía "golden idénticos" y "~16"; ver las
+decisiones de abajo.)
+
+**Plan de PRs**
+
+Lo que se relevó en el código (2026-11-22):
+- **P1 no usa el motor de operadores.** Son 3 partes `op1`/`op2`/`op3` con `T1`/`T2`/`T3` y
+  `g1`/`g2`/`g3` escritos a mano; `operator_count` es null y su golden tiene `operators: []`.
+- **Hidrostática** tiene 48 magnitudes: 27 masas `m{k}_{i}` (3 medidas × 9 ranuras), 6 de
+  Wilhelmy (`mw{k}`, `dw{k}`) y 15 comunes (`m_goma`, `rho_f`, `g_ac`, `b_E`, `b1`…`b9`, `l`,
+  `d`). Sus 12 resultados son `E{k}`, `rho{k}`, `gamma{k}` y los promedios escritos a mano
+  (`E_medio = (E1+E2+E3)/3`, `rho_medio`, `gamma_medio`), en secciones "Medida k".
+- **El motor de operadores** (`compute`, `src/computation/engines.rs:162`) ya separa las
+  magnitudes comunes (`is_given || !repeated`) de las de cada operador y vuelve a calcular todos
+  los resultados por operador con los mismos símbolos (`OperatorComputation`, etiqueta fija
+  "Operador i"). No promedia y vale para toda la práctica (`statistical_operators`,
+  `src/practices/parts.rs:224`). Hoy solo lo usa `smoke-operadores.mjs`. Se guarda en
+  `submission_measurements.operator_index`, y la UI lo muestra como bloques dentro de una pestaña
+  (`static/forms.js`, `static/analysis.js`).
+- **`config_json` no existe**: 3.4 lo menciona para las partes, pero nunca se agregó.
+- **Propagación**: `derive_results` propaga cada resultado hasta las entradas. Por eso `E_medio`
+  cuenta una sola vez los datos que comparten las tres medidas (brazos, `g_ac`): u(E_medio) ≈
+  1.38·10⁻⁴ N contra u(E1) ≈ 1.39·10⁻⁴ N. Tratar las medidas como independientes daría ≈
+  0.80·10⁻⁴ N, una subestimación.
+
+Decisiones:
+- **Golden = mismos números.** Se regeneran con la forma nueva (una lista de determinaciones en
+  vez de `g1`/`g2`/`g3`) y un test fija los valores e incertidumbres de hoy, símbolo por símbolo.
+- **Promedio correlacionado, como hoy.** El promedio de un resultado se propaga sobre todas las
+  entradas de las N determinaciones, con los datos comunes una sola vez.
+- **Hidrostática colapsa solo las determinaciones**: 48 → 26 magnitudes (`m_1`…`m_9`, `mw`, `dw`
+  repetidas por medida). Las ranuras como magnitud indexada (≈10 magnitudes, con sumatorias en
+  las fórmulas) quedan fuera de F9.
+- **Dónde vive la configuración.** `determinations = { count, label, average, display }` va en la
+  práctica si no tiene partes (reemplaza `operator_count`) y en cada parte estadística si tiene,
+  igual que `analysis_kind`. Se guarda en `config_json` (práctica y partes), con un tipo en Rust.
+- **Qué se repite.** Las magnitudes ganan `per_determination` (no se reusa `repeated`). Un
+  resultado es por determinación si su fórmula usa, directo o encadenado, algo por determinación.
+  Con `average`, cada resultado por determinación suma `<símbolo>_medio`.
+- **`display`**: `pestanas` (una pestaña por determinación, como P1) o `bloques` (todas en la
+  misma pestaña, como Hidrostática y el bloque de operadores de hoy).
+- **El formato de plantilla sigue en `schema_version: 1`**: los campos nuevos son opcionales.
+- En P1, `Q = pi*t_med/(T*ln2)` pasa a calcularse por operador (hoy usa solo `T1`): los valores
+  de hoy se mantienen y aparecen dos nuevos.
+
+1. **`feat(practicas)`: determinaciones en el motor (F9, 1/5).** ✅
+   - `config_json` en `practices` y `practice_parts`, y `per_determination` en las magnitudes:
+     tipos, CRUD, rutas y validación (panel de problemas).
+   - `compute` generaliza la rama de operadores a determinaciones de la práctica o de la parte,
+     con etiqueta configurable y promedios correlacionados (`<símbolo>_medio`); la parte devuelve
+     `determinations`.
+   - Las plantillas exportan e importan los campos nuevos.
+   - Tests del motor con una práctica de prueba: el promedio coincide con propagar la fórmula
+     expandida.
+2. **`feat(practicas)`: el alumno carga determinaciones (F9, 2/5).** ✅
+   - Formulario: `bloques` (reusa el bloque de operadores) y `pestanas` (una pestaña por
+     determinación dentro de la parte; las magnitudes comunes se ven en todas).
+   - El payload reusa `operator_replicas[k-1]`; el servidor rechaza una magnitud por
+     determinación cargada como un único valor o con más determinaciones de las que hay.
+     Borradores, cronómetro, datos de ejemplo y validación por determinación.
+   - El resultado final se informa por determinación como `g#k` y, con promedio, `g_medio`; la
+     comparación se arma por determinación y `g_medio` usa la tolerancia de `g`.
+   - El análisis muestra cada determinación (magnitudes y mensurandos).
+   - Al reabrir una entrega, cada determinación (y cada operador) vuelve a su lugar aunque haya
+     una vacía en el medio.
+   - Decidido: un dato de cátedra por determinación lleva un valor en cada una y **una sola U**
+     (`given_u` compartido).
+   - Decidido: `<símbolo>_medio` se puede usar en otras fórmulas (alcance, ciclos y parte del
+     símbolo lo reconocen) y como resultado del alumno.
+   - E2E `smoke-determinaciones` con una práctica de prueba.
+3. **`feat(practicas)`: el docente configura determinaciones (F9, 3a/5).** ✅
+   - Editor: cantidad, etiqueta, promedio y forma de mostrar, en "Configuración del análisis"
+     (práctica sin partes) o en la fila de cada parte estadística; y "Se repite por
+     determinación" en las magnitudes (con la marca en la columna "Cómo se ingresa").
+   - El panel de problemas y la prueba del borrador ya mostraban las determinaciones y los
+     promedios: no cambian.
+   - El servidor guarda `per_point = false` en una magnitud por determinación; al desmarcarla, el
+     editor vuelve a derivar `per_point` del rol, como en una magnitud nueva.
+4. **`feat(practicas)`: el servidor resuelve partes y determinaciones (F9, 3b/5).** ✅
+   - La definición que recibe el cliente (`/definition` y `/submissions/{id}/definition`) trae
+     `resolved`: la parte de cada símbolo (`symbol_part`) y las determinaciones de cada magnitud
+     y de cada mensurando que se repite. Se calcula al servir, no entra en las versiones.
+   - Se borraron las copias en JS (`symbolPart` recursivo, `perDeterminationSymbols`,
+     `formulaVariables`, `statisticalDeterminations`); `determinationsFor` y `symbolPart` leen
+     `resolved`.
+   - Qué mensurandos se promedian lo decide `PracticeDefinition::averaged_results()`, en un solo
+     lugar.
+   - Al guardar la entrega, una magnitud por determinación obligatoria tiene que traer todas las
+     determinaciones (`check_determination_groups`); la vista previa del borrador sigue
+     aceptando datos incompletos.
+   - Decidido: el alumno solo puede informar mensurandos finales (antes se aceptaban también los
+     no finales, aunque el formulario no los ofrecía).
+   - Queda: `determination_results()` clona la definición por parte y se llama varias veces por
+     pedido; calcularlo una vez si llega a notarse.
+5. **`refactor(practicas)`: P1 e Hidrostática con determinaciones (F9, 4/5).** ✅
+   - P1 sin partes: `T` se repite en 3 operadores en pestañas, sin promedio; `g` y `Q` se
+     calculan por operador (Q ya no usa solo el del operador 1).
+   - Hidrostática con 26 magnitudes: `m_1..m_9`, `mw` y `dw` por medida, en bloques con
+     promedio; `E`, `rho` y `gamma` con `E_medio`, `rho_medio` y `gamma_medio` automáticos.
+   - Golden regenerados, más `determinations_keep_the_numbers_of_the_hand_written_practices`,
+     que fija valor y U de hoy símbolo por símbolo.
+   - Decidido: `T` es opcional (ningún operador obligatorio); `E`, `rho` y `gamma` son finales,
+     así que el alumno informa cada medida y el promedio (antes, solo el promedio).
+   - Los tests que usaban la forma vieja de P1 (partes y `T1/T2/T3`) siguen con una copia en
+     `tests/fixtures/p1-partes.json`.
+6. **`refactor(practicas)`: se retira `operator_count` (F9, 5/5).** ✅
+   - Las determinaciones reemplazan al motor de operadores, su ruta (`/operator-count`) y su
+     editor; se quitan `operator_count` de la definición y de las plantillas, `OperatorComputation`
+     y la vista de análisis por operador. Las bases existentes conservan la columna sin uso.
+   - En #150 (4/5) cada determinación pasó a elegir su instrumento (`operator_instruments`); el
+     formulario ya no tiene selector compartido por grupo.
+   - `smoke-operadores` pasa a determinaciones "Operador" con un instrumento por operador.
 
 ### F10 — Futuro
 
@@ -1126,6 +1240,298 @@ probable**, así que lo que la habilita va primero:
   con `slope`/`intercept` y se puede expresar con el modelo actual.
 - **Material volumétrico** (bureta, pipeta, matraz) como instrumentos: ya entra en el catálogo con
   `apreciacion` o tolerancia de clase; validar con el primer caso real.
+
+**Plan de PRs: unidades estructuradas** (el primer ítem de química)
+
+Lo que se relevó en el código (2026-11-24):
+- `unit` es texto libre en magnitudes, resultados, intermedios, resultados por punto, agregados,
+  instrumentos y escalas (`unit TEXT NOT NULL`, solo se recorta). Nadie la interpreta: el motor
+  la copia a la salida y la única regla es que "Comparar con" exige el mismo texto
+  (`check_compare`).
+- El formulario ofrece un **prefijo SI** al lado de cada valor que no sabe nada de la unidad
+  ("m" en una magnitud en cm da 10⁻³ cm). Se aplica en 8 lugares al recolectar (lecturas, dato
+  ± U, U compartida, resultado final, celdas de la serie). Todo se guarda en la unidad
+  declarada; el prefijo elegido no se guarda.
+- **El tipo B mezcla unidades.** `step`, `appreciation`, `spec_fixed` y `u_cal_fixed` están en
+  la unidad de la escala y se combinan con medias en la unidad de la magnitud. La regla (mm) en
+  una longitud en cm o m, o el densímetro (g/cm³) en `rho_f` en kg/m³ (Viscosidad), dan una u_B
+  10 a 1000 veces mal. Los golden no lo tocan: en todos los casos que usan, la escala y la
+  magnitud tienen la misma unidad.
+- Unidades en uso: V, ohm, cm, m, mm, g, kg, s, (vacía), Hz, °, m/s2, kg/m3, F, A, W, Pa.s, C
+  (temperatura, que choca con coulomb), div, H, rad/s, rad, m3/s, m3, m/s, g/cm3, N/m, N, 1/s.
+  Notación: exponente pegado (`m3`), `.` como producto (`Pa.s`), `1/x`, `ohm`.
+
+Decisiones:
+- **`unit` sigue siendo texto**, sin cambio de esquema. Un módulo `src/units.rs` la interpreta
+  (factor, desplazamiento y dimensiones sobre m, kg, s, A, K, mol, cd). Lo que no reconoce (p. ej.
+  `div`) queda como hoy, sin conversión.
+- Cada factor de la unidad se busca primero entero en el catálogo y después como prefijo + base:
+  `M` es molar y `MPa` es megapascal; `min`, `cd`, `Pa` y `h` no se confunden con prefijos.
+- Catálogo inicial: m, g, s, A, K, mol, cd, L, Hz, N, Pa, J, W, C (coulomb), V, ohm/Ω, F, H, M
+  (mol/L), min, h, °C, rad, ° (ángulo), %, ppm, ppb, `% m/m`, `% m/v`, `% v/v`. La temperatura
+  lleva desplazamiento solo cuando la unidad es exactamente una temperatura; pasos e
+  incertidumbres se convierten solo por factor.
+- **El tipo B convierte la escala** a la unidad de la magnitud, en su propia PR.
+- **El alumno elige la unidad en un desplegable** de unidades compatibles que reemplaza al de
+  prefijos. El JS no interpreta unidades: el servidor manda en `resolved` las unidades de entrada
+  de cada magnitud y resultado final, con su factor y desplazamiento. Si la dimensión no tiene
+  lista propia, se ofrece la declarada con prefijos SI (lo de hoy); si la unidad no se reconoce,
+  solo la declarada.
+
+1. **`feat(unidades)`: el motor interpreta unidades (F10, 1/4).**
+   - `src/units.rs`: interpretar, compatibilidad, conversión y unidades de entrada, con tests
+     para todas las unidades en uso. Sin cambios de comportamiento.
+   - Las plantillas que usan `C` para temperatura pasan a `°C`.
+2. **`fix(incertidumbres)`: el tipo B convierte la escala a la unidad de la magnitud (F10, 2/4).** ✅
+   - Si las dos unidades se reconocen y son compatibles, el tipo B se calcula en la unidad de la
+     escala (con la media pasada a esa unidad, desplazamiento incluido) y la u_B se convierte una
+     sola vez a la unidad de la magnitud. Así todos los términos de la escala quedan bien, también
+     los que se agreguen.
+   - Si se reconocen y no son compatibles (un cronómetro en una masa), se calcula sin convertir,
+     como antes, con una advertencia; no frena el análisis (así una entrega guardada se sigue
+     pudiendo recalcular, y pares como `Hz` y `rad/s` no rompen). Si son distintas y alguna no
+     se reconoce (`div` en una magnitud en cm), también se avisa. Si son iguales o alguna está
+     vacía, queda como antes.
+   - Golden idénticos; tests con la regla en cm y en m, el densímetro en kg/m³ y un termómetro
+     en °C sobre una magnitud en K.
+3. **`refactor(unidades)`: una sola lógica de prefijos y de conversión (F10, 3a/4).** ✅
+   - `split_prefix` da el prefijo y la base de un símbolo; lo usan `symbol_unit` y `unprefixed`.
+     `PREFIXES` guarda la potencia de 10 y el factor exacto de cada prefijo, y los prefijos de
+     entrada se derivan de ahí (los de potencia múltiplo de 3).
+   - Los prefijos ofrecidos son razonables, contando desde la unidad declarada: en una unidad
+     simple, hasta 12 órdenes de magnitud contando el exponente (`cm2` → `mm2`, `km2`, no `Mm2`);
+     en una compuesta, hasta 3 (`µm/s` → `nm/s`, `mm/s`; `kg.m/s2` → `g.m/s2`, `Mg.m/s2`).
+   - `units::conversion(from, to)` convierte entre dos unidades (`valor·factor + offset`); la usa
+     el tipo B (`scale_to_quantity`). `input_units` comparte con ella el cálculo afín (`affine`)
+     y la misma regla de "sin unidad" (vacía tras normalizar), escrita aparte. Se quitó
+     `scale_factor`, que nadie usaba.
+4. **`feat(formularios)`: el alumno carga en la unidad que elija (F10, 3b/4).** ✅
+   - Desplegable de unidades compatibles en lugar del prefijo SI, en los 8 lugares del
+     formulario y en los resultados finales. Se guarda en la unidad declarada, como antes: los
+     valores con `factor` y `offset`, las incertidumbres solo con `factor`.
+   - El servidor manda en `resolved.input_units` las unidades de cada magnitud y de cada
+     resultado final (el cliente no interpreta unidades). Una magnitud con ranuras no se
+     convierte; con una sola unidad se muestra el texto, como antes.
+   - Decidido: **no hay marca de diferencia de temperatura** (se probó en el PR #156 y se
+     descartó). En el laboratorio se miden temperaturas: un ΔT se arma con una fórmula
+     (`T1 - T2`), que cancela el desplazamiento. Las magnitudes cargadas ofrecen °C ↔ K con
+     desplazamiento; los **resultados finales no ofrecen unidades con un desplazamiento
+     distinto** (un `dT` en K no se informa en °C).
+   - `mm2`, `cm2` y `m2` se suman a las candidatas (los prefijos de entrada son solo los de
+     potencia múltiplo de 3, así que `m2` no ofrecía `cm2`).
+5. **`feat(editor)`: el docente ve si la unidad se reconoce (F10, 4/4).** ✅
+   - Aviso en el panel de problemas para unidades que no se reconocen, solo donde importa
+     (magnitudes, resultados finales y mensurandos con "Comparar con"; `pH` y `% m/m` no avisan),
+     en un bloque "Avisos" aparte: **no bloquea publicar** (`div` es legítima). En la lista de
+     magnitudes y mensurandos se ven las otras unidades en que el alumno puede cargar (solo lo
+     guardado, no mientras se tipea).
+   - "Comparar con" acepta unidades compatibles **sin desplazamiento** (igual texto, o las dos
+     reconocidas y compatibles por factor; vacía solo con vacía; °C contra K no, por el mismo
+     motivo que los resultados finales). El servidor manda el factor de cada par
+     (`resolved.comparisons` y `comparisons` de la entrega, `{ with, factor }`) y la tabla
+     medido vs teórico pasa lo medido a la unidad del mensurando.
+
+**Plan de PRs: química, segunda tanda** (relevado 2026-11-25)
+
+Lo que se relevó:
+- La magnitud física (`quantity`) es texto libre en magnitudes e instrumentos y el cliente la
+  compara exacta (`compatibleInstruments`). Filtros usaba `tension` y ningún instrumento sembrado,
+  así que no ofrecía voltímetros.
+- Un dato de cátedra no tenía U fija: el alumno siempre la escribía; `default_value` solo precargaba.
+- Las fórmulas se compilan con `evalexpr` a un árbol recorrible; `units::Unit` tiene dimensiones
+  (m, kg, s, A, K, mol, cd, rad). La regresión da `slope`, `intercept` y sus u, sin covarianza, y
+  `uncertainty::propagate` supone entradas independientes.
+
+Decisiones: el chequeo dimensional **avisa y no bloquea**; las constantes del catálogo quedan
+**fijas** para el alumno; la interpolación inversa entra en esta tanda.
+
+1. **`feat(magnitudes)`: sinónimos de magnitud física.** ✅ (#159)
+   - `src/magnitudes.rs`: catálogo de canónicas con sus sinónimos y `canonical` (minúsculas, sin
+     tildes, espacios simples, sinónimo → canónica; lo desconocido queda normalizado).
+     `intensidad` y `capacidad` no son sinónimos: en química suelen ser otra cosa.
+   - Un solo punto de normalización, `QuantityInput::magnitude()`: el guardado, la definición
+     editada y el chequeo de `tiempo` del cronómetro. Instrumentos: `canonical` al guardar y al
+     validar (también al importar el catálogo). `filtros.json`: `tension` → `voltaje`.
+   - El editor sugiere las canónicas (`GET /api/magnitudes`, `<datalist>`).
+2. **`feat(practicas)`: dato de cátedra con valor fijo.** ✅
+   - Columnas `fixed` y `default_u`. "Valor fijo" es un tilde del dato de cátedra o la constante;
+     la U fija solo del dato de cátedra. Exige valor (y U ≥ 0 si lleva incertidumbre); no admite
+     ranuras ni repetirse por determinación.
+   - `computation::with_fixed_values` reemplaza lo que mande el cliente por el valor y la U de
+     la definición en la entrega, su edición, la vista previa y los valores en vivo: lo guardado
+     también es el valor fijo.
+   - El alumno ve `valor ± U unidad` como texto, sin campos ni desplegable de unidades.
+   - Ninguna práctica de la biblioteca usa valor fijo todavía: los golden no cambian.
+3. **`feat(editor)`: catálogo de constantes.** ✅
+   - `static/constants.json`, servido como archivo estático (sin ruta: son datos públicos y el
+     servidor no los usa). Exactas del SI 2019 como constantes sin U (N_A, k_B, R, F, q_e; `e` es el número de Euler) y la
+     gravedad estándar; masas molares de 12 elementos comunes (IUPAC/CIAAW 2021) como dato de
+     cátedra con la incertidumbre de la tabla como U. Cada entrada anota su edición (`source`);
+     no se consulta ninguna fuente en vivo, el archivo se actualiza a mano en un PR.
+   - "Desde el catálogo" en el alta de magnitud precarga la constante como valor fijo; el
+     docente la revisa y la guarda.
+   - El alumno ve el valor fijo con todos sus dígitos, coma decimal y `× 10ⁿ` para lo muy grande
+     o muy chico (`exactNumber`).
+4. **`feat(editor)`: chequeo dimensional de fórmulas.** ✅
+   - `src/dimensions.rs` infiere las dimensiones recorriendo el árbol de la fórmula, con los
+     exponentes de `units::Unit` sin los radianes. Solo dimensiones, no escala; lo que no se puede
+     inferir (unidad no reconocida, exponente no entero como `sqrt` de m, exponente no literal)
+     no avisa. Un número suelto se adapta (`T + 273.15` no avisa).
+   - Avisa, en el bloque "Avisos" y sin bloquear publicar, en mensurandos, intermedias, derivadas
+     por punto y agregados: si la fórmula no da la unidad declarada, si suma o resta dimensiones
+     distintas (también en `min`, `max`, `hypot`), y si ln, log, exp o una trigonométrica reciben
+     algo con dimensiones.
+   - Cada símbolo toma la unidad declarada de su elemento; los generados (`_first`, `_last`,
+     `_max`, `_at_…_max`, `_medio`) la de su base; `slope` = dim(y)/dim(x) e `intercept` =
+     dim(y) de los ejes. Ninguna práctica de la biblioteca da avisos.
+5. **`feat(regresion)`: interpolación inversa.** ✅
+   - La covarianza pendiente-ordenada no se suma como término `2·∂f/∂b·∂f/∂m·cov`: con x lejos
+     del origen (x̄ ≫ dispersión) los términos casi se cancelan y el redondeo se come lo que queda.
+     La recta se describe con dos fuentes independientes: la pendiente (`u_slope`) y la altura
+     media (`u_mean_y = s/√n`), con `intercept = ȳ - m·x̄`. `uncertainty::propagated_u` suma, por
+     cada fuente, el cuadrado de `Σ ∂f/∂x_i·carga_i`: las varianzas no se restan. Dentro de la
+     fuente de la pendiente sí se suman `∂f/∂m·u_m` y `−x̄·u_m·∂f/∂b`, que con x lejos del
+     origen casi se cancelan (la fórmula usa `intercept`, así que la cancelación es de la fórmula
+     misma). Se pierden unos `log10(x̄/dispersión)` dígitos de esa parte de la U: nada con 1e8
+     (verificado), unos 4 con x ~ 1e12.
+   - **Derivadas exactas**: la propagación de los mensurandos deja la diferencia finita y evalúa la
+     fórmula con números duales (`computation/dual.rs`, valor + gradiente) sobre el mismo árbol
+     de evalexpr. Cada operador y cada función de `FUNCTIONS` tiene su derivada de libro; lo que
+     no se reconoce da NaN en la derivada (y el aviso de U no calculable). El valor sigue saliendo de evalexpr.
+     Sin paso que elegir, desaparecen los casos borde de la diferencia finita (medias ~0, U ≫
+     media, singularidades, desplazamientos grandes).
+   - **Quiebres**: en `abs` en 0 y en un `min`/`max` empatado (lecturas redondeadas a la
+     resolución empatan seguido) se usa el gradiente completo de una sola rama, la de mayor U
+     (con las u y las fuentes compartidas del mensurando; una rama con NaN pierde). El alumno ve un
+     aviso de que puede no ser exacta siempre que las ramas empatadas difieran y alguna aporte U
+     (o, en `abs`, si su argumento aporta U). Con ramas de igual U dentro de una fórmula más grande
+     (`max(a, b) + a`), la U final puede depender del orden de los argumentos; por eso el aviso se
+     mantiene. En el salto de `%` (cociente entero distinto de 0) no hay derivada: U no
+     calculable, con su aviso.
+   - **Limitaciones conocidas**: (1) en un quiebre la rama se elige por la U de esa parte de la
+     fórmula, no del mensurando completo: si lo que rodea al `min`/`max` se correlaciona con él,
+     puede no ser la rama que da la mayor U final.
+     (2) Una magnitud que está en un eje y también en el mensurando (`y = h*rho*g0`, `k =
+     slope/rho`) cuenta su u dos veces: las fuentes compartidas solo ligan pendiente y ordenada, no
+     la pendiente con cada magnitud de los ejes.
+   - La interpolación es un mensurando común (`(A_m - intercept)/slope`, `A_m` magnitud
+     compartida); su U es `√((u(A_m)/m)² + (s/m)²·(1/n + (y0-ȳ)²/(m²·Sxx)))`, con u(A_m) la U
+     propia de la muestra (tipo A + tipo B de su escala). Con u(A_m) = s/√k es la fórmula de
+     libro `s/|m|·√(1/k + 1/n + …)`. Verificado también con x desplazado 1e8. Ayuda en el editor.
+   - Los golden no cambian.
+
+**Pasaje a analítico del resto** (pendiente, después de la #164)
+
+**Regla:** toda incertidumbre que se propaga a través de una fórmula sale de `eval_dual` +
+`propagated_u`: sin diferencias finitas ni derivadas escritas a mano. Las correlaciones entran
+como fuentes compartidas (cargas), nunca como términos de covarianza que se restan. Quedan
+fuera las U que no son propagación sino definición (tipo A, tipo B de la escala, su
+combinación, y `u_slope`/`u_intercept`/`u_mean_y` de la regresión).
+
+Con los duales, la U de los mensurandos ya sale con derivadas exactas. Lo que todavía se
+calcula sin incertidumbre usa el mismo evaluador:
+
+1. **Derivadas por punto** ✅: U por corrida (`u`/`u_expanded` en `point_results`, `valor ± U` en
+   la tabla "Por corrida"). `propagate` (sacado de `derive_results`) evalúa con duales una fórmula
+   y sus dependencias. Las hojas son las magnitudes: las por punto con la u de su punto (tipo A
+   de las réplicas del punto y tipo B de su escala en la media del punto) y las compartidas con su
+   u; `slope`/`intercept` entran con las fuentes de la recta. Las intermedias y los mensurandos
+   que use se expanden por su fórmula, así una magnitud que entra por varios caminos cuenta una
+   vez (`m - slope*c` con `m = slope*c` da U = 0); para las compartidas de los ejes vale desde el
+   ítem 5, pero no para la pendiente y la ordenada frente a las magnitudes por punto de los ejes
+   (un residuo `py - (slope*px + intercept)` sobreestima su U). El panel "Avisos" del editor marca
+   la derivada por punto que usa la recta y magnitudes por punto de los ejes (las `Re` de Fluidos I
+   y Viscosidad); no aparece en
+   las entregas, porque depende de la práctica y no de los datos. El valor sigue saliendo como antes: los golden
+   de Fluidos I y Viscosidad solo ganan `u`/`u_expanded`. **Un mensurando sin incertidumbre es
+   exacto** para todo lo que lo usa (otros mensurandos y derivadas): entra con su valor y u = 0,
+   sin expandirse; `derive_results` los calcula en orden de dependencias. En la biblioteca solo
+   cambia `gamma_medio` de Hidrostática (promedio de γ, que no tiene U): su U oculta pasa a 0; solo se calcula la u de las magnitudes que usan las
+   derivadas. Sigue el límite del ítem 5. Desde el ítem 4a las derivadas por punto usan el método
+   de las intermedias por réplica (ítem 3), así una derivada `P = Q` da la U de `Q`.
+2. **Agregados** ✅: U de cada agregado (`u`/`u_expanded`, `valor ± U` en la tabla), con
+   `propagate` contra las entradas. Hojas: las compartidas, la recta (sus fuentes), los extremos de
+   las magnitudes por punto (`X_first`… con la u de ese punto de su serie) y los mensurandos
+   exactos. Se expanden los mensurandos con incertidumbre, los agregados anteriores y los
+   extremos de las intermedias, armados con `rename_symbols` (`q_first = 2*px` pasa a
+   `2*px_first`), así `q_first - 2*px_first` da U = 0. El editor también avisa cuando un
+   agregado usa la recta y magnitudes de los ejes. Si una magnitud por punto tiene otro largo que
+   el ajuste, el extremo de una intermedia se propaga desde el punto de su corrida (como su valor),
+   y dos extremos que nombran el mismo punto (`x_first` y `x_last2` con dos puntos) cuentan una vez.
+   Desde el ítem 4b la U de un agregado sale con el método por réplica (ver 4b), así el extremo
+   de una intermedia da la U de esa intermedia en su corrida. El tipo B sigue saliendo de las
+   derivadas en los promedios: si la fórmula diverge justo en los promedios, el valor es finito y
+   la U no se puede calcular, con su aviso.
+   Como los mensurandos, un agregado puede ir **sin incertidumbre** (`has_uncertainty = false`):
+   se entrega solo el valor y es exacto para los agregados siguientes. Así van los cuatro de
+   Fluidos II (`Re_max`, `Re_min`, `Re_medio`, `M_teorico`), como en la hoja de resultados.
+3. **Intermedias por punto** ✅: U por corrida (`intermediates` en el análisis, con `values`/`u`/
+   `u_expanded` como las derivadas por punto; `valor ± U` en la tabla "Por corrida", también en
+   las prácticas de curva). Una intermedia **por réplica** (`Q = V/t`) calcula y promedia: su U
+   combina el tipo A de los valores calculados `f(r₁…rₙ)` (s/√n, que respeta que las lecturas de
+   una réplica se tomaron juntas) con el tipo B propagado con duales en los promedios (solo `u_b`
+   de las magnitudes que varían réplica a réplica; la u completa de las compartidas y de las de un
+   solo valor por punto). Una intermedia **sobre promedios** (`v = dx/t`) se propaga en los
+   promedios con la u completa de cada punto. Una intermedia por réplica que usa otra anterior por
+   réplica toma su valor en la misma réplica si tiene tantas réplicas como las magnitudes que usa
+   directo (si no, entra su promedio con su U completa, sin inventar réplicas; antes tomaba siempre
+   su promedio: `Qsq = Q*Q` pasa de
+   promedio(Q)² a promedio(Q²); ninguna de la biblioteca encadena intermedias) y la expande por su
+   fórmula, así una magnitud compartida (`q = 2*V`, `r = q*V`) cuenta una vez. Una intermedia sobre
+   promedios también expande las anteriores. Una anterior sobre promedios usada por una por réplica
+   vale lo mismo en todas las réplicas; desde el ítem 4a, en ese caso (y si alcanza una anterior
+   con otra cantidad de réplicas) la U se propaga en los promedios expandiendo todo, así una
+   magnitud compartida cuenta una vez. Si la U no sale porque falta la de una entrada, el aviso queda en esa
+   entrada y no culpa a la fórmula. Una intermedia sin corridas (una magnitud opcional vacía) no
+   se muestra.
+   Cada intermedia se muestra en tantas corridas como puntos tienen sus magnitudes (la menor
+   cantidad común, como el ajuste), sin pasarse de las corridas del ajuste o de la primera curva:
+   en curva, una intermedia que solo usa otra curva con más puntos queda cortada. Golden:
+   Fluidos I, Viscosidad, Filtros y CC ganan `intermediates`; ningún valor cambia.
+4. **Ejes del ajuste**:
+   - **4a** ✅: U de x e y en cada punto (`u_points` en la regresión, expandida, k = 2; barras de
+     error en el gráfico) y derivadas por punto con el método de las intermedias. Cada eje y cada
+     derivada se calcula como una intermedia por réplica: tipo A de la fórmula evaluada réplica
+     por réplica (con las intermedias anteriores emparejadas por réplica) y tipo B propagado con
+     duales expandiendo las intermedias emparejadas y los mensurandos con U, con `u_b` para las
+     magnitudes que varían réplica a réplica; `slope`/`intercept` llevan las fuentes de la recta.
+     Así un eje `Q` da la U de `Q`, y la derivada `P = Q` coincide con la tabla. Si la fórmula
+     alcanza una intermedia sobre promedios, una con otra cantidad de réplicas o una réplica no
+     finita, su U se propaga en los promedios con la u completa expandiendo todo (como antes),
+     así `P = Q*t` con `Q = V/t` sobre promedios da la U de `V`. El valor no
+     cambia. Una magnitud que solo entra en un eje ahora tiene u por punto (y su aviso de escala,
+     si no la tiene). Las curvas no llevan barras. Golden: los de regresión ganan `u_points`;
+     Fluidos I y Viscosidad cambian levemente la U de `Re` (no el valor).
+   - **4b** ✅: los agregados con el mismo método. Las hojas de punto se agrupan por corrida: la
+     de un extremo directo (`px__p{k}`) en su punto `k`, y la que se alcanza por la intermedia de la
+     corrida `i` en esa corrida (aunque una serie corta la haya fijado en su último punto, como en
+     el ajuste); si una misma hoja cae en dos grupos, esos grupos vuelven a los promedios. Las
+     réplicas de un grupo se tomaron juntas y las de grupos distintos son independientes. Por cada punto alcanzado, el tipo A sale de evaluar el agregado réplica por
+     réplica con las magnitudes de ese punto (lo demás en su valor), y el tipo B de propagar con
+     `u_b` para las hojas de esos puntos que varían; la U combina el tipo B con el tipo A de cada
+     punto. Un punto vuelve a los promedios (u completa, sin tipo A) si alcanza una intermedia sobre
+     promedios en esa corrida, si sus magnitudes tienen distinta cantidad de réplicas o si una
+     evaluación no es finita. Así `q_first` da la U de `q` en la corrida 0 y `q_first - 2*px_first`
+     sigue en 0. Ningún golden cambia: los únicos agregados de la biblioteca (Fluidos II) van sin
+     incertidumbre.
+   Es la base de una regresión ponderada (ítem de "General").
+5. **Magnitudes compartidas dentro y fuera del ajuste** ✅: una magnitud compartida que entra en
+   un eje corre la recta entera sin agregar dispersión, así que la u estadística del ajuste no la
+   ve. Ahora cada compartida `m` con u que alcanzan las fórmulas de eje (directo o por intermedias)
+   es una fuente común: con duales se calcula `∂x_i/∂m` y `∂y_i/∂m` en cada punto, y de ahí la
+   sensibilidad de la pendiente y la ordenada (`analysis::line_sensitivity`, forma cerrada de
+   mínimos cuadrados). El factor `[slope: db·u_m, intercept: da·u_m, m: u_m]` se suma a las fuentes
+   de la recta y la u independiente de `m` pasa a 0, en todas las propagaciones de la regresión
+   (mensurandos, intermedias, ejes, derivadas y agregados). Así `k = slope/rho` con eje
+   `h*rho*g0` cancela `rho`, y `µ = …/slope` con eje `dx/t` suma la u de `dx` (que antes faltaba).
+   El panel del ajuste muestra las dos U: la del ajuste y, si hay compartidas, la total
+   (`u_slope_total`, `u_intercept_total`, `shared` en la regresión). Las magnitudes por punto de los
+   ejes quedan fuera: su dispersión ya está en la u del ajuste, y la parte sistemática de su escala
+   pide otro modelo; el editor sigue avisando ese caso. En la biblioteca `dx` (Viscosidad) y
+   `h_max` (Fluidos II) van sin u, así que ningún golden cambia.
+
+Cada uno en su PR, con su test contra una fórmula de libro y los golden revisados (hoy esos
+campos no tienen U: el golden gana campos, no cambia números).
 
 **General**
 

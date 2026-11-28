@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   analysisSections,
+  determinationsFor,
+  symbolPart,
+  expandDeterminationResults,
   exampleMeasurements,
   practiceGuideSteps,
   guideStepOrNext,
@@ -11,8 +14,10 @@ import {
   setDisplaySymbols,
   inlineMathHtml,
   unitHtml,
+  unitText,
   cssEscape,
   format,
+  exactNumber,
   formatDate,
   groupBy,
   renderGroupType,
@@ -37,8 +42,6 @@ import {
   compareOptionGroups,
   draftMeasurementsByQuantity,
   draftedQuantityIds,
-  SI_PREFIXES,
-  prefixFactor,
   seriesStats,
   histogram,
   normalCurve,
@@ -176,6 +179,10 @@ test("inlineMathHtml y unitHtml formatean subíndices y superíndices visibles",
   assert.equal(unitHtml("kg/m3"), "kg/m<sup>3</sup>");
   assert.equal(unitHtml("m/s2"), "m/s<sup>2</sup>");
   assert.equal(unitHtml("R^2"), "R<sup>2</sup>");
+  assert.equal(unitText("cm3"), "cm³");
+  assert.equal(unitText("kg/m3"), "kg/m³");
+  assert.equal(unitText("m.s-2"), "m.s⁻²");
+  assert.equal(unitText("mol/L"), "mol/L");
 });
 
 test("cssEscape cae al escape de comillas sin window (Node)", () => {
@@ -355,7 +362,7 @@ test("measureText formatea 'valor ± U' y omite U inválida", () => {
 });
 
 test("regressionPlot escala puntos y recta al lienzo (recta conocida)", () => {
-  const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1, 320, 220, 32);
+  const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1);
   assert.deepEqual(plot.bounds, { minX: 0, maxX: 2, minY: 1, maxY: 5 });
   assert.deepEqual(plot.scatter, [
     { cx: 32, cy: 188 },
@@ -366,10 +373,25 @@ test("regressionPlot escala puntos y recta al lienzo (recta conocida)", () => {
 });
 
 test("regressionPlot extiende el rango Y para incluir la recta", () => {
-  const plot = regressionPlot([[0, 0], [1, 0]], 5, 0, 320, 220, 32);
+  const plot = regressionPlot([[0, 0], [1, 0]], 5, 0);
   assert.equal(plot.bounds.minY, 0);
   assert.equal(plot.bounds.maxY, 5);
   assert.deepEqual(plot.line, { x1: 32, y1: 188, x2: 288, y2: 32 });
+});
+
+test("regressionPlot amplía el rango para las barras, hasta la mitad del rango de los datos", () => {
+  const plot = regressionPlot([[0, 1], [1, 3], [2, 5]], 2, 1, { uPoints: [[0.5, 0], [0, 1], [null, 100]] });
+  assert.deepEqual(plot.bounds, { minX: -0.5, maxX: 2, minY: -1, maxY: 7 });
+  const [first, mid, last] = plot.scatter;
+  assert.deepEqual(first.ex, { ends: [32, first.cx + (first.cx - 32)], clipped: [false, false] });
+  assert.equal(first.ey, undefined);
+  assert.equal(mid.ex, undefined);
+  assert.ok(mid.ey.ends[0] > mid.cy && mid.ey.ends[1] < mid.cy);
+  assert.deepEqual(mid.ey.clipped, [false, false]);
+  assert.deepEqual(last.ey, { ends: [188, 32], clipped: [true, true] });
+  assert.equal(last.noU, true);
+  assert.equal(first.noU, undefined);
+  assert.equal(plot.line.x1, first.cx);
 });
 
 test("regressionPlot devuelve null con <2 puntos o rango nulo", () => {
@@ -461,6 +483,7 @@ test("draftMeasurementsByQuantity: columna de un valor por punto", () => {
   assert.deepEqual(map.get("q1"), {
     pointGroups: [[1], [2], [3]],
     operatorGroups: [],
+    operatorInstruments: [],
     values: [1, 2, 3],
     value_u: null,
     instrument_id: null,
@@ -494,6 +517,23 @@ test("draftMeasurementsByQuantity: magnitud por operador (Motor D)", () => {
     },
   ]);
   assert.deepEqual(map.get("q1").operatorGroups, [[1, 1.1], [2, 2.1, 2.2]]);
+});
+
+test("draftMeasurementsByQuantity: instrumento por determinación", () => {
+  const balanza = { instrument_id: "bal", scale_id: "0.1g" };
+  const none = { instrument_id: null, scale_id: null };
+  const map = draftMeasurementsByQuantity([
+    {
+      quantity_id: "m_8",
+      instrument_id: null,
+      scale_id: null,
+      values: [],
+      given_u: null,
+      operator_replicas: [[0], [2], [0]],
+      operator_instruments: [none, balanza, none],
+    },
+  ]);
+  assert.deepEqual(map.get("m_8").operatorInstruments, [none, balanza, none]);
 });
 
 test("draftMeasurementsByQuantity: fila suelta dada (valor ± U)", () => {
@@ -542,7 +582,7 @@ test("compareMeasuredVsTheoretical empareja cada resultado con su compare_with y
     { symbol: "VR1_s_t", name: "Teorica R1", unit: "V", value: 1.6, u_expanded: 0.08 },
     { symbol: "I_s", name: "Corriente", unit: "A", value: 0.015, u_expanded: 0.001 },
   ];
-  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["VR1_s_t", "VR1_s"]]));
+  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["VR1_s_t", { with: "VR1_s", factor: 1 }]]));
   assert.equal(rows.length, 1);
   const [row] = rows;
   assert.equal(row.symbol, "VR1_s");
@@ -560,7 +600,7 @@ test("compareMeasuredVsTheoretical: deltas null con teórico 0 o U faltante", ()
     { symbol: "X", name: "X", unit: "u", result: { mean: 2, u_expanded: null } },
   ];
   const derived = [{ symbol: "X_t", name: "X teorica", unit: "u", value: 0, u_expanded: 0.1 }];
-  const [row] = compareMeasuredVsTheoretical(quantities, derived, new Map([["X_t", "X"]]));
+  const [row] = compareMeasuredVsTheoretical(quantities, derived, new Map([["X_t", { with: "X", factor: 1 }]]));
   assert.ok(Math.abs(row.dValue - 2) < 1e-9);
   assert.equal(row.dValuePct, null);
   assert.equal(row.dU, null);
@@ -577,35 +617,22 @@ test("compareMeasuredVsTheoretical ya no empareja por el sufijo _t sino por los 
     { symbol: "Y_calc", name: "Y calculada", unit: "u", value: 3.2, u_expanded: 0.1 },
   ];
   assert.deepEqual(compareMeasuredVsTheoretical(quantities, derived).map((r) => r.symbol), []);
-  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["Y_calc", "Y"]]));
+  const rows = compareMeasuredVsTheoretical(quantities, derived, new Map([["Y_calc", { with: "Y", factor: 1 }]]));
   assert.deepEqual(rows.map((r) => [r.symbol, r.theoreticalSymbol]), [["Y", "Y_calc"]]);
 });
 
-test("comparisonPairs arma los pares desde los resultados con compare_with", () => {
-  const definition = {
-    results: [
-      { symbol: "VR1_s_t", compare_with: "VR1_s" },
-      { symbol: "I_s", compare_with: "" },
-      { symbol: "P_max_t" },
-    ],
-  };
-  assert.deepEqual([...comparisonPairs(definition)], [["VR1_s_t", "VR1_s"]]);
+test("comparisonPairs toma los pares que resuelve el servidor", () => {
+  const pair = { with: "VR1_s", factor: 1000 };
+  const definition = { results: [{ symbol: "VR1_s_t", compare_with: "VR1_s" }], resolved: { comparisons: { VR1_s_t: pair } } };
+  assert.deepEqual([...comparisonPairs(definition)], [["VR1_s_t", pair]]);
   assert.equal(comparisonPairs(null).size, 0);
 });
 
-test("SI_PREFIXES es un array con entradas para 'm', 'k' y ''", () => {
-  assert.ok(Array.isArray(SI_PREFIXES));
-  assert.ok(SI_PREFIXES.some((p) => p.label === "m" && Math.abs(p.factor - 1e-3) < 1e-15));
-  assert.ok(SI_PREFIXES.some((p) => p.label === "k" && Math.abs(p.factor - 1e3) < 1e-9));
-  assert.ok(SI_PREFIXES.some((p) => p.label === "" && p.factor === 1));
-});
-
-test("prefixFactor devuelve el factor correcto o 1 para desconocidos", () => {
-  assert.equal(prefixFactor("m"), 1e-3);
-  assert.equal(prefixFactor("k"), 1e3);
-  assert.equal(prefixFactor(""), 1);
-  assert.equal(prefixFactor("?"), 1);
-  assert.equal(prefixFactor(undefined), 1);
+test("compareMeasuredVsTheoretical pasa lo medido a la unidad del mensurando", () => {
+  const quantities = [{ symbol: "V", name: "V", unit: "V", result: { mean: 1.5, u_expanded: 0.1 } }];
+  const derived = [{ symbol: "V_t", name: "V teórica", unit: "mV", value: 1600, u_expanded: 80 }];
+  const [v] = compareMeasuredVsTheoretical(quantities, derived, new Map([["V_t", { with: "V", factor: 1000 }]]));
+  assert.deepEqual([v.unit, v.exp.value, v.exp.u, v.dValue], ["mV", 1500, 100, -100]);
 });
 
 test("seriesStats: n=0 devuelve NaN; n=1 std=0; n>1 calcula bien", () => {
@@ -742,15 +769,15 @@ test("validateMeasurements: estadistico reporta mensurando sin lecturas", () => 
   assert.equal(ok, null);
 });
 
-test("validateMeasurements: operadores exigen una serie por operador", () => {
-  const meta = { T: { name: "Periodo", isGiven: false, isChrono: false } };
+test("validateMeasurements: cada determinación exige su serie", () => {
+  const meta = { T: { name: "Periodo", isGiven: false, isChrono: false, groupLabel: "Operador" } };
   const err = validateMeasurements(
     [{ quantity_id: "T", values: [], given_u: null, operator_replicas: [[1, 1.1], []] }],
     "estadistico",
     meta,
   );
   assert.ok(typeof err === "string");
-  assert.ok(err.includes("operador 2"));
+  assert.ok(err.includes("falta cargar Operador 2"));
   const ok = validateMeasurements(
     [{ quantity_id: "T", values: [], given_u: null, operator_replicas: [[1, 1.1], [2, 2.1]] }],
     "estadistico",
@@ -922,17 +949,17 @@ test("formatSymbolHtml no busca en los símbolos a mostrar", () => {
   setDisplaySymbols({});
 });
 
-test("exampleMeasurements: estadística con datos dados, repetidas, únicas y operadores", () => {
+test("exampleMeasurements: estadística con datos dados, repetidas, únicas y determinaciones", () => {
   const definition = {
     analysis_kind: "estadistico",
-    operator_count: 2,
     quantities: [
       { id: "g", is_given: true, default_value: 9.8 },
       { id: "c", is_given: true, has_uncertainty: false },
       { id: "s", is_given: true, slot_count: 4 },
-      { id: "t", repeated: true },
+      { id: "t", symbol: "t", repeated: true, per_determination: true },
       { id: "L", repeated: false },
     ],
+    resolved: { determinations: { t: { count: 2, label: "Operador" } } },
   };
   const [g, c, s, t, L] = exampleMeasurements(definition);
   assert.deepEqual(g.values, [9.8]);
@@ -945,7 +972,7 @@ test("exampleMeasurements: estadística con datos dados, repetidas, únicas y op
   assert.deepEqual(L.values, [1]);
 });
 
-test("exampleMeasurements: sin operadores una repetida da réplicas parecidas", () => {
+test("exampleMeasurements: sin determinaciones una repetida da réplicas parecidas", () => {
   const [t] = exampleMeasurements({ quantities: [{ id: "t", repeated: true }] }, { replicas: 4 });
   assert.equal(t.values.length, 4);
   assert.ok(Math.max(...t.values) / Math.min(...t.values) < 1.05);
@@ -954,7 +981,6 @@ test("exampleMeasurements: sin operadores una repetida da réplicas parecidas", 
 test("exampleMeasurements: regresión con serie simple y con réplicas por punto", () => {
   const definition = {
     analysis_kind: "regresion_lineal",
-    operator_count: 3,
     quantities: [
       { id: "x", per_point: true },
       { id: "y", per_point: true, repeated: true, replicas_per_point: 2 },
@@ -1033,4 +1059,101 @@ test("guideStepOrNext: un paso que ya no aplica cae al siguiente que sí", () =>
   assert.equal(guideStepOrNext(estadistica, "magnitudes"), "magnitudes");
   assert.equal(guideStepOrNext({ analysis_kind: "curva" }, "serie"), "serie");
   assert.equal(guideStepOrNext(estadistica, "desconocido"), "datos");
+});
+
+function determinationDefinition(display = "bloques", average = true) {
+  const determinations = { count: 3, label: "Medida", average, display };
+  const scoped = { scope: "", ...determinations };
+  return {
+    analysis_kind: "estadistico",
+    determinations,
+    resolved: { symbol_parts: {}, determinations: { T: scoped, m: scoped, L: scoped, g: scoped, k: scoped } },
+    quantities: [
+      { id: "qT", symbol: "T", repeated: true, per_determination: true },
+      { id: "qm", symbol: "m", is_given: true, per_determination: true, default_value: 2 },
+      { id: "qL", symbol: "L", repeated: false },
+    ],
+    results: [
+      { symbol: "g", name: "Gravedad", formula: "4*pi^2*L/T^2", is_final: true },
+      { symbol: "k", name: "Constante", formula: "g*m", is_final: true },
+      { symbol: "doble", name: "Doble", formula: "2*L", is_final: true },
+      { symbol: "rel", name: "Relativo", formula: "g_medio/9.8", is_final: true },
+    ],
+  };
+}
+
+test("determinaciones: el cliente lee lo que resolvió el servidor", () => {
+  const def = determinationDefinition();
+  assert.equal(determinationsFor(def, "T").count, 3);
+  assert.equal(determinationsFor(def, "doble"), null);
+  assert.equal(determinationsFor({}, "T"), null);
+  assert.equal(symbolPart({ resolved: { symbol_parts: { g: "stat" } } }, "g"), "stat");
+  assert.equal(symbolPart(def, "g"), null);
+});
+
+test("determinaciones: filas del resultado final", () => {
+  const def = determinationDefinition();
+  const rows = expandDeterminationResults(def, def.results);
+  assert.deepEqual(
+    rows.map((r) => r.symbol),
+    ["g#1", "g#2", "g#3", "g_medio", "k#1", "k#2", "k#3", "k_medio", "doble", "rel"],
+  );
+  assert.equal(rows[1].name, "Gravedad — Medida 2");
+  assert.equal(rows[1].base, "g");
+  assert.equal(rows[1].determination.tabs, false);
+  const tabs = expandDeterminationResults(determinationDefinition("pestanas", false), def.results);
+  assert.ok(!tabs.some((r) => r.symbol.endsWith("_medio")));
+  assert.equal(tabs[2].determination.tabs, true);
+});
+
+test("exampleMeasurements: determinaciones, también en un dato de cátedra", () => {
+  const [T, m, L] = exampleMeasurements(determinationDefinition());
+  assert.equal(T.operator_replicas.length, 3);
+  assert.equal(T.operator_replicas[0].length, 3);
+  assert.deepEqual(m.operator_replicas.map((g) => g.length), [1, 1, 1]);
+  assert.deepEqual(m.values, []);
+  assert.ok(m.given_u > 0);
+  assert.deepEqual(L.values.length, 1);
+});
+
+test("validateMeasurements: cada determinación necesita lo suyo", () => {
+  const meta = {
+    qT: { name: "Período", groupLabel: "Medida" },
+    qm: { name: "Masa", isGiven: true, groupLabel: "Medida" },
+  };
+  const T = (groups) => ({ quantity_id: "qT", values: [], operator_replicas: groups });
+  const m = (groups, given_u = 0.1) => ({ quantity_id: "qm", values: [], given_u, operator_replicas: groups });
+  assert.equal(validateMeasurements([T([[1], [2], [3]]), m([[1], [1], [1]])], "estadistico", meta), null);
+  assert.match(validateMeasurements([T([[1], [], [3]])], "estadistico", meta), /falta cargar Medida 2/);
+  assert.match(validateMeasurements([m([[1], [], [1]])], "estadistico", meta), /falta cargar Medida 2/);
+  assert.match(validateMeasurements([m([[1], [1], [1]], null)], "estadistico", meta), /incertidumbre U/);
+});
+
+test("validateMeasurements: en una práctica de series las determinaciones se validan por grupo", () => {
+  const meta = {
+    x: { name: "x", perPoint: true },
+    T: { name: "Periodo", perPoint: false, groupLabel: "Medida" },
+  };
+  const x = { quantity_id: "x", values: [1, 2, 3] };
+  const T = (groups) => ({ quantity_id: "T", values: [], operator_replicas: groups });
+  assert.equal(validateMeasurements([x, T([[1], [2]])], "regresion_lineal", meta), null);
+  assert.match(validateMeasurements([x, T([[1], []])], "regresion_lineal", meta), /falta cargar Medida 2/);
+  assert.match(validateMeasurements([x, T([])], "regresion_lineal", meta), /falta cargar Medida 1/);
+});
+
+test("exactNumber: todos los dígitos, coma decimal y potencia de 10 si es muy grande o muy chico", () => {
+  assert.equal(exactNumber(8.314462618), "8,314462618");
+  assert.equal(exactNumber(96485.33212), "96485,33212");
+  assert.equal(exactNumber(1), "1");
+  assert.equal(exactNumber(0), "0");
+  assert.equal(exactNumber(-0.002), "-0,002");
+  assert.equal(exactNumber(0.0002), "0,0002");
+  assert.equal(exactNumber(0.00002), "2 × 10⁻⁵");
+  assert.equal(exactNumber(6.02214076e23), "6,02214076 × 10²³");
+  assert.equal(exactNumber(1.380649e-23), "1,380649 × 10⁻²³");
+  assert.equal(exactNumber(22.99, 0.001), "22,990");
+  assert.equal(exactNumber(1.008, 0.0002), "1,0080");
+  assert.equal(exactNumber(8.5, 0.1), "8,5");
+  assert.equal(exactNumber(1, 2e-7), "1");
+  assert.equal(exactNumber(6.02214076e23, 0.0001), "6,02214076 × 10²³");
 });

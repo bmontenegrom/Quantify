@@ -3,6 +3,7 @@ import { courseSelect, groupSelect, measurementFields, practiceSelect, studentCo
 import { collectMeasurements, collectFinalResults } from "./forms.js";
 import { Chronometer, CHRONO_MODES } from "./chronometer.js";
 import { chronoKeyFor, chronoHelperKey } from "./forms-chrono.js";
+import { unitChoices } from "./forms-shared.js";
 
 function draftKey() {
   const uid = state.user?.id ?? "anon";
@@ -17,6 +18,7 @@ export function saveDraft() {
     finalResults: collectFinalResults(),
     comment: studentComment?.value ?? "",
     chrono: chronoDraft(),
+    units: unitChoices(measurementFields),
     savedAt: Date.now(),
   };
   try {

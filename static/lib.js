@@ -51,11 +51,36 @@ export function unitHtml(value) {
     .replace(/([A-Za-zµΩ]+)(-?\d+)/g, "$1<sup>$2</sup>");
 }
 
+const SUPERSCRIPTS = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
+
+const sup = (digits) => [...digits].map((c) => SUPERSCRIPTS[c]).join("");
+
+export function unitText(value) {
+  return String(value ?? "")
+    .replace(/\^(-?\d+)/g, (_, d) => sup(d))
+    .replace(/([A-Za-zµΩ]+)(-?\d+)/g, (_, base, d) => base + sup(d));
+}
+
 export function cssEscape(value) {
   if (typeof window !== "undefined" && window.CSS?.escape) {
     return window.CSS.escape(String(value));
   }
   return String(value).replaceAll('"', '\\"');
+}
+
+const decimalsOf = (x) => {
+  const text = String(x);
+  return /e/.test(text) ? 0 : (text.split(".")[1] ?? "").length;
+};
+
+export function exactNumber(value, uncertainty = null) {
+  const v = Number(value);
+  if (v !== 0 && (Math.abs(v) >= 1e6 || Math.abs(v) < 1e-4)) {
+    const [mantissa, exponent] = v.toExponential().split("e");
+    return `${mantissa.replace(".", ",")} × 10${sup(String(Number(exponent)))}`;
+  }
+  const places = uncertainty == null ? 0 : decimalsOf(uncertainty);
+  return (decimalsOf(v) < places ? v.toFixed(places) : String(v)).replace(".", ",");
 }
 
 export function format(value) {
@@ -198,38 +223,35 @@ export function compatibleInstruments(instruments, magnitude) {
   return list.filter((instrument) => instrument.quantity === magnitude);
 }
 
-export const SI_PREFIXES = [
-  { label: "T",  factor: 1e12  },
-  { label: "G",  factor: 1e9   },
-  { label: "M",  factor: 1e6   },
-  { label: "k",  factor: 1e3   },
-  { label: "",   factor: 1     },
-  { label: "m",  factor: 1e-3  },
-  { label: "µ",  factor: 1e-6  },
-  { label: "n",  factor: 1e-9  },
-  { label: "p",  factor: 1e-12 },
-];
-
-export function prefixFactor(prefix) {
-  return SI_PREFIXES.find((p) => p.label === prefix)?.factor ?? 1;
-}
-
 export function measureText(value, u) {
   const base = format(value);
   if (u == null || !Number.isFinite(u) || u <= 0) return base;
   return `${base} ± ${format(u)}`;
 }
 
-export function regressionPlot(points, slope, intercept, width = 320, height = 220, pad = 32) {
+export function regressionPlot(points, slope, intercept, { uPoints = [], width = 320, height = 220, pad = 32 } = {}) {
   if (!Array.isArray(points) || points.length < 2) return null;
+  const half = (i, axis) => {
+    const u = uPoints?.[i]?.[axis];
+    return Number.isFinite(u) && u > 0 ? u : 0;
+  };
   const xs = points.map((p) => p[0]);
   const ys = points.map((p) => p[1]);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const lineYmin = slope * minX + intercept;
-  const lineYmax = slope * maxX + intercept;
-  const minY = Math.min(...ys, lineYmin, lineYmax);
-  const maxY = Math.max(...ys, lineYmin, lineYmax);
+  const dataMinX = Math.min(...xs);
+  const dataMaxX = Math.max(...xs);
+  const lineYmin = slope * dataMinX + intercept;
+  const lineYmax = slope * dataMaxX + intercept;
+  const dataMinY = Math.min(...ys, lineYmin, lineYmax);
+  const dataMaxY = Math.max(...ys, lineYmin, lineYmax);
+  const widen = (lo, hi, axis) => {
+    const room = (hi - lo) / 2;
+    return [
+      Math.max(lo - room, Math.min(lo, ...points.map((p, i) => p[axis] - half(i, axis)))),
+      Math.min(hi + room, Math.max(hi, ...points.map((p, i) => p[axis] + half(i, axis)))),
+    ];
+  };
+  const [minX, maxX] = widen(dataMinX, dataMaxX, 0);
+  const [minY, maxY] = widen(dataMinY, dataMaxY, 1);
   const spanX = maxX - minX;
   const spanY = maxY - minY;
   if (spanX === 0 || spanY === 0) return null;
@@ -237,12 +259,23 @@ export function regressionPlot(points, slope, intercept, width = 320, height = 2
   const innerH = height - 2 * pad;
   const sx = (x) => pad + ((x - minX) / spanX) * innerW;
   const sy = (y) => height - pad - ((y - minY) / spanY) * innerH;
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+  const bx = (px) => clamp(px, pad, width - pad);
+  const by = (py) => clamp(py, pad, height - pad);
   return {
     width,
     height,
     pad,
-    scatter: points.map((p) => ({ cx: sx(p[0]), cy: sy(p[1]) })),
-    line: { x1: sx(minX), y1: sy(lineYmin), x2: sx(maxX), y2: sy(lineYmax) },
+    scatter: points.map((p, i) => {
+      const point = { cx: sx(p[0]), cy: sy(p[1]) };
+      if (Array.isArray(uPoints?.[i]) && uPoints[i].some((u) => !Number.isFinite(u))) point.noU = true;
+      const bar = (lo, hi, fit) => ({ ends: [fit(lo), fit(hi)], clipped: [fit(lo) !== lo, fit(hi) !== hi] });
+      const [ux, uy] = [half(i, 0), half(i, 1)];
+      if (ux) point.ex = bar(sx(p[0] - ux), sx(p[0] + ux), bx);
+      if (uy) point.ey = bar(sy(p[1] - uy), sy(p[1] + uy), by);
+      return point;
+    }),
+    line: { x1: sx(dataMinX), y1: sy(lineYmin), x2: sx(dataMaxX), y2: sy(lineYmax) },
     bounds: { minX, maxX, minY, maxY },
   };
 }
@@ -381,9 +414,38 @@ export function guideStepOrNext(definition, step) {
   return (steps.find((s) => s.id === step) ?? steps.find((s) => order.indexOf(s.id) > from) ?? steps[0]).id;
 }
 
+export function seriesPart(definition) {
+  return (definition?.parts ?? []).find((p) => p.effective_kind && p.effective_kind !== "estadistico");
+}
+
+export function symbolPart(definition, symbol) {
+  return definition?.resolved?.symbol_parts?.[symbol] ?? null;
+}
+
+export function determinationsFor(definition, symbol) {
+  return definition?.resolved?.determinations?.[symbol] ?? null;
+}
+
+export function expandDeterminationResults(definition, results) {
+  return results.flatMap((r) => {
+    const d = determinationsFor(definition, r.symbol);
+    if (!d) return [r];
+    const label = d.label.trim();
+    const each = Array.from({ length: d.count }, (_, i) => ({
+      ...r,
+      symbol: `${r.symbol}#${i + 1}`,
+      name: `${r.name} — ${label} ${i + 1}`,
+      base: r.symbol,
+      part: d.scope || null,
+      determination: { scope: d.scope, index: i, tabs: d.display === "pestanas" },
+    }));
+    const average = { ...r, symbol: `${r.symbol}_medio`, name: `${r.name} (promedio)`, base: r.symbol, part: d.scope || null };
+    return d.average ? [...each, average] : each;
+  });
+}
+
 export function exampleMeasurements(definition, { points = 5, replicas = 3, instruments = [] } = {}) {
   const pointBased = POINT_KINDS.includes(definition?.analysis_kind);
-  const operators = !pointBased && (definition?.operator_count ?? 0) >= 2 ? definition.operator_count : 0;
   const round = (x) => Number(x.toPrecision(6));
   const series = (n, v) => Array.from({ length: n }, (_, k) => round(v * (1 + 0.01 * (k - (n - 1) / 2))));
   const quantities = definition?.quantities ?? [];
@@ -391,9 +453,15 @@ export function exampleMeasurements(definition, { points = 5, replicas = 3, inst
     const base = q.default_value != null && (q.is_given || q.default_value !== 0) ? q.default_value : quantities.length - i;
     const instrument = q.quantity && !q.is_given ? compatibleInstruments(instruments, q.quantity).find((x) => x.scales?.length) : null;
     const m = { quantity_id: q.id, instrument_id: instrument?.id ?? null, scale_id: instrument?.scales[0].id ?? null, values: [], given_u: null };
+    const groups = q.per_determination ? determinationsFor(definition, q.symbol)?.count ?? 0 : 0;
     if (q.is_given) {
       const value = q.slot_count ? q.default_value ?? 1 : base;
-      return { ...m, values: [value], given_u: hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null };
+      const given_u = hasUncertainty(q) ? round(Math.abs(value) * 0.01) : null;
+      if (groups) {
+        const each = (o) => (q.slot_count ? value : round(value * (1 + 0.02 * o)));
+        return { ...m, given_u, operator_replicas: Array.from({ length: groups }, (_, o) => [each(o)]) };
+      }
+      return { ...m, values: [value], given_u };
     }
     if (pointBased && q.per_point) {
       const at = (p) => base * (1 + p / (i + 2));
@@ -402,8 +470,9 @@ export function exampleMeasurements(definition, { points = 5, replicas = 3, inst
       }
       return { ...m, values: Array.from({ length: points }, (_, p) => round(at(p))) };
     }
-    if (q.repeated && operators) {
-      return { ...m, operator_replicas: Array.from({ length: operators }, (_, o) => series(replicas, base * (1 + 0.02 * o))) };
+    if (groups) {
+      const n = q.repeated ? replicas : 1;
+      return { ...m, operator_replicas: Array.from({ length: groups }, (_, o) => series(n, base * (1 + 0.02 * o))) };
     }
     return { ...m, values: q.repeated ? series(replicas, base) : [base] };
   });
@@ -444,6 +513,7 @@ export function draftMeasurementsByQuantity(measurements) {
     map.set(m.quantity_id, {
       pointGroups: m.point_replicas ?? (m.values ?? []).map((v) => [v]),
       operatorGroups: m.operator_replicas ?? [],
+      operatorInstruments: m.operator_instruments ?? [],
       values: m.values ?? [],
       value_u: m.given_u ?? null,
       instrument_id: m.instrument_id ?? null,
@@ -511,21 +581,25 @@ export function formulaHelpHtml(symbols, functions = [], known = null) {
 }
 
 export function comparisonPairs(definition) {
-  return new Map((definition?.results ?? []).filter((r) => r.compare_with).map((r) => [r.symbol, r.compare_with]));
+  return new Map(Object.entries(definition?.resolved?.comparisons ?? {}));
 }
 
 export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Map()) {
   const byQuantity = new Map((quantities ?? []).map((q) => [q.symbol, q]));
   return (derived ?? []).reduce((rows, d) => {
-    const q = byQuantity.get(pairs.get(d.symbol));
+    const pair = pairs.get(d.symbol);
+    const q = byQuantity.get(pair?.with);
     if (!q) return rows;
-    const ev = q.result?.mean ?? null;
-    const eu = q.result?.u_expanded ?? null;
+    const { factor = 1 } = pair;
+    const mean = q.result?.mean;
+    const u = q.result?.u_expanded;
+    const ev = mean == null ? null : mean * factor;
+    const eu = u == null ? null : u * factor;
     rows.push({
       symbol: q.symbol,
       theoreticalSymbol: d.symbol,
       name: q.name,
-      unit: q.unit,
+      unit: d.unit ?? q.unit,
       exp: { value: ev, u: eu },
       teo: { value: d.value, u: d.u_expanded },
       dValue: ev == null || !Number.isFinite(ev) ? null : ev - d.value,
@@ -535,6 +609,18 @@ export function compareMeasuredVsTheoretical(quantities, derived, pairs = new Ma
     });
     return rows;
   }, []);
+}
+
+export function groupError(m, meta) {
+  const name = meta.name ?? m.quantity_id;
+  const empty = m.operator_replicas.length === 0 ? 0 : m.operator_replicas.findIndex((reps) => reps.length === 0);
+  if (empty !== -1) {
+    return `"${name}": falta cargar ${meta.groupLabel} ${empty + 1}.`;
+  }
+  if (meta.isGiven && meta.hasUncertainty !== false && m.given_u == null) {
+    return `El dato "${name}" requiere la incertidumbre U.`;
+  }
+  return null;
 }
 
 export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
@@ -550,7 +636,10 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
     for (const m of measurements) {
       const meta = metaMap[m.quantity_id] ?? {};
       const name = meta.name ?? m.quantity_id;
-      if (meta.isGiven) {
+      if (m.operator_replicas) {
+        const error = meta.optional ? null : groupError(m, meta);
+        if (error) return error;
+      } else if (meta.isGiven) {
         if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
           return meta.hasUncertainty === false
             ? `El dato "${name}" requiere un valor.`
@@ -568,16 +657,14 @@ export function validateMeasurements(measurements, analysisKind, metaMap = {}) {
     if (meta.optional) {
       continue;
     }
-    if (meta.isGiven) {
+    if (m.operator_replicas) {
+      const error = groupError(m, meta);
+      if (error) return error;
+    } else if (meta.isGiven) {
       if (m.values.length === 0 || (meta.hasUncertainty !== false && m.given_u == null)) {
         return meta.hasUncertainty === false
           ? `El dato "${name}" requiere un valor.`
           : `El dato "${name}" requiere valor e incertidumbre U.`;
-      }
-    } else if (m.operator_replicas) {
-      const empty = m.operator_replicas.findIndex((reps) => reps.length === 0);
-      if (m.operator_replicas.length === 0 || empty !== -1) {
-        return `"${name}": cada operador debe cargar al menos una lectura (falta el operador ${empty + 1}).`;
       }
     } else if (meta.isChrono) {
       if (m.values.length === 0) {

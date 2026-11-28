@@ -317,6 +317,7 @@ async fn symbol_taken_detects_cross_table_collision() {
             unit: "".into(),
             formula: "slope".into(),
             is_final: false,
+            has_uncertainty: true,
         },
     )
     .await
@@ -344,6 +345,7 @@ async fn aggregate_crud_roundtrip() {
         unit: "".into(),
         formula: formula.into(),
         is_final: false,
+        has_uncertainty: true,
     };
     let a = create_aggregate(&pool, "p1-estadistica", mk("Re_max", "slope"))
         .await
@@ -734,53 +736,34 @@ async fn intermediate_crud_roundtrip() {
 async fn the_library_loads_p1() {
     let (pool, _dir) = setup().await;
     let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-    assert_eq!(def.quantities.len(), 5);
-    let l = def.quantities.iter().find(|q| q.symbol == "L").unwrap();
-    assert!(l.is_given);
-    let t_med = def.quantities.iter().find(|q| q.symbol == "t_med").unwrap();
-    assert!(t_med.is_given);
+    assert!(def.parts.is_empty());
+    let operators = def.determinations.as_ref().unwrap();
+    assert_eq!((operators.count, operators.label.as_str()), (3, "Operador"));
+    assert!(!operators.average);
+    assert_eq!(operators.display, DeterminationDisplay::Pestanas);
+    assert_eq!(def.quantities.len(), 3);
+    let by_symbol = |s: &str| def.quantities.iter().find(|q| q.symbol == s).unwrap();
+    assert!(by_symbol("L").is_given && !by_symbol("L").per_determination);
+    assert!(by_symbol("t_med").is_given);
     assert!(
-        !t_med.has_uncertainty,
+        !by_symbol("t_med").has_uncertainty,
         "t_med no deberia pedir incertidumbre"
     );
-    let t1 = def.quantities.iter().find(|q| q.symbol == "T1").unwrap();
-    assert!(t1.repeated);
-    assert!(!t1.optional, "el operador 1 es obligatorio");
-    for symbol in ["T2", "T3"] {
-        let t = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
-        assert!(t.repeated);
-        assert!(t.optional, "{symbol} deberia ser opcional");
-    }
+    let t = by_symbol("T");
+    assert!(t.repeated && t.per_determination && t.optional);
 
-    assert_eq!(def.results.len(), 5);
-    for symbol in ["gamma", "Q", "g1", "g2", "g3"] {
-        assert!(
-            def.results.iter().any(|r| r.symbol == symbol),
-            "falta el resultado {symbol}"
-        );
-    }
-    for symbol in ["gamma", "Q", "g1", "g2", "g3"] {
-        let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
-        assert!(r.is_final, "{symbol} deberia ser final");
-    }
-    for symbol in ["gamma", "Q"] {
-        let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
-        assert!(
-            !r.has_uncertainty,
-            "{symbol} no deberia mostrar incertidumbre"
-        );
-    }
-    for symbol in ["g1", "g2", "g3"] {
-        let r = def.results.iter().find(|r| r.symbol == symbol).unwrap();
-        assert!(r.has_uncertainty, "{symbol} deberia mostrar incertidumbre");
-    }
-    let q = def.results.iter().find(|r| r.symbol == "Q").unwrap();
-    assert!(q.formula.contains("T1"));
-    assert!(q.name.contains("Operador 1"));
-
-    let def2 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-    assert_eq!(def2.quantities.len(), 5);
-    assert_eq!(def2.results.len(), 5);
+    let symbols: Vec<&str> = def.results.iter().map(|r| r.symbol.as_str()).collect();
+    assert_eq!(symbols, ["gamma", "Q", "g"]);
+    assert!(def.results.iter().all(|r| r.is_final));
+    let res_by = |s: &str| def.results.iter().find(|r| r.symbol == s).unwrap();
+    assert!(!res_by("gamma").has_uncertainty && !res_by("Q").has_uncertainty);
+    assert!(res_by("g").has_uncertainty);
+    let repeated: Vec<String> = def
+        .determination_results()
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect();
+    assert_eq!(repeated, ["Q", "g"], "Q y g se calculan por operador");
 }
 
 #[tokio::test]
@@ -788,51 +771,45 @@ async fn the_library_loads_hidrostatica() {
     let (pool, _dir) = setup().await;
     let def = definition(&pool, "hidrostatica").await.unwrap().unwrap();
     assert_eq!(def.analysis_kind.as_deref(), Some("estadistico"));
+    assert_eq!(def.parts.len(), 2);
+    for part in &def.parts {
+        let d = part.determinations.as_ref().unwrap();
+        assert_eq!((d.count, d.label.as_str(), d.average), (3, "Medida", true));
+    }
 
-    assert_eq!(def.quantities.len(), 48);
+    assert_eq!(def.quantities.len(), 26);
 
     let by_symbol = |s: &str| def.quantities.iter().find(|q| q.symbol == s).unwrap();
     assert_eq!(by_symbol("b_E").default_value, Some(10.0));
     for i in 1..=9 {
         let b = by_symbol(&format!("b{i}"));
         assert!(b.is_given, "b{i} deberia ser dato de catedra");
+        assert!(!b.per_determination);
         assert_eq!(b.default_value, Some(i as f64));
+        let m = by_symbol(&format!("m_{i}"));
+        assert!(!m.is_given && !m.repeated && m.per_determination);
+        assert_eq!(m.default_value, Some(0.0));
     }
-    for k in 1..=3 {
-        for i in 1..=9 {
-            let m = by_symbol(&format!("m{k}_{i}"));
-            assert!(!m.is_given && !m.repeated);
-            assert_eq!(m.default_value, Some(0.0));
-        }
-    }
+    assert!(by_symbol("mw").per_determination);
+    assert_eq!(by_symbol("dw").slot_count, Some(9));
+    assert!(by_symbol("dw").per_determination);
     assert!(!by_symbol("g_ac").has_uncertainty);
 
-    assert_eq!(def.results.len(), 12);
+    let symbols: Vec<&str> = def.results.iter().map(|r| r.symbol.as_str()).collect();
+    assert_eq!(symbols, ["E", "rho", "gamma"]);
+    assert!(def.results.iter().all(|r| r.is_final));
     let res_by = |s: &str| def.results.iter().find(|r| r.symbol == s).unwrap();
-    for symbol in ["E_medio", "rho_medio", "gamma_medio"] {
-        assert!(res_by(symbol).is_final, "{symbol} deberia ser final");
-    }
-    for symbol in ["gamma1", "gamma2", "gamma3", "gamma_medio"] {
-        assert!(
-            !res_by(symbol).has_uncertainty,
-            "{symbol} no deberia mostrar incertidumbre"
-        );
-    }
-    for symbol in ["E1", "rho1", "E_medio", "rho_medio"] {
-        assert!(
-            res_by(symbol).has_uncertainty,
-            "{symbol} deberia mostrar incertidumbre"
-        );
-    }
-    let e1 = &res_by("E1").formula;
+    assert!(!res_by("gamma").has_uncertainty);
+    assert!(res_by("E").has_uncertainty && res_by("rho").has_uncertainty);
     for i in 1..=9 {
-        assert!(e1.contains(&format!("m1_{i}*b{i}")), "E1 sin la ranura {i}");
+        assert!(
+            res_by("E").formula.contains(&format!("m_{i}*b{i}")),
+            "E sin la ranura {i}"
+        );
     }
-    assert!(!e1.contains("m2_"), "E1 no deberia usar la medida 2");
-
-    let def2 = definition(&pool, "hidrostatica").await.unwrap().unwrap();
-    assert_eq!(def2.quantities.len(), 48);
-    assert_eq!(def2.results.len(), 12);
+    let mut averaged = def.averaged_results();
+    averaged.sort();
+    assert_eq!(averaged, ["E", "gamma", "rho"]);
 }
 
 #[tokio::test]
@@ -856,6 +833,7 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
             given_u,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         };
 
     let (l, t_med) = (1.0_f64, 2.006_f64);
@@ -864,21 +842,21 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
     let measurements = vec![
         mk("L", vec![l], Some(0.002)),
         mk("t_med", vec![t_med], Some(99.0)),
-        mk("T1", t1_vals, None),
+        crate::computation::MeasurementInput {
+            operator_replicas: Some(vec![t1_vals, vec![], vec![]]),
+            operator_instruments: None,
+            ..mk("T", vec![], None)
+        },
     ];
 
-    let analysis = crate::computation::tests::flattened(
-        crate::computation::analyze(&pool, "p1-estadistica", &measurements)
-            .await
-            .unwrap(),
-    );
-
-    let t1_q = analysis
-        .quantities
-        .iter()
-        .find(|q| q.symbol == "T1")
+    let analysis = crate::computation::analyze(&pool, "p1-estadistica", &measurements)
+        .await
         .unwrap();
-    assert!(t1_q.result.u_c > 0.0, "T1 sí debe tener incertidumbre real");
+    assert_eq!(analysis.determinations.len(), 3);
+    let first = &analysis.determinations[0];
+    assert_eq!(first.label, "Operador 1");
+    let t = first.quantities.iter().find(|q| q.symbol == "T").unwrap();
+    assert!(t.result.u_c > 0.0, "T sí debe tener incertidumbre real");
 
     let t_med_q = analysis
         .quantities
@@ -890,45 +868,38 @@ async fn analyze_p1_estadistica_con_operadores_opcionales() {
         "t_med sin instrumento/U debe dar u=0 pese a un given_u cargado"
     );
 
-    let derived = |sym: &str| {
-        analysis
+    let in_operator = |k: usize, sym: &str| {
+        analysis.determinations[k]
             .derived
             .iter()
             .find(|d| d.symbol == sym)
-            .unwrap_or_else(|| panic!("{sym} debe estar en derived"))
+            .unwrap_or_else(|| panic!("{sym} debe estar en el operador {}", k + 1))
+            .value
     };
-
-    let g1 = derived("g1");
-    let expected_g1 = 4.0 * std::f64::consts::PI.powi(2) * l / (t1_mean * t1_mean);
-    assert!(
-        (g1.value - expected_g1).abs() < 1e-9,
-        "g1 esperado {expected_g1}, obtenido {}",
-        g1.value
-    );
-
-    assert!(!derived("g2").value.is_finite());
-    assert!(!derived("g3").value.is_finite());
+    let expected_g = 4.0 * std::f64::consts::PI.powi(2) * l / (t1_mean * t1_mean);
+    assert!((in_operator(0, "g") - expected_g).abs() < 1e-9);
+    let expected_q = std::f64::consts::PI * t_med / (t1_mean * std::f64::consts::LN_2);
+    assert!((in_operator(0, "Q") - expected_q).abs() < 1e-9);
+    for k in [1, 2] {
+        assert!(!in_operator(k, "g").is_finite());
+    }
     assert!(
         analysis
             .warnings
             .iter()
-            .any(|w| w.contains("T2") || w.contains("g2")),
-        "debe haber una advertencia por T2/g2 sin datos"
+            .any(|w| w.starts_with("Operador 2, 3:") && w.contains("(T)")),
+        "debe haber una advertencia por los operadores sin datos: {:?}",
+        analysis.warnings
     );
 
-    let gamma = derived("gamma");
+    let gamma = analysis
+        .derived
+        .iter()
+        .find(|d| d.symbol == "gamma")
+        .unwrap();
     assert!(!gamma.has_uncertainty);
     let expected_gamma = 2.0 * std::f64::consts::LN_2 / t_med;
     assert!((gamma.value - expected_gamma).abs() < 1e-9);
-
-    let q = derived("Q");
-    assert!(!q.has_uncertainty);
-    let expected_q = std::f64::consts::PI * t_med / (t1_mean * std::f64::consts::LN_2);
-    assert!(
-        (q.value - expected_q).abs() < 1e-9,
-        "Q debe usar T1: esperado {expected_q}, obtenido {}",
-        q.value
-    );
 }
 
 #[tokio::test]
@@ -1002,6 +973,7 @@ async fn seeded_p3_formulas_compute() {
                 given_u: if q.is_given { Some(0.0) } else { None },
                 point_replicas: None,
                 operator_replicas: None,
+                operator_instruments: None,
             }
         })
         .collect();
@@ -1083,6 +1055,7 @@ async fn seeded_p3_desfasaje_fits_known_tau() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         },
         crate::computation::MeasurementInput {
             quantity_id: id("a"),
@@ -1092,6 +1065,7 @@ async fn seeded_p3_desfasaje_fits_known_tau() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         },
         crate::computation::MeasurementInput {
             quantity_id: id("b"),
@@ -1101,6 +1075,7 @@ async fn seeded_p3_desfasaje_fits_known_tau() {
             given_u: None,
             point_replicas: None,
             operator_replicas: None,
+            operator_instruments: None,
         },
     ];
     let full = crate::computation::analyze(&pool, "p3-relajacion", &measurements)
@@ -1142,6 +1117,10 @@ async fn seeded_fluidos2_populates_and_computes() {
         def.aggregates.iter().all(|a| a.is_final),
         "los 4 agregados deben ser comparables (is_final)"
     );
+    assert!(
+        def.aggregates.iter().all(|a| !a.has_uncertainty),
+        "los 4 agregados se entregan sin U"
+    );
     for symbol in ["mu_agua", "kp"] {
         let q = def.quantities.iter().find(|q| q.symbol == symbol).unwrap();
         assert!(!q.has_uncertainty, "{symbol} no debe pedir incertidumbre");
@@ -1166,6 +1145,7 @@ async fn seeded_fluidos2_populates_and_computes() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
     let scalar = |sym: &str, value: f64| per_point(sym, vec![value]);
     let measurements = vec![
@@ -1300,6 +1280,7 @@ async fn seeded_filtros_populates_and_computes() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
     let measurements = vec![
         pt("f", vec![100.0, 1000.0, 10000.0]),
@@ -1400,6 +1381,7 @@ async fn analyze_p2_cc_derives_results_and_aliases() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
 
     let (r1, r2, r3) = (100.0_f64, 200.0_f64, 200.0_f64);
@@ -1534,6 +1516,7 @@ async fn analyze_filtros_derives_fpasaje_fbloqueo() {
         given_u: None,
         point_replicas: None,
         operator_replicas: None,
+        operator_instruments: None,
     };
 
     let r = 1000.0_f64;
@@ -1620,7 +1603,7 @@ fn result_input_tolerance_serde_variants() {
 async fn submissions_off_slots_counts_non_slot_readings() {
     let (pool, _dir) = setup().await;
     let (qid,): (String,) = sqlx::query_as(
-        "SELECT id FROM practice_quantities WHERE practice_id = 'hidrostatica' AND symbol = 'dw1'",
+        "SELECT id FROM practice_quantities WHERE practice_id = 'hidrostatica' AND symbol = 'dw'",
     )
     .fetch_one(&pool)
     .await
@@ -1662,7 +1645,7 @@ async fn submissions_off_slots_counts_non_slot_readings() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(symbol, "dw1");
+    assert_eq!(symbol, "dw");
 }
 
 #[test]
@@ -1918,8 +1901,9 @@ async fn deleting_parts_and_sections_keeps_the_content() {
 #[tokio::test]
 async fn shared_results_that_use_one_part_move_into_it() {
     let (pool, _dir) = setup().await;
-    let p1 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-    assert_eq!(p1.result_part("Q"), Some("p1-estadistica-op1"));
+    crate::computation::tests::p1_partes(&pool).await;
+    let p1 = definition(&pool, "p1-partes").await.unwrap().unwrap();
+    assert_eq!(p1.result_part("Q"), Some("p1-partes-op1"));
     assert_eq!(p1.result_part("gamma"), None);
     let cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
     assert_eq!(cc.result_part("Req"), Some("p2-cc-paralelo"));
@@ -1954,84 +1938,6 @@ async fn the_series_part_takes_the_practice_kind_and_the_rest_are_statistical() 
         .quantities
         .iter()
         .all(|q| ["R1", "R2", "R3"].contains(&q.symbol.as_str())));
-}
-
-#[tokio::test]
-async fn shared_results_keep_the_operator_shape_of_the_form() {
-    let (pool, _dir) = setup().await;
-    set_operator_count(&pool, "p1-estadistica", 2)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE practice_sections SET part_id = NULL WHERE part_id = 'p1-estadistica-op1'")
-        .execute(&pool)
-        .await
-        .unwrap();
-    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-    assert_eq!(def.result_part("g1"), None);
-    let id = |sym: &str| {
-        def.quantities
-            .iter()
-            .find(|q| q.symbol == sym)
-            .unwrap()
-            .id
-            .clone()
-    };
-    let m = |sym: &str, values: Vec<f64>, given_u: Option<f64>, ops: Option<Vec<Vec<f64>>>| {
-        crate::computation::MeasurementInput {
-            quantity_id: id(sym),
-            instrument_id: None,
-            scale_id: None,
-            values,
-            given_u,
-            point_replicas: None,
-            operator_replicas: ops,
-        }
-    };
-    let measurements = vec![
-        m("L", vec![1.0], Some(0.002), None),
-        m("t_med", vec![2.0], Some(0.0), None),
-        m(
-            "T1",
-            vec![],
-            None,
-            Some(vec![vec![2.0, 2.02, 1.98], vec![2.01, 1.99, 2.0]]),
-        ),
-    ];
-    let analysis = crate::computation::analyze(&pool, "p1-estadistica", &measurements)
-        .await
-        .unwrap();
-    assert_eq!(analysis.operators.len(), 2);
-    for part in &analysis.parts {
-        for op in &part.analysis.operators {
-            assert!(op
-                .quantities
-                .iter()
-                .all(|q| q.symbol != "T1" && q.symbol != "L"));
-        }
-    }
-    for op in &analysis.operators {
-        let g1 = op.derived.iter().find(|d| d.symbol == "g1").unwrap();
-        assert!(
-            g1.value.is_finite() && (g1.value - 9.87).abs() < 0.1,
-            "{}",
-            g1.value
-        );
-    }
-}
-
-#[tokio::test]
-async fn curve_practices_do_not_inherit_a_leftover_operator_count() {
-    let (pool, _dir) = setup().await;
-    let mut cc = definition(&pool, "p2-cc").await.unwrap().unwrap();
-    cc.operator_count = Some(2);
-    assert_eq!(cc.shared_view().operator_count, None);
-    assert!(cc
-        .parts
-        .iter()
-        .all(|p| cc.part_view(p).operator_count.is_none()));
-    let mut p1 = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
-    p1.operator_count = Some(2);
-    assert_eq!(p1.shared_view().operator_count, Some(2));
 }
 
 #[tokio::test]
@@ -2250,7 +2156,8 @@ fn new_quantity(symbol: &str) -> QuantityInput {
 #[tokio::test]
 async fn a_quantity_in_a_version_is_retired_and_frees_its_symbol() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     let fresh = create_quantity(&pool, practice, new_quantity("Tn"))
         .await
         .unwrap();
@@ -2348,7 +2255,8 @@ async fn a_quantity_in_a_version_is_retired_and_frees_its_symbol() {
 #[tokio::test]
 async fn reordering_skips_retired_quantities() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     let before = definition(&pool, practice).await.unwrap().unwrap();
     let symbols = |d: &PracticeDefinition| -> Vec<String> {
         d.quantities.iter().map(|q| q.symbol.clone()).collect()
@@ -2433,6 +2341,7 @@ async fn a_quantity_measured_without_a_version_waits_for_the_first_publish() {
 #[tokio::test]
 async fn restarting_keeps_what_the_teacher_changed() {
     let (pool, _dir) = setup().await;
+    crate::computation::tests::p1_partes(&pool).await;
     let rename = |practice: &'static str, from: &'static str, to: &'static str| {
         let pool = pool.clone();
         async move {
@@ -2449,7 +2358,7 @@ async fn restarting_keeps_what_the_teacher_changed() {
             assert_eq!(changed, 1, "{from}");
         }
     };
-    rename("p1-estadistica", "T1", "Tx").await;
+    rename("p1-partes", "T1", "Tx").await;
     rename("p2-cc", "Vg_s", "Vfuente").await;
     sqlx::query(
         "UPDATE practice_results SET name = 'Editado', is_final = 0, has_uncertainty = 1 \
@@ -2459,14 +2368,14 @@ async fn restarting_keeps_what_the_teacher_changed() {
     .await
     .unwrap();
     let snapshot = |d: PracticeDefinition| serde_json::to_string(&d).unwrap();
-    let before_p1 = snapshot(definition(&pool, "p1-estadistica").await.unwrap().unwrap());
+    let before_p1 = snapshot(definition(&pool, "p1-partes").await.unwrap().unwrap());
     let before_cc = snapshot(definition(&pool, "p2-cc").await.unwrap().unwrap());
 
     db::migrate(&pool).await.unwrap();
 
     assert_eq!(
         before_p1,
-        snapshot(definition(&pool, "p1-estadistica").await.unwrap().unwrap())
+        snapshot(definition(&pool, "p1-partes").await.unwrap().unwrap())
     );
     assert_eq!(
         before_cc,
@@ -2487,7 +2396,8 @@ async fn the_power_results_have_no_uncertainty_from_the_first_start() {
 #[tokio::test]
 async fn cosmetic_changes_update_the_current_version_without_a_new_one() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     let no_problems = |_: &PracticeDefinition| Vec::new();
     let changes =
         |pool: SqlitePool| async move { draft_changes(&pool, practice).await.unwrap().unwrap() };
@@ -2550,7 +2460,8 @@ async fn cosmetic_changes_update_the_current_version_without_a_new_one() {
 #[tokio::test]
 async fn draft_changes_list_what_differs_and_count_submissions() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     let def = definition(&pool, practice).await.unwrap().unwrap();
     let t3 = def.quantities.iter().find(|q| q.symbol == "T3").unwrap();
     sqlx::query("DELETE FROM practice_results WHERE practice_id = ?1 AND formula LIKE '%T3%'")
@@ -2913,7 +2824,8 @@ async fn a_section_move_is_listed_next_to_a_formula_change() {
 #[tokio::test]
 async fn publishing_rejects_a_draft_that_changed_since_it_was_shown() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     let no_problems = |_: &PracticeDefinition| Vec::new();
     let formula = |symbol: &'static str, formula: &'static str| {
         let pool = pool.clone();
@@ -3034,7 +2946,8 @@ async fn a_practice_without_a_version_has_no_draft_changes() {
 #[tokio::test]
 async fn renumbering_positions_with_the_same_order_is_not_a_change() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     let def = definition(&pool, practice).await.unwrap().unwrap();
     let t2 = def.quantities.iter().find(|q| q.symbol == "T2").unwrap();
     sqlx::query("DELETE FROM practice_results WHERE practice_id = ?1 AND formula LIKE '%T2%'")
@@ -3060,7 +2973,8 @@ async fn renumbering_positions_with_the_same_order_is_not_a_change() {
 #[tokio::test]
 async fn an_unrelated_problem_does_not_block_a_cosmetic_update() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     let broken = |_: &PracticeDefinition| vec!["un problema anterior".to_string()];
     let set = |sql: &'static str| {
         let pool = pool.clone();
@@ -3117,7 +3031,8 @@ async fn seeded_practices_keep_their_special_symbols_as_data() {
 #[tokio::test]
 async fn changing_a_display_symbol_is_cosmetic() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     assert!(set_display_symbol(&pool, practice, "T1", "T_1")
         .await
         .unwrap());
@@ -3201,7 +3116,8 @@ async fn retired_quantities_stay_out_of_the_display_symbols() {
 #[tokio::test]
 async fn the_structural_summary_mentions_display_changes_of_kept_symbols_only() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     assert!(set_display_symbol(&pool, practice, "T1", "T_uno")
         .await
         .unwrap());
@@ -3394,6 +3310,7 @@ async fn display_symbols_are_saved_with_the_element() {
         unit: "m".into(),
         formula: "2".into(),
         is_final: false,
+        has_uncertainty: true,
     };
     let row = create_aggregate(&pool, practice, aggregate).await.unwrap();
     assert_eq!(shown("Ga").await.as_deref(), Some("G_a"));
@@ -3404,6 +3321,7 @@ async fn display_symbols_are_saved_with_the_element() {
         unit: "m".into(),
         formula: "2".into(),
         is_final: false,
+        has_uncertainty: true,
     };
     update_aggregate(&pool, practice, &row.id, aggregate)
         .await
@@ -3414,7 +3332,8 @@ async fn display_symbols_are_saved_with_the_element() {
 #[tokio::test]
 async fn a_submission_shows_the_symbols_of_its_version_never_the_draft() {
     let (pool, _dir) = setup().await;
-    let practice = "p1-estadistica";
+    crate::computation::tests::p1_partes(&pool).await;
+    let practice = "p1-partes";
     assert!(set_display_symbol(&pool, practice, "T1", "T_publicado")
         .await
         .unwrap());
@@ -3468,8 +3387,9 @@ async fn a_submission_shows_the_symbols_of_its_version_never_the_draft() {
 #[tokio::test]
 async fn a_submission_without_version_reads_the_published_version_everywhere() {
     let (pool, _dir) = setup().await;
+    crate::computation::tests::p1_partes(&pool).await;
     db::run_startup_seeds(&pool, true, None).await.unwrap();
-    let practice = "p1-estadistica";
+    let practice = "p1-partes";
     let tolerance = |value: f64| {
         let pool = pool.clone();
         async move {
@@ -3533,7 +3453,7 @@ fn presentation(label: &str, widget: &str) -> (String, String) {
 
 async fn assert_seeded_presentation(pool: &SqlitePool, read_version: bool) {
     let cases = [
-        ("p1-estadistica", "T1", "nombre", "cronometro"),
+        ("p1-estadistica", "T", "nombre", "cronometro"),
         ("p1-estadistica", "t_med", "nombre", "teclado"),
         ("p3-relajacion", "T_oc", "nombre_simbolo", "teclado"),
         ("p3-relajacion", "tmedio", "nombre", "teclado"),
@@ -3573,18 +3493,16 @@ async fn seeded_quantities_get_their_label_and_input() {
 #[tokio::test]
 async fn changing_a_label_or_input_is_cosmetic_and_summarized() {
     let (pool, _dir) = setup().await;
+    crate::computation::tests::p1_partes(&pool).await;
     sqlx::query(
         "UPDATE practice_quantities SET label_mode = 'simbolo', input_widget = 'teclado' \
-         WHERE practice_id = 'p1-estadistica' AND symbol = 'T1'",
+         WHERE practice_id = 'p1-partes' AND symbol = 'T1'",
     )
     .execute(&pool)
     .await
     .unwrap();
 
-    let found = draft_changes(&pool, "p1-estadistica")
-        .await
-        .unwrap()
-        .unwrap();
+    let found = draft_changes(&pool, "p1-partes").await.unwrap().unwrap();
     assert_eq!(found.kind, DraftChangeKind::Cosmetic);
     assert_eq!(
         found.changes,
@@ -3598,18 +3516,16 @@ async fn changing_a_label_or_input_is_cosmetic_and_summarized() {
 #[tokio::test]
 async fn renaming_a_quantity_does_not_hide_its_input_change() {
     let (pool, _dir) = setup().await;
+    crate::computation::tests::p1_partes(&pool).await;
     sqlx::query(
         "UPDATE practice_quantities SET symbol = 'T_1', input_widget = 'teclado' \
-         WHERE practice_id = 'p1-estadistica' AND symbol = 'T1'",
+         WHERE practice_id = 'p1-partes' AND symbol = 'T1'",
     )
     .execute(&pool)
     .await
     .unwrap();
 
-    let found = draft_changes(&pool, "p1-estadistica")
-        .await
-        .unwrap()
-        .unwrap();
+    let found = draft_changes(&pool, "p1-partes").await.unwrap().unwrap();
     assert!(
         found
             .changes
@@ -3622,7 +3538,8 @@ async fn renaming_a_quantity_does_not_hide_its_input_change() {
 #[tokio::test]
 async fn a_copy_keeps_label_and_input_and_a_missing_field_resets_them() {
     let (pool, _dir) = setup().await;
-    let copy = duplicate_practice(&pool, "p1-estadistica", "Copia P1", "u1")
+    crate::computation::tests::p1_partes(&pool).await;
+    let copy = duplicate_practice(&pool, "p1-partes", "Copia P1", "u1")
         .await
         .unwrap()
         .unwrap();
@@ -3754,13 +3671,30 @@ async fn a_submission_brings_the_comparisons_of_its_version() {
     .unwrap();
 
     let pairs = submission_comparisons(&pool, "s").await.unwrap();
-    assert_eq!(pairs["VR1_s_t"], "VR1_s");
-    assert_eq!(pairs["VR2_p_t"], "VR2_p");
+    assert_eq!(pairs["VR1_s_t"].with, "VR1_s");
+    assert_eq!(pairs["VR2_p_t"].with, "VR2_p");
+    assert_eq!(pairs["VR1_s_t"].factor, 1.0);
     assert!(!pairs.contains_key("P_max_t"));
     assert!(submission_comparisons(&pool, "no-existe")
         .await
         .unwrap()
         .is_empty());
+
+    sqlx::query(
+        "INSERT INTO practice_versions (id, practice_id, number, definition_json, published_at) \
+         VALUES ('rota', 'p2-cc', 999, '{\"results\": 1}', '2026-10-01T00:00:00Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE submissions SET practice_version_id = 'rota' WHERE id = 's'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        submission_comparisons(&pool, "s").await.unwrap().is_empty(),
+        "una versión ilegible no rompe el detalle de la entrega"
+    );
 }
 
 async fn live_symbols(pool: &SqlitePool, practice: &str, in_version: bool) -> Vec<String> {
@@ -3883,6 +3817,22 @@ fn check_template_rejects_what_cannot_be_written() {
     };
     assert!(check_template(&template(serde_json::json!({}))).is_ok());
     assert!(check_template(&template(serde_json::json!({"analysis_kind": " curva "}))).is_ok());
+    let curve_with_statistical_part = serde_json::json!({
+        "analysis_kind": "curva",
+        "parts": [{"title": "A"}, {"title": "B", "determinations": {"count": 2, "label": "M"}}],
+        "quantities": [
+            {"symbol": "x", "name": "x", "unit": "", "repeated": true, "per_point": true},
+            {"symbol": "t", "name": "t", "unit": "", "repeated": true, "per_determination": true}
+        ],
+        "sections": [
+            {"title": "S", "part": 0, "quantities": ["x"]},
+            {"title": "T", "part": 1, "quantities": ["t"]}
+        ]
+    });
+    assert_eq!(
+        check_template(&template(curve_with_statistical_part)),
+        Ok(())
+    );
     for key in ["", "  ", "serie-1"] {
         let parts = serde_json::json!({"parts": [{"title": "A", "key": key}]});
         assert!(check_template(&template(parts)).is_ok(), "{key:?}");
@@ -3896,7 +3846,42 @@ fn check_template_rejects_what_cannot_be_written() {
             "tipo de análisis",
         ),
         (serde_json::json!({"parts": [{"title": " "}]}), "sin título"),
-        (serde_json::json!({"operator_count": 21}), "superar 20"),
+        (
+            serde_json::json!({"quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": true, "per_determination": true}]}),
+            "parte con determinaciones",
+        ),
+        (
+            serde_json::json!({"analysis_kind": "curva", "parts": [{"title": "A", "determinations": {"count": 2, "label": "M"}}]}),
+            "parte estadística",
+        ),
+        (
+            serde_json::json!({"quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": false, "fixed": true, "default_value": 1.0}]}),
+            "La magnitud \"x\": Solo un dato de cátedra",
+        ),
+        (
+            serde_json::json!({"quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": false, "is_given": true, "default_u": -1.0}]}),
+            "cero o positiva",
+        ),
+        (
+            serde_json::json!({
+                "parts": [{"title": "A", "determinations": {"count": 2, "label": "M"}}, {"title": "B"}],
+                "quantities": [{"symbol": "x", "name": "x", "unit": "", "repeated": true, "per_determination": true}],
+                "sections": [{"title": "S", "part": 1, "quantities": ["x"]}]
+            }),
+            "no está en una práctica o parte con determinaciones",
+        ),
+        (
+            serde_json::json!({"parts": [{"title": "A", "analysis_kind": "curva", "determinations": {"count": 2, "label": "M"}}]}),
+            "parte estadística",
+        ),
+        (
+            serde_json::json!({"parts": [], "analysis_kind": "regresion_lineal", "determinations": {"count": 2, "label": "M"}}),
+            "parte estadística",
+        ),
+        (
+            serde_json::json!({"parts": [{"title": "A", "determinations": {"count": 1, "label": "M"}}]}),
+            "de 2 a",
+        ),
         (
             serde_json::json!({"parts": [{"title": "A", "key": "-"}]}),
             "clave de parte",
@@ -4055,4 +4040,346 @@ async fn part_keys_that_collide_across_practices_fall_back_to_a_fresh_id() {
     let second_parts = definition(&pool, "a").await.unwrap().unwrap().parts;
     assert_eq!(first_parts[0].id, "a-b-c");
     assert_ne!(second_parts[0].id, "a-b-c");
+}
+
+#[tokio::test]
+async fn a_part_with_determinations_is_analyzed_and_round_trips() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let template: PracticeTemplate = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "name": "Con medidas", "analysis_kind": "estadistico",
+        "parts": [{"title": "A", "determinations": {"count": 2, "label": "Medida", "average": true}}],
+        "sections": [{"title": "S", "part": 0, "quantities": ["T"], "results": ["f"]}],
+        "quantities": [{"symbol": "T", "name": "T", "unit": "s", "repeated": true,
+                        "per_determination": true}],
+        "results": [{"symbol": "f", "name": "f", "unit": "1/s", "formula": "1/T"}]
+    }))
+    .unwrap();
+    let practice = import_template(&pool, &template, "u1").await.unwrap();
+    let exported = export_template(&pool, &practice.id, ExportSource::Borrador)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(exported.parts[0].determinations.as_ref().unwrap().count, 2);
+    assert!(exported.quantities[0].per_determination);
+    let def = definition(&pool, &practice.id).await.unwrap().unwrap();
+    let measurements = vec![crate::computation::MeasurementInput {
+        quantity_id: def.quantities[0].id.clone(),
+        instrument_id: None,
+        scale_id: None,
+        values: vec![],
+        given_u: None,
+        point_replicas: None,
+        operator_replicas: Some(vec![vec![2.0, 2.0], vec![4.0, 4.0]]),
+        operator_instruments: None,
+    }];
+    let analysis = crate::computation::analyze(&pool, &practice.id, &measurements)
+        .await
+        .unwrap();
+    let part = &analysis.parts[0].analysis;
+    assert_eq!(part.determinations.len(), 2);
+    assert!((part.determinations[1].derived[0].value - 0.25).abs() < 1e-12);
+    let average = part.derived.iter().find(|d| d.symbol == "f_medio").unwrap();
+    assert!((average.value - 0.375).abs() < 1e-12);
+}
+
+#[test]
+fn resolved_offers_input_units_per_quantity_and_final_result() {
+    let quantity = |symbol: &str, unit: &str, slots: Option<i64>| crate::db::PracticeQuantity {
+        symbol: symbol.into(),
+        unit: unit.into(),
+        slot_count: slots,
+        ..Default::default()
+    };
+    let result = |symbol: &str, unit: &str, is_final: bool| crate::db::PracticeResult {
+        symbol: symbol.into(),
+        unit: unit.into(),
+        formula: "1".into(),
+        is_final,
+        ..Default::default()
+    };
+    let def = PracticeDefinition {
+        quantities: vec![
+            quantity("L", "cm", None),
+            quantity("T", "K", None),
+            quantity("d", "cm", Some(9)),
+        ],
+        results: vec![
+            result("dT", "K", true),
+            result("A", "m2", true),
+            result("x", "cm", false),
+        ],
+        ..Default::default()
+    };
+    let units = def.resolved().input_units;
+    let labels = |s: &str| -> Vec<String> { units[s].iter().map(|u| u.label.clone()).collect() };
+    assert!(labels("L").contains(&"mm".to_string()) && labels("L").contains(&"m".to_string()));
+    assert!(
+        labels("T").contains(&"°C".to_string()),
+        "una temperatura cargada ofrece °C"
+    );
+    assert_eq!(labels("d"), ["cm"], "una ranura no se convierte");
+    assert!(
+        !labels("dT").contains(&"°C".to_string()),
+        "un resultado no ofrece otro desplazamiento"
+    );
+    assert!(labels("A").contains(&"cm2".to_string()));
+    assert!(
+        !units.contains_key("x"),
+        "un resultado no final no se informa"
+    );
+}
+
+#[tokio::test]
+async fn a_per_determination_quantity_only_accepts_groups() {
+    let (pool, _dir) = crate::computation::tests::setup().await;
+    let template: PracticeTemplate = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "name": "Con medidas", "analysis_kind": "estadistico",
+        "determinations": {"count": 2, "label": "Medida", "average": true},
+        "quantities": [{"symbol": "T", "name": "T", "unit": "s", "repeated": true,
+                        "per_determination": true}],
+        "results": [{"symbol": "f", "name": "f", "unit": "1/s", "formula": "1/T"}]
+    }))
+    .unwrap();
+    let practice = import_template(&pool, &template, "u1").await.unwrap();
+    let def = definition(&pool, &practice.id).await.unwrap().unwrap();
+    let analyze =
+        |values: Vec<f64>, points: Option<Vec<Vec<f64>>>, groups: Option<Vec<Vec<f64>>>| {
+            let measurements = vec![crate::computation::MeasurementInput {
+                quantity_id: def.quantities[0].id.clone(),
+                instrument_id: None,
+                scale_id: None,
+                values,
+                given_u: None,
+                point_replicas: points,
+                operator_replicas: groups,
+                operator_instruments: None,
+            }];
+            let pool = pool.clone();
+            let id = practice.id.clone();
+            async move { crate::computation::analyze(&pool, &id, &measurements).await }
+        };
+    assert!(analyze(vec![], None, Some(vec![vec![2.0], vec![4.0]]))
+        .await
+        .is_ok());
+    let twice = crate::computation::MeasurementInput {
+        quantity_id: def.quantities[0].id.clone(),
+        instrument_id: None,
+        scale_id: None,
+        values: vec![],
+        given_u: None,
+        point_replicas: None,
+        operator_replicas: Some(vec![vec![2.0], vec![4.0]]),
+        operator_instruments: None,
+    };
+    let repeated = crate::computation::analyze(&pool, &practice.id, &[twice.clone(), twice]).await;
+    assert!(repeated.unwrap_err().to_string().contains("más de una vez"));
+    for (values, points, groups) in [
+        (vec![2.0], None, None),
+        (vec![], Some(vec![vec![2.0], vec![4.0]]), None),
+        (vec![], None, Some(vec![vec![2.0], vec![4.0], vec![5.0]])),
+    ] {
+        assert!(analyze(values, points, groups).await.is_err());
+    }
+}
+
+#[test]
+fn only_count_and_average_make_determinations_structural() {
+    let with = |d: Determinations| PracticeDefinition {
+        determinations: Some(d),
+        ..Default::default()
+    };
+    let base = Determinations {
+        count: 3,
+        label: "Medida".into(),
+        average: true,
+        display: DeterminationDisplay::Bloques,
+    };
+    let kind = |d: Determinations| compare_definitions(&with(base.clone()), &with(d)).unwrap();
+    let looks = kind(Determinations {
+        label: "Serie".into(),
+        display: DeterminationDisplay::Pestanas,
+        ..base.clone()
+    });
+    assert_eq!(looks.kind, DraftChangeKind::Cosmetic);
+    assert!(looks.changes[0].contains("Cambia cómo se muestran"));
+    assert_eq!(
+        kind(Determinations {
+            count: 4,
+            ..base.clone()
+        })
+        .kind,
+        DraftChangeKind::Structural
+    );
+    let added = compare_definitions(&PracticeDefinition::default(), &with(base.clone())).unwrap();
+    assert_eq!(added.kind, DraftChangeKind::Structural);
+    assert_eq!(added.changes, ["Cambian las determinaciones"]);
+    assert_eq!(
+        kind(Determinations {
+            average: false,
+            ..base.clone()
+        })
+        .kind,
+        DraftChangeKind::Structural
+    );
+}
+
+#[test]
+fn a_symbol_named_medio_belongs_to_its_base_only_when_it_is_an_undefined_average() {
+    use crate::practices::{
+        Determinations, PracticeAggregate, PracticeDefinition, PracticePart, PracticeSection,
+    };
+    let result = |symbol: &str, formula: &str| crate::db::PracticeResult {
+        symbol: symbol.into(),
+        formula: formula.into(),
+        ..Default::default()
+    };
+    let def = |aggregate: bool, average: bool| PracticeDefinition {
+        parts: vec![
+            PracticePart {
+                id: "stat".into(),
+                determinations: Some(Determinations {
+                    count: 2,
+                    label: "Medida".into(),
+                    average,
+                    display: Default::default(),
+                }),
+                ..Default::default()
+            },
+            PracticePart {
+                id: "reg".into(),
+                ..Default::default()
+            },
+        ],
+        sections: vec![PracticeSection {
+            part_id: Some("stat".into()),
+            quantities: vec!["T".into()],
+            results: vec!["x".into()],
+            ..Default::default()
+        }],
+        quantities: vec![crate::db::PracticeQuantity {
+            symbol: "T".into(),
+            per_determination: true,
+            ..Default::default()
+        }],
+        results: vec![result("x", "1/T"), result("k", "2*x_medio")],
+        aggregates: if aggregate {
+            vec![PracticeAggregate {
+                symbol: "x_medio".into(),
+                ..Default::default()
+            }]
+        } else {
+            vec![]
+        },
+        ..Default::default()
+    };
+    assert_eq!(def(false, true).result_part("k"), Some("stat"));
+    assert_eq!(def(false, false).result_part("k"), None);
+    assert_eq!(def(true, true).result_part("k"), None);
+    let resolved = def(false, true).resolved();
+    assert_eq!(
+        resolved.symbol_parts.get("k").map(String::as_str),
+        Some("stat")
+    );
+    assert_eq!(resolved.determinations["x"].scope, "stat");
+    assert_eq!(resolved.determinations["T"].scope, "stat");
+    assert!(!resolved.determinations.contains_key("k"));
+}
+
+#[tokio::test]
+async fn seeded_magnitudes_are_already_canonical() {
+    let (pool, _dir) = setup().await;
+    let used: Vec<(String,)> = sqlx::query_as(
+        "SELECT quantity FROM practice_quantities WHERE quantity IS NOT NULL \
+         UNION SELECT quantity FROM instruments",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(used.iter().any(|(q,)| q == "voltaje"));
+    for (q,) in used {
+        assert_eq!(crate::magnitudes::canonical(&q), q);
+    }
+}
+
+#[tokio::test]
+async fn a_saved_magnitude_is_stored_canonical() {
+    let (pool, _dir) = setup().await;
+    let q = create_quantity(
+        &pool,
+        "p1-estadistica",
+        QuantityInput {
+            quantity: Some("Diferencia de Potencial".into()),
+            ..sample_quantity()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(q.quantity.as_deref(), Some("voltaje"));
+}
+
+#[tokio::test]
+async fn a_fixed_given_uses_the_definition_and_ignores_the_client() {
+    let (pool, _dir) = setup().await;
+    let l = definition(&pool, "p1-estadistica")
+        .await
+        .unwrap()
+        .unwrap()
+        .quantities
+        .into_iter()
+        .find(|q| q.symbol == "L")
+        .unwrap();
+    let saved = update_quantity(
+        &pool,
+        &l.id,
+        QuantityInput {
+            symbol: "L".into(),
+            name: l.name.clone(),
+            unit: l.unit.clone(),
+            quantity: l.quantity.clone(),
+            is_given: true,
+            per_point: false,
+            fixed: true,
+            default_value: Some(Some(1.0)),
+            default_u: Some(Some(0.002)),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(saved.fixed);
+    assert_eq!(
+        (saved.default_value, saved.default_u),
+        (Some(1.0), Some(0.002))
+    );
+
+    let def = definition(&pool, "p1-estadistica").await.unwrap().unwrap();
+    let sent = crate::computation::MeasurementInput {
+        quantity_id: l.id.clone(),
+        values: vec![5.0],
+        given_u: Some(99.0),
+        ..Default::default()
+    };
+    let mut unset = def.quantities.clone();
+    unset.iter_mut().for_each(|q| q.default_value = None);
+    let kept = crate::computation::with_fixed_values(&unset, std::slice::from_ref(&sent));
+    assert_eq!(kept[0].values, vec![5.0]);
+    for client in [vec![sent], vec![]] {
+        let used = crate::computation::with_fixed_values(&def.quantities, &client);
+        assert_eq!(used.len(), 1);
+        assert_eq!(
+            (used[0].values.clone(), used[0].given_u),
+            (vec![1.0], Some(0.002))
+        );
+    }
+
+    let exported = export_template(&pool, "p1-estadistica", ExportSource::Borrador)
+        .await
+        .unwrap()
+        .unwrap();
+    let copy = import_template(&pool, &exported, "u1").await.unwrap();
+    let copied = definition(&pool, &copy.id).await.unwrap().unwrap();
+    let l = copied.quantities.iter().find(|q| q.symbol == "L").unwrap();
+    assert!(l.fixed);
+    assert_eq!(l.default_u, Some(0.002));
 }

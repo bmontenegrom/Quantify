@@ -6,7 +6,7 @@ use std::collections::HashMap;
 pub(crate) const CONSTANTS: [(&str, f64); 2] =
     [("pi", std::f64::consts::PI), ("e", std::f64::consts::E)];
 
-fn parse(formula: &str) -> evalexpr::EvalexprResult<Node> {
+pub(crate) fn parse(formula: &str) -> evalexpr::EvalexprResult<Node> {
     let mut tree = build_operator_tree(formula)?;
     for operator in tree.iter_operators_mut() {
         if let Operator::Const { value } = operator {

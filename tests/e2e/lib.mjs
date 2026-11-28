@@ -54,6 +54,13 @@ export async function assignSection(page, list, symbol, label) {
   if (shown !== label) throw new Error(`no se pudo asignar ${symbol} a ${label} (muestra ${shown})`);
 }
 
+export async function openPractice(page, id) {
+  await page.reload();
+  await page.waitForSelector("#app-shell:not(.hidden)");
+  await page.click('.tab.teacher-only[data-view="practices"]');
+  await page.click(`[data-practice-open][data-practice-id="${id}"]`);
+}
+
 export async function waitForStatus(page, text) {
   await page.waitForFunction(
     (t) => (document.querySelector("#practice-workspace .practice-status")?.textContent ?? "").includes(t),

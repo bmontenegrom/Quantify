@@ -27,7 +27,7 @@ pub(super) async fn display_symbols_for(
     Ok(rows.into_iter().collect())
 }
 
-pub(super) fn version_symbols(definition: &PracticeDefinition) -> impl Iterator<Item = &str> {
+pub fn version_symbols(definition: &PracticeDefinition) -> impl Iterator<Item = &str> {
     let quantities = definition.quantities.iter().map(|q| q.symbol.as_str());
     let results = definition.results.iter().map(|r| r.symbol.as_str());
     let intermediates = definition.intermediates.iter().map(|i| i.symbol.as_str());

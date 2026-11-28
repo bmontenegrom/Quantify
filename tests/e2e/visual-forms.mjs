@@ -111,6 +111,18 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
     flow.split("\n").length === 3 && flow.includes("0.5") && flow.includes("0.75"),
     `Q debía mostrar Q_1, Q_2 y su promedio 0.75, mostró "${flow}"`,
   );
+  const repCell = row.locator(".series-cell--replicas:has(.unit-select)").first();
+  assert((await repCell.count()) > 0, "fluidos-1 debía tener una celda con réplicas y desplegable de unidad");
+  {
+    await repCell.locator(".unit-select").selectOption({ index: 1 });
+    const { text, expected } = await repCell.evaluate((cell) => {
+      const raw = [...cell.querySelectorAll(".series-replica")].map((i) => Number(i.value));
+      const unit = cell.querySelector(".unit-select").selectedOptions[0].textContent;
+      return { text: cell.querySelector(".series-mean").textContent, expected: `x̄ ${raw.reduce((a, b) => a + b, 0) / raw.length} ${unit} (n=${raw.length})` };
+    });
+    assert(text === expected, `la media debía verse en la unidad elegida: "${expected}", mostró "${text}"`);
+    await repCell.locator(".unit-select").selectOption({ index: 0 });
+  }
   await row.locator(".series-point-result").first().fill("1234");
   await waitForDraft(page, { result: "Re#0", value: 1234 });
   await page.reload();
@@ -180,13 +192,15 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
       (k) => k.startsWith("quantify-draft:") && JSON.parse(localStorage.getItem(k)).comment === "borrador",
     );
     const draft = JSON.parse(localStorage.getItem(key));
-    draft.measurements = [{ quantity_id: id, instrument_id: null, scale_id: null, values: [1.5, 1.6], given_u: null }];
+    draft.measurements = [
+      { quantity_id: id, instrument_id: null, scale_id: null, values: [], given_u: null, operator_replicas: [[1.5, 1.6], [], []] },
+    ];
     localStorage.setItem(key, JSON.stringify(draft));
   }, draftedId);
   await page.reload();
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "p1-estadistica");
-  const draftedRow = page.locator(`#measurement-fields .measurement-row[data-quantity-id="${draftedId}"]`);
+  const draftedRow = page.locator(`#measurement-fields .measurement-row[data-quantity-id="${draftedId}"][data-operator-index="0"]`);
   await draftedRow.locator(".measure-value").first().waitFor({ state: "attached" });
   assert(
     !(await draftedRow.evaluate((row) => row.classList.contains("measurement-row--chrono"))),
@@ -203,7 +217,8 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   await page.waitForSelector("#app-shell:not(.hidden)");
   await openPractice(page, "p1-estadistica");
   const timedRow = page.locator(`#measurement-fields .measurement-row--chrono[data-quantity-id="${draftedId}"]`).first();
-  await timedRow.locator(".measure-instrument").selectOption("");
+  const timedInstrument = timedRow.locator(".measure-instrument");
+  await timedInstrument.selectOption("");
   await timedRow.locator(".chrono-start").click();
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(60);
@@ -223,7 +238,7 @@ await withE2E({ port: PORT, dbName: "quantify-visual.db" }, async ({ login }) =>
   assert((await timedRow.locator(".chrono-mode").inputValue()) === "consecutivo", "el modo del cronómetro debía conservarse");
   assert((await timedRow.locator(".series-point.discarded").count()) === 1, "la lectura descartada debía seguir descartada");
   assert(JSON.stringify(await savedChrono()) === JSON.stringify(before), "volver a abrir no debía cambiar el cronómetro guardado");
-  assert((await timedRow.locator(".measure-instrument").inputValue()) === "", "el borrador sin instrumento debía seguir sin instrumento");
+  assert((await timedInstrument.inputValue()) === "", "el borrador sin instrumento debía seguir sin instrumento");
 
   await timedRow.locator(".chrono-reset").click();
   await timedRow.locator(".chrono-start").click();

@@ -112,7 +112,7 @@ pub struct SubmissionDetail {
     pub members: Vec<ReportMember>,
     pub result_tolerances: HashMap<String, f64>,
     pub display_symbols: std::collections::BTreeMap<String, String>,
-    pub comparisons: std::collections::BTreeMap<String, String>,
+    pub comparisons: std::collections::BTreeMap<String, crate::practices::Comparison>,
     pub student_comment: Option<String>,
 }
 
