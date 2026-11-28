@@ -81,6 +81,9 @@ export APP_SECURE_COOKIES="true"        # la cookie solo viaja por HTTPS
   contraseña de `SEED_ADMIN_PASSWORD`. Es obligatoria en el primer arranque: sin ella (o con solo
   espacios, o con menos de 8 caracteres) el server no arranca. Solo con `SEED_DEMO_DATA=true` se usa `admin123` si falta. El resto de las cuentas se crean desde la UI. Si dejás la tabla de
   usuarios vacía, el próximo arranque vuelve a crear el admin.
+- **Un solo proceso**: los bloqueos que serializan la edición de una práctica viven en memoria.
+  Quantify corre como un único proceso; para correr varias instancias contra la misma base habría
+  que mover esa validación dentro de la transacción de escritura (`begin_write`).
 - **Datos de prueba**: `SEED_DEMO_DATA=true` agrega en una base nueva `docente@quantify.local`,
   `estudiante@quantify.local` (con `SEED_TEACHER_PASSWORD` y `SEED_STUDENT_PASSWORD`), la inscripción
   del estudiante y entregas de prueba. Viene apagada: no la definas en producción.

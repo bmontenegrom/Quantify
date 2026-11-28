@@ -298,6 +298,23 @@ pub async fn create_form_submission(
         .ok_or_else(|| anyhow::anyhow!("no se pudo leer la entrega recien creada"))
 }
 
+/// Rechaza los resultados del estudiante con símbolos que la práctica no pide.
+///
+/// ```
+/// use quantify::computation::validate_student_results;
+/// use quantify::db::{PracticeResult, StudentResultInput};
+/// use quantify::practices::PracticeDefinition;
+/// let g = PracticeResult {
+///     id: "r".into(), practice_id: "p".into(), symbol: "g".into(), name: "g".into(),
+///     unit: "m/s2".into(), formula: "L".into(), position: 0, tolerance: None,
+///     is_final: true, has_uncertainty: true,
+///     ..Default::default()
+/// };
+/// let def = PracticeDefinition { results: vec![g], ..Default::default() };
+/// let result = |symbol: &str| StudentResultInput { symbol: symbol.into(), value: 9.8, u_expanded: None };
+/// assert!(validate_student_results(&def, &[result("g")]).is_ok());
+/// assert!(validate_student_results(&def, &[result("h")]).is_err());
+/// ```
 pub fn validate_student_results(
     definition: &crate::practices::PracticeDefinition,
     results: &[db::StudentResultInput],
