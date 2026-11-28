@@ -416,3 +416,9 @@ Los datos persistentes quedan en `./data`. Ver `deploy/ubuntu.md` para más deta
 - **Entregas**: `GET /submissions`, `POST /submissions` (CSV heredado),
   `POST /submissions/form` (formulario), `GET /submissions/{id}`,
   `POST /submissions/{id}/review`, `POST /submissions/{id}/student-results`
+
+## Contribuir y licencia
+
+Las contribuciones son bienvenidas: el flujo de trabajo, las convenciones y cómo agregar una
+práctica a la biblioteca están en [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md). Quantify se
+distribuye bajo la licencia [MIT](LICENSE).
