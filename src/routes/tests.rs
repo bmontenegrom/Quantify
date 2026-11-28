@@ -68,7 +68,12 @@ impl TestApp {
             .unwrap();
         (
             status,
-            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            if bytes.is_empty() {
+                Value::Null
+            } else {
+                serde_json::from_slice(&bytes)
+                    .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+            },
         )
     }
 
@@ -166,21 +171,23 @@ impl TestApp {
     }
 
     async fn course_with_student(&self, teacher: &Session) -> (String, String) {
-        let (_, course) = self
+        let (status, course) = self
             .post(
                 "/academic/courses",
                 teacher,
                 json!({ "name": "Física", "term": "2026" }),
             )
             .await;
+        assert_eq!(status, StatusCode::OK, "{course}");
         let course_id = course["id"].as_str().unwrap().to_string();
-        let (_, group) = self
+        let (status, group) = self
             .post(
                 &format!("/academic/courses/{course_id}/groups"),
                 teacher,
                 json!({ "name": "Grupo 1", "table_count": 4 }),
             )
             .await;
+        assert_eq!(status, StatusCode::OK, "{group}");
         let group_id = group["id"].as_str().unwrap().to_string();
         let student = self.user_id(teacher, STUDENT.0).await;
         self.enroll(teacher, &course_id, &group_id, &student).await;
@@ -202,12 +209,25 @@ impl TestApp {
         group_id: &str,
         table_number: i64,
     ) -> (StatusCode, Value) {
-        self.post(
-            &format!("/academic/groups/{group_id}/practice-table"),
-            student,
-            json!({ "practice_id": "p1-partes", "table_number": table_number }),
-        )
-        .await;
+        let (status, table) = self
+            .post(
+                &format!("/academic/groups/{group_id}/practice-table"),
+                student,
+                json!({ "practice_id": "p1-partes", "table_number": table_number }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{table}");
+        self.submit_form(student, course_id, group_id, table_number)
+            .await
+    }
+
+    async fn submit_form(
+        &self,
+        student: &Session,
+        course_id: &str,
+        group_id: &str,
+        table_number: i64,
+    ) -> (StatusCode, Value) {
         let (_, definition) = self
             .get("/practices/p1-partes/definition", Some(student))
             .await;
@@ -321,14 +341,20 @@ async fn a_user_changes_the_profile_and_the_password() {
 async fn writes_without_a_valid_csrf_token_are_rejected() {
     let app = TestApp::new().await;
     let mut session = app.login(TEACHER).await;
-    session.csrf = "falso".into();
+    let body = json!({ "name": "X", "term": "2026" });
+    let without_header = axum::http::Request::post("/academic/courses")
+        .header(header::COOKIE, &session.cookie)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let response = app.app.clone().oneshot(without_header).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let (status, _) = app
-        .post(
-            "/academic/courses",
-            &session,
-            json!({ "name": "X", "term": "2026" }),
-        )
+        .send(Method::POST, "/academic/courses", None, Some(body.clone()))
         .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    session.csrf = "falso".into();
+    let (status, _) = app.post("/academic/courses", &session, body).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
@@ -791,7 +817,7 @@ async fn a_student_submits_a_form_and_only_members_see_it() {
     let other = app.login(("otro@quantify.local", "clave-segura")).await;
     let (status, _) = app.get(&format!("/submissions/{id}"), Some(&other)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = app.form_submission(&other, &course_id, &group_id, 1).await;
+    let (status, _) = app.submit_form(&other, &course_id, &group_id, 1).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = app.get("/submissions/no-existe", Some(&teacher)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -969,7 +995,7 @@ async fn report_members_are_invited_accepted_declined_and_removed() {
     assert_eq!(report["can_accept"], true);
     let (_, report) = app.get(&existing, Some(&student)).await;
     assert_eq!(report["is_owner"], true);
-    let (_, none) = app
+    let (status, none) = app
         .get(
             &format!(
                 "/submissions/existing?practice_id=p1-partes&group_id={group_id}&table_number=3"
@@ -977,6 +1003,7 @@ async fn report_members_are_invited_accepted_declined_and_removed() {
             Some(&student),
         )
         .await;
+    assert_eq!(status, StatusCode::OK);
     assert!(none.is_null());
 
     let (status, _) = app
@@ -990,7 +1017,10 @@ async fn report_members_are_invited_accepted_declined_and_removed() {
     let (status, _) = app.get(&format!("/submissions/{id}"), Some(&partner)).await;
     assert_eq!(status, StatusCode::OK);
 
-    app.post(&members_uri, &teacher, invite(&third_id)).await;
+    let (status, _) = app.post(&members_uri, &teacher, invite(&third_id)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, invitations) = app.get("/submissions/invitations", Some(&third)).await;
+    assert!(invitations.to_string().contains(&id));
     let (status, _) = app
         .post(&format!("/submissions/{id}/decline"), &third, json!({}))
         .await;
@@ -1028,6 +1058,36 @@ async fn a_teacher_moves_a_report_to_another_table() {
         .await;
     assert_eq!(status, StatusCode::OK, "{updated}");
     assert_eq!(updated["table_number"], 3);
+    let (status, _) = app
+        .post(
+            &format!("/submissions/{id}/report"),
+            &student,
+            json!({ "table_number": 2 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let partner_id = app.new_student(&teacher, "companero@quantify.local").await;
+    app.enroll(&teacher, &course_id, &group_id, &partner_id)
+        .await;
+    let partner = app
+        .login(("companero@quantify.local", "clave-segura"))
+        .await;
+    let (status, other) = app
+        .form_submission(&partner, &course_id, &group_id, 2)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{other}");
+    let (status, error) = app
+        .post(
+            &format!("/submissions/{id}/report"),
+            &teacher,
+            json!({ "table_number": 2 }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        error.to_string().contains("Ya existe un informe"),
+        "{error}"
+    );
     let (status, _) = app
         .post(
             "/submissions/no-existe/report",
