@@ -1422,23 +1422,26 @@ pub fn compute_regresion(
         if !on_axes.contains(m) {
             continue;
         }
-        let (d_points, kinks): (Vec<(f64, f64)>, Vec<bool>) = contexts
+        let mut kink = false;
+        let d_points: Vec<(f64, f64)> = contexts
             .iter()
             .enumerate()
             .map(|(i, ctx)| {
-                axis_derivatives(
+                let (d, k) = axis_derivatives(
                     &axis_trees,
                     &compiled_intermediates,
                     &point_inputs,
                     ctx,
                     i,
                     m,
-                )
+                );
+                kink |= k;
+                d
             })
-            .unzip();
+            .collect();
         let (slope, intercept) = analysis::line_sensitivity(&points, &d_points);
         if slope.is_finite() && intercept.is_finite() {
-            if kinks.contains(&true) {
+            if kink {
                 warnings.push(format!(
                     "En algún punto, un eje cae justo en un quiebre de su fórmula respecto de \"{m}\" (un valor absoluto en 0 o un mínimo/máximo empatado): cuánto mueve \"{m}\" la recta se calculó con una sola de las ramas, así que puede no ser exacto."
                 ));
@@ -1469,7 +1472,6 @@ pub fn compute_regresion(
             ("intercept", l.intercept * l.u),
             (l.symbol, l.u),
         ]);
-        us.insert(l.symbol.to_string(), 0.0);
         u_slope_total = uncertainty::combine(u_slope_total, l.slope * l.u);
         u_intercept_total = uncertainty::combine(u_intercept_total, l.intercept * l.u);
     }
@@ -2008,7 +2010,7 @@ fn propagate(
     factors: &[Vec<(&str, f64)>],
 ) -> Propagated {
     let (order, vars) = dependencies(tree, formulas);
-    let (means, us): (Vec<f64>, Vec<f64>) = vars.iter().map(|v| leaf(v)).unzip();
+    let (means, mut us): (Vec<f64>, Vec<f64>) = vars.iter().map(|v| leaf(v)).unzip();
     let position = |symbol: &str| vars.iter().position(|v| *v == symbol);
     let factor_loads: Vec<Vec<(usize, f64)>> = factors
         .iter()
@@ -2019,6 +2021,9 @@ fn propagate(
                 .collect()
         })
         .collect();
+    for &(i, _) in factor_loads.iter().flatten() {
+        us[i] = 0.0;
+    }
     let n = vars.len();
     let weigh = |d: &[f64]| uncertainty::propagated_u(d, &us, &factor_loads);
     let mut plain: HashMap<&str, f64> = vars.iter().copied().zip(means.iter().copied()).collect();
